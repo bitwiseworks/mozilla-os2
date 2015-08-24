@@ -3,16 +3,25 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-interface nsISupports;
-
 enum DOMRequestReadyState { "pending", "done" };
 
-interface DOMRequest : EventTarget {
+[NoInterfaceObject]
+interface DOMRequestShared {
   readonly attribute DOMRequestReadyState readyState;
 
   readonly attribute any result;
-  readonly attribute nsISupports? error;
+  readonly attribute DOMError? error;
 
   attribute EventHandler onsuccess;
   attribute EventHandler onerror;
 };
+
+interface DOMRequest : EventTarget {
+  // The [TreatNonCallableAsNull] annotation is required since then() should do
+  // nothing instead of throwing errors when non-callable arguments are passed.
+  [NewObject]
+  Promise<any> then([TreatNonCallableAsNull] optional AnyCallback? fulfillCallback = null,
+                    [TreatNonCallableAsNull] optional AnyCallback? rejectCallback = null);
+};
+
+DOMRequest implements DOMRequestShared;

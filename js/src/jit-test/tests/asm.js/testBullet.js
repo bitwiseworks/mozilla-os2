@@ -1,3 +1,4 @@
+// |jit-test| test-also-noasmjs
 // Test a big fat asm.js module. First load/compile/cache bullet.js in a
 // separate process and then load it again in this process, which should be a
 // cache hit.
@@ -11,7 +12,7 @@ if (!isAsmJSCompilationAvailable())
 // nestedShell() (and the loadedFromCache assertion) to see if the error
 // reproduces.
 var code = "setIonCheckGraphCoherency(false); setCachingEnabled(true); load('" + libdir + "bullet.js'); runBullet()";
-nestedShell("--js-cache", "--execute=" + code);
+nestedShell("--js-cache", "--no-js-cache-per-process", "--execute=" + code);
 setIonCheckGraphCoherency(false);
 load(libdir + 'bullet.js');
 var results = runBullet();

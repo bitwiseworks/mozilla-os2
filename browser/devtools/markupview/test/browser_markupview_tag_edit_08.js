@@ -11,7 +11,7 @@ const TEST_URL = TEST_URL_ROOT + "doc_markup_edit.html";
 const LONG_ATTRIBUTE = "ABCDEFGHIJKLMNOPQRSTUVWXYZ-ABCDEFGHIJKLMNOPQRSTUVWXYZ-ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZ-ABCDEFGHIJKLMNOPQRSTUVWXYZ-ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const LONG_ATTRIBUTE_COLLAPSED = "ABCDEFGHIJKLMNOPQRSTUVWXYZ-ABCDEFGHIJKLMNOPQRSTUVWXYZ-ABCDEF\u2026UVWXYZ-ABCDEFGHIJKLMNOPQRSTUVWXYZ-ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
-let test = asyncTest(function*() {
+add_task(function*() {
   let {inspector} = yield addTab(TEST_URL).then(openInspector);
 
   yield inspector.markup.expandAll();
@@ -36,7 +36,7 @@ function* testCollapsedLongAttribute(inspector) {
     "data-long": LONG_ATTRIBUTE
   });
 
-  let editor = getContainerForRawNode("#node24", inspector).editor;
+  let {editor} = yield getContainerForSelector("#node24", inspector);
   let attr = editor.attrs["data-long"].querySelector(".editable");
 
   // Check to make sure it has expanded after focus
@@ -69,7 +69,7 @@ function* testModifyInlineStyleWithQuotes(inspector) {
   });
 
   let onMutated = inspector.once("markupmutation");
-  let editor = getContainerForRawNode("#node26", inspector).editor;
+  let {editor} = yield getContainerForSelector("#node26", inspector);
   let attr = editor.attrs["style"].querySelector(".editable");
 
   attr.focus();
@@ -105,7 +105,7 @@ function* testEditingAttributeWithMixedQuotes(inspector) {
   });
 
   let onMutated = inspector.once("markupmutation");
-  let editor = getContainerForRawNode("#node27", inspector).editor;
+  let {editor} = yield getContainerForSelector("#node27", inspector);
   let attr = editor.attrs["class"].querySelector(".editable");
 
   attr.focus();

@@ -5,23 +5,10 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-ifdef EXPORT_LIBRARY
-ifeq ($(EXPORT_LIBRARY),1)
-ifdef IS_COMPONENT
-EXPORT_LIBRARY = $(DEPTH)/staticlib/components
-else
-EXPORT_LIBRARY = $(DEPTH)/staticlib
-endif
-else
-# If EXPORT_LIBRARY has a value, we'll be installing there. We also need to cleanup there
-GARBAGE += $(foreach lib,$(LIBRARY),$(EXPORT_LIBRARY)/$(lib))
-endif
-endif # EXPORT_LIBRARY
-
-binaries libs:: $(SUBMAKEFILES) $(TARGETS)
 ifndef NO_DIST_INSTALL
 ifdef SHARED_LIBRARY
 ifdef IS_COMPONENT
+target:: $(SUBMAKEFILES) $(SHARED_LIBRARY)
 	$(INSTALL) $(IFLAGS2) $(SHARED_LIBRARY) $(FINAL_TARGET)/components
 ifdef DEBUG_SYMFILE
 	$(INSTALL) $(IFLAGS2) $(call DEBUG_SYMFILE,$(SHARED_LIBRARY)) $(FINAL_TARGET)/components
@@ -42,24 +29,18 @@ ifdef DEBUG_SYMFILE
 PROGRAMS_EXECUTABLES += $(foreach f,$(PROGRAMS_EXECUTABLES),$(call DEBUG_SYMFILE,$f))
 endif
 PROGRAMS_DEST ?= $(FINAL_TARGET)
-PROGRAMS_TARGET := binaries libs
+PROGRAMS_TARGET := target
 INSTALL_TARGETS += PROGRAMS
 endif
 
 ifdef LIBRARY
-ifdef EXPORT_LIBRARY
-LIBRARY_FILES = $(LIBRARY)
-LIBRARY_DEST ?= $(EXPORT_LIBRARY)
-LIBRARY_TARGET = binaries libs
-INSTALL_TARGETS += LIBRARY
-endif
 ifdef DIST_INSTALL
 ifdef IS_COMPONENT
 $(error Shipping static component libs makes no sense.)
 else
 DIST_LIBRARY_FILES = $(LIBRARY)
 DIST_LIBRARY_DEST ?= $(DIST)/lib
-DIST_LIBRARY_TARGET = binaries libs
+DIST_LIBRARY_TARGET = target
 INSTALL_TARGETS += DIST_LIBRARY
 endif
 endif # DIST_INSTALL
@@ -70,7 +51,7 @@ ifdef SHARED_LIBRARY
 ifndef IS_COMPONENT
 SHARED_LIBRARY_FILES = $(SHARED_LIBRARY) $(call DEBUG_SYMFILE,$(SHARED_LIBRARY))
 SHARED_LIBRARY_DEST ?= $(FINAL_TARGET)
-SHARED_LIBRARY_TARGET = binaries libs
+SHARED_LIBRARY_TARGET = target
 INSTALL_TARGETS += SHARED_LIBRARY
 
 ifneq (,$(filter OS2 WINNT,$(OS_ARCH)))
@@ -82,7 +63,7 @@ IMPORT_LIB_FILES = $(SHARED_LIBRARY)
 endif
 
 IMPORT_LIB_DEST ?= $(DIST)/lib
-IMPORT_LIB_TARGET = binaries libs
+IMPORT_LIB_TARGET = target
 ifdef IMPORT_LIB_FILES
 INSTALL_TARGETS += IMPORT_LIB
 endif
@@ -93,36 +74,17 @@ endif # SHARED_LIBRARY
 ifneq (,$(strip $(HOST_SIMPLE_PROGRAMS)$(HOST_PROGRAM)))
 HOST_PROGRAMS_EXECUTABLES = $(HOST_SIMPLE_PROGRAMS) $(HOST_PROGRAM)
 HOST_PROGRAMS_DEST ?= $(DIST)/host/bin
-HOST_PROGRAMS_TARGET = binaries libs
+HOST_PROGRAMS_TARGET = host
 INSTALL_TARGETS += HOST_PROGRAMS
 endif
 
 ifdef HOST_LIBRARY
 HOST_LIBRARY_FILES = $(HOST_LIBRARY)
 HOST_LIBRARY_DEST ?= $(DIST)/host/lib
-HOST_LIBRARY_TARGET = binaries libs
+HOST_LIBRARY_TARGET = host
 INSTALL_TARGETS += HOST_LIBRARY
 endif
 
 endif # !NO_DIST_INSTALL
-
-ifdef MOZ_PSEUDO_DERECURSE
-BINARIES_INSTALL_TARGETS := $(foreach category,$(INSTALL_TARGETS),$(if $(filter binaries,$($(category)_TARGET)),$(category)))
-
-# Fill a dependency file with all the binaries installed somewhere in $(DIST)
-# and with dependencies on the relevant backend files.
-BINARIES_PP := $(MDDEPDIR)/binaries.pp
-
-$(BINARIES_PP): Makefile $(wildcard backend.mk) $(call mkdir_deps,$(MDDEPDIR))
-	@echo '$(strip $(foreach category,$(BINARIES_INSTALL_TARGETS),\
-		$(foreach file,$($(category)_FILES) $($(category)_EXECUTABLES),\
-			$($(category)_DEST)/$(notdir $(file)): $(file)%\
-		)\
-	))binaries: Makefile $(wildcard backend.mk)' | tr % '\n' > $@
-
-else
-binaries::
-	$(error The binaries target is not supported without MOZ_PSEUDO_DERECURSE)
-endif
 
 # EOF

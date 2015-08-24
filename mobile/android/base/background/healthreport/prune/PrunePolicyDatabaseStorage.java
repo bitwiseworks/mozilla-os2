@@ -5,8 +5,10 @@
 package org.mozilla.gecko.background.healthreport.prune;
 
 import org.mozilla.gecko.background.common.log.Logger;
+import org.mozilla.gecko.background.healthreport.AndroidConfigurationProvider;
 import org.mozilla.gecko.background.healthreport.Environment;
 import org.mozilla.gecko.background.healthreport.EnvironmentBuilder;
+import org.mozilla.gecko.background.healthreport.EnvironmentBuilder.ConfigurationProvider;
 import org.mozilla.gecko.background.healthreport.HealthReportDatabaseStorage;
 import org.mozilla.gecko.background.healthreport.ProfileInformationCache;
 
@@ -24,6 +26,7 @@ public class PrunePolicyDatabaseStorage implements PrunePolicyStorage {
 
   private final Context context;
   private final String profilePath;
+  private final ConfigurationProvider config;
 
   private ContentProviderClient client;
   private HealthReportDatabaseStorage storage;
@@ -33,14 +36,17 @@ public class PrunePolicyDatabaseStorage implements PrunePolicyStorage {
   public PrunePolicyDatabaseStorage(final Context context, final String profilePath) {
     this.context = context;
     this.profilePath = profilePath;
+    this.config = new AndroidConfigurationProvider(context);
 
     this.currentEnvironmentID = -1;
   }
 
+  @Override
   public void pruneEvents(final int count) {
     getStorage().pruneEvents(count);
   }
 
+  @Override
   public void pruneEnvironments(final int count) {
     getStorage().pruneEnvironments(count);
 
@@ -55,10 +61,12 @@ public class PrunePolicyDatabaseStorage implements PrunePolicyStorage {
    * current environment from the profile cache, it will not delete data so be sure to prune by
    * other methods (e.g. {@link pruneEvents}) as well.
    */
+  @Override
   public int deleteDataBefore(final long time) {
     return getStorage().deleteDataBefore(time, getCurrentEnvironmentID());
   }
 
+  @Override
   public void cleanup() {
     final HealthReportDatabaseStorage storage = getStorage();
     // The change to auto_vacuum will only take affect after a vacuum.
@@ -66,14 +74,17 @@ public class PrunePolicyDatabaseStorage implements PrunePolicyStorage {
     storage.vacuum();
   }
 
+  @Override
   public int getEventCount() {
     return getStorage().getEventCount();
   }
 
+  @Override
   public int getEnvironmentCount() {
     return getStorage().getEnvironmentCount();
   }
 
+  @Override
   public void close() {
     if (client != null) {
       client.release();
@@ -128,7 +139,7 @@ public class PrunePolicyDatabaseStorage implements PrunePolicyStorage {
       if (!cache.restoreUnlessInitialized()) {
         throw new IllegalStateException("Current environment unknown.");
       }
-      final Environment env = EnvironmentBuilder.getCurrentEnvironment(cache);
+      final Environment env = EnvironmentBuilder.getCurrentEnvironment(cache, config);
       currentEnvironmentID = env.register();
     }
     return currentEnvironmentID;

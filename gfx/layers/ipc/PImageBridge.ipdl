@@ -5,14 +5,15 @@
 
 include LayersSurfaces;
 include LayersMessages;
-include protocol PGrallocBuffer;
 include protocol PCompositable;
+include protocol PLayer;
 include protocol PTexture;
 include ProtocolTypes;
 
 include "mozilla/GfxMessageUtils.h";
 
 using struct mozilla::layers::TextureInfo from "mozilla/layers/CompositorTypes.h";
+using mozilla::layers::TextureFlags from "mozilla/layers/CompositorTypes.h";
 
 namespace mozilla {
 namespace layers {
@@ -25,21 +26,15 @@ namespace layers {
 intr protocol PImageBridge
 {
   manages PCompositable;
-  manages PGrallocBuffer;
   manages PTexture;
+
+child:
+  async ParentAsyncMessages(AsyncParentMessageData[] aMessages);
 
 parent:
 
   sync Update(CompositableOperation[] ops) returns (EditReply[] reply);
   async UpdateNoSwap(CompositableOperation[] ops);
-
-  // Allocates a gralloc buffer that may not suitable to use with
-  // gfxImageSurface but allows hardware decoder to write to the
-  // buffer directly. The format is a enum defined in
-  // system/graphics.h and the usage is the GraphicBuffer usage
-  // flag. See GraphicBuffer.h and gralloc.h.
-  sync PGrallocBuffer(IntSize size, uint32_t format, uint32_t usage)
-    returns (MaybeMagicGrallocBufferHandle handle);
 
   // First step of the destruction sequence. This puts ImageBridge
   // in a state in which it can't send asynchronous messages
@@ -54,7 +49,9 @@ parent:
   sync Stop();
 
   sync PCompositable(TextureInfo aInfo) returns (uint64_t id);
-  async PTexture(SurfaceDescriptor aSharedData, uint32_t aTextureFlags);
+  async PTexture(SurfaceDescriptor aSharedData, TextureFlags aTextureFlags);
+
+  async ChildAsyncMessages(AsyncChildMessageData[] aMessages);
 };
 
 

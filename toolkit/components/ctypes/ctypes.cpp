@@ -25,7 +25,7 @@ namespace ctypes {
 
 // copy of what's in dom/workers/ChromeWorkerScope.cpp
 static char*
-UnicodeToNative(JSContext* aCx, const jschar* aSource, size_t aSourceLen)
+UnicodeToNative(JSContext* aCx, const char16_t* aSource, size_t aSourceLen)
 {
   nsDependentString unicode(aSource, aSourceLen);
 
@@ -46,7 +46,7 @@ UnicodeToNative(JSContext* aCx, const jschar* aSource, size_t aSourceLen)
 }
 
 // copy of what's in dom/workers/ChromeWorkerScope.cpp
-static jschar*
+static char16_t*
 NativeToUnicode(JSContext* aCx, const char* aSource, size_t aSourceLen)
 {
   nsDependentCString native(aSource, aSourceLen);
@@ -57,12 +57,12 @@ NativeToUnicode(JSContext* aCx, const char* aSource, size_t aSourceLen)
     return nullptr;
   }
 
-  jschar* result = static_cast<jschar*>(JS_malloc(aCx, (unicode.Length() + 1) * sizeof(jschar)));
+  char16_t* result = static_cast<char16_t*>(JS_malloc(aCx, (unicode.Length() + 1) * sizeof(char16_t)));
   if (!result) {
     return nullptr;
   }
 
-  memcpy(result, unicode.get(), unicode.Length() * sizeof(jschar));
+  memcpy(result, unicode.get(), unicode.Length() * sizeof(char16_t));
   result[unicode.Length()] = 0;
   return result;
 }
@@ -121,7 +121,7 @@ InitAndSealCTypesClass(JSContext* cx, JS::Handle<JSObject*> global)
   if (!JS_GetProperty(cx, global, "ctypes", &ctypes))
     return false;
 
-  JS_SetCTypesCallbacks(JSVAL_TO_OBJECT(ctypes), &sCallbacks);
+  JS_SetCTypesCallbacks(ctypes.toObjectOrNull(), &sCallbacks);
 
   // Seal up Object, Function, Array and Error and their prototypes.  (This
   // single object instance is shared amongst everyone who imports the ctypes

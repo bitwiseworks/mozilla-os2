@@ -18,10 +18,10 @@
 
 var Cu = require('chrome').Cu;
 
-var debuggerSocketConnect = Cu.import('resource://gre/modules/devtools/dbg-client.jsm', {}).debuggerSocketConnect;
 var DebuggerClient = Cu.import('resource://gre/modules/devtools/dbg-client.jsm', {}).DebuggerClient;
+var { Task } = Cu.import("resource://gre/modules/Task.jsm", {});
 
-var promise = require('../util/promise');
+var Promise = require('../util/promise').Promise;
 var Connection = require('./connectors').Connection;
 
 /**
@@ -62,7 +62,7 @@ function RdpConnection(url) {
 /**
  * Asynchronous construction
  */
-RdpConnection.create = function(url) {
+RdpConnection.create = Task.async(function*(url) {
   this.host = url;
   this.port = undefined; // TODO: Split out the port number
 
@@ -71,45 +71,42 @@ RdpConnection.create = function(url) {
 
   this._emit = this._emit.bind(this);
 
-  var deferred = promise.defer();
+  let transport = yield DebuggerClient.socketConnect({
+    host: this.host,
+    port: this.port
+  });
 
-  this.transport = debuggerSocketConnect(this.host, this.port);
-  this.client = new DebuggerClient(this.transport);
-
-  this.client.connect(function() {
-    this.client.listTabs(function(response) {
-      this.actor = response.gcliActor;
-      deferred.resolve();
+  return new Promise(function(resolve, reject) {
+    this.client = new DebuggerClient(transport);
+    this.client.connect(function() {
+      this.client.listTabs(function(response) {
+        this.actor = response.gcliActor;
+        resolve();
+      }.bind(this));
     }.bind(this));
   }.bind(this));
-
-  return deferred.promise;
-};
+});
 
 RdpConnection.prototype = Object.create(Connection.prototype);
 
 RdpConnection.prototype.call = function(command, data) {
-  var deferred = promise.defer();
+  return new Promise(function(resolve, reject) {
+    var request = { to: this.actor, type: command, data: data };
 
-  var request = { to: this.actor, type: command, data: data };
-
-  this.client.request(request, function(response) {
-    deferred.resolve(response.commandSpecs);
-  });
-
-  return deferred.promise;
+    this.client.request(request, function(response) {
+      resolve(response.commandSpecs);
+    });
+  }.bind(this));
 };
 
 RdpConnection.prototype.disconnect = function() {
-  var deferred = promise.defer();
+  return new Promise(function(resolve, reject) {
+    this.client.close(function() {
+      resolve();
+    });
 
-  this.client.close(function() {
-    deferred.resolve();
-  });
-
-  delete this._emit;
-
-  return deferred.promise;
+    delete this._emit;
+  }.bind(this));
 };
 
 
@@ -126,8 +123,9 @@ function Request(actor, typed, args) {
     requestId: 'id-' + Request._nextRequestId++,
   };
 
-  this._deferred = promise.defer();
-  this.promise = this._deferred.promise;
+  this.promise = new Promise(function(resolve, reject) {
+    this._resolve = resolve;
+  }.bind(this));
 }
 
 Request._nextRequestId = 0;
@@ -139,7 +137,7 @@ Request._nextRequestId = 0;
  * @param data the data itself
  */
 Request.prototype.complete = function(error, type, data) {
-  this._deferred.resolve({
+  this._resolve({
     error: error,
     type: type,
     data: data

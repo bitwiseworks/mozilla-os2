@@ -39,7 +39,7 @@ import java.util.Map;
  * addon code can be compiled against the android.jar provided in the Android
  * SDK, rather than having to be compiled against Fennec source code.
  *
- * The Handler.Callback instances provided (as described above) are inovked with
+ * The Handler.Callback instances provided (as described above) are invoked with
  * Message objects when the corresponding events are dispatched. The Bundle
  * object attached to the Message will contain the "primitive" values from the
  * JSON of the event. ("primitive" includes bool/int/long/double/String). If
@@ -65,7 +65,7 @@ class JavaAddonManager implements GeckoEventListener {
     }
 
     private JavaAddonManager() {
-        mDispatcher = GeckoAppShell.getEventDispatcher();
+        mDispatcher = EventDispatcher.getInstance();
         mAddonCallbacks = new HashMap<String, Map<String, GeckoEventListener>>();
     }
 
@@ -75,8 +75,9 @@ class JavaAddonManager implements GeckoEventListener {
             return;
         }
         mApplicationContext = applicationContext;
-        mDispatcher.registerEventListener("Dex:Load", this);
-        mDispatcher.registerEventListener("Dex:Unload", this);
+        mDispatcher.registerGeckoThreadListener(this,
+            "Dex:Load",
+            "Dex:Unload");
     }
 
     @Override
@@ -121,7 +122,7 @@ class JavaAddonManager implements GeckoEventListener {
         addonCallbacks = new HashMap<String, GeckoEventListener>();
         for (String event : callbacks.keySet()) {
             CallbackWrapper wrapper = new CallbackWrapper(callbacks.get(event));
-            mDispatcher.registerEventListener(event, wrapper);
+            mDispatcher.registerGeckoThreadListener(wrapper, event);
             addonCallbacks.put(event, wrapper);
         }
         mAddonCallbacks.put(zipFile, addonCallbacks);
@@ -134,7 +135,7 @@ class JavaAddonManager implements GeckoEventListener {
             return;
         }
         for (String event : callbacks.keySet()) {
-            mDispatcher.unregisterEventListener(event, callbacks.get(event));
+            mDispatcher.unregisterGeckoThreadListener(callbacks.get(event), event);
         }
     }
 

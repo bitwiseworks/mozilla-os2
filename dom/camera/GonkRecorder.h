@@ -31,11 +31,10 @@
 namespace android {
 
 class GonkCameraSource;
-struct MediaSource;
+struct MOZ_EXPORT MediaSource;
 struct MediaWriter;
-class MetaData;
-struct AudioSource;
-class MediaProfiles;
+class MOZ_EXPORT MetaData;
+struct MOZ_EXPORT AudioSource;
 class GonkCameraHardware;
 
 struct GonkRecorder {

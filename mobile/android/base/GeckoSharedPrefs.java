@@ -4,22 +4,19 @@
 
 package org.mozilla.gecko;
 
-import org.mozilla.gecko.mozglue.RobocopTarget;
-import org.mozilla.gecko.util.ThreadUtils;
-
-import android.content.Context;
-import android.content.SharedPreferences;
-import android.content.SharedPreferences.Editor;
-import android.os.Build;
-import android.os.StrictMode;
-import android.preference.PreferenceManager;
-import android.util.Log;
-
 import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+
+import org.mozilla.gecko.mozglue.RobocopTarget;
+
+import android.content.Context;
+import android.content.SharedPreferences;
+import android.content.SharedPreferences.Editor;
+import android.os.StrictMode;
+import android.preference.PreferenceManager;
+import android.util.Log;
 
 /**
  * {@code GeckoSharedPrefs} provides scoped SharedPreferences instances.
@@ -50,14 +47,14 @@ public final class GeckoSharedPrefs {
     // Name for app-scoped prefs
     public static final String APP_PREFS_NAME = "GeckoApp";
 
+    // Used when fetching profile-scoped prefs.
+    public static final String PROFILE_PREFS_NAME_PREFIX = "GeckoProfile-";
+
     // The prefs key that holds the current migration
     private static final String PREFS_VERSION_KEY = "gecko_shared_prefs_migration";
 
     // For disabling migration when getting a SharedPreferences instance
     private static final EnumSet<Flags> disableMigrations = EnumSet.of(Flags.DISABLE_MIGRATIONS);
-
-    // Timeout for migration commits to be done (10 seconds)
-    private static final int MIGRATION_COMMIT_TIMEOUT_MSEC = 10000;
 
     // The keys that have to be moved from ProfileManager's default
     // shared prefs to the profile from version 0 to 1.
@@ -67,14 +64,11 @@ public final class GeckoSharedPrefs {
     };
 
     // For optimizing the migration check in subsequent get() calls
-    private static volatile boolean migrationDone = false;
+    private static volatile boolean migrationDone;
 
     public enum Flags {
         DISABLE_MIGRATIONS
     }
-
-    // Used when fetching profile-scoped prefs.
-    private static final String PROFILE_PREFS_NAME_PREFIX = "GeckoProfile-";
 
     public static SharedPreferences forApp(Context context) {
         return forApp(context, EnumSet.noneOf(Flags.class));
@@ -152,21 +146,16 @@ public final class GeckoSharedPrefs {
             return;
         }
 
-        // We deliberatly perform the migration in the current thread (which
+        // We deliberately perform the migration in the current thread (which
         // is likely the UI thread) as this is actually cheaper than enforcing a
         // context switch to another thread (see bug 940575).
-        if (Build.VERSION.SDK_INT < 9) {
+        // Avoid strict mode warnings when doing so.
+        final StrictMode.ThreadPolicy savedPolicy = StrictMode.allowThreadDiskReads();
+        StrictMode.allowThreadDiskWrites();
+        try {
             performMigration(context);
-        } else {
-            // Avoid strict mode warnings.
-            final StrictMode.ThreadPolicy savedPolicy = StrictMode.allowThreadDiskReads();
-            StrictMode.allowThreadDiskWrites();
-
-            try {
-                performMigration(context);
-            } finally {
-                StrictMode.setThreadPolicy(savedPolicy);
-            }
+        } finally {
+            StrictMode.setThreadPolicy(savedPolicy);
         }
 
         migrationDone = true;
@@ -215,10 +204,10 @@ public final class GeckoSharedPrefs {
         // Update prefs version accordingly.
         appEditor.putInt(PREFS_VERSION_KEY, PREFS_VERSION);
 
-        appEditor.commit();
-        profileEditor.commit();
+        appEditor.apply();
+        profileEditor.apply();
         if (pmEditor != null) {
-            pmEditor.commit();
+            pmEditor.apply();
         }
 
         Log.d(LOGTAG, "All keys have been migrated");
@@ -254,7 +243,6 @@ public final class GeckoSharedPrefs {
         return pmPrefs.edit().clear();
     }
 
-    @SuppressWarnings("unchecked")
     private static void putEntry(Editor to, String key, Object value) {
         Log.d(LOGTAG, "Migrating key = " + key + " with value = " + value);
 

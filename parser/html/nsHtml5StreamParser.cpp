@@ -26,6 +26,7 @@
 #include "nsIThreadRetargetableRequest.h"
 #include "nsPrintfCString.h"
 #include "nsNetUtil.h"
+#include "nsXULAppAPI.h"
 
 #include "mozilla/dom/EncodingUtils.h"
 
@@ -117,7 +118,7 @@ class nsHtml5ExecutorFlusher : public nsRunnable
   private:
     nsRefPtr<nsHtml5TreeOpExecutor> mExecutor;
   public:
-    nsHtml5ExecutorFlusher(nsHtml5TreeOpExecutor* aExecutor)
+    explicit nsHtml5ExecutorFlusher(nsHtml5TreeOpExecutor* aExecutor)
       : mExecutor(aExecutor)
     {}
     NS_IMETHODIMP Run()
@@ -134,7 +135,7 @@ class nsHtml5LoadFlusher : public nsRunnable
   private:
     nsRefPtr<nsHtml5TreeOpExecutor> mExecutor;
   public:
-    nsHtml5LoadFlusher(nsHtml5TreeOpExecutor* aExecutor)
+    explicit nsHtml5LoadFlusher(nsHtml5TreeOpExecutor* aExecutor)
       : mExecutor(aExecutor)
     {}
     NS_IMETHODIMP Run()
@@ -181,7 +182,7 @@ nsHtml5StreamParser::nsHtml5StreamParser(nsHtml5TreeOpExecutor* aExecutor,
     mTreeBuilder->EnableViewSource(highlighter); // doesn't own
   }
 
-  // Chardet instantiation adapted from nsDOMFile.
+  // Chardet instantiation adapted from File.
   // Chardet is initialized here even if it turns out to be useless
   // to make the chardet refcount its observer (nsHtml5StreamParser)
   // on the main thread.
@@ -234,11 +235,8 @@ nsHtml5StreamParser::Notify(const char* aCharset, nsDetectionConfident aConf)
   if (aConf == eBestAnswer || aConf == eSureAnswer) {
     mFeedChardet = false; // just in case
     nsAutoCString encoding;
-    if (!EncodingUtils::FindEncodingForLabel(nsDependentCString(aCharset),
-                                             encoding)) {
-      return NS_OK;
-    }
-    if (encoding.EqualsLiteral("replacement")) {
+    if (!EncodingUtils::FindEncodingForLabelNoReplacement(
+        nsDependentCString(aCharset), encoding)) {
       return NS_OK;
     }
     if (HasDecoder()) {
@@ -376,9 +374,9 @@ nsHtml5StreamParser::SniffBOMlessUTF16BasicLatin(const uint8_t* aFromSegment,
   }
 
   if (byteNonZero[0]) {
-    mCharset.Assign("UTF-16LE");
+    mCharset.AssignLiteral("UTF-16LE");
   } else {
-    mCharset.Assign("UTF-16BE");
+    mCharset.AssignLiteral("UTF-16BE");
   }
   mCharsetSource = kCharsetFromIrreversibleAutoDetection;
   mTreeBuilder->SetDocumentCharset(mCharset, mCharsetSource);
@@ -773,8 +771,7 @@ nsHtml5StreamParser::SniffStreamBytes(const uint8_t* aFromSegment,
   }
 
   if (!mSniffingBuffer) {
-    const mozilla::fallible_t fallible = mozilla::fallible_t();
-    mSniffingBuffer = new (fallible)
+    mSniffingBuffer = new (mozilla::fallible)
       uint8_t[NS_HTML5_STREAM_PARSER_SNIFFING_BUFFER_SIZE];
     if (!mSniffingBuffer) {
       return NS_ERROR_OUT_OF_MEMORY;
@@ -937,13 +934,21 @@ nsHtml5StreamParser::OnStartRequest(nsIRequest* aRequest, nsISupports* aContext)
       mReparseForbidden = true;
       mFeedChardet = false; // can't restart anyway
     }
+  }
 
-    // Attempt to retarget delivery of data (via OnDataAvailable) to the parser
-    // thread, rather than through the main thread.
-    nsCOMPtr<nsIThreadRetargetableRequest> threadRetargetableRequest =
-      do_QueryInterface(mRequest);
-    if (threadRetargetableRequest) {
-      threadRetargetableRequest->RetargetDeliveryTo(mThread);
+  // Attempt to retarget delivery of data (via OnDataAvailable) to the parser
+  // thread, rather than through the main thread.
+  nsCOMPtr<nsIThreadRetargetableRequest> threadRetargetableRequest =
+    do_QueryInterface(mRequest, &rv);
+  if (threadRetargetableRequest) {
+    rv = threadRetargetableRequest->RetargetDeliveryTo(mThread);
+  }
+
+  if (NS_FAILED(rv)) {
+    // for now skip warning if we're on child process, since we don't support
+    // off-main thread delivery there yet.  This will change with bug 1015466
+    if (XRE_GetProcessType() != GeckoProcessType_Content) {
+      NS_WARNING("Failed to retarget HTML data delivery to the parser thread.");
     }
   }
 
@@ -1025,7 +1030,7 @@ class nsHtml5RequestStopper : public nsRunnable
   private:
     nsHtml5RefPtr<nsHtml5StreamParser> mStreamParser;
   public:
-    nsHtml5RequestStopper(nsHtml5StreamParser* aStreamParser)
+    explicit nsHtml5RequestStopper(nsHtml5StreamParser* aStreamParser)
       : mStreamParser(aStreamParser)
     {}
     NS_IMETHODIMP Run()
@@ -1140,8 +1145,7 @@ nsHtml5StreamParser::OnDataAvailable(nsIRequest* aRequest,
   uint32_t totalRead;
   // Main thread to parser thread dispatch requires copying to buffer first.
   if (NS_IsMainThread()) {
-    const mozilla::fallible_t fallible = mozilla::fallible_t();
-    nsAutoArrayPtr<uint8_t> data(new (fallible) uint8_t[aLength]);
+    nsAutoArrayPtr<uint8_t> data(new (mozilla::fallible) uint8_t[aLength]);
     if (!data) {
       return mExecutor->MarkAsBroken(NS_ERROR_OUT_OF_MEMORY);
     }
@@ -1206,7 +1210,7 @@ nsHtml5StreamParser::PreferredForInternalEncodingDecl(nsACString& aEncoding)
     mTreeBuilder->MaybeComplainAboutCharset("EncMetaUtf16",
                                             true,
                                             mTokenizer->getLineNumber());
-    newEncoding.Assign("UTF-8");
+    newEncoding.AssignLiteral("UTF-8");
   }
 
   if (newEncoding.EqualsLiteral("x-user-defined")) {
@@ -1214,7 +1218,7 @@ nsHtml5StreamParser::PreferredForInternalEncodingDecl(nsACString& aEncoding)
     mTreeBuilder->MaybeComplainAboutCharset("EncMetaUserDefined",
                                             true,
                                             mTokenizer->getLineNumber());
-    newEncoding.Assign("windows-1252");
+    newEncoding.AssignLiteral("windows-1252");
   }
 
   if (newEncoding.Equals(mCharset)) {
@@ -1411,7 +1415,7 @@ class nsHtml5StreamParserContinuation : public nsRunnable
 private:
   nsHtml5RefPtr<nsHtml5StreamParser> mStreamParser;
 public:
-  nsHtml5StreamParserContinuation(nsHtml5StreamParser* aStreamParser)
+  explicit nsHtml5StreamParserContinuation(nsHtml5StreamParser* aStreamParser)
     : mStreamParser(aStreamParser)
   {}
   NS_IMETHODIMP Run()
@@ -1576,7 +1580,7 @@ class nsHtml5TimerKungFu : public nsRunnable
 private:
   nsHtml5RefPtr<nsHtml5StreamParser> mStreamParser;
 public:
-  nsHtml5TimerKungFu(nsHtml5StreamParser* aStreamParser)
+  explicit nsHtml5TimerKungFu(nsHtml5StreamParser* aStreamParser)
     : mStreamParser(aStreamParser)
   {}
   NS_IMETHODIMP Run()

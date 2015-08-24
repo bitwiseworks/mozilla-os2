@@ -7,47 +7,41 @@
 #define _NS_NSSCERTIFICATE_H_
 
 #include "nsIX509Cert.h"
-#include "nsIX509Cert2.h"
-#include "nsIX509Cert3.h"
 #include "nsIX509CertDB.h"
 #include "nsIX509CertList.h"
 #include "nsIASN1Object.h"
-#include "nsISMimeCert.h"
 #include "nsIIdentityInfo.h"
 #include "nsCOMPtr.h"
 #include "nsNSSShutDown.h"
 #include "nsISimpleEnumerator.h"
 #include "nsISerializable.h"
 #include "nsIClassInfo.h"
-#include "pkix/pkixtypes.h"
+#include "ScopedNSSTypes.h"
 #include "certt.h"
+
+namespace mozilla { namespace pkix { class DERArray; } }
 
 class nsAutoString;
 class nsINSSComponent;
 class nsIASN1Sequence;
 
-class nsNSSCertificate : public nsIX509Cert3,
-                         public nsIIdentityInfo,
-                         public nsISMimeCert,
-                         public nsISerializable,
-                         public nsIClassInfo,
-                         public nsNSSShutDownObject
+class nsNSSCertificate final : public nsIX509Cert,
+                                   public nsIIdentityInfo,
+                                   public nsISerializable,
+                                   public nsIClassInfo,
+                                   public nsNSSShutDownObject
 {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIX509CERT
-  NS_DECL_NSIX509CERT2
-  NS_DECL_NSIX509CERT3
   NS_DECL_NSIIDENTITYINFO
-  NS_DECL_NSISMIMECERT
   NS_DECL_NSISERIALIZABLE
   NS_DECL_NSICLASSINFO
 
   friend class nsNSSCertificateFakeTransport;
 
-  nsNSSCertificate(CERTCertificate* cert, SECOidTag* evOidPolicy = nullptr);
+  explicit nsNSSCertificate(CERTCertificate* cert, SECOidTag* evOidPolicy = nullptr);
   nsNSSCertificate();
-  virtual ~nsNSSCertificate();
   nsresult FormatUIStrings(const nsAutoString& nickname,
                            nsAutoString& nickWithSerial,
                            nsAutoString& details);
@@ -55,35 +49,53 @@ public:
                                   SECOidTag* evOidPolicy = nullptr);
   static nsNSSCertificate* ConstructFromDER(char* certDER, int derLen);
 
+  enum EVStatus {
+    ev_status_invalid = 0,
+    ev_status_valid = 1,
+    ev_status_unknown = 2
+  };
+
 private:
-  mozilla::pkix::ScopedCERTCertificate mCert;
+  virtual ~nsNSSCertificate();
+
+  mozilla::ScopedCERTCertificate mCert;
   bool             mPermDelete;
   uint32_t         mCertType;
   nsresult CreateASN1Struct(nsIASN1Object** aRetVal);
   nsresult CreateTBSCertificateASN1Struct(nsIASN1Sequence** retSequence,
                                           nsINSSComponent* nssComponent);
   nsresult GetSortableDate(PRTime aTime, nsAString& _aSortableDate);
-  virtual void virtualDestroyNSSReference();
+  virtual void virtualDestroyNSSReference() override;
   void destructorSafeDestroyNSSReference();
   bool InitFromDER(char* certDER, int derLen);  // return false on failure
 
-  enum {
-    ev_status_invalid = 0, ev_status_valid = 1, ev_status_unknown = 2
-  } mCachedEVStatus;
+  nsresult GetCertificateHash(nsAString& aFingerprint, SECOidTag aHashAlg);
+
+  EVStatus mCachedEVStatus;
   SECOidTag mCachedEVOidTag;
   nsresult hasValidEVOidTag(SECOidTag& resultOidTag, bool& validEV);
   nsresult getValidEVOidTag(SECOidTag& resultOidTag, bool& validEV);
 };
 
+namespace mozilla {
+
+SECStatus ConstructCERTCertListFromReversedDERArray(
+            const mozilla::pkix::DERArray& certArray,
+            /*out*/ mozilla::ScopedCERTCertList& certList);
+
+} // namespcae mozilla
+
 class nsNSSCertList: public nsIX509CertList,
+                     public nsISerializable,
                      public nsNSSShutDownObject
 {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIX509CERTLIST
+  NS_DECL_NSISERIALIZABLE
 
   // certList is adopted
-  nsNSSCertList(mozilla::pkix::ScopedCERTCertList& certList,
+  nsNSSCertList(mozilla::ScopedCERTCertList& certList,
                 const nsNSSShutDownPreventionLock& proofOfLock);
 
   nsNSSCertList();
@@ -93,13 +105,13 @@ public:
                                      proofOfLock);
 private:
    virtual ~nsNSSCertList();
-   virtual void virtualDestroyNSSReference();
+   virtual void virtualDestroyNSSReference() override;
    void destructorSafeDestroyNSSReference();
 
-   mozilla::pkix::ScopedCERTCertList mCertList;
+   mozilla::ScopedCERTCertList mCertList;
 
-   nsNSSCertList(const nsNSSCertList&) MOZ_DELETE;
-   void operator=(const nsNSSCertList&) MOZ_DELETE;
+   nsNSSCertList(const nsNSSCertList&) = delete;
+   void operator=(const nsNSSCertList&) = delete;
 };
 
 class nsNSSCertListEnumerator: public nsISimpleEnumerator,
@@ -113,13 +125,13 @@ public:
                            const nsNSSShutDownPreventionLock& proofOfLock);
 private:
    virtual ~nsNSSCertListEnumerator();
-   virtual void virtualDestroyNSSReference();
+   virtual void virtualDestroyNSSReference() override;
    void destructorSafeDestroyNSSReference();
 
-   mozilla::pkix::ScopedCERTCertList mCertList;
+   mozilla::ScopedCERTCertList mCertList;
 
-   nsNSSCertListEnumerator(const nsNSSCertListEnumerator&) MOZ_DELETE;
-   void operator=(const nsNSSCertListEnumerator&) MOZ_DELETE;
+   nsNSSCertListEnumerator(const nsNSSCertListEnumerator&) = delete;
+   void operator=(const nsNSSCertListEnumerator&) = delete;
 };
 
 

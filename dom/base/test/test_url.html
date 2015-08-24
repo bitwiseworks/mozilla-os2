@@ -1,4 +1,3 @@
-
 <!DOCTYPE HTML>
 <html>
 <head>
@@ -291,6 +290,50 @@
     var url = new URL("http://localhost/");
     url.hostname = "";
     is(url.href, "http://localhost/", "Empty hostname is ignored");
+  </script>
+
+  <script>
+    /** Test for Bug 960014 **/
+    var url = new URL("http://localhost/");
+    url.hostname = "[2001::1]";
+    is(url.hostname, "[2001::1]", "IPv6 hostname");
+    is(url.href, "http://[2001::1]/");
+
+    url.hostname = "[::192.9.5.5]";
+    is(url.hostname, "[::192.9.5.5]", "IPv6 hostname");
+    is(url.href, "http://[::192.9.5.5]/");
+
+    url = new URL("http://localhost/");
+    url.hostname = "[::]";
+    is(url.hostname, "[::]", "IPv6 hostname");
+
+    url = new URL("http://localhost/");
+    url.host = "[2001::1]:30";
+    is(url.hostname, "[2001::1]", "IPv6 hostname");
+    is(url.port, 30, "Port");
+    is(url.host, "[2001::1]:30", "IPv6 host");
+
+    url = new URL("http://localhost/");
+    // This should silently fail since it's missing the brackets
+    url.hostname = "2001::1";
+    is(url.hostname, "localhost", "Setting bad hostname fails");
+  </script>
+
+  <script>
+    var blob = new Blob(['a']);
+    var url = URL.createObjectURL(blob);
+
+    var u = new URL(url);
+    ok(u.origin, 'http://mochi.test:8888', "The URL generated from a blob URI has an origin");
+  </script>
+
+  <script>
+    var blob = new Blob(['a']);
+    var url = URL.createObjectURL(blob);
+
+    var a = document.createElement('A');
+    a.href = url;
+    ok(a.origin, 'http://mochi.test:8888', "The 'a' element has the correct origin");
   </script>
 </body>
 </html>

@@ -22,8 +22,9 @@ EXPORTS.mozilla.plugins += [
     'NPEventOSX.h',
     'NPEventUnix.h',
     'NPEventWindows.h',
-    'PluginIdentifierChild.h',
-    'PluginIdentifierParent.h',
+    'PluginAsyncSurrogate.h',
+    'PluginBridge.h',
+    'PluginDataResolver.h',
     'PluginInstanceChild.h',
     'PluginInstanceParent.h',
     'PluginMessageUtils.h',
@@ -38,6 +39,8 @@ EXPORTS.mozilla.plugins += [
     'PluginStreamChild.h',
     'PluginStreamParent.h',
     'PluginUtilsOSX.h',
+    'PluginWidgetChild.h',
+    'PluginWidgetParent.h',
     'ScopedMethodFactory.h',
     'StreamNotifyChild.h',
     'StreamNotifyParent.h',
@@ -47,16 +50,17 @@ if CONFIG['OS_ARCH'] == 'WINNT':
     EXPORTS.mozilla.plugins += [
         'PluginSurfaceParent.h',
     ]
-    # These files cannot be built in unified mode because they force NSPR logging.
-    SOURCES += [
+    UNIFIED_SOURCES += [
         'COMMessageFilter.cpp',
-        'MiniShmParent.cpp',
         'PluginHangUIParent.cpp',
         'PluginSurfaceParent.cpp',
     ]
+    SOURCES += [
+        'MiniShmParent.cpp', # Issues with CreateEvent
+    ]
     DEFINES['MOZ_HANGUI_PROCESS_NAME'] = '"plugin-hang-ui%s"' % CONFIG['BIN_SUFFIX']
     LOCAL_INCLUDES += [
-        '/widget/shared',
+        '/widget',
         'hangui',
     ]
 
@@ -78,24 +82,20 @@ if CONFIG['MOZ_ENABLE_QT']:
     GENERATED_SOURCES += [
         'moc_NestedLoopTimer.cpp',
     ]
-    # These files cannot be built in unified mode because they force NSPR logging.
     SOURCES += [
         'NestedLoopTimer.cpp',
+        'PluginHelperQt.cpp',
     ]
 
-# These files cannot be built in unified mode because they force NSPR logging.
-SOURCES += [
+UNIFIED_SOURCES += [
     'BrowserStreamChild.cpp',
     'BrowserStreamParent.cpp',
     'ChildAsyncCall.cpp',
     'ChildTimer.cpp',
+    'PluginAsyncSurrogate.cpp',
     'PluginBackgroundDestroyer.cpp',
-    'PluginIdentifierChild.cpp',
-    'PluginIdentifierParent.cpp',
-    'PluginInstanceChild.cpp',
     'PluginInstanceParent.cpp',
     'PluginMessageUtils.cpp',
-    'PluginModuleChild.cpp',
     'PluginModuleParent.cpp',
     'PluginProcessChild.cpp',
     'PluginProcessParent.cpp',
@@ -105,17 +105,23 @@ SOURCES += [
     'PluginStreamParent.cpp',
 ]
 
+SOURCES += [
+    'PluginInstanceChild.cpp', # 'PluginThreadCallback' : ambiguous symbol
+    'PluginModuleChild.cpp',   # Redefinition of mozilla::WindowsDllInterceptor sUser32Intercept
+    'PluginWidgetChild.cpp',
+    'PluginWidgetParent.cpp',
+]
+
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
-    # These files cannot be built in unified mode because they force NSPR logging.
-    SOURCES += [
+    UNIFIED_SOURCES += [
         'PluginInterposeOSX.mm',
         'PluginUtilsOSX.mm',
     ]
 
 IPDL_SOURCES += [
     'PBrowserStream.ipdl',
+    'PluginTypes.ipdlh',
     'PPluginBackgroundDestroyer.ipdl',
-    'PPluginIdentifier.ipdl',
     'PPluginInstance.ipdl',
     'PPluginModule.ipdl',
     'PPluginScriptableObject.ipdl',
@@ -136,3 +142,10 @@ LOCAL_INCLUDES += [
 
 DEFINES['FORCE_PR_LOG'] = True
 
+if CONFIG['MOZ_WIDGET_TOOLKIT'] != 'gtk3':
+    CXXFLAGS += CONFIG['TK_CFLAGS']
+else:
+    # Force build against gtk+2 for struct offsets and such.
+    CXXFLAGS += CONFIG['MOZ_GTK2_CFLAGS']
+
+CXXFLAGS += CONFIG['MOZ_CAIRO_CFLAGS']

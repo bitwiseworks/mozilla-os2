@@ -14,6 +14,8 @@ user_pref("dom.forms.color", true); // on for testing
 user_pref("dom.max_script_run_time", 0); // no slow script dialogs
 user_pref("hangmonitor.timeout", 0); // no hang monitor
 user_pref("dom.max_chrome_script_run_time", 0);
+user_pref("dom.max_child_script_run_time", 0);
+user_pref("dom.ipc.reportProcessHangs", false); // process hang monitor
 user_pref("dom.popup_maximum", -1);
 user_pref("dom.send_after_paint_to_content", true);
 user_pref("dom.successive_dialog_time_limit", 0);
@@ -23,6 +25,7 @@ user_pref("shell.checkDefaultClient", false);
 user_pref("browser.warnOnQuit", false);
 user_pref("accessibility.typeaheadfind.autostart", false);
 user_pref("javascript.options.showInConsole", true);
+user_pref("devtools.browsertoolbox.panel", "jsdebugger");
 user_pref("devtools.errorconsole.enabled", true);
 user_pref("devtools.debugger.remote-port", 6023);
 user_pref("layout.debug.enable_data_xbl", true);
@@ -35,15 +38,19 @@ user_pref("dom.min_background_timeout_value", 1000);
 user_pref("test.mousescroll", true);
 user_pref("security.default_personal_cert", "Select Automatically"); // Need to client auth test be w/o any dialogs
 user_pref("network.http.prompt-temp-redirect", false);
-user_pref("media.cache_size", 100);
+user_pref("media.cache_size", 1000);
 user_pref("media.volume_scale", "0.01");
 user_pref("security.warn_viewing_mixed", false);
 user_pref("app.update.enabled", false);
 user_pref("app.update.staging.enabled", false);
+user_pref("app.update.url.android", "");
+// Make sure GMPInstallManager won't hit the network.
+user_pref("media.gmp-manager.url.override", "http://%(server)s/dummy-gmp-manager.xml");
 user_pref("browser.panorama.experienced_first_run", true); // Assume experienced
 user_pref("dom.w3c_touch_events.enabled", 1);
 user_pref("dom.undo_manager.enabled", true);
 user_pref("dom.webcomponents.enabled", true);
+user_pref("dom.animations-api.core.enabled", true);
 // Set a future policy version to avoid the telemetry prompt.
 user_pref("toolkit.telemetry.prompted", 999);
 user_pref("toolkit.telemetry.notifiedOptOut", 999);
@@ -70,17 +77,18 @@ user_pref("extensions.installDistroAddons", false);
 user_pref("extensions.defaultProviders.enabled", true);
 
 user_pref("geo.wifi.uri", "http://%(server)s/tests/dom/tests/mochitest/geolocation/network_geolocation.sjs");
-user_pref("geo.wifi.timeToWaitBeforeSending", 200);
+user_pref("geo.wifi.timeToWaitBeforeSending", 2000);
 user_pref("geo.wifi.scan", false);
 user_pref("geo.wifi.logging.enabled", true);
-
-user_pref("camino.warn_when_closing", false); // Camino-only, harmless to others
 
 // Make url-classifier updates so rare that they won't affect tests
 user_pref("urlclassifier.updateinterval", 172800);
 // Point the url-classifier to the local testing server for fast failures
 user_pref("browser.safebrowsing.gethashURL", "http://%(server)s/safebrowsing-dummy/gethash");
 user_pref("browser.safebrowsing.updateURL", "http://%(server)s/safebrowsing-dummy/update");
+user_pref("browser.safebrowsing.appRepURL", "http://%(server)s/safebrowsing-dummy/update");
+user_pref("browser.trackingprotection.gethashURL", "http://%(server)s/safebrowsing-dummy/gethash");
+user_pref("browser.trackingprotection.updateURL", "http://%(server)s/safebrowsing-dummy/update");
 // Point update checks to the local testing server for fast failures
 user_pref("extensions.update.url", "http://%(server)s/extensions-dummy/updateURL");
 user_pref("extensions.update.background.url", "http://%(server)s/extensions-dummy/updateBackgroundURL");
@@ -98,6 +106,12 @@ user_pref("extensions.getAddons.search.browseURL", "http://%(server)s/extensions
 user_pref("extensions.getAddons.search.url", "http://%(server)s/extensions-dummy/repositorySearchURL");
 // Make sure that opening the plugins check page won't hit the network
 user_pref("plugins.update.url", "http://%(server)s/plugins-dummy/updateCheckURL");
+// Make sure SNTP requests don't hit the network
+user_pref("network.sntp.pools", "%(server)s");
+// We know the SNTP request will fail, since localhost isn't listening on
+// port 135. The default number of retries (10) is excessive, but retrying
+// at least once will mean that codepath is still tested in automation.
+user_pref("network.sntp.maxRetryCount", 1);
 
 // Existing tests don't wait for the notification button security delay
 user_pref("security.notification_enable_delay", 0);
@@ -116,8 +130,10 @@ user_pref("dom.use_xbl_scopes_for_remote_xul", true);
 // Get network events.
 user_pref("network.activity.blipIntervalMilliseconds", 250);
 
-// Don't allow the Data Reporting service to prompt for policy acceptance.
-user_pref("datareporting.policy.dataSubmissionPolicyBypassAcceptance", true);
+// We do not wish to display datareporting policy notifications as it might
+// cause other tests to fail. Tests that wish to test the notification functionality
+// should explicitly disable this pref.
+user_pref("datareporting.policy.dataSubmissionPolicyBypassNotification", true);
 
 // Point Firefox Health Report at a local server. We don't care if it actually
 // works. It just can't hit the default production endpoint.
@@ -130,10 +146,26 @@ user_pref("layout.css.report_errors", true);
 // Enable CSS Grid for testing
 user_pref("layout.css.grid.enabled", true);
 
+// Enable CSS object-fit & object-position for testing
+user_pref("layout.css.object-fit-and-position.enabled", true);
+
+// Enable CSS Ruby for testing
+user_pref("layout.css.ruby.enabled", true);
+
+// Enable CSS Font Loading API for testing
+user_pref("layout.css.font-loading-api.enabled", true);
+
+// Disable spammy layout warnings because they pollute test logs
+user_pref("layout.spammy_warnings.enabled", false);
+
+// Enable Media Source Extensions for testing
+user_pref("media.mediasource.enabled", true);
+user_pref("media.mediasource.whitelist", false);
+user_pref("media.mediasource.mp4.enabled", true);
+user_pref("media.mediasource.webm.enabled", true);
+
 // Enable mozContacts
 user_pref("dom.mozContacts.enabled", true);
-user_pref("dom.navigator-property.disable.mozContacts", false);
-user_pref("dom.global-constructor.disable.mozContact", false);
 
 // Enable mozSettings
 user_pref("dom.mozSettings.enabled", true);
@@ -144,11 +176,6 @@ user_pref("network.http.bypass-cachelock-threshold", 200000);
 // Enable Gamepad
 user_pref("dom.gamepad.enabled", true);
 user_pref("dom.gamepad.non_standard_events.enabled", true);
-
-// Enable Web Audio legacy APIs
-user_pref("media.webaudio.legacy.BiquadFilterNode", true);
-user_pref("media.webaudio.legacy.PannerNode", true);
-user_pref("media.webaudio.legacy.OscillatorNode", true);
 
 // Always use network provider for geolocation tests
 // so we bypass the OSX dialog raised by the corelocation provider
@@ -161,6 +188,10 @@ user_pref("browser.pagethumbnails.capturing_disabled", true);
 // Indicate that the download panel has been shown once so that whichever
 // download test runs first doesn't show the popup inconsistently.
 user_pref("browser.download.panel.shown", true);
+
+// Assume the about:newtab page's intro panels have been shown to not depend on
+// which test runs first and happens to open about:newtab
+user_pref("browser.newtabpage.introShown", true);
 
 // prefs for firefox metro.
 // Disable first-tun tab
@@ -175,15 +206,13 @@ user_pref("browser.webapps.testing", true);
 // Disable android snippets
 user_pref("browser.snippets.enabled", false);
 user_pref("browser.snippets.syncPromo.enabled", false);
+user_pref("browser.snippets.firstrunHomepage.enabled", false);
 
 // Disable useragent updates.
 user_pref("general.useragent.updates.enabled", false);
 
 // Disable webapp updates.  Yes, it is supposed to be an integer.
 user_pref("browser.webapps.checkForUpdates", 0);
-
-// Do not turn HTTP cache v2 for our infra tests (some tests are failing)
-user_pref("browser.cache.use_new_backend_temp", false);
 
 // Don't connect to Yahoo! for RSS feed tests.
 // en-US only uses .types.0.uri, but set all of them just to be sure.
@@ -194,6 +223,9 @@ user_pref('browser.contentHandlers.types.3.uri', 'http://test1.example.org/rss?u
 user_pref('browser.contentHandlers.types.4.uri', 'http://test1.example.org/rss?url=%%s')
 user_pref('browser.contentHandlers.types.5.uri', 'http://test1.example.org/rss?url=%%s')
 
+// Set dummy server for Android tiles testing.
+user_pref('browser.tiles.reportURL', 'http://%(server)s/tests/robocop/robocop_tiles.sjs')
+
 // We want to collect telemetry, but we don't want to send in the results.
 user_pref('toolkit.telemetry.server', 'https://%(server)s/telemetry-dummy/');
 
@@ -202,9 +234,69 @@ user_pref('toolkit.telemetry.server', 'https://%(server)s/telemetry-dummy/');
 // resolves and accepts requests, even if they all fail.
 user_pref('identity.fxaccounts.auth.uri', 'https://%(server)s/fxa-dummy/');
 
+// Ditto for all the other Firefox accounts URIs used for about:accounts et al.:
+user_pref("identity.fxaccounts.remote.signup.uri", "https://%(server)s/fxa-signup");
+user_pref("identity.fxaccounts.remote.force_auth.uri", "https://%(server)s/fxa-force-auth");
+user_pref("identity.fxaccounts.remote.signin.uri", "https://%(server)s/fxa-signin");
+user_pref("identity.fxaccounts.settings.uri", "https://%(server)s/fxa-settings");
+
+// Enable logging of APZ test data (see bug 961289).
+user_pref('apz.test.logging_enabled', true);
+
+// Make sure SSL Error reports don't hit the network
+user_pref("security.ssl.errorReporting.url", "https://example.com/browser/browser/base/content/test/general/pinning_reports.sjs?succeed");
+
+// Make sure Translation won't hit the network.
+user_pref("browser.translation.bing.authURL", "http://%(server)s/browser/browser/components/translation/test/bing.sjs");
+user_pref("browser.translation.bing.translateArrayURL", "http://%(server)s/browser/browser/components/translation/test/bing.sjs");
+
 // Make sure we don't try to load snippets from the network.
 user_pref("browser.aboutHomeSnippets.updateUrl", "nonexistent://test");
+
+// Enable debug logging in the mozApps implementation.
+user_pref("dom.mozApps.debug", true);
+// Enable apps customizations
+user_pref("dom.apps.customization.enabled", true);
+
+// Don't fetch or send directory tiles data from real servers
+user_pref("browser.newtabpage.directory.source", 'data:application/json,{"testing":1}');
+user_pref("browser.newtabpage.directory.ping", "");
+
+// Enable Loop
+user_pref("loop.debug.loglevel", "All");
+user_pref("loop.enabled", true);
+user_pref("loop.throttled", false);
+user_pref("loop.oauth.google.URL", "http://%(server)s/browser/browser/components/loop/test/mochitest/google_service.sjs?action=");
+user_pref("loop.oauth.google.getContactsURL", "http://%(server)s/browser/browser/components/loop/test/mochitest/google_service.sjs?action=contacts");
+user_pref("loop.oauth.google.getGroupsURL", "http://%(server)s/browser/browser/components/loop/test/mochitest/google_service.sjs?action=groups");
+user_pref("loop.server", "http://%(server)s/browser/browser/components/loop/test/mochitest/loop_fxa.sjs?");
+user_pref("loop.CSP","default-src 'self' about: file: chrome: data: wss://* http://* https://*");
 
 // Ensure UITour won't hit the network
 user_pref("browser.uitour.pinnedTabUrl", "http://%(server)s/uitour-dummy/pinnedTab");
 user_pref("browser.uitour.url", "http://%(server)s/uitour-dummy/tour");
+
+// Tell the search service we are running in the US.  This also has the desired
+// side-effect of preventing our geoip lookup.
+user_pref("browser.search.isUS", true);
+user_pref("browser.search.countryCode", "US");
+
+// Make sure the self support tab doesn't hit the network.
+user_pref("browser.selfsupport.url", "https://%(server)s/selfsupport-dummy/");
+
+user_pref("media.eme.enabled", true);
+user_pref("media.eme.apiVisible", true);
+
+#if defined(XP_WIN)
+user_pref("media.decoder.heuristic.dormant.timeout", 0);
+#endif
+
+// Don't prompt about e10s
+user_pref("browser.displayedE10SPrompt.1", 5);
+// Don't use auto-enabled e10s
+user_pref("browser.tabs.remote.autostart.1", false);
+// Don't forceably kill content processes after a timeout
+user_pref("dom.ipc.tabs.shutdownTimeoutSecs", 0);
+
+// Avoid performing Readinglist Intro during tests.
+user_pref("browser.readinglist.introShown", true);

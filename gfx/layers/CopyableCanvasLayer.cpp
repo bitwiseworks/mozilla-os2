@@ -8,30 +8,31 @@
 #include "GLContext.h"                  // for GLContext
 #include "GLScreenBuffer.h"             // for GLScreenBuffer
 #include "SharedSurface.h"              // for SharedSurface
-#include "SharedSurfaceGL.h"            // for SharedSurface_GL, etc
-#include "SurfaceTypes.h"               // for APITypeT, APITypeT::OpenGL, etc
-#include "gfxMatrix.h"                  // for gfxMatrix
+#include "SharedSurfaceGL.h"              // for SharedSurface
 #include "gfxPattern.h"                 // for gfxPattern, etc
 #include "gfxPlatform.h"                // for gfxPlatform, gfxImageFormat
 #include "gfxRect.h"                    // for gfxRect
 #include "gfxUtils.h"                   // for gfxUtils
 #include "gfx2DGlue.h"                  // for thebes --> moz2d transition
 #include "mozilla/gfx/BaseSize.h"       // for BaseSize
+#include "mozilla/gfx/Tools.h"
 #include "nsDebug.h"                    // for NS_ASSERTION, NS_WARNING, etc
 #include "nsISupportsImpl.h"            // for gfxContext::AddRef, etc
 #include "nsRect.h"                     // for nsIntRect
 #include "nsSize.h"                     // for nsIntSize
-#include "LayerUtils.h"
-
-using namespace mozilla::gfx;
-using namespace mozilla::gl;
+#include "gfxUtils.h"
 
 namespace mozilla {
 namespace layers {
 
+using namespace mozilla::gfx;
+using namespace mozilla::gl;
+
 CopyableCanvasLayer::CopyableCanvasLayer(LayerManager* aLayerManager, void *aImplData) :
   CanvasLayer(aLayerManager, aImplData)
-  , mStream(nullptr)
+  , mGLFrontbuffer(nullptr)
+  , mIsAlphaPremultiplied(true)
+  , mOriginPos(gl::OriginPos::TopLeft)
 {
   MOZ_COUNT_CTOR(CopyableCanvasLayer);
 }
@@ -48,19 +49,24 @@ CopyableCanvasLayer::Initialize(const Data& aData)
 
   if (aData.mGLContext) {
     mGLContext = aData.mGLContext;
-    mStream = aData.mStream;
-    mIsGLAlphaPremult = aData.mIsGLAlphaPremult;
-    mNeedsYFlip = true;
+    mIsAlphaPremultiplied = aData.mIsGLAlphaPremult;
+    mOriginPos = gl::OriginPos::BottomLeft;
+
     MOZ_ASSERT(mGLContext->IsOffscreen(), "canvas gl context isn't offscreen");
 
-    // [Basic Layers, non-OMTC] WebGL layer init.
-    // `GLScreenBuffer::Morph`ing is only needed in BasicShadowableCanvasLayer.
+    if (aData.mFrontbufferGLTex) {
+      gfx::IntSize size(aData.mSize.width, aData.mSize.height);
+      mGLFrontbuffer = SharedSurface_GLTexture::Create(aData.mGLContext,
+                                                       nullptr,
+                                                       aData.mGLContext->GetGLFormats(),
+                                                       size, aData.mHasAlpha,
+                                                       aData.mFrontbufferGLTex);
+    }
   } else if (aData.mDrawTarget) {
     mDrawTarget = aData.mDrawTarget;
     mSurface = mDrawTarget->Snapshot();
-    mNeedsYFlip = false;
   } else {
-    NS_ERROR("CanvasLayer created without mSurface, mDrawTarget or mGLContext?");
+    MOZ_CRASH("CanvasLayer created without mSurface, mDrawTarget or mGLContext?");
   }
 
   mBounds.SetRect(0, 0, aData.mSize.width, aData.mSize.height);
@@ -69,16 +75,12 @@ CopyableCanvasLayer::Initialize(const Data& aData)
 bool
 CopyableCanvasLayer::IsDataValid(const Data& aData)
 {
-  return mGLContext == aData.mGLContext && mStream == aData.mStream;
+  return mGLContext == aData.mGLContext;
 }
 
 void
 CopyableCanvasLayer::UpdateTarget(DrawTarget* aDestTarget)
 {
-  if (!IsDirty())
-    return;
-  Painted();
-
   if (mDrawTarget) {
     mDrawTarget->Flush();
     mSurface = mDrawTarget->Snapshot();
@@ -90,86 +92,82 @@ CopyableCanvasLayer::UpdateTarget(DrawTarget* aDestTarget)
       aDestTarget->CopySurface(mSurface,
                                IntRect(0, 0, mBounds.width, mBounds.height),
                                IntPoint(0, 0));
+      mSurface = nullptr;
     }
     return;
   }
 
-  if (mGLContext) {
-    RefPtr<DataSourceSurface> readSurf;
-    RefPtr<SourceSurface> resultSurf;
+  if (mDrawTarget) {
+    return;
+  }
 
-    SharedSurface_GL* sharedSurf = nullptr;
-    if (mStream) {
-      sharedSurf = SharedSurface_GL::Cast(mStream->SwapConsumer());
-    } else {
-      sharedSurf = mGLContext->RequestFrame();
+  MOZ_ASSERT(mGLContext);
+
+  SharedSurface* frontbuffer = nullptr;
+  if (mGLFrontbuffer) {
+    frontbuffer = mGLFrontbuffer.get();
+  } else {
+    GLScreenBuffer* screen = mGLContext->Screen();
+    ShSurfHandle* front = screen->Front();
+    if (front) {
+      frontbuffer = front->Surf();
     }
+  }
 
-    if (!sharedSurf) {
-      NS_WARNING("Null frame received.");
-      return;
-    }
+  if (!frontbuffer) {
+    NS_WARNING("Null frame received.");
+    return;
+  }
 
-    IntSize readSize(sharedSurf->Size());
-    SurfaceFormat format = (GetContentFlags() & CONTENT_OPAQUE)
-                            ? SurfaceFormat::B8G8R8X8
-                            : SurfaceFormat::B8G8R8A8;
+  IntSize readSize(frontbuffer->mSize);
+  SurfaceFormat format = (GetContentFlags() & CONTENT_OPAQUE)
+                          ? SurfaceFormat::B8G8R8X8
+                          : SurfaceFormat::B8G8R8A8;
+  bool needsPremult = frontbuffer->mHasAlpha && !mIsAlphaPremultiplied;
 
-    if (aDestTarget) {
-      resultSurf = aDestTarget->Snapshot();
-      if (!resultSurf) {
-        resultSurf = GetTempSurface(readSize, format);
+  // Try to read back directly into aDestTarget's output buffer
+  if (aDestTarget) {
+    uint8_t* destData;
+    IntSize destSize;
+    int32_t destStride;
+    SurfaceFormat destFormat;
+    if (aDestTarget->LockBits(&destData, &destSize, &destStride, &destFormat)) {
+      if (destSize == readSize && destFormat == format) {
+        RefPtr<DataSourceSurface> data =
+          Factory::CreateWrappingDataSourceSurface(destData, destStride, destSize, destFormat);
+        mGLContext->Readback(frontbuffer, data);
+        if (needsPremult) {
+            gfxUtils::PremultiplyDataSurface(data, data);
+        }
+        aDestTarget->ReleaseBits(destData);
+        return;
       }
-    } else {
-      resultSurf = GetTempSurface(readSize, format);
+      aDestTarget->ReleaseBits(destData);
     }
-    MOZ_ASSERT(resultSurf);
-    MOZ_ASSERT(sharedSurf->APIType() == APITypeT::OpenGL);
-    SharedSurface_GL* surfGL = SharedSurface_GL::Cast(sharedSurf);
+  }
 
-    if (surfGL->Type() == SharedSurfaceType::Basic) {
-      // sharedSurf_Basic->mData must outlive readSurf. Alas, readSurf may not
-      // leave the scope it was declared in.
-      SharedSurface_Basic* sharedSurf_Basic = SharedSurface_Basic::Cast(surfGL);
-      readSurf = sharedSurf_Basic->GetData();
-    } else {
-      if (resultSurf->GetSize() != readSize ||
-          !(readSurf = resultSurf->GetDataSurface()) ||
-          readSurf->GetFormat() != format)
-      {
-        readSurf = GetTempSurface(readSize, format);
-      }
+  RefPtr<DataSourceSurface> resultSurf = GetTempSurface(readSize, format);
+  // There will already be a warning from inside of GetTempSurface, but
+  // it doesn't hurt to complain:
+  if (NS_WARN_IF(!resultSurf)) {
+    return;
+  }
 
-      // Readback handles Flush/MarkDirty.
-      mGLContext->Screen()->Readback(surfGL, readSurf);
-    }
-    MOZ_ASSERT(readSurf);
+  // Readback handles Flush/MarkDirty.
+  mGLContext->Readback(frontbuffer, resultSurf);
+  if (needsPremult) {
+    gfxUtils::PremultiplyDataSurface(resultSurf, resultSurf);
+  }
+  MOZ_ASSERT(resultSurf);
 
-    bool needsPremult = surfGL->HasAlpha() && !mIsGLAlphaPremult;
-    if (needsPremult) {
-      PremultiplySurface(readSurf);
-    }
-
-    if (readSurf != resultSurf) {
-      RefPtr<DataSourceSurface> resultDataSurface =
-        resultSurf->GetDataSurface();
-      RefPtr<DrawTarget> dt =
-        Factory::CreateDrawTargetForData(BackendType::CAIRO,
-                                         resultDataSurface->GetData(),
-                                         resultDataSurface->GetSize(),
-                                         resultDataSurface->Stride(),
-                                         resultDataSurface->GetFormat());
-      IntSize readSize = readSurf->GetSize();
-      dt->CopySurface(readSurf,
-                      IntRect(0, 0, readSize.width, readSize.height),
-                      IntPoint(0, 0));
-    }
-
+  if (aDestTarget) {
+    aDestTarget->CopySurface(resultSurf,
+                             IntRect(0, 0, readSize.width, readSize.height),
+                             IntPoint(0, 0));
+  } else {
     // If !aDestSurface then we will end up painting using mSurface, so
     // stick our surface into mSurface, so that the Paint() path is the same.
-    if (!aDestTarget) {
-      mSurface = resultSurf;
-    }
+    mSurface = resultSurf;
   }
 }
 
@@ -178,13 +176,12 @@ CopyableCanvasLayer::GetTempSurface(const IntSize& aSize,
                                     const SurfaceFormat aFormat)
 {
   if (!mCachedTempSurface ||
-      aSize.width != mCachedSize.width ||
-      aSize.height != mCachedSize.height ||
-      aFormat != mCachedFormat)
+      aSize != mCachedTempSurface->GetSize() ||
+      aFormat != mCachedTempSurface->GetFormat())
   {
-    mCachedTempSurface = Factory::CreateDataSourceSurface(aSize, aFormat);
-    mCachedSize = aSize;
-    mCachedFormat = aFormat;
+    // Create a surface aligned to 8 bytes since that's the highest alignment WebGL can handle.
+    uint32_t stride = GetAlignedStride<8>(aSize.width * BytesPerPixel(aFormat));
+    mCachedTempSurface = Factory::CreateDataSourceSurfaceWithStride(aSize, aFormat, stride);
   }
 
   return mCachedTempSurface;

@@ -6,16 +6,18 @@
 #ifndef nsSupportsArrayEnumerator_h___
 #define nsSupportsArrayEnumerator_h___
 
+#include "nsCOMPtr.h"
 #include "nsIEnumerator.h"
 #include "mozilla/Attributes.h"
 
 class nsISupportsArray;
 
-class nsSupportsArrayEnumerator MOZ_FINAL : public nsIBidirectionalEnumerator {
+class nsSupportsArrayEnumerator final : public nsIBidirectionalEnumerator
+{
 public:
   NS_DECL_ISUPPORTS
 
-  nsSupportsArrayEnumerator(nsISupportsArray* array);
+  explicit nsSupportsArrayEnumerator(nsISupportsArray* aArray);
 
   // nsIEnumerator methods:
   NS_DECL_NSIENUMERATOR
@@ -27,7 +29,7 @@ private:
   ~nsSupportsArrayEnumerator();
 
 protected:
-  nsISupportsArray*     mArray;
+  nsCOMPtr<nsISupportsArray> mArray;
   int32_t               mCursor;
 
 };

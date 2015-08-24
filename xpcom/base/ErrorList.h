@@ -115,6 +115,16 @@
 
 
   /* ======================================================================= */
+  /* 4:  NS_ERROR_MODULE_WIDGET */
+  /* ======================================================================= */
+#define MODULE  NS_ERROR_MODULE_WIDGET
+  /* Used by nsIWidget::NotifyIME(). Returned when the notification is handled
+   * and the notified event is consumed by IME. */
+  ERROR(NS_SUCCESS_EVENT_CONSUMED,                        SUCCESS(1)),
+#undef MODULE
+
+
+  /* ======================================================================= */
   /* 6: NS_ERROR_MODULE_NETWORK */
   /* ======================================================================= */
 #define MODULE NS_ERROR_MODULE_NETWORK
@@ -201,6 +211,8 @@
   ERROR(NS_ERROR_NET_INTERRUPT,             FAILURE(71)),
   /* The connection attempt to a proxy failed. */
   ERROR(NS_ERROR_PROXY_CONNECTION_REFUSED,  FAILURE(72)),
+  /* A transfer was only partially done when it completed. */
+  ERROR(NS_ERROR_NET_PARTIAL_TRANSFER,      FAILURE(76)),
 
   /* XXX really need to better rationalize these error codes.  are consumers of
    * necko really expected to know how to discern the meaning of these?? */
@@ -318,6 +330,7 @@
   ERROR(NS_ERROR_PLUGIN_BLOCKLISTED,               FAILURE(1002)),
   ERROR(NS_ERROR_PLUGIN_TIME_RANGE_NOT_SUPPORTED,  FAILURE(1003)),
   ERROR(NS_ERROR_PLUGIN_CLICKTOPLAY,               FAILURE(1004)),
+  ERROR(NS_PLUGIN_INIT_PENDING,                    SUCCESS(1005)),
 #undef MODULE
 
 
@@ -484,9 +497,11 @@
   ERROR(NS_ERROR_RANGE_ERR,                        FAILURE(27)),
   /* StringEncoding API errors from http://wiki.whatwg.org/wiki/StringEncoding */
   ERROR(NS_ERROR_DOM_ENCODING_NOT_SUPPORTED_ERR,   FAILURE(28)),
-  ERROR(NS_ERROR_DOM_ENCODING_NOT_UTF_ERR,         FAILURE(29)),
-  ERROR(NS_ERROR_DOM_ENCODING_DECODE_ERR,          FAILURE(30)),
-  ERROR(NS_ERROR_DOM_INVALID_POINTER_ERR,          FAILURE(31)),
+  ERROR(NS_ERROR_DOM_INVALID_POINTER_ERR,          FAILURE(29)),
+  /* WebCrypto API errors from http://www.w3.org/TR/WebCryptoAPI/ */
+  ERROR(NS_ERROR_DOM_UNKNOWN_ERR,                  FAILURE(30)),
+  ERROR(NS_ERROR_DOM_DATA_ERR,                     FAILURE(31)),
+  ERROR(NS_ERROR_DOM_OPERATION_ERR,                FAILURE(32)),
   /* DOM error codes defined by us */
   ERROR(NS_ERROR_DOM_SECMAN_ERR,                   FAILURE(1001)),
   ERROR(NS_ERROR_DOM_WRONG_TYPE_ERR,               FAILURE(1002)),
@@ -503,6 +518,9 @@
   ERROR(NS_ERROR_DOM_RETVAL_UNDEFINED,             FAILURE(1013)),
   ERROR(NS_ERROR_DOM_QUOTA_REACHED,                FAILURE(1014)),
   ERROR(NS_ERROR_DOM_JS_EXCEPTION,                 FAILURE(1015)),
+
+  /* A way to represent uncatchable exceptions */
+  ERROR(NS_ERROR_UNCATCHABLE_EXCEPTION,            FAILURE(1016)),
 
   /* May be used to indicate when e.g. setting a property value didn't
    * actually change the value, like for obj.foo = "bar"; obj.foo = "bar";
@@ -615,6 +633,7 @@
   /* ======================================================================= */
 #define MODULE NS_ERROR_MODULE_SECURITY
   /* Error code for CSP */
+  ERROR(NS_ERROR_CSP_FORM_ACTION_VIOLATION,        FAILURE(98)),
   ERROR(NS_ERROR_CSP_FRAME_ANCESTOR_VIOLATION,     FAILURE(99)),
 
   /* CMS specific nsresult error codes.  Note: the numbers used here correspond
@@ -658,6 +677,7 @@
    * blacklist. */
   ERROR(NS_ERROR_MALWARE_URI,           FAILURE(30)),
   ERROR(NS_ERROR_PHISHING_URI,          FAILURE(31)),
+  ERROR(NS_ERROR_TRACKING_URI,          FAILURE(34)),
   /* Used when "Save Link As..." doesn't see the headers quickly enough to
    * choose a filename.  See nsContextMenu.js. */
   ERROR(NS_ERROR_SAVE_LINK_AS_TIMEOUT,  FAILURE(32)),
@@ -807,7 +827,7 @@
 #define MODULE NS_ERROR_MODULE_DOM_FILEHANDLE
   ERROR(NS_ERROR_DOM_FILEHANDLE_UNKNOWN_ERR,              FAILURE(1)),
   ERROR(NS_ERROR_DOM_FILEHANDLE_NOT_ALLOWED_ERR,          FAILURE(2)),
-  ERROR(NS_ERROR_DOM_FILEHANDLE_LOCKEDFILE_INACTIVE_ERR,  FAILURE(3)),
+  ERROR(NS_ERROR_DOM_FILEHANDLE_INACTIVE_ERR,             FAILURE(3)),
   ERROR(NS_ERROR_DOM_FILEHANDLE_ABORT_ERR,                FAILURE(4)),
   ERROR(NS_ERROR_DOM_FILEHANDLE_READ_ONLY_ERR,            FAILURE(5)),
   ERROR(NS_ERROR_DOM_FILEHANDLE_QUOTA_ERR,                FAILURE(6)),
@@ -840,6 +860,30 @@
 #undef MODULE
 
   /* ======================================================================= */
+  /* 37: NS_ERROR_MODULE_DOM_BLUETOOTH */
+  /* ======================================================================= */
+#define MODULE NS_ERROR_MODULE_DOM_BLUETOOTH
+  ERROR(NS_ERROR_DOM_BLUETOOTH_FAIL,                      FAILURE(1)),
+  ERROR(NS_ERROR_DOM_BLUETOOTH_NOT_READY,                 FAILURE(2)),
+  ERROR(NS_ERROR_DOM_BLUETOOTH_NOMEM,                     FAILURE(3)),
+  ERROR(NS_ERROR_DOM_BLUETOOTH_BUSY,                      FAILURE(4)),
+  ERROR(NS_ERROR_DOM_BLUETOOTH_DONE,                      FAILURE(5)),
+  ERROR(NS_ERROR_DOM_BLUETOOTH_UNSUPPORTED,               FAILURE(6)),
+  ERROR(NS_ERROR_DOM_BLUETOOTH_PARM_INVALID,              FAILURE(7)),
+  ERROR(NS_ERROR_DOM_BLUETOOTH_UNHANDLED,                 FAILURE(8)),
+  ERROR(NS_ERROR_DOM_BLUETOOTH_AUTH_FAILURE,              FAILURE(9)),
+  ERROR(NS_ERROR_DOM_BLUETOOTH_RMT_DEV_DOWN,              FAILURE(10)),
+  ERROR(NS_ERROR_DOM_BLUETOOTH_AUTH_REJECTED,             FAILURE(11)),
+#undef MODULE
+
+  /* ======================================================================= */
+  /* 38: NS_ERROR_MODULE_SIGNED_APP */
+  /* ======================================================================= */
+#define MODULE NS_ERROR_MODULE_SIGNED_APP
+  ERROR(NS_ERROR_SIGNED_APP_MANIFEST_INVALID,   FAILURE(1)),
+#undef MODULE
+
+  /* ======================================================================= */
   /* 51: NS_ERROR_MODULE_GENERAL */
   /* ======================================================================= */
 #define MODULE NS_ERROR_MODULE_GENERAL
@@ -865,6 +909,7 @@
    * case in which nsIAppStartup::Quit was called with the eRestart flag. */
   ERROR(NS_SUCCESS_RESTART_APP,          SUCCESS(1)),
   ERROR(NS_SUCCESS_RESTART_METRO_APP,    SUCCESS(2)),
+  ERROR(NS_SUCCESS_RESTART_APP_NOT_SAME_PROFILE,    SUCCESS(3)),
   ERROR(NS_SUCCESS_UNORM_NOTFOUND,  SUCCESS(17)),
 
 

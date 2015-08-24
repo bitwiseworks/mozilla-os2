@@ -9,21 +9,20 @@
 #include "nsCOMArray.h"
 #include "nsString.h"
 
-class nsStatusReporter MOZ_FINAL : public nsIStatusReporter
+class nsStatusReporter final : public nsIStatusReporter
 {
 public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSISTATUSREPORTER
 
-  nsStatusReporter(nsACString& process,
-                   nsACString& desc);
+  nsStatusReporter(nsACString& aProcess, nsACString& aDesc);
 
-  virtual ~nsStatusReporter();
-
-protected:
+private:
   nsCString sProcess;
   nsCString sName;
   nsCString sDesc;
+
+  virtual ~nsStatusReporter();
 };
 
 
@@ -34,8 +33,9 @@ public:
   NS_DECL_NSISTATUSREPORTERMANAGER
 
   nsStatusReporterManager();
-  virtual ~nsStatusReporterManager();
 
 private:
-  nsCOMArray<nsIStatusReporter>      mReporters;
+  nsCOMArray<nsIStatusReporter> mReporters;
+
+  virtual ~nsStatusReporterManager();
 };

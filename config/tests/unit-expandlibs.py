@@ -36,7 +36,7 @@ config_unix = {
 
 config = sys.modules['expandlibs_config'] = imp.new_module('expandlibs_config')
 
-from expandlibs import LibDescriptor, ExpandArgs, relativize, ExpandLibsDeps
+from expandlibs import LibDescriptor, ExpandArgs, relativize
 from expandlibs_gen import generate
 from expandlibs_exec import ExpandArgsMore, SectionFinder
 
@@ -186,33 +186,15 @@ class TestExpandArgs(TestExpandInit):
         args = ExpandArgs(['foo', '-bar'] + self.arg_files + [self.tmpfile('liby', Lib('y'))])
         self.assertRelEqual(args, ['foo', '-bar'] + self.files + self.liby_files + self.libx_files) 
 
-        # When a library exists at the same time as a descriptor, we just use
-        # the library
+        # When a library exists at the same time as a descriptor, we still use
+        # the descriptor.
         self.touch([self.tmpfile('libx', Lib('x'))])
         args = ExpandArgs(['foo', '-bar'] + self.arg_files + [self.tmpfile('liby', Lib('y'))])
-        self.assertRelEqual(args, ['foo', '-bar'] + self.files + self.liby_files + [self.tmpfile('libx', Lib('x'))]) 
+        self.assertRelEqual(args, ['foo', '-bar'] + self.files + self.liby_files + self.libx_files)
 
         self.touch([self.tmpfile('liby', Lib('y'))])
         args = ExpandArgs(['foo', '-bar'] + self.arg_files + [self.tmpfile('liby', Lib('y'))])
-        self.assertRelEqual(args, ['foo', '-bar'] + self.files + [self.tmpfile('liby', Lib('y'))])
-
-class TestExpandLibsDeps(TestExpandInit):
-    def test_expandlibsdeps(self):
-        '''Test library expansion for dependencies'''
-        # Dependency list for a library with a descriptor is equivalent to
-        # the arguments expansion, to which we add each descriptor
-        args = self.arg_files + [self.tmpfile('liby', Lib('y'))]
-        self.assertRelEqual(ExpandLibsDeps(args), ExpandArgs(args) + [self.tmpfile('libx', Lib('x') + config.LIBS_DESC_SUFFIX), self.tmpfile('liby', Lib('y') + config.LIBS_DESC_SUFFIX)])
-
-        # When a library exists at the same time as a descriptor, the
-        # descriptor is not a dependency
-        self.touch([self.tmpfile('libx', Lib('x'))])
-        args = self.arg_files + [self.tmpfile('liby', Lib('y'))]
-        self.assertRelEqual(ExpandLibsDeps(args), ExpandArgs(args) + [self.tmpfile('liby', Lib('y') + config.LIBS_DESC_SUFFIX)])
-
-        self.touch([self.tmpfile('liby', Lib('y'))])
-        args = self.arg_files + [self.tmpfile('liby', Lib('y'))]
-        self.assertRelEqual(ExpandLibsDeps(args), ExpandArgs(args))
+        self.assertRelEqual(args, ['foo', '-bar'] + self.files + self.liby_files + self.libx_files)
 
 class TestExpandArgsMore(TestExpandInit):
     def test_makelist(self):
@@ -250,7 +232,7 @@ class TestExpandArgsMore(TestExpandInit):
         '''Test library extraction'''
         # Divert subprocess.call
         subprocess_call = subprocess.call
-        extracted = {}
+        subprocess_check_output = subprocess.check_output
         def call(args, **kargs):
             if config.AR == 'lib':
                 self.assertEqual(args[:2], [config.AR, '-NOLOGO'])
@@ -294,31 +276,60 @@ class TestExpandArgsMore(TestExpandInit):
 
         # ExpandArgsMore does the same as ExpandArgs
         self.touch([self.tmpfile('liby', Lib('y'))])
-        with ExpandArgsMore(['foo', '-bar'] + self.arg_files + [self.tmpfile('liby', Lib('y'))]) as args:
-            self.assertRelEqual(args, ['foo', '-bar'] + self.files + [self.tmpfile('liby', Lib('y'))])
+        for iteration in (1, 2):
+            with ExpandArgsMore(['foo', '-bar'] + self.arg_files + [self.tmpfile('liby', Lib('y'))]) as args:
+                files = self.files + self.liby_files + self.libx_files
 
-            # ExpandArgsMore also has an extra method extracting static libraries
-            # when possible
-            args.extract()
+                self.assertRelEqual(args, ['foo', '-bar'] + files)
 
-            files = self.files + self.liby_files + self.libx_files
-            # With AR_EXTRACT, it uses the descriptors when there are, and
-            # actually
-            # extracts the remaining libraries
-            extracted_args = []
-            for f in files:
-                if f.endswith(config.LIB_SUFFIX):
-                    extracted_args.extend(sorted(extracted[os.path.splitext(os.path.basename(f))[0]]))
-                else:
-                    extracted_args.append(f)
-            self.assertRelEqual(args, ['foo', '-bar'] + extracted_args)
+                extracted = {}
+                # ExpandArgsMore also has an extra method extracting static libraries
+                # when possible
+                args.extract()
 
-            tmp = args.tmp
-        # Check that all temporary files are properly removed
-        self.assertEqual(True, all([not os.path.exists(f) for f in tmp]))
+                # With AR_EXTRACT, it uses the descriptors when there are, and
+                # actually
+                # extracts the remaining libraries
+                extracted_args = []
+                for f in files:
+                    if f.endswith(config.LIB_SUFFIX):
+                        base = os.path.splitext(os.path.basename(f))[0]
+                        # On the first iteration, we test the behavior of
+                        # extracting archives that don't have a copy of their
+                        # contents next to them, which is to use the file
+                        # extracted from the archive in a temporary directory.
+                        # On the second iteration, we test extracting archives
+                        # that do have a copy of their contents next to them,
+                        # in which case those contents are used instead of the
+                        # temporarily extracted files.
+                        if iteration == 1:
+                            extracted_args.extend(sorted(extracted[base]))
+                        else:
+                            dirname = os.path.dirname(f[len(self.tmpdir)+1:])
+                            if base.endswith('f'):
+                                dirname = os.path.join(dirname, 'foo', 'bar')
+                            extracted_args.extend([self.tmpfile(dirname, Obj(base)), self.tmpfile(dirname, Obj(base + '2'))])
+                    else:
+                        extracted_args.append(f)
+                self.assertRelEqual(args, ['foo', '-bar'] + extracted_args)
 
-        # Restore subprocess.call
+                tmp = args.tmp
+            # Check that all temporary files are properly removed
+            self.assertEqual(True, all([not os.path.exists(f) for f in tmp]))
+
+            # Create archives contents next to them for the second iteration.
+            base = os.path.splitext(Lib('_'))[0]
+            self.touch(self.tmpfile(Obj(base.replace('_', suffix))) for suffix in ('a', 'a2', 'd', 'd2'))
+            try:
+                os.makedirs(self.tmpfile('foo', 'bar'))
+            except:
+                pass
+            self.touch(self.tmpfile('foo', 'bar', Obj(base.replace('_', suffix))) for suffix in ('f', 'f2'))
+            self.touch(self.tmpfile('liby', Obj(base.replace('_', suffix))) for suffix in ('z', 'z2'))
+
+        # Restore subprocess.call and subprocess.check_output
         subprocess.call = subprocess_call
+        subprocess.check_output = subprocess_check_output
 
 class FakeProcess(object):
     def __init__(self, out, err = ''):

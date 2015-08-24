@@ -36,7 +36,7 @@ nsMathMLmunderoverFrame::AttributeChanged(int32_t         aNameSpaceID,
       nsGkAtoms::accentunder_ == aAttribute) {
     // When we have automatic data to update within ourselves, we ask our
     // parent to re-layout its children
-    return ReLayoutChildren(mParent);
+    return ReLayoutChildren(GetParent());
   }
 
   return nsMathMLContainerFrame::
@@ -256,6 +256,28 @@ XXX The winner is the outermost setting in conflicting settings like these:
                                  NS_MATHML_COMPRESSED,
                                  NS_MATHML_COMPRESSED);
   }
+
+  /* Set flags for dtls font feature settings.
+
+     dtls
+     Dotless Forms
+     This feature provides dotless forms for Math Alphanumeric
+     characters, such as U+1D422 MATHEMATICAL BOLD SMALL I,
+     U+1D423 MATHEMATICAL BOLD SMALL J, U+1D456
+     U+MATHEMATICAL ITALIC SMALL I, U+1D457 MATHEMATICAL ITALIC
+     SMALL J, and so on.
+     The dotless forms are to be used as base forms for placing
+     mathematical accents over them.
+
+     To opt out of this change, add the following to the stylesheet:
+     "font-feature-settings: 'dtls' 0"
+   */
+  if (overscriptFrame &&
+      NS_MATHML_EMBELLISH_IS_ACCENTOVER(mEmbellishData.flags) &&
+      !NS_MATHML_EMBELLISH_IS_MOVABLELIMITS(mEmbellishData.flags)) {
+    PropagatePresentationDataFor(baseFrame, NS_MATHML_DTLS, NS_MATHML_DTLS);
+  }
+
   return NS_OK;
 }
 
@@ -283,25 +305,25 @@ nsMathMLmunderoverFrame::Place(nsRenderingContext& aRenderingContext,
                                bool                 aPlaceOrigin,
                                nsHTMLReflowMetrics& aDesiredSize)
 {
+  float fontSizeInflation = nsLayoutUtils::FontSizeInflationFor(this);
   nsIAtom* tag = mContent->Tag();
   if (NS_MATHML_EMBELLISH_IS_MOVABLELIMITS(mEmbellishData.flags) &&
       StyleFont()->mMathDisplay == NS_MATHML_DISPLAYSTYLE_INLINE) {
     //place like sub sup or subsup
-    nscoord scriptSpace = nsPresContext::CSSPointsToAppUnits(0.5f);
     if (tag == nsGkAtoms::munderover_) {
       return nsMathMLmmultiscriptsFrame::PlaceMultiScript(PresContext(),
                                                           aRenderingContext,
                                                           aPlaceOrigin,
                                                           aDesiredSize,
                                                           this, 0, 0,
-                                                          scriptSpace);
+                                                          fontSizeInflation);
     } else if (tag == nsGkAtoms::munder_) {
       return nsMathMLmmultiscriptsFrame::PlaceMultiScript(PresContext(),
                                                           aRenderingContext,
                                                           aPlaceOrigin,
                                                           aDesiredSize,
                                                           this, 0, 0,
-                                                          scriptSpace);
+                                                          fontSizeInflation);
     } else {
       NS_ASSERTION(tag == nsGkAtoms::mover_, "mContent->Tag() not recognized");
       return nsMathMLmmultiscriptsFrame::PlaceMultiScript(PresContext(),
@@ -309,7 +331,7 @@ nsMathMLmunderoverFrame::Place(nsRenderingContext& aRenderingContext,
                                                           aPlaceOrigin,
                                                           aDesiredSize,
                                                           this, 0, 0,
-                                                          scriptSpace);
+                                                          fontSizeInflation);
     }
     
   }
@@ -324,8 +346,8 @@ nsMathMLmunderoverFrame::Place(nsRenderingContext& aRenderingContext,
   nsIFrame* overFrame = nullptr;
   nsIFrame* underFrame = nullptr;
   nsIFrame* baseFrame = mFrames.FirstChild();
-  underSize.SetTopAscent(0);
-  overSize.SetTopAscent(0);
+  underSize.SetBlockStartAscent(0);
+  overSize.SetBlockStartAscent(0);
   bool haveError = false;
   if (baseFrame) {
     if (tag == nsGkAtoms::munder_ ||
@@ -377,10 +399,12 @@ nsMathMLmunderoverFrame::Place(nsRenderingContext& aRenderingContext,
   // Place Children
 
   nsRefPtr<nsFontMetrics> fm;
-  nsLayoutUtils::GetFontMetricsForFrame(this, getter_AddRefs(fm));
-  aRenderingContext.SetFont(fm);
+  nsLayoutUtils::GetFontMetricsForFrame(this, getter_AddRefs(fm),
+                                        fontSizeInflation);
 
   nscoord xHeight = fm->XHeight();
+  nscoord oneDevPixel = fm->AppUnitsPerDevPixel();
+  gfxFont* mathFont = fm->GetThebesFontGroup()->GetFirstMathFont();
 
   nscoord ruleThickness;
   GetRuleThickness (aRenderingContext, fm, ruleThickness);
@@ -401,14 +425,27 @@ nsMathMLmunderoverFrame::Place(nsRenderingContext& aRenderingContext,
                       dummy, bigOpSpacing2, 
                       dummy, bigOpSpacing4, 
                       bigOpSpacing5);
+    if (mathFont) {
+      // XXXfredw The Open Type MATH table has some StretchStack* parameters
+      // that we may use when the base is a stretchy horizontal operator. See
+      // bug 963131.
+      bigOpSpacing2 =
+        mathFont->GetMathConstant(gfxFontEntry::LowerLimitGapMin,
+                                  oneDevPixel);
+      bigOpSpacing4 =
+        mathFont->GetMathConstant(gfxFontEntry::LowerLimitBaselineDropMin,
+                                  oneDevPixel);
+      bigOpSpacing5 = 0;
+    }
     underDelta1 = std::max(bigOpSpacing2, (bigOpSpacing4 - bmUnder.ascent));
     underDelta2 = bigOpSpacing5;
   }
   else {
     // No corresponding rule in TeXbook - we are on our own here
     // XXX tune the gap delta between base and underscript 
-
-    // Should we use Rule 10 like \underline does?
+    // XXX Should we use Rule 10 like \underline does?
+    // XXXfredw Perhaps use the Underbar* parameters of the MATH table. See
+    // bug 963125.
     underDelta1 = ruleThickness + onePixel/2;
     underDelta2 = ruleThickness;
   }
@@ -423,11 +460,26 @@ nsMathMLmunderoverFrame::Place(nsRenderingContext& aRenderingContext,
 
   if (!NS_MATHML_EMBELLISH_IS_ACCENTOVER(mEmbellishData.flags)) {    
     // Rule 13a, App. G, TeXbook
+    // XXXfredw The Open Type MATH table has some StretchStack* parameters
+    // that we may use when the base is a stretchy horizontal operator. See
+    // bug 963131.
     nscoord bigOpSpacing1, bigOpSpacing3, bigOpSpacing5, dummy; 
     GetBigOpSpacings (fm, 
                       bigOpSpacing1, dummy, 
                       bigOpSpacing3, dummy, 
                       bigOpSpacing5);
+    if (mathFont) {
+      // XXXfredw The Open Type MATH table has some StretchStack* parameters
+      // that we may use when the base is a stretchy horizontal operator. See
+      // bug 963131.
+      bigOpSpacing1 =
+        mathFont->GetMathConstant(gfxFontEntry::UpperLimitGapMin,
+                                  oneDevPixel);
+      bigOpSpacing3 =
+        mathFont->GetMathConstant(gfxFontEntry::UpperLimitBaselineRiseMin,
+                                  oneDevPixel);
+      bigOpSpacing5 = 0;
+    }
     overDelta1 = std::max(bigOpSpacing1, (bigOpSpacing3 - bmOver.descent));
     overDelta2 = bigOpSpacing5;
 
@@ -468,9 +520,15 @@ nsMathMLmunderoverFrame::Place(nsRenderingContext& aRenderingContext,
     // from the baseline of the base char. we also slap on an extra
     // padding between the accent and base chars.
     overDelta1 = ruleThickness + onePixel/2;
-    if (bmBase.ascent < xHeight) {
-      // also ensure at least x-height above the baseline of the base
-      overDelta1 += xHeight - bmBase.ascent;
+    nscoord accentBaseHeight = xHeight;
+    if (mathFont) {
+      accentBaseHeight =
+        mathFont->GetMathConstant(gfxFontEntry::AccentBaseHeight,
+                                  oneDevPixel);
+    }
+    if (bmBase.ascent < accentBaseHeight) {
+      // also ensure at least accentBaseHeight above the baseline of the base
+      overDelta1 += accentBaseHeight - bmBase.ascent;
     }
     overDelta2 = ruleThickness;
   }
@@ -547,8 +605,10 @@ nsMathMLmunderoverFrame::Place(nsRenderingContext& aRenderingContext,
   nsBoundingMetrics bmAnonymousBase = mBoundingMetrics;
   nscoord ascentAnonymousBase =
     std::max(mBoundingMetrics.ascent + overDelta2,
-           overSize.TopAscent() + bmOver.descent + overDelta1 + bmBase.ascent);
-  ascentAnonymousBase = std::max(ascentAnonymousBase, baseSize.TopAscent());
+             overSize.BlockStartAscent() + bmOver.descent +
+             overDelta1 + bmBase.ascent);
+  ascentAnonymousBase = std::max(ascentAnonymousBase,
+                                 baseSize.BlockStartAscent());
 
   // Width of non-spacing marks is zero so use left and right bearing.
   nscoord underWidth = bmUnder.width;
@@ -587,35 +647,37 @@ nsMathMLmunderoverFrame::Place(nsRenderingContext& aRenderingContext,
   mBoundingMetrics.rightBearing = 
     std::max(dxAnonymousBase + bmAnonymousBase.rightBearing, dxUnder + bmUnder.rightBearing);
 
-  aDesiredSize.SetTopAscent(ascentAnonymousBase);
-  aDesiredSize.Height() = aDesiredSize.TopAscent() +
+  aDesiredSize.SetBlockStartAscent(ascentAnonymousBase);
+  aDesiredSize.Height() = aDesiredSize.BlockStartAscent() +
     std::max(mBoundingMetrics.descent + underDelta2,
            bmAnonymousBase.descent + underDelta1 + bmUnder.ascent +
-             underSize.Height() - underSize.TopAscent());
+             underSize.Height() - underSize.BlockStartAscent());
   aDesiredSize.Height() = std::max(aDesiredSize.Height(),
-                               aDesiredSize.TopAscent() +
-                               baseSize.Height() - baseSize.TopAscent());
+                               aDesiredSize.BlockStartAscent() +
+                               baseSize.Height() - baseSize.BlockStartAscent());
   aDesiredSize.Width() = mBoundingMetrics.width;
   aDesiredSize.mBoundingMetrics = mBoundingMetrics;
 
   mReference.x = 0;
-  mReference.y = aDesiredSize.TopAscent();
+  mReference.y = aDesiredSize.BlockStartAscent();
 
   if (aPlaceOrigin) {
     nscoord dy;
     // place overscript
     if (overFrame) {
-      dy = aDesiredSize.TopAscent() - mBoundingMetrics.ascent + bmOver.ascent 
-        - overSize.TopAscent();
+      dy = aDesiredSize.BlockStartAscent() -
+           mBoundingMetrics.ascent + bmOver.ascent -
+           overSize.BlockStartAscent();
       FinishReflowChild (overFrame, PresContext(), overSize, nullptr, dxOver, dy, 0);
     }
     // place base
-    dy = aDesiredSize.TopAscent() - baseSize.TopAscent();
+    dy = aDesiredSize.BlockStartAscent() - baseSize.BlockStartAscent();
     FinishReflowChild (baseFrame, PresContext(), baseSize, nullptr, dxBase, dy, 0);
     // place underscript
     if (underFrame) {
-      dy = aDesiredSize.TopAscent() + mBoundingMetrics.descent - bmUnder.descent 
-        - underSize.TopAscent();
+      dy = aDesiredSize.BlockStartAscent() +
+           mBoundingMetrics.descent - bmUnder.descent -
+           underSize.BlockStartAscent();
       FinishReflowChild (underFrame, PresContext(), underSize, nullptr,
                          dxUnder, dy, 0);
     }

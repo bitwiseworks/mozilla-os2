@@ -21,17 +21,16 @@ class MInstruction;
 class MBasicBlock;
 class MIRGraph;
 class LinearScanAllocator;
-class LInstruction;
+class LNode;
 
 class C1Spewer
 {
     MIRGraph* graph;
-    HandleScript script;
     FILE* spewout_;
 
   public:
     C1Spewer()
-      : graph(nullptr), script(NullPtr()), spewout_(nullptr)
+      : graph(nullptr), spewout_(nullptr)
     { }
 
     bool init(const char* path);
@@ -43,7 +42,7 @@ class C1Spewer
 
   private:
     void spewPass(FILE* fp, MBasicBlock* block);
-    void spewIntervals(FILE* fp, LinearScanAllocator* regalloc, LInstruction* ins, size_t& nextId);
+    void spewIntervals(FILE* fp, LinearScanAllocator* regalloc, LNode* ins, size_t& nextId);
     void spewIntervals(FILE* fp, MBasicBlock* block, LinearScanAllocator* regalloc, size_t& nextId);
 };
 

@@ -1,9 +1,10 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
+Components.utils.import("resource://gre/modules/TelemetryStopwatch.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "MigrationUtils",
                                   "resource:///modules/MigrationUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Task",
@@ -14,6 +15,9 @@ XPCOMUtils.defineLazyModuleGetter(this, "PlacesBackups",
                                   "resource://gre/modules/PlacesBackups.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "DownloadUtils",
                                   "resource://gre/modules/DownloadUtils.jsm");
+
+const RESTORE_FILEPICKER_FILTER_EXT = "*.json;*.jsonlz4";
+const HISTORY_LIBRARY_SEARCH_TELEMETRY = "PLACES_HISTORY_LIBRARY_SEARCH_TIME_MS";
 
 var PlacesOrganizer = {
   _places: null,
@@ -489,7 +493,7 @@ var PlacesOrganizer = {
     fp.init(window, PlacesUIUtils.getString("bookmarksRestoreTitle"),
             Ci.nsIFilePicker.modeOpen);
     fp.appendFilter(PlacesUIUtils.getString("bookmarksRestoreFilterName"),
-                    PlacesUIUtils.getString("bookmarksRestoreFilterExtension"));
+                    RESTORE_FILEPICKER_FILTER_EXT);
     fp.appendFilters(Ci.nsIFilePicker.filterAll);
     fp.displayDirectory = backupsDir;
     fp.open(fpCallback);
@@ -500,7 +504,7 @@ var PlacesOrganizer = {
    */
   restoreBookmarksFromFile: function PO_restoreBookmarksFromFile(aFilePath) {
     // check file extension
-    if (!aFilePath.endsWith("json")) {
+    if (!aFilePath.endsWith("json") && !aFilePath.endsWith("jsonlz4"))  {
       this._showErrorAlert(PlacesUIUtils.getString("bookmarksRestoreFormatError"));
       return;
     }
@@ -551,23 +555,10 @@ var PlacesOrganizer = {
     fp.init(window, PlacesUIUtils.getString("bookmarksBackupTitle"),
             Ci.nsIFilePicker.modeSave);
     fp.appendFilter(PlacesUIUtils.getString("bookmarksRestoreFilterName"),
-                    PlacesUIUtils.getString("bookmarksRestoreFilterExtension"));
+                    RESTORE_FILEPICKER_FILTER_EXT);
     fp.defaultString = PlacesBackups.getFilenameForDate();
     fp.displayDirectory = backupsDir;
     fp.open(fpCallback);
-  },
-
-  _paneDisabled: false,
-  _setDetailsFieldsDisabledState:
-  function PO__setDetailsFieldsDisabledState(aDisabled) {
-    if (aDisabled) {
-      document.getElementById("paneElementsBroadcaster")
-              .setAttribute("disabled", "true");
-    }
-    else {
-      document.getElementById("paneElementsBroadcaster")
-              .removeAttribute("disabled");
-    }
   },
 
   _detectAndSetDetailsPaneMinimalState:
@@ -853,7 +844,9 @@ var PlacesSearchBox = {
           currentView.load([query], options);
         }
         else {
+          TelemetryStopwatch.start(HISTORY_LIBRARY_SEARCH_TELEMETRY);
           currentView.applyFilter(filterString, null, true);
+          TelemetryStopwatch.finish(HISTORY_LIBRARY_SEARCH_TELEMETRY);
         }
         break;
       case "downloads":

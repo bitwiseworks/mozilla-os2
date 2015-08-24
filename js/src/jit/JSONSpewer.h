@@ -7,8 +7,6 @@
 #ifndef jit_JSONSpewer_h
 #define jit_JSONSpewer_h
 
-#include "mozilla/NullPtr.h"
-
 #include <stdio.h>
 
 #include "js/TypeDecls.h"
@@ -22,7 +20,7 @@ class MBasicBlock;
 class MIRGraph;
 class MResumePoint;
 class LinearScanAllocator;
-class LInstruction;
+class LNode;
 
 class JSONSpewer
 {
@@ -63,7 +61,7 @@ class JSONSpewer
     void spewMDef(MDefinition* def);
     void spewMResumePoint(MResumePoint* rp);
     void spewMIR(MIRGraph* mir);
-    void spewLIns(LInstruction* ins);
+    void spewLIns(LNode* ins);
     void spewLIR(MIRGraph* mir);
     void spewIntervals(LinearScanAllocator* regalloc);
     void endPass();

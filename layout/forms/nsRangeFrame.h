@@ -11,6 +11,7 @@
 #include "mozilla/EventForwards.h"
 #include "nsContainerFrame.h"
 #include "nsIAnonymousContentCreator.h"
+#include "nsIDOMEventListener.h"
 #include "nsCOMPtr.h"
 
 class nsBaseContentList;
@@ -24,7 +25,7 @@ class nsRangeFrame : public nsContainerFrame,
 
   friend class nsDisplayRangeFocusRing;
 
-  nsRangeFrame(nsStyleContext* aContext);
+  explicit nsRangeFrame(nsStyleContext* aContext);
   virtual ~nsRangeFrame();
 
   typedef mozilla::dom::Element Element;
@@ -35,61 +36,66 @@ public:
   NS_DECL_FRAMEARENA_HELPERS
 
   // nsIFrame overrides
-  virtual void Init(nsIContent*      aContent,
-                    nsIFrame*        aParent,
-                    nsIFrame*        aPrevInFlow) MOZ_OVERRIDE;
+  virtual void Init(nsIContent*       aContent,
+                    nsContainerFrame* aParent,
+                    nsIFrame*         aPrevInFlow) override;
 
-  virtual void DestroyFrom(nsIFrame* aDestructRoot) MOZ_OVERRIDE;
+  virtual void DestroyFrom(nsIFrame* aDestructRoot) override;
 
   void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                         const nsRect&           aDirtyRect,
-                        const nsDisplayListSet& aLists) MOZ_OVERRIDE;
+                        const nsDisplayListSet& aLists) override;
 
-  virtual nsresult Reflow(nsPresContext*           aPresContext,
-                          nsHTMLReflowMetrics&     aDesiredSize,
-                          const nsHTMLReflowState& aReflowState,
-                          nsReflowStatus&          aStatus) MOZ_OVERRIDE;
+  virtual void Reflow(nsPresContext*           aPresContext,
+                      nsHTMLReflowMetrics&     aDesiredSize,
+                      const nsHTMLReflowState& aReflowState,
+                      nsReflowStatus&          aStatus) override;
 
 #ifdef DEBUG_FRAME_DUMP
-  virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE {
+  virtual nsresult GetFrameName(nsAString& aResult) const override {
     return MakeFrameName(NS_LITERAL_STRING("Range"), aResult);
   }
 #endif
 
-  virtual bool IsLeaf() const MOZ_OVERRIDE { return true; }
+  virtual bool IsLeaf() const override { return true; }
 
 #ifdef ACCESSIBILITY
-  virtual mozilla::a11y::AccType AccessibleType() MOZ_OVERRIDE;
+  virtual mozilla::a11y::AccType AccessibleType() override;
 #endif
 
   // nsIAnonymousContentCreator
-  virtual nsresult CreateAnonymousContent(nsTArray<ContentInfo>& aElements) MOZ_OVERRIDE;
-  virtual void AppendAnonymousContentTo(nsBaseContentList& aElements,
-                                        uint32_t aFilter) MOZ_OVERRIDE;
+  virtual nsresult CreateAnonymousContent(nsTArray<ContentInfo>& aElements) override;
+  virtual void AppendAnonymousContentTo(nsTArray<nsIContent*>& aElements,
+                                        uint32_t aFilter) override;
 
   virtual nsresult AttributeChanged(int32_t  aNameSpaceID,
                                     nsIAtom* aAttribute,
-                                    int32_t  aModType) MOZ_OVERRIDE;
+                                    int32_t  aModType) override;
 
-  virtual nsSize ComputeAutoSize(nsRenderingContext *aRenderingContext,
-                                 nsSize aCBSize, nscoord aAvailableWidth,
-                                 nsSize aMargin, nsSize aBorder,
-                                 nsSize aPadding, bool aShrinkWrap) MOZ_OVERRIDE;
+  virtual mozilla::LogicalSize
+  ComputeAutoSize(nsRenderingContext *aRenderingContext,
+                  mozilla::WritingMode aWritingMode,
+                  const mozilla::LogicalSize& aCBSize,
+                  nscoord aAvailableISize,
+                  const mozilla::LogicalSize& aMargin,
+                  const mozilla::LogicalSize& aBorder,
+                  const mozilla::LogicalSize& aPadding,
+                  bool aShrinkWrap) override;
 
-  virtual nscoord GetMinWidth(nsRenderingContext *aRenderingContext) MOZ_OVERRIDE;
-  virtual nscoord GetPrefWidth(nsRenderingContext *aRenderingContext) MOZ_OVERRIDE;
+  virtual nscoord GetMinISize(nsRenderingContext *aRenderingContext) override;
+  virtual nscoord GetPrefISize(nsRenderingContext *aRenderingContext) override;
 
-  virtual nsIAtom* GetType() const MOZ_OVERRIDE;
+  virtual nsIAtom* GetType() const override;
 
-  virtual bool IsFrameOfType(uint32_t aFlags) const MOZ_OVERRIDE
+  virtual bool IsFrameOfType(uint32_t aFlags) const override
   {
     return nsContainerFrame::IsFrameOfType(aFlags &
       ~(nsIFrame::eReplaced | nsIFrame::eReplacedContainsBlock));
   }
 
-  nsStyleContext* GetAdditionalStyleContext(int32_t aIndex) const MOZ_OVERRIDE;
+  nsStyleContext* GetAdditionalStyleContext(int32_t aIndex) const override;
   void SetAdditionalStyleContext(int32_t aIndex,
-                                 nsStyleContext* aStyleContext) MOZ_OVERRIDE;
+                                 nsStyleContext* aStyleContext) override;
 
   /**
    * Returns true if the slider's thumb moves horizontally, or else false if it
@@ -131,7 +137,7 @@ public:
    */
   void UpdateForValueChange();
 
-  virtual Element* GetPseudoElement(nsCSSPseudoElements::Type aType) MOZ_OVERRIDE;
+  virtual Element* GetPseudoElement(nsCSSPseudoElements::Type aType) override;
 
 private:
 
@@ -140,9 +146,9 @@ private:
                             nsTArray<ContentInfo>& aElements);
 
   // Helper function which reflows the anonymous div frames.
-  nsresult ReflowAnonymousContent(nsPresContext*           aPresContext,
-                                  nsHTMLReflowMetrics&     aDesiredSize,
-                                  const nsHTMLReflowState& aReflowState);
+  void ReflowAnonymousContent(nsPresContext*           aPresContext,
+                              nsHTMLReflowMetrics&     aDesiredSize,
+                              const nsHTMLReflowState& aReflowState);
 
   void DoUpdateThumbPosition(nsIFrame* aThumbFrame,
                              const nsSize& aRangeSize);
@@ -174,6 +180,25 @@ private:
    * Cached style context for -moz-focus-outer CSS pseudo-element style.
    */
   nsRefPtr<nsStyleContext> mOuterFocusStyle;
+
+  class DummyTouchListener final : public nsIDOMEventListener
+  {
+  private:
+    ~DummyTouchListener() {}
+
+  public:
+    NS_DECL_ISUPPORTS
+
+    NS_IMETHOD HandleEvent(nsIDOMEvent* aEvent) override
+    {
+      return NS_OK;
+    }
+  };
+
+  /**
+   * A no-op touch-listener used for APZ purposes (see nsRangeFrame::Init).
+   */
+  nsRefPtr<DummyTouchListener> mDummyTouchListener;
 };
 
 #endif

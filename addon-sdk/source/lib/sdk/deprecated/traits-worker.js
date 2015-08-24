@@ -83,16 +83,7 @@ const WorkerSandbox = EventEmitter.compose({
    */
   emitSync: function emitSync() {
     let args = Array.slice(arguments);
-    return this._emitToContent(args);
-  },
-
-  /**
-   * Tells if content script has at least one listener registered for one event,
-   * through `self.on('xxx', ...)`.
-   * /!\ Shouldn't be used. Implemented to avoid breaking context-menu API.
-   */
-  hasListenerFor: function hasListenerFor(name) {
-    return this._hasListenerFor(name);
+    return this._emitToContent(Cu.cloneInto(args, this._addonWorker._window));
   },
 
   /**
@@ -145,16 +136,11 @@ const WorkerSandbox = EventEmitter.compose({
       wantGlobalProperties.push("XMLHttpRequest");
     }
 
-    // Instantiate trusted code in another Sandbox in order to prevent content
-    // script from messing with standard classes used by proxy and API code.
-    let apiSandbox = sandbox(principals, { wantXrays: true, sameZoneAs: window });
-    apiSandbox.console = console;
-
     // Create the sandbox and bind it to window in order for content scripts to
     // have access to all standard globals (window, document, ...)
     let content = this._sandbox = sandbox(principals, {
       sandboxPrototype: proto,
-      wantXrays: true,
+      wantXrays: !worker._injectInDocument,
       wantGlobalProperties: wantGlobalProperties,
       sameZoneAs: window,
       metadata: {
@@ -171,19 +157,23 @@ const WorkerSandbox = EventEmitter.compose({
       // We need "this === window === top" to be true in toplevel scope:
       get window() content,
       get top() top,
-      get parent() parent,
-      // Use the Greasemonkey naming convention to provide access to the
-      // unwrapped window object so the content script can access document
-      // JavaScript values.
-      // NOTE: this functionality is experimental and may change or go away
-      // at any time!
-      get unsafeWindow() window.wrappedJSObject
+      get parent() parent
     });
+    // Use the Greasemonkey naming convention to provide access to the
+    // unwrapped window object so the content script can access document
+    // JavaScript values.
+    // NOTE: this functionality is experimental and may change or go away
+    // at any time!
+    //
+    // Note that because waivers aren't propagated between origins, we
+    // need the unsafeWindow getter to live in the sandbox.
+    var unsafeWindowGetter =
+      new content.Function('return window.wrappedJSObject || window;');
+    Object.defineProperty(content, 'unsafeWindow', {get: unsafeWindowGetter});
+
 
     // Load trusted code that will inject content script API.
-    // We need to expose JS objects defined in same principal in order to
-    // avoid having any kind of wrapper.
-    load(apiSandbox, CONTENT_WORKER_URL);
+    let ContentWorker = load(content, CONTENT_WORKER_URL);
 
     // prepare a clean `self.options`
     let options = 'contentScriptOptions' in worker ?
@@ -194,39 +184,20 @@ const WorkerSandbox = EventEmitter.compose({
     // by trading two methods that allow to send events to the other side:
     //   - `onEvent` called by content script
     //   - `result.emitToContent` called by addon script
-    // Bug 758203: We have to explicitely define `__exposedProps__` in order
-    // to allow access to these chrome object attributes from this sandbox with
-    // content priviledges
-    // https://developer.mozilla.org/en/XPConnect_wrappers#Other_security_wrappers
-    let chromeAPI = {
+    let chromeAPI = Cu.cloneInto({
       timers: {
-        setTimeout: timer.setTimeout,
-        setInterval: timer.setInterval,
-        clearTimeout: timer.clearTimeout,
-        clearInterval: timer.clearInterval,
-        __exposedProps__: {
-          setTimeout: 'r',
-          setInterval: 'r',
-          clearTimeout: 'r',
-          clearInterval: 'r'
-        }
+        setTimeout: timer.setTimeout.bind(timer),
+        setInterval: timer.setInterval.bind(timer),
+        clearTimeout: timer.clearTimeout.bind(timer),
+        clearInterval: timer.clearInterval.bind(timer),
       },
       sandbox: {
         evaluate: evaluate,
-        __exposedProps__: {
-          evaluate: 'r',
-        }
       },
-      __exposedProps__: {
-        timers: 'r',
-        sandbox: 'r',
-      }
-    };
-    let onEvent = this._onContentEvent.bind(this);
-    // `ContentWorker` is defined in CONTENT_WORKER_URL file
-    let result = apiSandbox.ContentWorker.inject(content, chromeAPI, onEvent, options);
-    this._emitToContent = result.emitToContent;
-    this._hasListenerFor = result.hasListenerFor;
+    }, ContentWorker, {cloneFunctions: true});
+    let onEvent = Cu.exportFunction(this._onContentEvent.bind(this), ContentWorker);
+    let result = Cu.waiveXrays(ContentWorker).inject(content, chromeAPI, onEvent, options);
+    this._emitToContent = result;
 
     // Handle messages send by this script:
     let self = this;
@@ -267,7 +238,8 @@ const WorkerSandbox = EventEmitter.compose({
     if (worker._injectInDocument) {
       let win = window.wrappedJSObject ? window.wrappedJSObject : window;
       Object.defineProperty(win, "addon", {
-          value: content.self
+          value: content.self,
+          configurable: true
         }
       );
     }
@@ -375,7 +347,7 @@ const WorkerSandbox = EventEmitter.compose({
    */
   _importScripts: function _importScripts(url) {
     let urls = Array.slice(arguments, 0);
-    for each (let contentScriptFile in urls) {
+    for (let contentScriptFile of urls) {
       try {
         let uri = URL(contentScriptFile);
         if (uri.scheme === 'resource')
@@ -393,7 +365,7 @@ const WorkerSandbox = EventEmitter.compose({
 /**
  * Message-passing facility for communication between code running
  * in the content and add-on process.
- * @see https://addons.mozilla.org/en-US/developers/docs/sdk/latest/modules/sdk/content/worker.html
+ * @see https://developer.mozilla.org/en-US/Add-ons/SDK/Low-Level_APIs/content_worker
  */
 const Worker = EventEmitter.compose({
   on: Trait.required,

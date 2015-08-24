@@ -103,9 +103,12 @@
                 dropPoint.folderElt = elt;
               return dropPoint;
             }
-            else if ((PlacesUtils.nodeIsFolder(elt._placesNode) ||
-                      PlacesUtils.nodeIsTagQuery(elt._placesNode)) &&
-                     !PlacesUtils.nodeIsReadOnly(elt._placesNode)) {
+
+            let tagName = PlacesUtils.nodeIsTagQuery(elt._placesNode) ?
+                            elt._placesNode.title : null;
+            if ((PlacesUtils.nodeIsFolder(elt._placesNode) &&
+                 !PlacesUIUtils.isContentsReadOnly(elt._placesNode)) ||
+                PlacesUtils.nodeIsTagQuery(elt._placesNode)) {
               // This is a folder or a tag container.
               if (eventY - eltY < eltHeight * 0.20) {
                 // If mouse is in the top part of the element, drop above folder.
@@ -113,7 +116,7 @@
                                     PlacesUtils.getConcreteItemId(resultNode),
                                     -1,
                                     Ci.nsITreeView.DROP_BEFORE,
-                                    PlacesUtils.nodeIsTagQuery(elt._placesNode),
+                                    tagName,
                                     elt._placesNode.itemId);
                 return dropPoint;
               }
@@ -123,7 +126,7 @@
                                     PlacesUtils.getConcreteItemId(elt._placesNode),
                                     -1,
                                     Ci.nsITreeView.DROP_ON,
-                                    PlacesUtils.nodeIsTagQuery(elt._placesNode));
+                                    tagName);
                 dropPoint.folderElt = elt;
                 return dropPoint;
               }
@@ -135,7 +138,7 @@
                                   PlacesUtils.getConcreteItemId(resultNode),
                                   -1,
                                   Ci.nsITreeView.DROP_BEFORE,
-                                  PlacesUtils.nodeIsTagQuery(elt._placesNode),
+                                  tagName,
                                   elt._placesNode.itemId);
               return dropPoint;
             }
@@ -145,7 +148,7 @@
                                 PlacesUtils.getConcreteItemId(resultNode),
                                 -1,
                                 Ci.nsITreeView.DROP_AFTER,
-                                PlacesUtils.nodeIsTagQuery(elt._placesNode),
+                                tagName,
                                 elt._placesNode.itemId);
             return dropPoint;
         ]]></body>
@@ -364,7 +367,8 @@
 
         let dropPoint = this._getDropPoint(event);
         if (dropPoint && dropPoint.ip) {
-          PlacesControllerDragHelper.onDrop(dropPoint.ip, event.dataTransfer);
+          PlacesControllerDragHelper.onDrop(dropPoint.ip, event.dataTransfer)
+                                    .then(null, Components.utils.reportError);
           event.preventDefault();
         }
 
@@ -527,6 +531,8 @@
           var position = this.alignmentPosition;
           var offset = this.alignmentOffset;
 
+          this.setAttribute("arrowposition", position);
+
           // if this panel has a "sliding" arrow, we may have previously set margins...
           arrowbox.style.removeProperty("transform");
           if (position.indexOf("start_") == 0 || position.indexOf("end_") == 0) {
@@ -579,6 +585,7 @@
     <handlers>
       <handler event="popupshowing" phase="target"><![CDATA[
         this.adjustArrowPosition();
+        this.setAttribute("animate", "open");
       ]]></handler>
       <handler event="popupshown" phase="target"><![CDATA[
         this.setAttribute("panelopen", "true");
@@ -605,11 +612,15 @@
           this.style.removeProperty("pointer-events");
         }
       ]]></handler>
+      <handler event="popuphiding" phase="target"><![CDATA[
+        this.setAttribute("animate", "cancel");
+      ]]></handler>
       <handler event="popuphidden" phase="target"><![CDATA[
         this.removeAttribute("panelopen");
         if (this.getAttribute("disablepointereventsfortransition") == "true") {
           this.style.pointerEvents = 'none';
         }
+        this.removeAttribute("animate");
       ]]></handler>
     </handlers>
   </binding>

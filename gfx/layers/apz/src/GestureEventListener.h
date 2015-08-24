@@ -8,7 +8,7 @@
 #define mozilla_layers_GestureEventListener_h
 
 #include "InputData.h"                  // for MultiTouchInput, etc
-#include "Units.h"                      // for ScreenIntPoint
+#include "Units.h"
 #include "mozilla/EventForwards.h"      // for nsEventStatus
 #include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsISupportsImpl.h"
@@ -36,11 +36,11 @@ class AsyncPanZoomController;
  * Android doesn't use this class because it has its own built-in gesture event
  * listeners that should generally be preferred.
  */
-class GestureEventListener MOZ_FINAL {
+class GestureEventListener final {
 public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(GestureEventListener)
 
-  GestureEventListener(AsyncPanZoomController* aAsyncPanZoomController);
+  explicit GestureEventListener(AsyncPanZoomController* aAsyncPanZoomController);
 
   // --------------------------------------------------------------------------
   // These methods must only be called on the controller/UI thread.
@@ -52,6 +52,13 @@ public:
    * it gets consumed here and never forwarded along.
    */
   nsEventStatus HandleInputEvent(const MultiTouchInput& aEvent);
+
+  /**
+   * Returns the identifier of the touch in the last touch event processed by
+   * this GestureEventListener. This should only be called when the last touch
+   * event contained only one touch.
+   */
+  int32_t GetLastTouchIdentifier() const;
 
 private:
   // Private destructor, to discourage deletion outside of Release():
@@ -126,6 +133,8 @@ private:
 
   void TriggerSingleTapConfirmedEvent();
 
+  bool MoveDistanceIsLarge();
+
   /**
    * Do actual state transition and reset substates.
    */
@@ -167,6 +176,15 @@ private:
   MultiTouchInput mLastTouchInput;
 
   /**
+   * Cached copy of the last tap gesture input.
+   * In the situation when we have a tap followed by a pinch we lose info
+   * about tap since we keep only last input and to dispatch it correctly
+   * we save last tap copy into this variable.
+   * For more info see bug 947892.
+   */
+  MultiTouchInput mLastTapInput;
+
+  /**
    * Position of the last touch starting. This is only valid during an attempt
    * to determine if a touch is a tap. If a touch point moves away from
    * mTouchStartPosition to the distance greater than
@@ -175,7 +193,7 @@ private:
    * or GESTURE_SECOND_SINGLE_TOUCH_DOWN then we're certain the gesture is
    * not tap.
    */
-  ScreenIntPoint mTouchStartPosition;
+  ParentLayerPoint mTouchStartPosition;
 
   /**
    * Task used to timeout a long tap. This gets posted to the UI thread such

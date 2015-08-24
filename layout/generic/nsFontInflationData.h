@@ -8,7 +8,7 @@
 #ifndef nsFontInflationData_h_
 #define nsFontInflationData_h_
 
-#include "nsIFrame.h"
+#include "nsContainerFrame.h"
 
 struct nsHTMLReflowState;
 
@@ -38,10 +38,10 @@ public:
 
 private:
 
-  nsFontInflationData(nsIFrame* aBFCFrame);
+  explicit nsFontInflationData(nsIFrame* aBFCFrame);
 
-  nsFontInflationData(const nsFontInflationData&) MOZ_DELETE;
-  void operator=(const nsFontInflationData&) MOZ_DELETE;
+  nsFontInflationData(const nsFontInflationData&) = delete;
+  void operator=(const nsFontInflationData&) = delete;
 
   void UpdateWidth(const nsHTMLReflowState &aReflowState);
   enum SearchDirection { eFromStart, eFromEnd };

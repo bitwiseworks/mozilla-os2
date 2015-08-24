@@ -4,7 +4,7 @@
 
 #include "domstubs.idl"
 
-[scriptable, uuid(fb089720-1c5c-11e3-b773-0800200c9a66)]
+[scriptable, uuid(9f1c43b9-f01b-4c87-ad3d-1a86520c2159)]
 interface nsINotificationStorageCallback : nsISupports
 {
   /**
@@ -26,7 +26,9 @@ interface nsINotificationStorageCallback : nsISupports
               in DOMString lang,
               in DOMString body,
               in DOMString tag,
-              in DOMString icon);
+              in DOMString icon,
+              in DOMString data,
+              in DOMString behavior);
 
   /**
    * Callback function used to notify C++ the we have returned
@@ -39,7 +41,7 @@ interface nsINotificationStorageCallback : nsISupports
 /**
  * Interface for notification persistence layer.
  */
-[scriptable, uuid(b177b080-2a23-11e3-8224-0800200c9a66)]
+[scriptable, uuid(f5145be6-e34b-468b-84da-c8c4c1ad60fe)]
 interface nsINotificationStorage : nsISupports
 {
 
@@ -55,6 +57,10 @@ interface nsINotificationStorage : nsISupports
    * @param body: the notification body
    * @param tag: notification tag, will replace any existing
    *             notifications with same origin/tag pair
+   * @param alertName: the alert identifier as used by system app.
+   *                   Stored in the database to avoid re-computing
+   *                   it. Built from origin and tag or id depending
+   *                   whether there is a tag defined.
    */
   void put(in DOMString origin,
            in DOMString id,
@@ -63,7 +69,10 @@ interface nsINotificationStorage : nsISupports
            in DOMString lang,
            in DOMString body,
            in DOMString tag,
-           in DOMString icon);
+           in DOMString icon,
+           in DOMString alertName,
+           in DOMString data,
+           in DOMString behavior);
 
   /**
    * Retrieve a list of notifications.

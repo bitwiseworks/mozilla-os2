@@ -45,6 +45,7 @@ public:
   uint32_t ByteCount() const;
   uint32_t Length() const;
   uint32_t VariableLength() const;
+  uint32_t StaticLength() const;
   void Clear();
   const nvPair *operator[] (int32_t index) const;
 
@@ -64,26 +65,8 @@ protected:
   const static uint32_t kDefaultMaxBuffer = 4096;
 
   virtual void ClearHeaderTable();
-  virtual void UpdateReferenceSet(int32_t delta);
-  virtual void IncrementReferenceSetIndices();
-  virtual void MakeRoom(uint32_t amount) = 0;
-
-  nsAutoTArray<uint32_t, 64> mReferenceSet; // list of indicies
-
-  // the alternate set is used to track the emitted headers when
-  // processing input for a header set. The input to the compressor
-  // is a series of nvpairs, the input to the decompressor is the
-  // series of op codes that make up the header block.
-  //
-  // after processing the input the compressor compares the alternate
-  // set to the inherited reference set and generates indicies to
-  // toggle off any members of alternate - inherited. the alternate
-  // then becomes the inherited set for the next header set.
-  //
-  // after processing the input the decompressor comapres the alternate
-  // set to the inherited reference set and generates headers for
-  // anything implicit in reference - alternate.
-  nsAutoTArray<uint32_t, 64> mAlternateReferenceSet; // list of indicies
+  virtual void MakeRoom(uint32_t amount, const char *direction);
+  virtual void DumpState();
 
   nsACString *mOutput;
   nvFIFO mHeaderTable;
@@ -93,7 +76,7 @@ protected:
 
 class Http2Compressor;
 
-class Http2Decompressor MOZ_FINAL : public Http2BaseCompressor
+class Http2Decompressor final : public Http2BaseCompressor
 {
 public:
   Http2Decompressor() { };
@@ -101,7 +84,7 @@ public:
 
   // NS_OK: Produces the working set of HTTP/1 formatted headers
   nsresult DecodeHeaderBlock(const uint8_t *data, uint32_t datalen,
-                             nsACString &output);
+                             nsACString &output, bool isPush);
 
   void GetStatus(nsACString &hdr) { hdr = mHeaderStatus; }
   void GetHost(nsACString &hdr) { hdr = mHeaderHost; }
@@ -110,14 +93,13 @@ public:
   void GetMethod(nsACString &hdr) { hdr = mHeaderMethod; }
   void SetCompressor(Http2Compressor *compressor) { mCompressor = compressor; }
 
-protected:
-  virtual void MakeRoom(uint32_t amount) MOZ_OVERRIDE;
-
 private:
   nsresult DoIndexed();
   nsresult DoLiteralWithoutIndex();
   nsresult DoLiteralWithIncremental();
-  nsresult DoLiteralInternal(nsACString &, nsACString &);
+  nsresult DoLiteralInternal(nsACString &, nsACString &, uint32_t);
+  nsresult DoLiteralNeverIndexed();
+  nsresult DoContextUpdate();
 
   nsresult DecodeInteger(uint32_t prefixLen, uint32_t &result);
   nsresult OutputHeader(uint32_t index);
@@ -144,13 +126,19 @@ private:
   uint32_t mOffset;
   const uint8_t *mData;
   uint32_t mDataLen;
+  bool mSeenNonColonHeader;
+  bool mIsPush;
 };
 
 
-class Http2Compressor MOZ_FINAL : public Http2BaseCompressor
+class Http2Compressor final : public Http2BaseCompressor
 {
 public:
-  Http2Compressor() : mParsedContentLength(-1) { };
+  Http2Compressor() : mParsedContentLength(-1),
+                      mMaxBufferSetting(kDefaultMaxBuffer),
+                      mBufferSizeChangeWaiting(false),
+                      mLowestBufferSizeWaiting(0)
+  { };
   virtual ~Http2Compressor() { }
 
   // HTTP/1 formatted header block as input - HTTP/2 formatted
@@ -158,38 +146,33 @@ public:
   nsresult EncodeHeaderBlock(const nsCString &nvInput,
                              const nsACString &method, const nsACString &path,
                              const nsACString &host, const nsACString &scheme,
-                             nsACString &output);
+                             bool connectForm, nsACString &output);
 
   int64_t GetParsedContentLength() { return mParsedContentLength; } // -1 on not found
 
   void SetMaxBufferSize(uint32_t maxBufferSize);
   nsresult SetMaxBufferSizeInternal(uint32_t maxBufferSize);
 
-protected:
-  virtual void ClearHeaderTable() MOZ_OVERRIDE;
-  virtual void UpdateReferenceSet(int32_t delta) MOZ_OVERRIDE;
-  virtual void IncrementReferenceSetIndices() MOZ_OVERRIDE;
-  virtual void MakeRoom(uint32_t amount) MOZ_OVERRIDE;
-
 private:
   enum outputCode {
+    kNeverIndexedLiteral,
     kPlainLiteral,
     kIndexedLiteral,
-    kToggleOff,
-    kToggleOn,
-    kNop
+    kIndex
   };
 
   void DoOutput(Http2Compressor::outputCode code,
                 const class nvPair *pair, uint32_t index);
   void EncodeInteger(uint32_t prefixLen, uint32_t val);
-  void ProcessHeader(const nvPair inputPair);
+  void ProcessHeader(const nvPair inputPair, bool noLocalIndex,
+                     bool neverIndex);
   void HuffmanAppend(const nsCString &value);
+  void EncodeTableSizeChange(uint32_t newMaxSize);
 
   int64_t mParsedContentLength;
   uint32_t mMaxBufferSetting;
-
-  nsAutoTArray<uint32_t, 64> mImpliedReferenceSet;
+  bool mBufferSizeChangeWaiting;
+  uint32_t mLowestBufferSizeWaiting;
 };
 
 } // namespace mozilla::net

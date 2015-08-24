@@ -13,7 +13,6 @@
 #include "nsReadableUtils.h"
 #include "nsXPIDLString.h"
 #include "nsPrimitiveHelpers.h"
-#include "nsICharsetConverterManager.h"
 #include "nsIServiceManager.h"
 #include "nsImageToPixbuf.h"
 #include "nsStringStream.h"
@@ -34,6 +33,10 @@
 #include <errno.h>
 #include <unistd.h>
 
+#include "mozilla/dom/EncodingUtils.h"
+#include "nsIUnicodeDecoder.h"
+
+using mozilla::dom::EncodingUtils;
 using namespace mozilla;
 
 // Callback when someone asks us for the data
@@ -134,14 +137,6 @@ nsClipboard::SetData(nsITransferable *aTransferable,
         return NS_OK;
     }
 
-    nsresult rv;
-    if (!mPrivacyHandler) {
-        rv = NS_NewClipboardPrivacyHandler(getter_AddRefs(mPrivacyHandler));
-        NS_ENSURE_SUCCESS(rv, rv);
-    }
-    rv = mPrivacyHandler->PrepareDataForClipboard(aTransferable);
-    NS_ENSURE_SUCCESS(rv, rv);
-
     // Clear out the clipboard in order to set the new data
     EmptyClipboard(aWhichClipboard);
 
@@ -151,7 +146,8 @@ nsClipboard::SetData(nsITransferable *aTransferable,
     // Get the types of supported flavors
     nsCOMPtr<nsISupportsArray> flavors;
 
-    rv = aTransferable->FlavorsTransferableCanExport(getter_AddRefs(flavors));
+    nsresult rv =
+        aTransferable->FlavorsTransferableCanExport(getter_AddRefs(flavors));
     if (!flavors || NS_FAILED(rv))
         return NS_ERROR_FAILURE;
 
@@ -708,25 +704,17 @@ void ConvertHTMLtoUCS2(guchar * data, int32_t dataLength,
     } else {
         // app which use "text/html" to copy&paste
         nsCOMPtr<nsIUnicodeDecoder> decoder;
-        nsresult rv;
         // get the decoder
-        nsCOMPtr<nsICharsetConverterManager> ccm =
-            do_GetService(NS_CHARSETCONVERTERMANAGER_CONTRACTID, &rv);
-        if (NS_FAILED(rv)) {
-#ifdef DEBUG_CLIPBOARD
-            g_print("        can't get CHARSET CONVERTER MANAGER service\n");
-#endif
-            outUnicodeLen = 0;
-            return;
-        }
-        rv = ccm->GetUnicodeDecoder(charset.get(), getter_AddRefs(decoder));
-        if (NS_FAILED(rv)) {
+        nsAutoCString encoding;
+        if (!EncodingUtils::FindEncodingForLabelNoReplacement(charset,
+                                                              encoding)) {
 #ifdef DEBUG_CLIPBOARD
             g_print("        get unicode decoder error\n");
 #endif
             outUnicodeLen = 0;
             return;
         }
+        decoder = EncodingUtils::DecoderForEncoding(encoding);
         // converting
         decoder->GetMaxLength((const char *)data, dataLength, &outUnicodeLen);
         // |outUnicodeLen| is number of chars
@@ -991,7 +979,7 @@ wait_for_contents(GtkClipboard *clipboard, GdkAtom target)
 {
     RefPtr<RetrievalContext> context = new RetrievalContext();
     // Balanced by Release in clipboard_contents_received
-    context->AddRef();
+    context.get()->AddRef();
     gtk_clipboard_request_contents(clipboard, target,
                                    clipboard_contents_received,
                                    context.get());
@@ -1013,7 +1001,7 @@ wait_for_text(GtkClipboard *clipboard)
 {
     RefPtr<RetrievalContext> context = new RetrievalContext();
     // Balanced by Release in clipboard_text_received
-    context->AddRef();
+    context.get()->AddRef();
     gtk_clipboard_request_text(clipboard, clipboard_text_received, context.get());
     return static_cast<gchar*>(context->Wait());
 }

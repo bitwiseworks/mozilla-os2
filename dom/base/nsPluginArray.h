@@ -17,7 +17,7 @@
 class nsPluginElement;
 class nsMimeType;
 
-class nsPluginArray MOZ_FINAL : public nsIObserver,
+class nsPluginArray final : public nsIObserver,
                                 public nsSupportsWeakReference,
                                 public nsWrapperCache
 {
@@ -29,11 +29,9 @@ public:
   // nsIObserver
   NS_DECL_NSIOBSERVER
 
-  nsPluginArray(nsPIDOMWindow* aWindow);
-  virtual ~nsPluginArray();
-
+  explicit nsPluginArray(nsPIDOMWindow* aWindow);
   nsPIDOMWindow* GetParentObject() const;
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) override;
 
   // nsPluginArray registers itself as an observer with a weak reference.
   // This can't be done in the constructor, because at that point its
@@ -57,6 +55,8 @@ public:
   void GetSupportedNames(unsigned, nsTArray<nsString>& aRetval);
 
 private:
+  virtual ~nsPluginArray();
+
   bool AllowPlugins() const;
   void EnsurePlugins();
 
@@ -75,7 +75,7 @@ private:
   nsTArray<nsRefPtr<nsPluginElement> > mHiddenPlugins;
 };
 
-class nsPluginElement MOZ_FINAL : public nsISupports,
+class nsPluginElement final : public nsISupports,
                                   public nsWrapperCache
 {
 public:
@@ -85,7 +85,7 @@ public:
   nsPluginElement(nsPIDOMWindow* aWindow, nsPluginTag* aPluginTag);
 
   nsPIDOMWindow* GetParentObject() const;
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) override;
 
   nsPluginTag* PluginTag() const
   {
@@ -109,6 +109,8 @@ public:
   nsTArray<nsRefPtr<nsMimeType> >& MimeTypes();
 
 protected:
+  ~nsPluginElement();
+
   void EnsurePluginMimeTypes();
 
   nsCOMPtr<nsPIDOMWindow> mWindow;

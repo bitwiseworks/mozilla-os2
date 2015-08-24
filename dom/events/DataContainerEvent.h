@@ -31,7 +31,7 @@ public:
   NS_DECL_NSIDOMDATACONTAINEREVENT
 
   virtual JSObject*
-  WrapObject(JSContext* aCx) MOZ_OVERRIDE
+  WrapObjectInternal(JSContext* aCx) override
   {
     return DataContainerEventBinding::Wrap(aCx, this);
   }
@@ -45,6 +45,9 @@ public:
 
   void SetData(JSContext* aCx, const nsAString& aKey,
                JS::Handle<JS::Value> aVal, ErrorResult& aRv);
+
+protected:
+  ~DataContainerEvent() {}
 
 private:
   static PLDHashOperator

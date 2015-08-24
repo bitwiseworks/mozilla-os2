@@ -7,8 +7,6 @@
 #ifndef jit_BaselineInspector_h
 #define jit_BaselineInspector_h
 
-#ifdef JS_ION
-
 #include "jit/BaselineIC.h"
 #include "jit/BaselineJIT.h"
 #include "jit/MIR.h"
@@ -50,10 +48,10 @@ class BaselineInspector
     ICEntry* prevLookedUpEntry;
 
   public:
-    BaselineInspector(JSScript* script)
+    explicit BaselineInspector(JSScript* script)
       : script(script), prevLookedUpEntry(nullptr)
     {
-        JS_ASSERT(script);
+        MOZ_ASSERT(script);
     }
 
     bool hasBaselineScript() const {
@@ -72,10 +70,10 @@ class BaselineInspector
 #endif
 
     ICEntry& icEntryFromPC(jsbytecode* pc) {
-        JS_ASSERT(hasBaselineScript());
-        JS_ASSERT(isValidPC(pc));
+        MOZ_ASSERT(hasBaselineScript());
+        MOZ_ASSERT(isValidPC(pc));
         ICEntry& ent = baselineScript()->icEntryFromPCOffset(script->pcToOffset(pc), prevLookedUpEntry);
-        JS_ASSERT(ent.isForOp());
+        MOZ_ASSERT(ent.isForOp());
         prevLookedUpEntry = &ent;
         return ent;
     }
@@ -85,7 +83,7 @@ class BaselineInspector
         ICEntry* ent = nullptr;
         if (hasBaselineScript()) {
             ent = &icEntryFromPC(pc);
-            JS_ASSERT(ent->fallbackStub()->kind() == expectedFallbackKind);
+            MOZ_ASSERT(ent->fallbackStub()->kind() == expectedFallbackKind);
         }
         return ICInspectorType(this, pc, ent);
     }
@@ -94,8 +92,12 @@ class BaselineInspector
     bool dimorphicStub(jsbytecode* pc, ICStub** pfirst, ICStub** psecond);
 
   public:
-    typedef Vector<Shape*, 4, IonAllocPolicy> ShapeVector;
-    bool maybeShapesForPropertyOp(jsbytecode* pc, ShapeVector& shapes);
+    typedef Vector<Shape*, 4, JitAllocPolicy> ShapeVector;
+    typedef Vector<ObjectGroup*, 4, JitAllocPolicy> ObjectGroupVector;
+    bool maybeInfoForPropertyOp(jsbytecode* pc,
+                                ShapeVector& nativeShapes,
+                                ObjectGroupVector& unboxedGroups,
+                                ObjectGroupVector& convertUnboxedGroups);
 
     SetElemICInspector setElemICInspector(jsbytecode* pc) {
         return makeICInspector<SetElemICInspector>(pc, ICStub::SetElem_Fallback);
@@ -109,21 +111,30 @@ class BaselineInspector
     bool hasSeenNegativeIndexGetElement(jsbytecode* pc);
     bool hasSeenAccessedGetter(jsbytecode* pc);
     bool hasSeenDoubleResult(jsbytecode* pc);
-    bool hasSeenNonStringIterNext(jsbytecode* pc);
+    bool hasSeenNonStringIterMore(jsbytecode* pc);
 
+    bool isOptimizableCallStringSplit(jsbytecode* pc, JSString** stringOut, JSString** stringArg,
+                                      NativeObject** objOut);
     JSObject* getTemplateObject(jsbytecode* pc);
     JSObject* getTemplateObjectForNative(jsbytecode* pc, Native native);
+    JSObject* getTemplateObjectForClassHook(jsbytecode* pc, const Class* clasp);
+
+    JSFunction* getSingleCallee(jsbytecode* pc);
 
     DeclEnvObject* templateDeclEnvObject();
     CallObject* templateCallObject();
 
-    JSObject* commonGetPropFunction(jsbytecode* pc, Shape** lastProperty, JSFunction** commonGetter);
-    JSObject* commonSetPropFunction(jsbytecode* pc, Shape** lastProperty, JSFunction** commonSetter);
+    bool commonGetPropFunction(jsbytecode* pc, JSObject** holder, Shape** holderShape,
+                               JSFunction** commonGetter, Shape** globalShape, bool* isOwnProperty,
+                               ShapeVector& receiverShapes);
+    bool commonSetPropFunction(jsbytecode* pc, JSObject** holder, Shape** holderShape,
+                               JSFunction** commonSetter, bool* isOwnProperty,
+                               ShapeVector& receiverShapes);
+
+    bool instanceOfData(jsbytecode* pc, Shape** shape, uint32_t* slot, JSObject** prototypeObject);
 };
 
 } // namespace jit
 } // namespace js
-
-#endif // JS_ION
 
 #endif /* jit_BaselineInspector_h */

@@ -24,7 +24,11 @@
 #include <media/stagefright/foundation/AMessage.h>
 #include <utils/ByteOrder.h>
 
-#include <sys/socket.h>
+#include "prnetdb.h"
+#include "prerr.h"
+#include "NetworkActivityMonitor.h"
+
+using namespace mozilla::net;
 
 namespace android {
 
@@ -34,25 +38,30 @@ UDPPusher::UDPPusher(const char *filename, unsigned port)
       mFirstTimeUs(0) {
     CHECK(mFile != NULL);
 
-    mSocket = socket(AF_INET, SOCK_DGRAM, 0);
+    mSocket = PR_OpenUDPSocket(PR_AF_INET);
+    if (!mSocket) {
+        TRESPASS();
+    }
 
-    struct sockaddr_in addr;
-    memset(addr.sin_zero, 0, sizeof(addr.sin_zero));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;
-    addr.sin_port = 0;
+    NetworkActivityMonitor::AttachIOLayer(mSocket);
 
-    CHECK_EQ(0, bind(mSocket, (const struct sockaddr *)&addr, sizeof(addr)));
+    PRNetAddr addr;
+    addr.inet.family = PR_AF_INET;
+    addr.inet.ip = PR_htonl(PR_INADDR_ANY);
+    addr.inet.port = PR_htons(0);
 
-    memset(mRemoteAddr.sin_zero, 0, sizeof(mRemoteAddr.sin_zero));
-    mRemoteAddr.sin_family = AF_INET;
-    mRemoteAddr.sin_addr.s_addr = INADDR_ANY;
-    mRemoteAddr.sin_port = htons(port);
+    CHECK_EQ(PR_SUCCESS, PR_Bind(mSocket, &addr));
+
+    mRemoteAddr.inet.family = PR_AF_INET;
+    mRemoteAddr.inet.ip = PR_htonl(PR_INADDR_ANY);
+    mRemoteAddr.inet.port = PR_htons(port);
 }
 
 UDPPusher::~UDPPusher() {
-    close(mSocket);
-    mSocket = -1;
+    if (mSocket) {
+        PR_Close(mSocket);
+        mSocket = nullptr;
+    }
 
     fclose(mFile);
     mFile = NULL;
@@ -76,7 +85,10 @@ bool UDPPusher::onPush() {
 
     length = fromlel(length);
 
-    CHECK_GT(length, 0u);
+    if (length <= 0u) {
+        LOGE("Zero length");
+        return false;
+    }
 
     sp<ABuffer> buffer = new ABuffer(length);
     if (fread(buffer->data(), 1, length, mFile) < length) {
@@ -84,11 +96,15 @@ bool UDPPusher::onPush() {
         return false;
     }
 
-    ssize_t n = sendto(
+    ssize_t n = PR_SendTo(
             mSocket, buffer->data(), buffer->size(), 0,
-            (const struct sockaddr *)&mRemoteAddr, sizeof(mRemoteAddr));
+            &mRemoteAddr, PR_INTERVAL_NO_WAIT);
 
     CHECK_EQ(n, (ssize_t)buffer->size());
+    if (n != (ssize_t)buffer->size()) {
+        LOGE("Sizes don't match");
+        return false;
+    }
 
     uint32_t timeMs;
     if (fread(&timeMs, 1, sizeof(timeMs), mFile) < sizeof(timeMs)) {
@@ -97,7 +113,10 @@ bool UDPPusher::onPush() {
     }
 
     timeMs = fromlel(timeMs);
-    CHECK_GE(timeMs, mFirstTimeMs);
+    if (timeMs < mFirstTimeMs) {
+        LOGE("Time is wrong");
+        return false;
+    }
 
     timeMs -= mFirstTimeMs;
     int64_t whenUs = mFirstTimeUs + timeMs * 1000ll;
@@ -129,12 +148,11 @@ void UDPPusher::onMessageReceived(const sp<AMessage> &msg) {
                 struct sockaddr_in tmp = mRemoteAddr;
                 tmp.sin_port = htons(ntohs(mRemoteAddr.sin_port) | 1);
 
-                ssize_t n = sendto(
+                ssize_t n = PR_SendTo(
                         mSocket, buffer->data(), buffer->size(), 0,
-                        (const struct sockaddr *)&tmp,
-                        sizeof(tmp));
+                        &tmp, PR_INTERVAL_NO_WAIT);
 
-                CHECK_EQ(n, (ssize_t)buffer->size());
+                MOZ_ASSERT(n, (ssize_t)buffer->size());
             }
             break;
         }

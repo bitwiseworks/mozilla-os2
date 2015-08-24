@@ -15,8 +15,31 @@
 #include <string.h> // memcpy
 
 namespace webrtc {
-// RTCPParserV2 : currently read only
 
+namespace RTCPUtility {
+
+NackStats::NackStats()
+    : max_sequence_number_(0),
+      requests_(0),
+      unique_requests_(0) {}
+
+NackStats::~NackStats() {}
+
+void NackStats::ReportRequest(uint16_t sequence_number) {
+  if (requests_ == 0 ||
+      webrtc::IsNewerSequenceNumber(sequence_number, max_sequence_number_)) {
+    max_sequence_number_ =  sequence_number;
+    ++unique_requests_;
+  }
+  ++requests_;
+}
+
+uint32_t MidNtp(uint32_t ntp_sec, uint32_t ntp_frac) {
+  return (ntp_sec << 16) + (ntp_frac >> 16);
+}  // end RTCPUtility
+}
+
+// RTCPParserV2 : currently read only
 RTCPUtility::RTCPParserV2::RTCPParserV2(const uint8_t* rtcpData,
                                         size_t rtcpDataLength,
                                         bool rtcpReducedSizeEnable)
@@ -110,6 +133,12 @@ RTCPUtility::RTCPParserV2::Iterate()
         case State_PSFB_REMBItem:
             IteratePsfbREMBItem();
             break;
+        case State_XRItem:
+            IterateXrItem();
+            break;
+        case State_XR_DLLRItem:
+            IterateXrDlrrItem();
+            break;
         case State_AppItem:
             IterateAppItem();
             break;
@@ -198,7 +227,6 @@ RTCPUtility::RTCPParserV2::IterateTopLevel()
                 // Nothing supported found, continue to next block!
                 break;
             }
-
             return;
         }
         case PT_APP:
@@ -213,7 +241,7 @@ RTCPUtility::RTCPParserV2::IterateTopLevel()
         }
         case PT_XR:
         {
-            const bool ok = ParseXR();
+            const bool ok = ParseXr();
             if (!ok)
             {
                 // Nothing supported found, continue to next block!
@@ -226,6 +254,26 @@ RTCPUtility::RTCPParserV2::IterateTopLevel()
             EndCurrentBlock();
             break;
         }
+    }
+}
+
+void
+RTCPUtility::RTCPParserV2::IterateXrItem()
+{
+    const bool success = ParseXrItem();
+    if (!success)
+    {
+        Iterate();
+    }
+}
+
+void
+RTCPUtility::RTCPParserV2::IterateXrDlrrItem()
+{
+    const bool success = ParseXrDlrrItem();
+    if (!success)
+    {
+        Iterate();
     }
 }
 
@@ -820,7 +868,7 @@ RTCPUtility::RTCPParserV2::ParseBYEItem()
     return true;
 }
 /*
-  0                   1                   2                   3
+    0                   1                   2                   3
     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |V=2|P|reserved |   PT=XR=207   |             length            |
@@ -830,10 +878,9 @@ RTCPUtility::RTCPParserV2::ParseBYEItem()
    :                         report blocks                         :
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
-bool RTCPUtility::RTCPParserV2::ParseXR()
+bool RTCPUtility::RTCPParserV2::ParseXr()
 {
     const ptrdiff_t length = _ptrRTCPBlockEnd - _ptrRTCPData;
-
     if (length < 8)
     {
         EndCurrentBlock();
@@ -847,51 +894,154 @@ bool RTCPUtility::RTCPParserV2::ParseXR()
     _packet.XR.OriginatorSSRC += *_ptrRTCPData++ << 8;
     _packet.XR.OriginatorSSRC += *_ptrRTCPData++;
 
-    return ParseXRItem();
+    _packetType = kRtcpXrHeaderCode;
+    _state = State_XRItem;
+    return true;
 }
-/*
+
+/*  Extended report block format (RFC 3611).
+    BT: block type.
+    block length: length of report block in 32-bits words minus one (including
+                  the header).
     0                   1                   2                   3
-     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     |      BT       | type-specific |         block length          |
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     :             type-specific block contents                      :
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
+bool RTCPUtility::RTCPParserV2::ParseXrItem() {
+  const int kBlockHeaderLengthInBytes = 4;
+  const ptrdiff_t length = _ptrRTCPBlockEnd - _ptrRTCPData;
+  if (length < kBlockHeaderLengthInBytes) {
+    _state = State_TopLevel;
+    EndCurrentBlock();
+    return false;
+  }
 
-bool
-RTCPUtility::RTCPParserV2::ParseXRItem()
-{
-    const ptrdiff_t length = _ptrRTCPBlockEnd - _ptrRTCPData;
+  uint8_t block_type = *_ptrRTCPData++;
+  _ptrRTCPData++;  // Ignore reserved.
 
-    if (length < 4) //
-    {
-        EndCurrentBlock();
-        return false;
-    }
+  uint16_t block_length_in_4bytes = *_ptrRTCPData++ << 8;
+  block_length_in_4bytes += *_ptrRTCPData++;
 
-    uint8_t blockType = *_ptrRTCPData++;
-    uint8_t typeSpecific = *_ptrRTCPData++;
-
-    uint16_t blockLength = *_ptrRTCPData++ << 8;
-    blockLength = *_ptrRTCPData++;
-
-    if(blockType == 7 && typeSpecific == 0)
-    {
-        if(blockLength != 8)
-        {
-            EndCurrentBlock();
-            return false;
-        }
-        return ParseXRVOIPMetricItem();
-    }else
-    {
-        EndCurrentBlock();
-        return false;
-    }
+  switch (block_type) {
+    case kBtReceiverReferenceTime:
+      return ParseXrReceiverReferenceTimeItem(block_length_in_4bytes);
+    case kBtDlrr:
+      return ParseXrDlrr(block_length_in_4bytes);
+    case kBtVoipMetric:
+      return ParseXrVoipMetricItem(block_length_in_4bytes);
+    default:
+      return ParseXrUnsupportedBlockType(block_length_in_4bytes);
+  }
 }
-/*
- 0                   1                   2                   3
+
+/*  Receiver Reference Time Report Block.
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |     BT=4      |   reserved    |       block length = 2        |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |              NTP timestamp, most significant word             |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |             NTP timestamp, least significant word             |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+*/
+bool RTCPUtility::RTCPParserV2::ParseXrReceiverReferenceTimeItem(
+    int block_length_4bytes) {
+  const int kBlockLengthIn4Bytes = 2;
+  const int kBlockLengthInBytes = kBlockLengthIn4Bytes * 4;
+  const ptrdiff_t length = _ptrRTCPBlockEnd - _ptrRTCPData;
+  if (block_length_4bytes != kBlockLengthIn4Bytes ||
+      length < kBlockLengthInBytes) {
+    _state = State_TopLevel;
+    EndCurrentBlock();
+    return false;
+  }
+
+  _packet.XRReceiverReferenceTimeItem.NTPMostSignificant = *_ptrRTCPData++<<24;
+  _packet.XRReceiverReferenceTimeItem.NTPMostSignificant+= *_ptrRTCPData++<<16;
+  _packet.XRReceiverReferenceTimeItem.NTPMostSignificant+= *_ptrRTCPData++<<8;
+  _packet.XRReceiverReferenceTimeItem.NTPMostSignificant+= *_ptrRTCPData++;
+
+  _packet.XRReceiverReferenceTimeItem.NTPLeastSignificant = *_ptrRTCPData++<<24;
+  _packet.XRReceiverReferenceTimeItem.NTPLeastSignificant+= *_ptrRTCPData++<<16;
+  _packet.XRReceiverReferenceTimeItem.NTPLeastSignificant+= *_ptrRTCPData++<<8;
+  _packet.XRReceiverReferenceTimeItem.NTPLeastSignificant+= *_ptrRTCPData++;
+
+  _packetType = kRtcpXrReceiverReferenceTimeCode;
+  _state = State_XRItem;
+  return true;
+}
+
+/*  DLRR Report Block.
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |     BT=5      |   reserved    |         block length          |
+   +=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+
+   |                 SSRC_1 (SSRC of first receiver)               | sub-
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ block
+   |                         last RR (LRR)                         |   1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                   delay since last RR (DLRR)                  |
+   +=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+
+   |                 SSRC_2 (SSRC of second receiver)              | sub-
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ block
+   :                               ...                             :   2
+   +=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+
+*/
+bool RTCPUtility::RTCPParserV2::ParseXrDlrr(int block_length_4bytes) {
+  const int kSubBlockLengthIn4Bytes = 3;
+  if (block_length_4bytes < 0 ||
+      (block_length_4bytes % kSubBlockLengthIn4Bytes) != 0) {
+    _state = State_TopLevel;
+    EndCurrentBlock();
+    return false;
+  }
+  _packetType = kRtcpXrDlrrReportBlockCode;
+  _state = State_XR_DLLRItem;
+  _numberOfBlocks = block_length_4bytes / kSubBlockLengthIn4Bytes;
+  return true;
+}
+
+bool RTCPUtility::RTCPParserV2::ParseXrDlrrItem() {
+  if (_numberOfBlocks == 0) {
+    _state = State_XRItem;
+    return false;
+  }
+  const int kSubBlockLengthInBytes = 12;
+  const ptrdiff_t length = _ptrRTCPBlockEnd - _ptrRTCPData;
+  if (length < kSubBlockLengthInBytes) {
+    _state = State_TopLevel;
+    EndCurrentBlock();
+    return false;
+  }
+
+  _packet.XRDLRRReportBlockItem.SSRC = *_ptrRTCPData++ << 24;
+  _packet.XRDLRRReportBlockItem.SSRC += *_ptrRTCPData++ << 16;
+  _packet.XRDLRRReportBlockItem.SSRC += *_ptrRTCPData++ << 8;
+  _packet.XRDLRRReportBlockItem.SSRC += *_ptrRTCPData++;
+
+  _packet.XRDLRRReportBlockItem.LastRR = *_ptrRTCPData++ << 24;
+  _packet.XRDLRRReportBlockItem.LastRR += *_ptrRTCPData++ << 16;
+  _packet.XRDLRRReportBlockItem.LastRR += *_ptrRTCPData++ << 8;
+  _packet.XRDLRRReportBlockItem.LastRR += *_ptrRTCPData++;
+
+  _packet.XRDLRRReportBlockItem.DelayLastRR = *_ptrRTCPData++ << 24;
+  _packet.XRDLRRReportBlockItem.DelayLastRR += *_ptrRTCPData++ << 16;
+  _packet.XRDLRRReportBlockItem.DelayLastRR += *_ptrRTCPData++ << 8;
+  _packet.XRDLRRReportBlockItem.DelayLastRR += *_ptrRTCPData++;
+
+  _packetType = kRtcpXrDlrrReportBlockItemCode;
+  --_numberOfBlocks;
+  _state = State_XR_DLLRItem;
+  return true;
+}
+/*  VoIP Metrics Report Block.
+    0                   1                   2                   3
     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |     BT=7      |   reserved    |       block length = 8        |
@@ -913,61 +1063,78 @@ RTCPUtility::RTCPParserV2::ParseXRItem()
    |          JB maximum           |          JB abs max           |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
-bool
-RTCPUtility::RTCPParserV2::ParseXRVOIPMetricItem()
-{
-    const ptrdiff_t length = _ptrRTCPBlockEnd - _ptrRTCPData;
 
-    if (length < 28)
-    {
-        EndCurrentBlock();
-        return false;
-    }
-    _packetType = kRtcpXrVoipMetricCode;
+bool RTCPUtility::RTCPParserV2::ParseXrVoipMetricItem(int block_length_4bytes) {
+  const int kBlockLengthIn4Bytes = 8;
+  const int kBlockLengthInBytes = kBlockLengthIn4Bytes * 4;
+  const ptrdiff_t length = _ptrRTCPBlockEnd - _ptrRTCPData;
+  if (block_length_4bytes != kBlockLengthIn4Bytes ||
+      length < kBlockLengthInBytes) {
+    _state = State_TopLevel;
+    EndCurrentBlock();
+    return false;
+  }
 
-    _packet.XRVOIPMetricItem.SSRC = *_ptrRTCPData++ << 24;
-    _packet.XRVOIPMetricItem.SSRC += *_ptrRTCPData++ << 16;
-    _packet.XRVOIPMetricItem.SSRC += *_ptrRTCPData++ << 8;
-    _packet.XRVOIPMetricItem.SSRC += *_ptrRTCPData++;
+  _packet.XRVOIPMetricItem.SSRC = *_ptrRTCPData++ << 24;
+  _packet.XRVOIPMetricItem.SSRC += *_ptrRTCPData++ << 16;
+  _packet.XRVOIPMetricItem.SSRC += *_ptrRTCPData++ << 8;
+  _packet.XRVOIPMetricItem.SSRC += *_ptrRTCPData++;
 
-    _packet.XRVOIPMetricItem.lossRate = *_ptrRTCPData++;
-    _packet.XRVOIPMetricItem.discardRate = *_ptrRTCPData++;
-    _packet.XRVOIPMetricItem.burstDensity = *_ptrRTCPData++;
-    _packet.XRVOIPMetricItem.gapDensity = *_ptrRTCPData++;
+  _packet.XRVOIPMetricItem.lossRate = *_ptrRTCPData++;
+  _packet.XRVOIPMetricItem.discardRate = *_ptrRTCPData++;
+  _packet.XRVOIPMetricItem.burstDensity = *_ptrRTCPData++;
+  _packet.XRVOIPMetricItem.gapDensity = *_ptrRTCPData++;
 
-    _packet.XRVOIPMetricItem.burstDuration = *_ptrRTCPData++ << 8;
-    _packet.XRVOIPMetricItem.burstDuration += *_ptrRTCPData++;
+  _packet.XRVOIPMetricItem.burstDuration = *_ptrRTCPData++ << 8;
+  _packet.XRVOIPMetricItem.burstDuration += *_ptrRTCPData++;
 
-    _packet.XRVOIPMetricItem.gapDuration = *_ptrRTCPData++ << 8;
-    _packet.XRVOIPMetricItem.gapDuration += *_ptrRTCPData++;
+  _packet.XRVOIPMetricItem.gapDuration = *_ptrRTCPData++ << 8;
+  _packet.XRVOIPMetricItem.gapDuration += *_ptrRTCPData++;
 
-    _packet.XRVOIPMetricItem.roundTripDelay = *_ptrRTCPData++ << 8;
-    _packet.XRVOIPMetricItem.roundTripDelay += *_ptrRTCPData++;
+  _packet.XRVOIPMetricItem.roundTripDelay = *_ptrRTCPData++ << 8;
+  _packet.XRVOIPMetricItem.roundTripDelay += *_ptrRTCPData++;
 
-    _packet.XRVOIPMetricItem.endSystemDelay = *_ptrRTCPData++ << 8;
-    _packet.XRVOIPMetricItem.endSystemDelay += *_ptrRTCPData++;
+  _packet.XRVOIPMetricItem.endSystemDelay = *_ptrRTCPData++ << 8;
+  _packet.XRVOIPMetricItem.endSystemDelay += *_ptrRTCPData++;
 
-    _packet.XRVOIPMetricItem.signalLevel = *_ptrRTCPData++;
-    _packet.XRVOIPMetricItem.noiseLevel = *_ptrRTCPData++;
-    _packet.XRVOIPMetricItem.RERL = *_ptrRTCPData++;
-    _packet.XRVOIPMetricItem.Gmin = *_ptrRTCPData++;
-    _packet.XRVOIPMetricItem.Rfactor = *_ptrRTCPData++;
-    _packet.XRVOIPMetricItem.extRfactor = *_ptrRTCPData++;
-    _packet.XRVOIPMetricItem.MOSLQ = *_ptrRTCPData++;
-    _packet.XRVOIPMetricItem.MOSCQ = *_ptrRTCPData++;
-    _packet.XRVOIPMetricItem.RXconfig = *_ptrRTCPData++;
-    _ptrRTCPData++; // skip reserved
+  _packet.XRVOIPMetricItem.signalLevel = *_ptrRTCPData++;
+  _packet.XRVOIPMetricItem.noiseLevel = *_ptrRTCPData++;
+  _packet.XRVOIPMetricItem.RERL = *_ptrRTCPData++;
+  _packet.XRVOIPMetricItem.Gmin = *_ptrRTCPData++;
+  _packet.XRVOIPMetricItem.Rfactor = *_ptrRTCPData++;
+  _packet.XRVOIPMetricItem.extRfactor = *_ptrRTCPData++;
+  _packet.XRVOIPMetricItem.MOSLQ = *_ptrRTCPData++;
+  _packet.XRVOIPMetricItem.MOSCQ = *_ptrRTCPData++;
+  _packet.XRVOIPMetricItem.RXconfig = *_ptrRTCPData++;
+  _ptrRTCPData++; // skip reserved
 
-    _packet.XRVOIPMetricItem.JBnominal = *_ptrRTCPData++ << 8;
-    _packet.XRVOIPMetricItem.JBnominal += *_ptrRTCPData++;
+  _packet.XRVOIPMetricItem.JBnominal = *_ptrRTCPData++ << 8;
+  _packet.XRVOIPMetricItem.JBnominal += *_ptrRTCPData++;
 
-    _packet.XRVOIPMetricItem.JBmax = *_ptrRTCPData++ << 8;
-    _packet.XRVOIPMetricItem.JBmax += *_ptrRTCPData++;
+  _packet.XRVOIPMetricItem.JBmax = *_ptrRTCPData++ << 8;
+  _packet.XRVOIPMetricItem.JBmax += *_ptrRTCPData++;
 
-    _packet.XRVOIPMetricItem.JBabsMax = *_ptrRTCPData++ << 8;
-    _packet.XRVOIPMetricItem.JBabsMax += *_ptrRTCPData++;
+  _packet.XRVOIPMetricItem.JBabsMax = *_ptrRTCPData++ << 8;
+  _packet.XRVOIPMetricItem.JBabsMax += *_ptrRTCPData++;
 
-    return true;
+  _packetType = kRtcpXrVoipMetricCode;
+  _state = State_XRItem;
+  return true;
+}
+
+bool RTCPUtility::RTCPParserV2::ParseXrUnsupportedBlockType(
+    int block_length_4bytes) {
+  const int32_t kBlockLengthInBytes = block_length_4bytes * 4;
+  const ptrdiff_t length = _ptrRTCPBlockEnd - _ptrRTCPData;
+  if (length < kBlockLengthInBytes) {
+    _state = State_TopLevel;
+    EndCurrentBlock();
+    return false;
+  }
+  // Skip block.
+  _ptrRTCPData += kBlockLengthInBytes;
+  _state = State_XRItem;
+  return false;
 }
 
 bool
@@ -1116,31 +1283,27 @@ RTCPUtility::RTCPParserV2::ParseFBCommon(const RTCPCommonHeader& header)
     }
 }
 
-bool
-RTCPUtility::RTCPParserV2::ParseRPSIItem()
-{
-    // RFC 4585 6.3.3.  Reference Picture Selection Indication (RPSI)
-    /*
-    0                   1                   2                   3
-    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    |      PB       |0| Payload Type|    Native RPSI bit string     |
-    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    |   defined per codec          ...                | Padding (0) |
-    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    */
+bool RTCPUtility::RTCPParserV2::ParseRPSIItem() {
+
+    // RFC 4585 6.3.3.  Reference Picture Selection Indication (RPSI).
+    //
+    //  0                   1                   2                   3
+    //  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+    //  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    //  |      PB       |0| Payload Type|    Native RPSI bit string     |
+    //  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    //  |   defined per codec          ...                | Padding (0) |
+    //  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
     const ptrdiff_t length = _ptrRTCPBlockEnd - _ptrRTCPData;
 
-    if (length < 4)
-    {
+    if (length < 4) {
         _state = State_TopLevel;
 
         EndCurrentBlock();
         return false;
     }
-    if(length > 2+RTCP_RPSI_DATA_SIZE)
-    {
+    if (length > 2 + RTCP_RPSI_DATA_SIZE) {
         _state = State_TopLevel;
 
         EndCurrentBlock();
@@ -1149,12 +1312,14 @@ RTCPUtility::RTCPParserV2::ParseRPSIItem()
 
     _packetType = kRtcpPsfbRpsiCode;
 
-    uint8_t paddingBits = *_ptrRTCPData++;
+    uint8_t padding_bits = *_ptrRTCPData++;
     _packet.RPSI.PayloadType = *_ptrRTCPData++;
 
-    memcpy(_packet.RPSI.NativeBitString, _ptrRTCPData, length-2);
+    memcpy(_packet.RPSI.NativeBitString, _ptrRTCPData, length - 2);
+    _ptrRTCPData += length - 2;
 
-    _packet.RPSI.NumberOfValidBits = uint16_t(length-2)*8 - paddingBits;
+    _packet.RPSI.NumberOfValidBits =
+        static_cast<uint16_t>(length - 2) * 8 - padding_bits;
     return true;
 }
 

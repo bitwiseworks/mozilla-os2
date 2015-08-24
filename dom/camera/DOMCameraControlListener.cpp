@@ -4,18 +4,19 @@
 
 #include "DOMCameraControlListener.h"
 #include "nsThreadUtils.h"
-#include "nsDOMFile.h"
 #include "CameraCommon.h"
 #include "DOMCameraControl.h"
 #include "CameraPreviewMediaStream.h"
 #include "mozilla/dom/CameraManagerBinding.h"
+#include "mozilla/dom/File.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
 
 DOMCameraControlListener::DOMCameraControlListener(nsDOMCameraControl* aDOMCameraControl,
                                                    CameraPreviewMediaStream* aStream)
-  : mDOMCameraControl(new nsMainThreadPtrHolder<nsDOMCameraControl>(aDOMCameraControl))
+  : mDOMCameraControl(
+      new nsMainThreadPtrHolder<nsISupports>(static_cast<DOMMediaStream*>(aDOMCameraControl)))
   , mStream(aStream)
 {
   DOM_CAMERA_LOGT("%s:%d : this=%p, camera=%p, stream=%p\n",
@@ -31,58 +32,66 @@ DOMCameraControlListener::~DOMCameraControlListener()
 class DOMCameraControlListener::DOMCallback : public nsRunnable
 {
 public:
-  DOMCallback(nsMainThreadPtrHandle<nsDOMCameraControl> aDOMCameraControl)
+  explicit DOMCallback(nsMainThreadPtrHandle<nsISupports> aDOMCameraControl)
     : mDOMCameraControl(aDOMCameraControl)
   {
     MOZ_COUNT_CTOR(DOMCameraControlListener::DOMCallback);
   }
+
+protected:
   virtual ~DOMCallback()
   {
     MOZ_COUNT_DTOR(DOMCameraControlListener::DOMCallback);
   }
 
+public:
   virtual void RunCallback(nsDOMCameraControl* aDOMCameraControl) = 0;
 
   NS_IMETHOD
-  Run() MOZ_OVERRIDE
+  Run() override
   {
     MOZ_ASSERT(NS_IsMainThread());
 
-    nsRefPtr<nsDOMCameraControl> camera = mDOMCameraControl.get();
-    if (camera) {
-      RunCallback(camera);
+    nsRefPtr<nsDOMCameraControl> camera = do_QueryObject(mDOMCameraControl.get());
+    if (!camera) {
+      DOM_CAMERA_LOGE("do_QueryObject failed to get an nsDOMCameraControl\n");
+      return NS_ERROR_INVALID_ARG;
     }
+    RunCallback(camera);
     return NS_OK;
   }
 
 protected:
-  nsMainThreadPtrHandle<nsDOMCameraControl> mDOMCameraControl;
+  nsMainThreadPtrHandle<nsISupports> mDOMCameraControl;
 };
 
 // Specific callback handlers
 void
-DOMCameraControlListener::OnHardwareStateChange(HardwareState aState)
+DOMCameraControlListener::OnHardwareStateChange(HardwareState aState,
+                                                nsresult aReason)
 {
   class Callback : public DOMCallback
   {
   public:
-    Callback(nsMainThreadPtrHandle<nsDOMCameraControl> aDOMCameraControl,
-             HardwareState aState)
+    Callback(nsMainThreadPtrHandle<nsISupports> aDOMCameraControl,
+             HardwareState aState, nsresult aReason)
       : DOMCallback(aDOMCameraControl)
       , mState(aState)
+      , mReason(aReason)
     { }
 
     void
-    RunCallback(nsDOMCameraControl* aDOMCameraControl) MOZ_OVERRIDE
+    RunCallback(nsDOMCameraControl* aDOMCameraControl) override
     {
-      aDOMCameraControl->OnHardwareStateChange(mState);
+      aDOMCameraControl->OnHardwareStateChange(mState, mReason);
     }
 
   protected:
     HardwareState mState;
+    nsresult mReason;
   };
 
-  NS_DispatchToMainThread(new Callback(mDOMCameraControl, aState));
+  NS_DispatchToMainThread(new Callback(mDOMCameraControl, aState, aReason));
 }
 
 void
@@ -91,14 +100,14 @@ DOMCameraControlListener::OnPreviewStateChange(PreviewState aState)
   class Callback : public DOMCallback
   {
   public:
-    Callback(nsMainThreadPtrHandle<nsDOMCameraControl> aDOMCameraControl,
+    Callback(nsMainThreadPtrHandle<nsISupports> aDOMCameraControl,
              PreviewState aState)
       : DOMCallback(aDOMCameraControl)
       , mState(aState)
     { }
 
     void
-    RunCallback(nsDOMCameraControl* aDOMCameraControl) MOZ_OVERRIDE
+    RunCallback(nsDOMCameraControl* aDOMCameraControl) override
     {
       aDOMCameraControl->OnPreviewStateChange(mState);
     }
@@ -131,9 +140,10 @@ DOMCameraControlListener::OnPreviewStateChange(PreviewState aState)
 
     default:
       DOM_CAMERA_LOGE("Unknown preview state %d\n", aState);
-      MOZ_ASSUME_UNREACHABLE("Invalid preview state");
+      MOZ_ASSERT_UNREACHABLE("Invalid preview state");
       return;
   }
+  mStream->OnPreviewStateChange(aState == kPreviewStarted);
   NS_DispatchToMainThread(new Callback(mDOMCameraControl, aState));
 }
 
@@ -144,7 +154,7 @@ DOMCameraControlListener::OnRecorderStateChange(RecorderState aState,
   class Callback : public DOMCallback
   {
   public:
-    Callback(nsMainThreadPtrHandle<nsDOMCameraControl> aDOMCameraControl,
+    Callback(nsMainThreadPtrHandle<nsISupports> aDOMCameraControl,
              RecorderState aState,
              int32_t aStatus,
              int32_t aTrackNum)
@@ -155,7 +165,7 @@ DOMCameraControlListener::OnRecorderStateChange(RecorderState aState,
     { }
 
     void
-    RunCallback(nsDOMCameraControl* aDOMCameraControl) MOZ_OVERRIDE
+    RunCallback(nsDOMCameraControl* aDOMCameraControl) override
     {
       aDOMCameraControl->OnRecorderStateChange(mState, mStatus, mTrackNum);
     }
@@ -175,14 +185,14 @@ DOMCameraControlListener::OnConfigurationChange(const CameraListenerConfiguratio
   class Callback : public DOMCallback
   {
   public:
-    Callback(nsMainThreadPtrHandle<nsDOMCameraControl> aDOMCameraControl,
+    Callback(nsMainThreadPtrHandle<nsISupports> aDOMCameraControl,
              const CameraListenerConfiguration& aConfiguration)
       : DOMCallback(aDOMCameraControl)
       , mConfiguration(aConfiguration)
     { }
 
     void
-    RunCallback(nsDOMCameraControl* aDOMCameraControl) MOZ_OVERRIDE
+    RunCallback(nsDOMCameraControl* aDOMCameraControl) override
     {
       nsRefPtr<nsDOMCameraControl::DOMCameraConfiguration> config =
         new nsDOMCameraControl::DOMCameraConfiguration();
@@ -205,6 +215,8 @@ DOMCameraControlListener::OnConfigurationChange(const CameraListenerConfiguratio
       config->mRecorderProfile = mConfiguration.mRecorderProfile;
       config->mPreviewSize.mWidth = mConfiguration.mPreviewSize.width;
       config->mPreviewSize.mHeight = mConfiguration.mPreviewSize.height;
+      config->mPictureSize.mWidth = mConfiguration.mPictureSize.width;
+      config->mPictureSize.mHeight = mConfiguration.mPictureSize.height;
       config->mMaxMeteringAreas = mConfiguration.mMaxMeteringAreas;
       config->mMaxFocusAreas = mConfiguration.mMaxFocusAreas;
 
@@ -224,13 +236,13 @@ DOMCameraControlListener::OnAutoFocusMoving(bool aIsMoving)
   class Callback : public DOMCallback
   {
   public:
-    Callback(nsMainThreadPtrHandle<nsDOMCameraControl> aDOMCameraControl, bool aIsMoving)
+    Callback(nsMainThreadPtrHandle<nsISupports> aDOMCameraControl, bool aIsMoving)
       : DOMCallback(aDOMCameraControl)
       , mIsMoving(aIsMoving)
     { }
 
     void
-    RunCallback(nsDOMCameraControl* aDOMCameraControl) MOZ_OVERRIDE
+    RunCallback(nsDOMCameraControl* aDOMCameraControl) override
     {
       aDOMCameraControl->OnAutoFocusMoving(mIsMoving);
     }
@@ -248,14 +260,14 @@ DOMCameraControlListener::OnFacesDetected(const nsTArray<ICameraControl::Face>& 
   class Callback : public DOMCallback
   {
   public:
-    Callback(nsMainThreadPtrHandle<nsDOMCameraControl> aDOMCameraControl,
+    Callback(nsMainThreadPtrHandle<nsISupports> aDOMCameraControl,
              const nsTArray<ICameraControl::Face>& aFaces)
       : DOMCallback(aDOMCameraControl)
       , mFaces(aFaces)
     { }
 
     void
-    RunCallback(nsDOMCameraControl* aDOMCameraControl) MOZ_OVERRIDE
+    RunCallback(nsDOMCameraControl* aDOMCameraControl) override
     {
       aDOMCameraControl->OnFacesDetected(mFaces);
     }
@@ -273,18 +285,24 @@ DOMCameraControlListener::OnShutter()
   class Callback : public DOMCallback
   {
   public:
-    Callback(nsMainThreadPtrHandle<nsDOMCameraControl> aDOMCameraControl)
+    explicit Callback(nsMainThreadPtrHandle<nsISupports> aDOMCameraControl)
       : DOMCallback(aDOMCameraControl)
     { }
 
     void
-    RunCallback(nsDOMCameraControl* aDOMCameraControl) MOZ_OVERRIDE
+    RunCallback(nsDOMCameraControl* aDOMCameraControl) override
     {
       aDOMCameraControl->OnShutter();
     }
   };
 
   NS_DispatchToMainThread(new Callback(mDOMCameraControl));
+}
+
+void
+DOMCameraControlListener::OnRateLimitPreview(bool aLimit)
+{
+  mStream->RateLimit(aLimit);
 }
 
 bool
@@ -302,14 +320,14 @@ DOMCameraControlListener::OnAutoFocusComplete(bool aAutoFocusSucceeded)
   class Callback : public DOMCallback
   {
   public:
-    Callback(nsMainThreadPtrHandle<nsDOMCameraControl> aDOMCameraControl,
+    Callback(nsMainThreadPtrHandle<nsISupports> aDOMCameraControl,
              bool aAutoFocusSucceeded)
       : DOMCallback(aDOMCameraControl)
       , mAutoFocusSucceeded(aAutoFocusSucceeded)
     { }
 
     void
-    RunCallback(nsDOMCameraControl* aDOMCameraControl) MOZ_OVERRIDE
+    RunCallback(nsDOMCameraControl* aDOMCameraControl) override
     {
       aDOMCameraControl->OnAutoFocusComplete(mAutoFocusSucceeded);
     }
@@ -327,7 +345,7 @@ DOMCameraControlListener::OnTakePictureComplete(uint8_t* aData, uint32_t aLength
   class Callback : public DOMCallback
   {
   public:
-    Callback(nsMainThreadPtrHandle<nsDOMCameraControl> aDOMCameraControl,
+    Callback(nsMainThreadPtrHandle<nsISupports> aDOMCameraControl,
              uint8_t* aData, uint32_t aLength, const nsAString& aMimeType)
       : DOMCallback(aDOMCameraControl)
       , mData(aData)
@@ -336,11 +354,13 @@ DOMCameraControlListener::OnTakePictureComplete(uint8_t* aData, uint32_t aLength
     { }
 
     void
-    RunCallback(nsDOMCameraControl* aDOMCameraControl) MOZ_OVERRIDE
+    RunCallback(nsDOMCameraControl* aDOMCameraControl) override
     {
-      nsCOMPtr<nsIDOMBlob> picture = new nsDOMMemoryFile(static_cast<void*>(mData),
-                                                         static_cast<uint64_t>(mLength),
-                                                         mMimeType);
+      nsCOMPtr<nsIDOMBlob> picture =
+        File::CreateMemoryFile(mDOMCameraControl.get(),
+                               static_cast<void*>(mData),
+                               static_cast<uint64_t>(mLength),
+                               mMimeType);
       aDOMCameraControl->OnTakePictureComplete(picture);
     }
 
@@ -354,52 +374,28 @@ DOMCameraControlListener::OnTakePictureComplete(uint8_t* aData, uint32_t aLength
 }
 
 void
-DOMCameraControlListener::OnError(CameraErrorContext aContext, CameraError aError)
+DOMCameraControlListener::OnUserError(UserContext aContext, nsresult aError)
 {
   class Callback : public DOMCallback
   {
   public:
-    Callback(nsMainThreadPtrHandle<nsDOMCameraControl> aDOMCameraControl,
-             CameraErrorContext aContext,
-             CameraError aError)
+    Callback(nsMainThreadPtrHandle<nsISupports> aDOMCameraControl,
+             UserContext aContext,
+             nsresult aError)
       : DOMCallback(aDOMCameraControl)
       , mContext(aContext)
       , mError(aError)
     { }
 
     virtual void
-    RunCallback(nsDOMCameraControl* aDOMCameraControl) MOZ_OVERRIDE
+    RunCallback(nsDOMCameraControl* aDOMCameraControl) override
     {
-      nsString error;
-
-      switch (mError) {
-        case kErrorServiceFailed:
-          error = NS_LITERAL_STRING("ErrorServiceFailed");
-          break;
-
-        case kErrorSetPictureSizeFailed:
-          error = NS_LITERAL_STRING("ErrorSetPictureSizeFailed");
-          break;
-
-        case kErrorSetThumbnailSizeFailed:
-          error = NS_LITERAL_STRING("ErrorSetThumbnailSizeFailed");
-          break;
-
-        case kErrorApiFailed:
-          // XXXmikeh legacy error placeholder
-          error = NS_LITERAL_STRING("FAILURE");
-          break;
-
-        default:
-          error = NS_LITERAL_STRING("ErrorUnknown");
-          break;
-      }
-      aDOMCameraControl->OnError(mContext, error);
+      aDOMCameraControl->OnUserError(mContext, mError);
     }
 
   protected:
-    CameraErrorContext mContext;
-    CameraError mError;
+    UserContext mContext;
+    nsresult mError;
   };
 
   NS_DispatchToMainThread(new Callback(mDOMCameraControl, aContext, aError));

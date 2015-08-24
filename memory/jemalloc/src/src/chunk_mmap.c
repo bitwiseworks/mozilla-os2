@@ -43,7 +43,7 @@ pages_map(void *addr, size_t size)
 		if (munmap(ret, size) == -1) {
 			char buf[BUFERROR_BUF];
 
-			buferror(buf, sizeof(buf));
+			buferror(get_errno(), buf, sizeof(buf));
 			malloc_printf("<jemalloc: Error in munmap(): %s\n",
 			    buf);
 			if (opt_abort)
@@ -69,7 +69,7 @@ pages_unmap(void *addr, size_t size)
 	{
 		char buf[BUFERROR_BUF];
 
-		buferror(buf, sizeof(buf));
+		buferror(get_errno(), buf, sizeof(buf));
 		malloc_printf("<jemalloc>: Error in "
 #ifdef _WIN32
 		              "VirtualFree"
@@ -121,7 +121,7 @@ pages_purge(void *addr, size_t length)
 #ifdef _WIN32
 	VirtualAlloc(addr, length, MEM_RESET, PAGE_READWRITE);
 	unzeroed = true;
-#else
+#elif defined(JEMALLOC_HAVE_MADVISE)
 #  ifdef JEMALLOC_PURGE_MADVISE_DONTNEED
 #    define JEMALLOC_MADV_PURGE MADV_DONTNEED
 #    define JEMALLOC_MADV_ZEROS true
@@ -129,12 +129,15 @@ pages_purge(void *addr, size_t length)
 #    define JEMALLOC_MADV_PURGE MADV_FREE
 #    define JEMALLOC_MADV_ZEROS false
 #  else
-#    error "No method defined for purging unused dirty pages."
+#    error "No madvise(2) flag defined for purging unused dirty pages."
 #  endif
 	int err = madvise(addr, length, JEMALLOC_MADV_PURGE);
-	unzeroed = (JEMALLOC_MADV_ZEROS == false || err != 0);
+	unzeroed = (!JEMALLOC_MADV_ZEROS || err != 0);
 #  undef JEMALLOC_MADV_PURGE
 #  undef JEMALLOC_MADV_ZEROS
+#else
+	/* Last resort no-op. */
+	unzeroed = true;
 #endif
 	return (unzeroed);
 }
@@ -200,11 +203,11 @@ chunk_alloc_mmap(size_t size, size_t alignment, bool *zero)
 }
 
 bool
-chunk_dealloc_mmap(void *chunk, size_t size)
+chunk_dalloc_mmap(void *chunk, size_t size)
 {
 
 	if (config_munmap)
 		pages_unmap(chunk, size);
 
-	return (config_munmap == false);
+	return (!config_munmap);
 }

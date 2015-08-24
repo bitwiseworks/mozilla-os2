@@ -1,4 +1,4 @@
-// -*- Mode: js2; tab-width: 2; indent-tabs-mode: nil; js2-basic-offset: 2; js2-skip-preprocessor-directives: t; -*-
+// -*- indent-tabs-mode: nil; js-indent-level: 2 -*-
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -15,6 +15,9 @@ Cu.import("resource://gre/modules/Messaging.jsm");
 
 // Keep this in sync with the constant defined in PanelAuthCache.java
 const PREFS_PANEL_AUTH_PREFIX = "home_panels_auth_";
+
+// Default weight for a banner message.
+const DEFAULT_WEIGHT = 100;
 
 // See bug 915424
 function resolveGeckoURI(aURI) {
@@ -49,6 +52,9 @@ function BannerMessage(options) {
 
   if ("ondismiss" in options && typeof options.ondismiss === "function")
     this.ondismiss = options.ondismiss;
+
+  let weight = parseInt(options.weight, 10);
+  this.weight = weight > 0 ? weight : DEFAULT_WEIGHT;
 }
 
 // We need this object to have access to the HomeBanner
@@ -62,7 +68,9 @@ let HomeBanner = (function () {
   // Functions used to handle messages sent from Java.
   HomeBannerMessageHandlers = {
     "HomeBanner:Get": function handleBannerGet(data) {
-      if (!_sendBannerData()) {
+      if (Object.keys(_messages).length > 0) {
+        _sendBannerData();
+      } else {
         _pendingRequest = true;
       }
     }
@@ -71,23 +79,30 @@ let HomeBanner = (function () {
   // Holds the messages that will rotate through the banner.
   let _messages = {};
 
+  // Choose a random message from the set of messages, biasing towards those with higher weight.
+  // Weight logic copied from desktop snippets:
+  // https://github.com/mozilla/snippets-service/blob/7d80edb8b1cddaed075275c2fc7cdf69a10f4003/snippets/base/templates/base/includes/snippet_js.html#L119
   let _sendBannerData = function() {
-    let keys = Object.keys(_messages);
-    if (!keys.length) {
-      return false;
+    let totalWeight = 0;
+    for (let key in _messages) {
+      let message = _messages[key];
+      totalWeight += message.weight;
+      message.totalWeight = totalWeight;
     }
 
-    // Choose a message at random.
-    let randomId = keys[Math.floor(Math.random() * keys.length)];
-    let message = _messages[randomId];
-
-    sendMessageToJava({
-      type: "HomeBanner:Data",
-      id: message.id,
-      text: message.text,
-      iconURI: message.iconURI
-    });
-    return true;
+    let threshold = Math.random() * totalWeight;
+    for (let key in _messages) {
+      let message = _messages[key];
+      if (threshold < message.totalWeight) {
+        Messaging.sendRequest({
+          type: "HomeBanner:Data",
+          id: message.id,
+          text: message.text,
+          iconURI: message.iconURI
+        });
+        return;
+      }
+    }
   };
 
   let _handleShown = function(id) {
@@ -199,7 +214,7 @@ let HomePanels = (function () {
         }
       }
 
-      sendMessageToJava({
+      Messaging.sendRequest({
         type: "HomePanels:Data",
         panels: panels,
         requestId: requestId
@@ -414,7 +429,7 @@ let HomePanels = (function () {
     install: function(id) {
       _assertPanelExists(id);
 
-      sendMessageToJava({
+      Messaging.sendRequest({
         type: "HomePanels:Install",
         panel: _generatePanel(id)
       });
@@ -423,7 +438,7 @@ let HomePanels = (function () {
     uninstall: function(id) {
       _assertPanelExists(id);
 
-      sendMessageToJava({
+      Messaging.sendRequest({
         type: "HomePanels:Uninstall",
         id: id
       });
@@ -432,7 +447,7 @@ let HomePanels = (function () {
     update: function(id) {
       _assertPanelExists(id);
 
-      sendMessageToJava({
+      Messaging.sendRequest({
         type: "HomePanels:Update",
         panel: _generatePanel(id)
       });
@@ -442,7 +457,7 @@ let HomePanels = (function () {
       _assertPanelExists(id);
 
       let authKey = PREFS_PANEL_AUTH_PREFIX + id;
-      let sharedPrefs = new SharedPreferences();
+      let sharedPrefs = SharedPreferences.forProfile();
       sharedPrefs.setBoolPref(authKey, isAuthenticated);
     }
   });

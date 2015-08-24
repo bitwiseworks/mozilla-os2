@@ -7,13 +7,13 @@ package org.mozilla.gecko;
 
 import org.mozilla.gecko.EventDispatcher;
 import org.mozilla.gecko.util.GeckoEventListener;
-
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.preference.PreferenceManager;
 import android.util.Log;
 
 import java.util.Map;
@@ -27,6 +27,32 @@ public final class SharedPreferencesHelper
 {
     public static final String LOGTAG = "GeckoAndSharedPrefs";
 
+    // Calculate this once, at initialization. isLoggable is too expensive to
+    // have in-line in each log call.
+    private static final boolean logVerbose = Log.isLoggable(LOGTAG, Log.VERBOSE);
+
+    private enum Scope {
+        APP("app"),
+        PROFILE("profile"),
+        GLOBAL("global");
+
+        public final String key;
+
+        private Scope(String key) {
+            this.key = key;
+        }
+
+        public static Scope forKey(String key) {
+            for (Scope scope : values()) {
+                if (scope.key.equals(key)) {
+                    return scope;
+                }
+            }
+
+            throw new IllegalStateException("SharedPreferences scope must be valid.");
+        }
+    }
+
     protected final Context mContext;
 
     // mListeners is not synchronized because it is only updated in
@@ -38,34 +64,68 @@ public final class SharedPreferencesHelper
 
         mListeners = new HashMap<String, SharedPreferences.OnSharedPreferenceChangeListener>();
 
-        EventDispatcher dispatcher = GeckoAppShell.getEventDispatcher();
+        EventDispatcher dispatcher = EventDispatcher.getInstance();
         if (dispatcher == null) {
             Log.e(LOGTAG, "Gecko event dispatcher must not be null", new RuntimeException());
             return;
         }
-        dispatcher.registerEventListener("SharedPreferences:Set", this);
-        dispatcher.registerEventListener("SharedPreferences:Get", this);
-        dispatcher.registerEventListener("SharedPreferences:Observe", this);
+        dispatcher.registerGeckoThreadListener(this,
+            "SharedPreferences:Set",
+            "SharedPreferences:Get",
+            "SharedPreferences:Observe");
     }
 
     public synchronized void uninit() {
-        EventDispatcher dispatcher = GeckoAppShell.getEventDispatcher();
+        EventDispatcher dispatcher = EventDispatcher.getInstance();
         if (dispatcher == null) {
             Log.e(LOGTAG, "Gecko event dispatcher must not be null", new RuntimeException());
             return;
         }
-
-        dispatcher.unregisterEventListener("SharedPreferences:Set", this);
-        dispatcher.unregisterEventListener("SharedPreferences:Get", this);
-        dispatcher.unregisterEventListener("SharedPreferences:Observe", this);
+        dispatcher.unregisterGeckoThreadListener(this,
+            "SharedPreferences:Set",
+            "SharedPreferences:Get",
+            "SharedPreferences:Observe");
     }
 
-    private SharedPreferences getSharedPreferences(String branch) {
-        if (branch == null) {
-            return GeckoSharedPrefs.forApp(mContext);
-        } else {
-            return mContext.getSharedPreferences(branch, Context.MODE_PRIVATE);
+    private SharedPreferences getSharedPreferences(JSONObject message) throws JSONException {
+        final Scope scope = Scope.forKey(message.getString("scope"));
+        switch (scope) {
+            case APP:
+                return GeckoSharedPrefs.forApp(mContext);
+            case PROFILE:
+                final String profileName = message.optString("profileName", null);
+                if (profileName == null) {
+                    return GeckoSharedPrefs.forProfile(mContext);
+                } else {
+                    return GeckoSharedPrefs.forProfileName(mContext, profileName);
+                }
+            case GLOBAL:
+                final String branch = message.optString("branch", null);
+                if (branch == null) {
+                    return PreferenceManager.getDefaultSharedPreferences(mContext);
+                } else {
+                    return mContext.getSharedPreferences(branch, Context.MODE_PRIVATE);
+                }
         }
+
+        return null;
+    }
+
+    private String getBranch(Scope scope, String profileName, String branch) {
+        switch (scope) {
+            case APP:
+                return GeckoSharedPrefs.APP_PREFS_NAME;
+            case PROFILE:
+                if (profileName == null) {
+                    profileName = GeckoProfile.get(mContext).getName();
+                }
+
+                return GeckoSharedPrefs.PROFILE_PREFS_NAME_PREFIX + profileName;
+            case GLOBAL:
+                return branch;
+        }
+
+        return null;
     }
 
     /**
@@ -78,13 +138,7 @@ public final class SharedPreferencesHelper
      * and an Object value.
      */
     private void handleSet(JSONObject message) throws JSONException {
-        if (!message.has("branch")) {
-            Log.e(LOGTAG, "No branch specified for SharedPreference:Set; aborting.");
-            return;
-        }
-
-        String branch = message.isNull("branch") ? null : message.getString("branch");
-        SharedPreferences.Editor editor = getSharedPreferences(branch).edit();
+        SharedPreferences.Editor editor = getSharedPreferences(message).edit();
 
         JSONArray jsonPrefs = message.getJSONArray("preferences");
 
@@ -101,7 +155,7 @@ public final class SharedPreferencesHelper
             } else {
                 Log.w(LOGTAG, "Unknown pref value type [" + type + "] for pref [" + name + "]");
             }
-            editor.commit();
+            editor.apply();
         }
     }
 
@@ -115,13 +169,7 @@ public final class SharedPreferencesHelper
      * "string"].
      */
     private JSONArray handleGet(JSONObject message) throws JSONException {
-        if (!message.has("branch")) {
-            Log.e(LOGTAG, "No branch specified for SharedPreference:Get; aborting.");
-            return null;
-        }
-
-        String branch = message.isNull("branch") ? null : message.getString("branch");
-        SharedPreferences prefs = getSharedPreferences(branch);
+        SharedPreferences prefs = getSharedPreferences(message);
         JSONArray jsonPrefs = message.getJSONArray("preferences");
         JSONArray jsonValues = new JSONArray();
 
@@ -158,23 +206,29 @@ public final class SharedPreferencesHelper
 
     private static class ChangeListener
         implements SharedPreferences.OnSharedPreferenceChangeListener {
+        public final Scope scope;
         public final String branch;
+        public final String profileName;
 
-        public ChangeListener(final String branch) {
+        public ChangeListener(final Scope scope, final String branch, final String profileName) {
+            this.scope = scope;
             this.branch = branch;
+            this.profileName = profileName;
         }
 
         @Override
         public void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
-            if (Log.isLoggable(LOGTAG, Log.VERBOSE)) {
+            if (logVerbose) {
                 Log.v(LOGTAG, "Got onSharedPreferenceChanged");
             }
             try {
                 final JSONObject msg = new JSONObject();
+                msg.put("scope", this.scope.key);
                 msg.put("branch", this.branch);
+                msg.put("profileName", this.profileName);
                 msg.put("key", key);
 
-                // Truly, this is awful, but the API impedence is strong: there
+                // Truly, this is awful, but the API impedance is strong: there
                 // is no way to get a single untyped value from a
                 // SharedPreferences instance.
                 msg.put("value", sharedPreferences.getAll().get(key));
@@ -196,24 +250,29 @@ public final class SharedPreferencesHelper
      * disable listening.
      */
     private void handleObserve(JSONObject message) throws JSONException {
-        if (!message.has("branch")) {
+        final SharedPreferences prefs = getSharedPreferences(message);
+        final boolean enable = message.getBoolean("enable");
+
+        final Scope scope = Scope.forKey(message.getString("scope"));
+        final String profileName = message.optString("profileName", null);
+        final String branch = getBranch(scope, profileName, message.optString("branch", null));
+
+        if (branch == null) {
             Log.e(LOGTAG, "No branch specified for SharedPreference:Observe; aborting.");
             return;
         }
 
-        String branch = message.isNull("branch") ? null : message.getString("branch");
-        SharedPreferences prefs = getSharedPreferences(branch);
-        boolean enable = message.getBoolean("enable");
-
         // mListeners is only modified in this one observer, which is called
         // from Gecko serially.
         if (enable && !this.mListeners.containsKey(branch)) {
-            SharedPreferences.OnSharedPreferenceChangeListener listener = new ChangeListener(branch);
+            SharedPreferences.OnSharedPreferenceChangeListener listener
+                = new ChangeListener(scope, branch, profileName);
             this.mListeners.put(branch, listener);
             prefs.registerOnSharedPreferenceChangeListener(listener);
         }
         if (!enable && this.mListeners.containsKey(branch)) {
-            SharedPreferences.OnSharedPreferenceChangeListener listener = this.mListeners.remove(branch);
+            SharedPreferences.OnSharedPreferenceChangeListener listener
+                = this.mListeners.remove(branch);
             prefs.unregisterOnSharedPreferenceChangeListener(listener);
         }
     }
@@ -224,19 +283,19 @@ public final class SharedPreferencesHelper
         // overwriting an in-progress response.
         try {
             if (event.equals("SharedPreferences:Set")) {
-                if (Log.isLoggable(LOGTAG, Log.VERBOSE)) {
+                if (logVerbose) {
                     Log.v(LOGTAG, "Got SharedPreferences:Set message.");
                 }
                 handleSet(message);
             } else if (event.equals("SharedPreferences:Get")) {
-                if (Log.isLoggable(LOGTAG, Log.VERBOSE)) {
+                if (logVerbose) {
                     Log.v(LOGTAG, "Got SharedPreferences:Get message.");
                 }
                 JSONObject obj = new JSONObject();
                 obj.put("values", handleGet(message));
                 EventDispatcher.sendResponse(message, obj);
             } else if (event.equals("SharedPreferences:Observe")) {
-                if (Log.isLoggable(LOGTAG, Log.VERBOSE)) {
+                if (logVerbose) {
                     Log.v(LOGTAG, "Got SharedPreferences:Observe message.");
                 }
                 handleObserve(message);

@@ -59,13 +59,20 @@ add_task(function() {
   menuButton.remove();
 });
 
-add_task(function() {
+add_task(function*() {
   let searchbar = document.getElementById("searchbar");
   gCustomizeMode.addToPanel(searchbar);
   let placement = CustomizableUI.getPlacementOfWidget("search-container");
   is(placement.area, CustomizableUI.AREA_PANEL, "Should be in panel");
   yield PanelUI.show();
   yield waitForCondition(() => "value" in searchbar && searchbar.value === "");
+
+  // Focusing a non-empty searchbox will cause us to open the
+  // autocomplete panel and search for suggestions, which would
+  // trigger network requests. Temporarily disable suggestions.
+  let suggestEnabled =
+    Services.prefs.getBoolPref("browser.search.suggest.enabled");
+  Services.prefs.setBoolPref("browser.search.suggest.enabled", false);
 
   searchbar.value = "foo";
   searchbar.focus();
@@ -83,12 +90,34 @@ add_task(function() {
   EventUtils.synthesizeMouseAtCenter(selectAll, {});
   yield contextMenuHidden;
 
+  // Hide the suggestion panel.
+  searchbar.textbox.popup.hidePopup();
+
   ok(isPanelUIOpen(), "Panel should still be open");
 
   let hiddenPanelPromise = promisePanelHidden(window);
   EventUtils.synthesizeKey("VK_ESCAPE", {});
   yield hiddenPanelPromise;
   ok(!isPanelUIOpen(), "Panel should no longer be open");
+
+  Services.prefs.setBoolPref("browser.search.suggest.enabled", suggestEnabled);
+  CustomizableUI.reset();
+});
+
+add_task(function*() {
+  button = document.createElement("toolbarbutton");
+  button.id = "browser_946166_button_disabled";
+  button.setAttribute("disabled", "true");
+  button.setAttribute("label", "Button");
+  PanelUI.contents.appendChild(button);
+  yield PanelUI.show();
+  EventUtils.synthesizeMouseAtCenter(button, {});
+  is(PanelUI.panel.state, "open", "Popup stays open");
+  button.removeAttribute("disabled");
+  let hiddenAgain = promisePanelHidden(window);
+  EventUtils.synthesizeMouseAtCenter(button, {});
+  yield hiddenAgain;
+  button.remove();
 });
 
 registerCleanupFunction(function() {
@@ -105,4 +134,3 @@ registerCleanupFunction(function() {
     PanelUI.hide();
   }
 });
-

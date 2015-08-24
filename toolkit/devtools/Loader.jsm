@@ -10,28 +10,12 @@
 
 let { Constructor: CC, classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
-// addDebuggerToGlobal only allows adding the Debugger object to a global. The
-// this object is not guaranteed to be a global (in particular on B2G, due to
-// compartment sharing), so add the Debugger object to a sandbox instead.
-let sandbox = Cu.Sandbox(CC('@mozilla.org/systemprincipal;1', 'nsIPrincipal')());
-Cu.evalInSandbox(
-  "Components.utils.import('resource://gre/modules/jsdebugger.jsm');" +
-  "addDebuggerToGlobal(this);",
-  sandbox
-);
-let Debugger = sandbox.Debugger;
-
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
-let Timer = Cu.import("resource://gre/modules/Timer.jsm", {});
 
 XPCOMUtils.defineLazyModuleGetter(this, "NetUtil", "resource://gre/modules/NetUtil.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "FileUtils", "resource://gre/modules/FileUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "OS", "resource://gre/modules/osfile.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "console", "resource://gre/modules/devtools/Console.jsm");
-
-let SourceMap = {};
-Cu.import("resource://gre/modules/devtools/SourceMap.jsm", SourceMap);
 
 let loader = Cu.import("resource://gre/modules/commonjs/toolkit/loader.js", {}).Loader;
 let promise = Cu.import("resource://gre/modules/Promise.jsm", {}).Promise;
@@ -43,31 +27,53 @@ this.EXPORTED_SYMBOLS = ["DevToolsLoader", "devtools", "BuiltinProvider",
  * Providers are different strategies for loading the devtools.
  */
 
-let loaderGlobals = {
-  btoa: btoa,
-  console: console,
-  promise: promise,
-  _Iterator: Iterator,
-  ChromeWorker: ChromeWorker,
-  loader: {
-    lazyGetter: XPCOMUtils.defineLazyGetter.bind(XPCOMUtils),
-    lazyImporter: XPCOMUtils.defineLazyModuleGetter.bind(XPCOMUtils),
-    lazyServiceGetter: XPCOMUtils.defineLazyServiceGetter.bind(XPCOMUtils)
-  }
+let loaderModules = {
+  "Services": Object.create(Services),
+  "toolkit/loader": loader,
+  "promise": promise,
+  "PromiseDebugging": PromiseDebugging
 };
+XPCOMUtils.defineLazyGetter(loaderModules, "Debugger", () => {
+  // addDebuggerToGlobal only allows adding the Debugger object to a global. The
+  // this object is not guaranteed to be a global (in particular on B2G, due to
+  // compartment sharing), so add the Debugger object to a sandbox instead.
+  let sandbox = Cu.Sandbox(CC('@mozilla.org/systemprincipal;1', 'nsIPrincipal')());
+  Cu.evalInSandbox(
+    "Components.utils.import('resource://gre/modules/jsdebugger.jsm');" +
+    "addDebuggerToGlobal(this);",
+    sandbox
+  );
+  return sandbox.Debugger;
+});
+XPCOMUtils.defineLazyGetter(loaderModules, "Timer", () => {
+  let {setTimeout, clearTimeout} = Cu.import("resource://gre/modules/Timer.jsm", {});
+  // Do not return Cu.import result, as SDK loader would freeze Timer.jsm globals...
+  return {
+    setTimeout,
+    clearTimeout
+  };
+});
+XPCOMUtils.defineLazyGetter(loaderModules, "xpcInspector", () => {
+  return Cc["@mozilla.org/jsinspector;1"].getService(Ci.nsIJSInspector);
+});
+XPCOMUtils.defineLazyGetter(loaderModules, "indexedDB", () => {
+  // On xpcshell, we can't instantiate indexedDB without crashing
+  try {
+    return Cu.Sandbox(this, {wantGlobalProperties:["indexedDB"]}).indexedDB;
+  } catch(e) {
+    return {};
+  }
+});
+
+let sharedGlobalBlacklist = ["sdk/indexed-db"];
 
 // Used when the tools should be loaded from the Firefox package itself (the default)
 function BuiltinProvider() {}
 BuiltinProvider.prototype = {
   load: function() {
     this.loader = new loader.Loader({
-      modules: {
-        "Debugger": Debugger,
-        "Services": Object.create(Services),
-        "Timer": Object.create(Timer),
-        "toolkit/loader": loader,
-        "source-map": SourceMap,
-      },
+      id: "fx-devtools",
+      modules: loaderModules,
       paths: {
         // When you add a line to this mapping, don't forget to make a
         // corresponding addition to the SrcdirProvider mapping below as well.
@@ -84,17 +90,23 @@ BuiltinProvider.prototype = {
         "devtools/touch-events": "resource://gre/modules/devtools/touch-events",
         "devtools/client": "resource://gre/modules/devtools/client",
         "devtools/pretty-fast": "resource://gre/modules/devtools/pretty-fast.js",
+        "devtools/jsbeautify": "resource://gre/modules/devtools/jsbeautify/beautify.js",
         "devtools/async-utils": "resource://gre/modules/devtools/async-utils",
         "devtools/content-observer": "resource://gre/modules/devtools/content-observer",
         "gcli": "resource://gre/modules/devtools/gcli",
+        "projecteditor": "resource:///modules/devtools/projecteditor",
         "acorn": "resource://gre/modules/devtools/acorn",
         "acorn/util/walk": "resource://gre/modules/devtools/acorn/walk.js",
+        "tern": "resource://gre/modules/devtools/tern",
+        "source-map": "resource://gre/modules/devtools/SourceMap.jsm",
 
         // Allow access to xpcshell test items from the loader.
         "xpcshell-test": "resource://test"
       },
-      globals: loaderGlobals,
-      invisibleToDebugger: this.invisibleToDebugger
+      globals: this.globals,
+      invisibleToDebugger: this.invisibleToDebugger,
+      sharedGlobal: true,
+      sharedGlobalBlacklist: sharedGlobalBlacklist
     });
 
     return promise.resolve(undefined);
@@ -134,19 +146,18 @@ SrcdirProvider.prototype = {
     let touchEventsURI = this.fileURI(OS.Path.join(toolkitDir, "touch-events"));
     let clientURI = this.fileURI(OS.Path.join(toolkitDir, "client"));
     let prettyFastURI = this.fileURI(OS.Path.join(toolkitDir), "pretty-fast.js");
+    let jsBeautifyURI = this.fileURI(OS.Path.join(toolkitDir, "jsbeautify", "beautify.js"));
     let asyncUtilsURI = this.fileURI(OS.Path.join(toolkitDir), "async-utils.js");
     let contentObserverURI = this.fileURI(OS.Path.join(toolkitDir), "content-observer.js");
     let gcliURI = this.fileURI(OS.Path.join(toolkitDir, "gcli", "source", "lib", "gcli"));
+    let projecteditorURI = this.fileURI(OS.Path.join(devtoolsDir, "projecteditor"));
     let acornURI = this.fileURI(OS.Path.join(toolkitDir, "acorn"));
     let acornWalkURI = OS.Path.join(acornURI, "walk.js");
+    let ternURI = OS.Path.join(toolkitDir, "tern");
+    let sourceMapURI = this.fileURI(OS.Path.join(toolkitDir), "SourceMap.jsm");
     this.loader = new loader.Loader({
-      modules: {
-        "Debugger": Debugger,
-        "Services": Object.create(Services),
-        "Timer": Object.create(Timer),
-        "toolkit/loader": loader,
-        "source-map": SourceMap,
-      },
+      id: "fx-devtools",
+      modules: loaderModules,
       paths: {
         "": "resource://gre/modules/commonjs/",
         "main": mainURI,
@@ -161,14 +172,20 @@ SrcdirProvider.prototype = {
         "devtools/touch-events": touchEventsURI,
         "devtools/client": clientURI,
         "devtools/pretty-fast": prettyFastURI,
+        "devtools/jsbeautify": jsBeautifyURI,
         "devtools/async-utils": asyncUtilsURI,
         "devtools/content-observer": contentObserverURI,
         "gcli": gcliURI,
+        "projecteditor": projecteditorURI,
         "acorn": acornURI,
-        "acorn/util/walk": acornWalkURI
+        "acorn/util/walk": acornWalkURI,
+        "tern": ternURI,
+        "source-map": sourceMapURI,
       },
-      globals: loaderGlobals,
-      invisibleToDebugger: this.invisibleToDebugger
+      globals: this.globals,
+      invisibleToDebugger: this.invisibleToDebugger,
+      sharedGlobal: true,
+      sharedGlobalBlacklist: sharedGlobalBlacklist
     });
 
     return this._writeManifest(devtoolsDir).then(null, Cu.reportError);
@@ -182,36 +199,28 @@ SrcdirProvider.prototype = {
   _readFile: function(filename) {
     let deferred = promise.defer();
     let file = new FileUtils.File(filename);
-    NetUtil.asyncFetch(file, (inputStream, status) => {
-      if (!Components.isSuccessCode(status)) {
-        deferred.reject(new Error("Couldn't load manifest: " + filename + "\n"));
-        return;
-      }
-      var data = NetUtil.readInputStreamToString(inputStream, inputStream.available());
-      deferred.resolve(data);
-    });
+    NetUtil.asyncFetch2(
+      file,
+      (inputStream, status) => {
+        if (!Components.isSuccessCode(status)) {
+          deferred.reject(new Error("Couldn't load manifest: " + filename + "\n"));
+          return;
+        }
+        var data = NetUtil.readInputStreamToString(inputStream, inputStream.available());
+        deferred.resolve(data);
+      },
+      null,      // aLoadingNode
+      Services.scriptSecurityManager.getSystemPrincipal(),
+      null,      // aTriggeringPrincipal
+      Ci.nsILoadInfo.SEC_NORMAL,
+      Ci.nsIContentPolicy.TYPE_OTHER);
+
     return deferred.promise;
   },
 
   _writeFile: function(filename, data) {
-    let deferred = promise.defer();
-    let file = new FileUtils.File(filename);
-
-    var ostream = FileUtils.openSafeFileOutputStream(file)
-
-    var converter = Cc["@mozilla.org/intl/scriptableunicodeconverter"].
-                    createInstance(Ci.nsIScriptableUnicodeConverter);
-    converter.charset = "UTF-8";
-    var istream = converter.convertToInputStream(data);
-    NetUtil.asyncCopy(istream, ostream, (status) => {
-      if (!Components.isSuccessCode(status)) {
-        deferred.reject(new Error("Couldn't write manifest: " + filename + "\n"));
-        return;
-      }
-
-      deferred.resolve(null);
-    });
-    return deferred.promise;
+    let promise = OS.File.writeAtomic(filename, data, {encoding: "utf-8"});
+    return promise.then(null, (ex) => new Error("Couldn't write manifest: " + ex + "\n"));
   },
 
   _writeManifest: function(dir) {
@@ -253,6 +262,10 @@ SrcdirProvider.prototype = {
  */
 this.DevToolsLoader = function DevToolsLoader() {
   this.require = this.require.bind(this);
+  this.lazyGetter = XPCOMUtils.defineLazyGetter.bind(XPCOMUtils);
+  this.lazyImporter = XPCOMUtils.defineLazyModuleGetter.bind(XPCOMUtils);
+  this.lazyServiceGetter = XPCOMUtils.defineLazyServiceGetter.bind(XPCOMUtils);
+  this.lazyRequireGetter = this.lazyRequireGetter.bind(this);
 };
 
 DevToolsLoader.prototype = {
@@ -271,7 +284,9 @@ DevToolsLoader.prototype = {
    * @see setProvider
    */
   require: function() {
-    this._chooseProvider();
+    if (!this._provider) {
+      this._chooseProvider();
+    }
     return this.require.apply(this, arguments);
   },
 
@@ -286,10 +301,15 @@ DevToolsLoader.prototype = {
    *    The property name.
    * @param String module
    *    The module path.
+   * @param Boolean destructure
+   *    Pass true if the property name is a member of the module's exports.
    */
-  lazyRequireGetter: function (obj, property, module) {
+  lazyRequireGetter: function (obj, property, module, destructure) {
     Object.defineProperty(obj, property, {
-      get: () => this.require(module)
+      get: () => destructure
+        ? this.require(module)[property]
+        : this.require(module || property),
+      configurable: true
     });
   },
 
@@ -345,7 +365,26 @@ DevToolsLoader.prototype = {
       this._provider.unload("newprovider");
     }
     this._provider = provider;
+
+    // Pass through internal loader settings specific to this loader instance
     this._provider.invisibleToDebugger = this.invisibleToDebugger;
+    this._provider.globals = {
+      isWorker: false,
+      reportError: Cu.reportError,
+      btoa: btoa,
+      _Iterator: Iterator,
+      loader: {
+        lazyGetter: this.lazyGetter,
+        lazyImporter: this.lazyImporter,
+        lazyServiceGetter: this.lazyServiceGetter,
+        lazyRequireGetter: this.lazyRequireGetter
+      },
+    };
+    // Lazy define console in order to load Console.jsm only when it is used
+    XPCOMUtils.defineLazyGetter(this._provider.globals, "console", () => {
+      return Cu.import("resource://gre/modules/devtools/Console.jsm", {}).console;
+    });
+
     this._provider.load();
     this.require = loader.Require(this._provider.loader, { id: "devtools" });
 

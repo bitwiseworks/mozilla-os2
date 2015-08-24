@@ -36,11 +36,14 @@ txParseDocumentFromURI(const nsAString& aHref, const txXPathNode& aLoader,
     nsAutoSyncOperation sync(loaderDocument);
     rv = nsSyncLoadService::LoadDocument(documentURI,
                                          loaderDocument->NodePrincipal(),
-                                         loadGroup, true, &theDocument);
+                                         loadGroup, true,
+                                         loaderDocument->GetReferrerPolicy(),
+                                         &theDocument);
 
     if (NS_FAILED(rv)) {
-        aErrMsg.Append(NS_LITERAL_STRING("Document load of ") + 
-                       aHref + NS_LITERAL_STRING(" failed."));
+        aErrMsg.AppendLiteral("Document load of ");
+        aErrMsg.Append(aHref);
+        aErrMsg.AppendLiteral(" failed.");
         return NS_FAILED(rv) ? rv : NS_ERROR_FAILURE;
     }
 

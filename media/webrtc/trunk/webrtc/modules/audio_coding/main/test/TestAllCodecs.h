@@ -8,16 +8,18 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_MAIN_TEST_TEST_ALL_CODECS_H_
-#define WEBRTC_MODULES_AUDIO_CODING_MAIN_TEST_TEST_ALL_CODECS_H_
+#ifndef WEBRTC_MODULES_AUDIO_CODING_MAIN_TEST_TESTALLCODECS_H_
+#define WEBRTC_MODULES_AUDIO_CODING_MAIN_TEST_TESTALLCODECS_H_
 
+#include "webrtc/modules/audio_coding/main/test/ACMTest.h"
+#include "webrtc/modules/audio_coding/main/test/Channel.h"
+#include "webrtc/modules/audio_coding/main/test/PCMFile.h"
 #include "webrtc/system_wrappers/interface/scoped_ptr.h"
-#include "ACMTest.h"
-#include "Channel.h"
-#include "PCMFile.h"
-#include "typedefs.h"
+#include "webrtc/typedefs.h"
 
 namespace webrtc {
+
+class Config;
 
 class TestPack : public AudioPacketizationCallback {
  public:
@@ -26,10 +28,11 @@ class TestPack : public AudioPacketizationCallback {
 
   void RegisterReceiverACM(AudioCodingModule* acm);
 
-  int32_t SendData(FrameType frame_type, uint8_t payload_type,
-                   uint32_t timestamp, const uint8_t* payload_data,
-                   uint16_t payload_size,
-                   const RTPFragmentationHeader* fragmentation);
+  virtual int32_t SendData(
+      FrameType frame_type, uint8_t payload_type,
+      uint32_t timestamp, const uint8_t* payload_data,
+      uint16_t payload_size,
+      const RTPFragmentationHeader* fragmentation) OVERRIDE;
 
   uint16_t payload_size();
   uint32_t timestamp_diff();
@@ -47,10 +50,10 @@ class TestPack : public AudioPacketizationCallback {
 
 class TestAllCodecs : public ACMTest {
  public:
-  TestAllCodecs(int test_mode);
+  explicit TestAllCodecs(int test_mode);
   ~TestAllCodecs();
 
-  void Perform();
+  virtual void Perform() OVERRIDE;
 
  private:
   // The default value of '-1' indicates that the registration is based only on
@@ -71,10 +74,10 @@ class TestAllCodecs : public ACMTest {
   PCMFile infile_a_;
   PCMFile outfile_b_;
   int test_count_;
-  uint16_t packet_size_samples_;
-  uint16_t packet_size_bytes_;
+  int packet_size_samples_;
+  int packet_size_bytes_;
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_CODING_MAIN_TEST_TEST_ALL_CODECS_H_
+#endif  // WEBRTC_MODULES_AUDIO_CODING_MAIN_TEST_TESTALLCODECS_H_

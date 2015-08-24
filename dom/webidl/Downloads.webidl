@@ -19,8 +19,8 @@ enum DownloadState {
 
 //
 // XXXTODO: When we have a generic way to do feature detection in marketplace
-//          we will *STOP* using the pref and use the function like DOMDownload
-//          and DownloadEvent.
+//          we will *STOP* using the pref and use CheckPermissions like 
+//          DOMDownload and DownloadEvent.
 //
 [NoInterfaceObject,
  NavigatorProperty="mozDownloadManager",
@@ -29,21 +29,25 @@ enum DownloadState {
 interface DOMDownloadManager : EventTarget {
   // This promise returns an array of downloads with all the current
   // download objects.
-  Promise getDownloads();
+  Promise<sequence<DOMDownload>> getDownloads();
 
   // Removes one download from the downloads set. Returns a promise resolved
   // with the finalized download.
-  Promise remove(DOMDownload download);
+  [UnsafeInPrerendering]
+  Promise<DOMDownload> remove(DOMDownload download);
 
-  // Removes all the completed downloads from the set.
-  Promise clearAllDone();
+  // Removes all the completed downloads from the set.  Returns an
+  // array of the completed downloads that were removed.
+  [UnsafeInPrerendering]
+  Promise<sequence<DOMDownload>> clearAllDone();
 
   // Fires when a new download starts.
   attribute EventHandler ondownloadstart;
 };
 
 [JSImplementation="@mozilla.org/downloads/download;1",
- Func="Navigator::HasDownloadsSupport"]
+ Pref="dom.mozDownloads.enabled",
+ CheckPermissions="downloads"]
 interface DOMDownload : EventTarget {
   // The full size of the resource.
   readonly attribute long long totalBytes;
@@ -54,9 +58,16 @@ interface DOMDownload : EventTarget {
   // The url of the resource.
   readonly attribute DOMString url;
 
-  // The path in local storage where the file will end up once the download
+  // The full path in local storage where the file will end up once the download
   // is complete.
   readonly attribute DOMString path;
+
+  // The DeviceStorage volume name on which the file is being downloaded.
+  readonly attribute DOMString storageName;
+
+  // The DeviceStorage path on the volume with 'storageName' of the file being
+  // downloaded.
+  readonly attribute DOMString storagePath;
 
   // The state of the download.
   readonly attribute DownloadState state;
@@ -76,11 +87,13 @@ interface DOMDownload : EventTarget {
   readonly attribute DOMError? error;
 
   // Pauses the download.
-  Promise pause();
+  [UnsafeInPrerendering]
+  Promise<DOMDownload> pause();
 
   // Resumes the download. This resolves only once the download has
   // succeeded.
-  Promise resume();
+  [UnsafeInPrerendering]
+  Promise<DOMDownload> resume();
 
   // This event is triggered anytime a property of the object changes:
   // - when the transfer progresses, updating currentBytes.

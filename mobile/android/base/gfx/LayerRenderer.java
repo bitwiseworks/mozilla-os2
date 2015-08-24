@@ -26,13 +26,17 @@ import android.graphics.RectF;
 import android.opengl.GLES20;
 import android.os.SystemClock;
 import android.util.Log;
+
 import org.mozilla.gecko.mozglue.JNITarget;
+import org.mozilla.gecko.util.ThreadUtils;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.ArrayList;
+import java.util.List;
 
 import javax.microedition.khronos.egl.EGLConfig;
 
@@ -55,8 +59,9 @@ public class LayerRenderer implements Tabs.OnTabsChangedListener {
     private static final long NANOS_PER_MS = 1000000;
     private static final int NANOS_PER_SECOND = 1000000000;
 
+    private static final int MAX_SCROLL_SPEED_TO_REQUEST_ZOOM_RENDER = 5;
+
     private final LayerView mView;
-    private TextLayer mFrameRateLayer;
     private final ScrollbarLayer mHorizScrollLayer;
     private final ScrollbarLayer mVertScrollLayer;
     private final FadeRunnable mFadeRunnable;
@@ -70,10 +75,10 @@ public class LayerRenderer implements Tabs.OnTabsChangedListener {
     private long mLastFrameTime;
     private final CopyOnWriteArrayList<RenderTask> mTasks;
 
-    private CopyOnWriteArrayList<Layer> mExtraLayers = new CopyOnWriteArrayList<Layer>();
+    private final CopyOnWriteArrayList<Layer> mExtraLayers = new CopyOnWriteArrayList<Layer>();
 
     // Dropped frames display
-    private int[] mFrameTimings;
+    private final int[] mFrameTimings;
     private int mCurrentFrame, mFrameTimingsSum, mDroppedFrames;
 
     // Render profiling output
@@ -90,6 +95,10 @@ public class LayerRenderer implements Tabs.OnTabsChangedListener {
     private int mTextureHandle;
     private int mSampleHandle;
     private int mTMatrixHandle;
+
+    private List<LayerView.ZoomedViewListener> mZoomedViewListeners;
+    private float mLastViewLeft;
+    private float mLastViewTop;
 
     // column-major matrix applied to each vertex to shift the viewport from
     // one ranging from (-1, -1),(1,1) to (0,0),(1,1) and to scale all sizes by
@@ -136,10 +145,8 @@ public class LayerRenderer implements Tabs.OnTabsChangedListener {
 
     public LayerRenderer(LayerView view) {
         mView = view;
-        try {
-            mOverscrollColor = view.getContext().getResources().getColor(R.color.background_normal);
-        } catch (Resources.NotFoundException nfe) { mOverscrollColor = Color.BLACK; }
-        
+        setOverscrollColor(R.color.background_normal);
+
         Bitmap scrollbarImage = view.getScrollbarImage();
         IntSize size = new IntSize(scrollbarImage.getWidth(), scrollbarImage.getHeight());
         scrollbarImage = expandCanvasToPowerOfTwo(scrollbarImage, size);
@@ -161,6 +168,7 @@ public class LayerRenderer implements Tabs.OnTabsChangedListener {
         mCoordBuffer = mCoordByteBuffer.asFloatBuffer();
 
         Tabs.registerOnTabsChangedListener(this);
+        mZoomedViewListeners = new ArrayList<LayerView.ZoomedViewListener>();
     }
 
     private Bitmap expandCanvasToPowerOfTwo(Bitmap image, IntSize size) {
@@ -187,16 +195,20 @@ public class LayerRenderer implements Tabs.OnTabsChangedListener {
         mCoordBuffer = null;
         mHorizScrollLayer.destroy();
         mVertScrollLayer.destroy();
-        if (mFrameRateLayer != null) {
-            mFrameRateLayer.destroy();
-        }
         Tabs.unregisterOnTabsChangedListener(this);
+        mZoomedViewListeners.clear();
     }
 
     void onSurfaceCreated(EGLConfig config) {
         checkMonitoringEnabled();
         createDefaultProgram();
         activateDefaultProgram();
+    }
+
+    void setOverscrollColor(int colorId) {
+        try {
+            mOverscrollColor = mView.getContext().getResources().getColor(colorId);
+        } catch (Resources.NotFoundException nfe) { mOverscrollColor = Color.BLACK; }
     }
 
     public void createDefaultProgram() {
@@ -243,6 +255,15 @@ public class LayerRenderer implements Tabs.OnTabsChangedListener {
         GLES20.glDisableVertexAttribArray(mTextureHandle);
         GLES20.glDisableVertexAttribArray(mPositionHandle);
         GLES20.glUseProgram(0);
+    }
+
+    void restoreState(boolean enableScissor, int scissorX, int scissorY, int scissorW, int scissorH) {
+        GLES20.glScissor(scissorX, scissorY, scissorW, scissorH);
+        if (enableScissor) {
+            GLES20.glEnable(GLES20.GL_SCISSOR_TEST);
+        } else {
+            GLES20.glDisable(GLES20.GL_SCISSOR_TEST);
+        }
     }
 
     public int getMaxTextureSize() {
@@ -346,43 +367,10 @@ public class LayerRenderer implements Tabs.OnTabsChangedListener {
         mCurrentFrame = (mCurrentFrame + 1) % mFrameTimings.length;
 
         int averageTime = mFrameTimingsSum / mFrameTimings.length;
-        mFrameRateLayer.beginTransaction();     // called on compositor thread
-        try {
-            mFrameRateLayer.setText(averageTime + " ms/" + mDroppedFrames);
-        } finally {
-            mFrameRateLayer.endTransaction();
-        }
-    }
-
-    /* Given the new dimensions for the surface, moves the frame rate layer appropriately. */
-    private void moveFrameRateLayer(int width, int height) {
-        mFrameRateLayer.beginTransaction();     // called on compositor thread
-        try {
-            Rect position = new Rect(width - FRAME_RATE_METER_WIDTH - 8,
-                                    height - FRAME_RATE_METER_HEIGHT + 8,
-                                    width - 8,
-                                    height + 8);
-            mFrameRateLayer.setPosition(position);
-        } finally {
-            mFrameRateLayer.endTransaction();
-        }
     }
 
     void checkMonitoringEnabled() {
-        /* Do this I/O off the main thread to minimize its impact on startup time. */
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                Context context = mView.getContext();
-                SharedPreferences preferences = context.getSharedPreferences("GeckoApp", 0);
-                if (preferences.getBoolean("showFrameRate", false)) {
-                    IntSize frameRateLayerSize = new IntSize(FRAME_RATE_METER_WIDTH, FRAME_RATE_METER_HEIGHT);
-                    mFrameRateLayer = TextLayer.create(frameRateLayerSize, "-- ms/--");
-                    moveFrameRateLayer(mView.getWidth(), mView.getHeight());
-                }
-                mProfileRender = Log.isLoggable(PROFTAG, Log.DEBUG);
-            }
-        }).start();
+        mProfileRender = Log.isLoggable(PROFTAG, Log.DEBUG);
     }
 
     /*
@@ -441,9 +429,9 @@ public class LayerRenderer implements Tabs.OnTabsChangedListener {
         // The timestamp recording the start of this frame.
         private long mFrameStartTime;
         // A fixed snapshot of the viewport metrics that this frame is using to render content.
-        private ImmutableViewportMetrics mFrameMetrics;
+        private final ImmutableViewportMetrics mFrameMetrics;
         // A rendering context for page-positioned layers, and one for screen-positioned layers.
-        private RenderContext mPageContext, mScreenContext;
+        private final RenderContext mPageContext, mScreenContext;
         // Whether a layer was updated.
         private boolean mUpdated;
         private final Rect mPageRect;
@@ -504,9 +492,11 @@ public class LayerRenderer implements Tabs.OnTabsChangedListener {
             // Run through pre-render tasks
             runRenderTasks(mTasks, false, mFrameStartTime);
 
-            if (!mPageContext.fuzzyEquals(mLastPageContext) && !mView.isFullScreen()) {
+            boolean hideScrollbars = (mView.getFullScreenState() == FullScreenState.NON_ROOT_ELEMENT);
+            if (!mPageContext.fuzzyEquals(mLastPageContext) && !hideScrollbars) {
                 // The viewport or page changed, so show the scrollbars again
-                // as per UX decision. Don't do this if we're in full-screen mode though.
+                // as per UX decision. Don't do this if we're disabling scrolling due to
+                // full-screen mode though.
                 mVertScrollLayer.unfade();
                 mHorizScrollLayer.unfade();
                 mFadeRunnable.scheduleStartFade(ScrollbarLayer.FADE_DELAY);
@@ -524,56 +514,12 @@ public class LayerRenderer implements Tabs.OnTabsChangedListener {
                 mUpdated &= rootLayer.update(mPageContext);
             }
 
-            if (mFrameRateLayer != null) {
-                // Called on compositor thread.
-                mUpdated &= mFrameRateLayer.update(mScreenContext);
-            }
-
             mUpdated &= mVertScrollLayer.update(mPageContext);  // called on compositor thread
             mUpdated &= mHorizScrollLayer.update(mPageContext); // called on compositor thread
 
             for (Layer layer : mExtraLayers) {
                 mUpdated &= layer.update(mPageContext); // called on compositor thread
             }
-        }
-
-        /** Retrieves the bounds for the layer, rounded in such a way that it
-         * can be used as a mask for something that will render underneath it.
-         * This will round the bounds inwards, but stretch the mask towards any
-         * near page edge, where near is considered to be 'within 2 pixels'.
-         * Returns null if the given layer is null.
-         */
-        private Rect getMaskForLayer(Layer layer) {
-            if (layer == null) {
-                return null;
-            }
-
-            RectF bounds = RectUtils.contract(layer.getBounds(mPageContext), 1.0f, 1.0f);
-            Rect mask = RectUtils.roundIn(bounds);
-
-            // If the mask is within two pixels of any page edge, stretch it over
-            // that edge. This is to avoid drawing thin slivers when masking
-            // layers.
-            if (mask.top <= 2) {
-                mask.top = -1;
-            }
-            if (mask.left <= 2) {
-                mask.left = -1;
-            }
-
-            // Because we're drawing relative to the page-rect, we only need to
-            // take into account its width and height (and not its origin)
-            int pageRight = mPageRect.width();
-            int pageBottom = mPageRect.height();
-
-            if (mask.right >= pageRight - 2) {
-                mask.right = pageRight + 1;
-            }
-            if (mask.bottom >= pageBottom - 2) {
-                mask.bottom = pageBottom + 1;
-            }
-
-            return mask;
         }
 
         private void clear(int color) {
@@ -591,7 +537,7 @@ public class LayerRenderer implements Tabs.OnTabsChangedListener {
         @JNITarget
         public void drawBackground() {
             // Any GL state which is changed here must be restored in
-            // CompositorOGL::RestoreState
+            // restoreState(...)
 
             GLES20.glDisable(GLES20.GL_SCISSOR_TEST);
 
@@ -607,20 +553,10 @@ public class LayerRenderer implements Tabs.OnTabsChangedListener {
             GLES20.glDisable(GLES20.GL_SCISSOR_TEST);
         }
 
-        // Draws the layer the client added to us.
-        void drawRootLayer() {
-            Layer rootLayer = mView.getLayerClient().getRoot();
-            if (rootLayer == null) {
-                return;
-            }
-
-            rootLayer.draw(mPageContext);
-        }
-
         @JNITarget
         public void drawForeground() {
             // Any GL state which is changed here must be restored in
-            // CompositorOGL::RestoreState
+            // restoreState(...)
 
             /* Draw any extra layers that were added (likely plugins) */
             if (mExtraLayers.size() > 0) {
@@ -660,14 +596,42 @@ public class LayerRenderer implements Tabs.OnTabsChangedListener {
 
             runRenderTasks(mTasks, true, mFrameStartTime);
 
-            /* Draw the FPS. */
-            if (mFrameRateLayer != null) {
-                updateDroppedFrames(mFrameStartTime);
+        }
 
-                GLES20.glEnable(GLES20.GL_BLEND);
-                GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
-                mFrameRateLayer.draw(mScreenContext);
+        private void maybeRequestZoomedViewRender(RenderContext context) {
+            // Concurrently update of mZoomedViewListeners should not be an issue here
+            // because the following line is just a short-circuit
+            if (mZoomedViewListeners.size() == 0) {
+                return;
             }
+
+            // When scrolling fast, do not request zoomed view render to avoid to slow down
+            // the scroll in the main view.
+            // Speed is estimated using the offset changes between 2 display frame calls
+            final float viewLeft = context.viewport.left - context.offset.x;
+            final float viewTop = context.viewport.top - context.offset.y;
+            boolean shouldWaitToRender = false;
+
+            if (Math.abs(mLastViewLeft - viewLeft) > MAX_SCROLL_SPEED_TO_REQUEST_ZOOM_RENDER ||
+                Math.abs(mLastViewTop - viewTop) > MAX_SCROLL_SPEED_TO_REQUEST_ZOOM_RENDER) {
+                shouldWaitToRender = true;
+            }
+
+            mLastViewLeft = viewLeft;
+            mLastViewTop = viewTop;
+
+            if (shouldWaitToRender) {
+                return;
+            }
+
+            ThreadUtils.postToUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    for (LayerView.ZoomedViewListener listener : mZoomedViewListeners) {
+                        listener.requestZoomedViewRender();
+                    }
+                }
+            });
         }
 
         /** This function is invoked via JNI; be careful when modifying signature. */
@@ -678,6 +642,8 @@ public class LayerRenderer implements Tabs.OnTabsChangedListener {
                 mView.requestRender();
 
             PanningPerfAPI.recordFrameTime();
+
+            maybeRequestZoomedViewRender(mPageContext);
 
             /* Used by robocop for testing purposes */
             IntBuffer pixelBuffer = mPixelBuffer;
@@ -715,11 +681,37 @@ public class LayerRenderer implements Tabs.OnTabsChangedListener {
         // thread, so this may need to be changed if any problems appear.
         if (msg == Tabs.TabEvents.SELECTED) {
             if (mView != null) {
+                final int overscrollColor =
+                        (tab.isPrivate() ? R.color.background_private : R.color.background_normal);
+                setOverscrollColor(overscrollColor);
+
                 if (mView.getChildAt(0) != null) {
                     mView.getChildAt(0).setBackgroundColor(tab.getBackgroundColor());
                 }
                 mView.setPaintState(LayerView.PAINT_START);
             }
         }
+    }
+
+    public void updateZoomedView(final ByteBuffer data) {
+        ThreadUtils.postToUiThread(new Runnable() {
+            @Override
+            public void run() {
+                for (LayerView.ZoomedViewListener listener : mZoomedViewListeners) {
+                    data.position(0);
+                    listener.updateView(data);
+                }
+            }
+        });
+    }
+
+    public void addZoomedViewListener(LayerView.ZoomedViewListener listener) {
+        ThreadUtils.assertOnUiThread();
+        mZoomedViewListeners.add(listener);
+    }
+
+    public void removeZoomedViewListener(LayerView.ZoomedViewListener listener) {
+        ThreadUtils.assertOnUiThread();
+        mZoomedViewListeners.remove(listener);
     }
 }

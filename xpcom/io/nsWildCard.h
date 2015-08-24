@@ -1,4 +1,5 @@
-/* -*- Mode: C; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -37,9 +38,9 @@
 #define INVALID_SXP -2
 #define VALID_SXP 1
 
-int NS_WildCardValid(const char *expr);
+int NS_WildCardValid(const char* aExpr);
 
-int NS_WildCardValid(const char16_t *expr);
+int NS_WildCardValid(const char16_t* aExpr);
 
 /* return values for the search routines */
 #define MATCH 0
@@ -54,10 +55,10 @@ int NS_WildCardValid(const char16_t *expr);
  * Returns 0 on match and 1 on non-match.
  */
 
-int NS_WildCardMatch(const char *str, const char *expr,
-                            bool case_insensitive);
+int NS_WildCardMatch(const char* aStr, const char* aExpr,
+                     bool aCaseInsensitive);
 
-int NS_WildCardMatch(const char16_t *str, const char16_t *expr,
-                            bool case_insensitive);
+int NS_WildCardMatch(const char16_t* aStr, const char16_t* aExpr,
+                     bool aCaseInsensitive);
 
 #endif /* nsWildCard_h__ */

@@ -1,10 +1,14 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 package org.mozilla.gecko.tests;
 
 public class testAwesomebar extends BaseTest {
     public void testAwesomebar() {
         blockForGeckoReady();
 
-        String url = getAbsoluteUrl("/robocop/robocop_blank_01.html");
+        String url = getAbsoluteUrl(StringHelper.ROBOCOP_BLANK_PAGE_01_URL);
         inputAndLoadUrl(url);
 
         mDriver.setupScrollHandling();

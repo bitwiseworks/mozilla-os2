@@ -256,7 +256,8 @@ nsMathMLmpaddedFrame::UpdateValue(int32_t                  aSign,
                                   int32_t                  aPseudoUnit,
                                   const nsCSSValue&        aCSSValue,
                                   const nsHTMLReflowMetrics& aDesiredSize,
-                                  nscoord&                 aValueToUpdate) const
+                                  nscoord&                 aValueToUpdate,
+                                  float                aFontSizeInflation) const
 {
   nsCSSUnit unit = aCSSValue.GetUnit();
   if (NS_MATHML_SIGN_INVALID != aSign && eCSSUnit_Null != unit) {
@@ -269,11 +270,11 @@ nsMathMLmpaddedFrame::UpdateValue(int32_t                  aSign,
              break;
 
         case NS_MATHML_PSEUDO_UNIT_HEIGHT:
-             scaler = aDesiredSize.TopAscent();
+             scaler = aDesiredSize.BlockStartAscent();
              break;
 
         case NS_MATHML_PSEUDO_UNIT_DEPTH:
-             scaler = aDesiredSize.Height() - aDesiredSize.TopAscent();
+             scaler = aDesiredSize.Height() - aDesiredSize.BlockStartAscent();
              break;
 
         default:
@@ -289,7 +290,8 @@ nsMathMLmpaddedFrame::UpdateValue(int32_t                  aSign,
     else if (eCSSUnit_Percent == unit)
       amount = NSToCoordRound(float(scaler) * aCSSValue.GetPercentValue());
     else
-      amount = CalcLength(PresContext(), mStyleContext, aCSSValue);
+      amount = CalcLength(PresContext(), mStyleContext, aCSSValue,
+                          aFontSizeInflation);
 
     if (NS_MATHML_SIGN_PLUS == aSign)
       aValueToUpdate += amount;
@@ -300,7 +302,7 @@ nsMathMLmpaddedFrame::UpdateValue(int32_t                  aSign,
   }
 }
 
-nsresult
+void
 nsMathMLmpaddedFrame::Reflow(nsPresContext*          aPresContext,
                              nsHTMLReflowMetrics&     aDesiredSize,
                              const nsHTMLReflowState& aReflowState,
@@ -310,10 +312,9 @@ nsMathMLmpaddedFrame::Reflow(nsPresContext*          aPresContext,
 
   ///////////////
   // Let the base class format our content like an inferred mrow
-  nsresult rv = nsMathMLContainerFrame::Reflow(aPresContext, aDesiredSize,
-                                               aReflowState, aStatus);
+  nsMathMLContainerFrame::Reflow(aPresContext, aDesiredSize,
+                                 aReflowState, aStatus);
   //NS_ASSERTION(NS_FRAME_IS_COMPLETE(aStatus), "bad status");
-  return rv;
 }
 
 /* virtual */ nsresult
@@ -328,8 +329,8 @@ nsMathMLmpaddedFrame::Place(nsRenderingContext& aRenderingContext,
     return rv;
   }
 
-  nscoord height = aDesiredSize.TopAscent();
-  nscoord depth  = aDesiredSize.Height() - aDesiredSize.TopAscent();
+  nscoord height = aDesiredSize.BlockStartAscent();
+  nscoord depth  = aDesiredSize.Height() - aDesiredSize.BlockStartAscent();
   // The REC says:
   //
   // "The lspace attribute ('leading' space) specifies the horizontal location
@@ -360,40 +361,41 @@ nsMathMLmpaddedFrame::Place(nsRenderingContext& aRenderingContext,
 
   int32_t pseudoUnit;
   nscoord initialWidth = width;
+  float fontSizeInflation = nsLayoutUtils::FontSizeInflationFor(this);
 
   // update width
   pseudoUnit = (mWidthPseudoUnit == NS_MATHML_PSEUDO_UNIT_ITSELF)
              ? NS_MATHML_PSEUDO_UNIT_WIDTH : mWidthPseudoUnit;
   UpdateValue(mWidthSign, pseudoUnit, mWidth,
-              aDesiredSize, width);
+              aDesiredSize, width, fontSizeInflation);
   width = std::max(0, width);
 
   // update "height" (this is the ascent in the terminology of the REC)
   pseudoUnit = (mHeightPseudoUnit == NS_MATHML_PSEUDO_UNIT_ITSELF)
              ? NS_MATHML_PSEUDO_UNIT_HEIGHT : mHeightPseudoUnit;
   UpdateValue(mHeightSign, pseudoUnit, mHeight,
-              aDesiredSize, height);
+              aDesiredSize, height, fontSizeInflation);
   height = std::max(0, height);
 
   // update "depth" (this is the descent in the terminology of the REC)
   pseudoUnit = (mDepthPseudoUnit == NS_MATHML_PSEUDO_UNIT_ITSELF)
              ? NS_MATHML_PSEUDO_UNIT_DEPTH : mDepthPseudoUnit;
   UpdateValue(mDepthSign, pseudoUnit, mDepth,
-              aDesiredSize, depth);
+              aDesiredSize, depth, fontSizeInflation);
   depth = std::max(0, depth);
 
   // update lspace
   if (mLeadingSpacePseudoUnit != NS_MATHML_PSEUDO_UNIT_ITSELF) {
     pseudoUnit = mLeadingSpacePseudoUnit;
     UpdateValue(mLeadingSpaceSign, pseudoUnit, mLeadingSpace,
-                aDesiredSize, lspace);
+                aDesiredSize, lspace, fontSizeInflation);
   }
 
   // update voffset
   if (mVerticalOffsetPseudoUnit != NS_MATHML_PSEUDO_UNIT_ITSELF) {
     pseudoUnit = mVerticalOffsetPseudoUnit;
     UpdateValue(mVerticalOffsetSign, pseudoUnit, mVerticalOffset,
-                aDesiredSize, voffset);
+                aDesiredSize, voffset, fontSizeInflation);
   }
   // do the padding now that we have everything
   // The idea here is to maintain the invariant that <mpadded>...</mpadded> (i.e.,
@@ -419,19 +421,19 @@ nsMathMLmpaddedFrame::Place(nsRenderingContext& aRenderingContext,
   nscoord dx = (StyleVisibility()->mDirection ?
                 width - initialWidth - lspace : lspace);
     
-  aDesiredSize.SetTopAscent(height);
+  aDesiredSize.SetBlockStartAscent(height);
   aDesiredSize.Width() = mBoundingMetrics.width;
-  aDesiredSize.Height() = depth + aDesiredSize.TopAscent();
+  aDesiredSize.Height() = depth + aDesiredSize.BlockStartAscent();
   mBoundingMetrics.ascent = height;
   mBoundingMetrics.descent = depth;
   aDesiredSize.mBoundingMetrics = mBoundingMetrics;
 
   mReference.x = 0;
-  mReference.y = aDesiredSize.TopAscent();
+  mReference.y = aDesiredSize.BlockStartAscent();
 
   if (aPlaceOrigin) {
     // Finish reflowing child frames, positioning their origins.
-    PositionRowChildFrames(dx, aDesiredSize.TopAscent() - voffset);
+    PositionRowChildFrames(dx, aDesiredSize.BlockStartAscent() - voffset);
   }
 
   return NS_OK;

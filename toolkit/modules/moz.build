@@ -9,8 +9,10 @@ BROWSER_CHROME_MANIFESTS += ['tests/browser/browser.ini']
 MOCHITEST_MANIFESTS += ['tests/mochitest/mochitest.ini']
 MOCHITEST_CHROME_MANIFESTS += ['tests/chrome/chrome.ini']
 
+SPHINX_TREES['toolkit_modules'] = 'docs'
+
 EXTRA_JS_MODULES += [
-    'AsyncShutdown.jsm',
+    'Battery.jsm',
     'BinarySearch.jsm',
     'BrowserUtils.jsm',
     'CharsetMenu.jsm',
@@ -18,30 +20,31 @@ EXTRA_JS_MODULES += [
     'DeferredTask.jsm',
     'Deprecated.jsm',
     'Dict.jsm',
-    'DirectoryLinksProvider.jsm',
     'FileUtils.jsm',
     'Finder.jsm',
     'Geometry.jsm',
     'Http.jsm',
     'InlineSpellChecker.jsm',
+    'InlineSpellCheckerContent.jsm',
     'LoadContextInfo.jsm',
     'Log.jsm',
     'NewTabUtils.jsm',
     'PageMenu.jsm',
+    'PageMetadata.jsm',
     'PermissionsUtils.jsm',
     'PopupNotifications.jsm',
     'Preferences.jsm',
     'PrivateBrowsingUtils.jsm',
     'Promise-backend.js',
     'Promise.jsm',
+    'PromiseUtils.jsm',
     'PropertyListUtils.jsm',
-    'RemoteAddonsChild.jsm',
-    'RemoteAddonsParent.jsm',
     'RemoteController.jsm',
     'RemoteFinder.jsm',
     'RemoteSecurityUI.jsm',
     'RemoteWebNavigation.jsm',
     'RemoteWebProgress.jsm',
+    'secondscreen/SimpleServiceDiscovery.jsm',
     'SelectContentHelper.jsm',
     'SelectParentHelper.jsm',
     'sessionstore/FormData.jsm',
@@ -54,12 +57,16 @@ EXTRA_JS_MODULES += [
     'Task.jsm',
     'TelemetryTimestamps.jsm',
     'Timer.jsm',
+    'WebChannel.jsm',
     'ZipUtils.jsm',
 ]
 
 EXTRA_PP_JS_MODULES += [
     'CertUtils.jsm',
+    'GMPInstallManager.jsm',
+    'GMPUtils.jsm',
     'ResetProfile.jsm',
+    'secondscreen/RokuApp.jsm',
     'Services.jsm',
     'Troubleshoot.jsm',
     'UpdateChannel.jsm',
@@ -71,6 +78,8 @@ if 'Android' != CONFIG['OS_TARGET']:
     EXTRA_PP_JS_MODULES += [
         'LightweightThemeConsumer.jsm',
     ]
+else:
+    DEFINES['ANDROID'] = True
 
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':

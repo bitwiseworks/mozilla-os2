@@ -114,7 +114,7 @@ nsGridRowLeafLayout::PopulateBoxSizes(nsIFrame* aBox, nsBoxLayoutState& aState, 
     nsBoxSize* start = nullptr;
     nsBoxSize* last = nullptr;
     nsBoxSize* current = nullptr;
-    nsIFrame* child = aBox->GetChildBox();
+    nsIFrame* child = nsBox::GetChildBox(aBox);
     for (int i=0; i < count; i++)
     {
       column = grid->GetColumnAt(i,isHorizontal); 
@@ -206,7 +206,7 @@ nsGridRowLeafLayout::PopulateBoxSizes(nsIFrame* aBox, nsBoxLayoutState& aState, 
       }
 
       if (child && !column->mIsBogus)
-        child = child->GetNextBox();
+        child = nsBox::GetNextBox(child);
 
     }
     aBoxSizes = start;
@@ -289,7 +289,7 @@ nsGridRowLeafLayout::DirtyRows(nsIFrame* aBox, nsBoxLayoutState& aState)
   if (aBox) {
     // mark us dirty
     // XXXldb We probably don't want to walk up the ancestor chain
-    // calling MarkIntrinsicWidthsDirty for every row.
+    // calling MarkIntrinsicISizesDirty for every row.
     aState.PresShell()->FrameNeedsReflow(aBox, nsIPresShell::eTreeChange,
                                          NS_FRAME_IS_DIRTY);
   }
@@ -299,12 +299,12 @@ void
 nsGridRowLeafLayout::CountRowsColumns(nsIFrame* aBox, int32_t& aRowCount, int32_t& aComputedColumnCount)
 {
   if (aBox) {
-    nsIFrame* child = aBox->GetChildBox();
+    nsIFrame* child = nsBox::GetChildBox(aBox);
 
     // count the children
     int32_t columnCount = 0;
     while(child) {
-      child = child->GetNextBox();
+      child = nsBox::GetNextBox(child);
       columnCount++;
     }
 

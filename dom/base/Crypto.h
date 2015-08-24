@@ -4,18 +4,9 @@
 #ifndef mozilla_dom_Crypto_h
 #define mozilla_dom_Crypto_h
 
-#ifdef MOZ_DISABLE_CRYPTOLEGACY
 #include "nsIDOMCrypto.h"
-#else
-#include "nsIDOMCryptoLegacy.h"
-namespace mozilla {
-namespace dom {
-class CRMFObject;
-}
-}
-#endif
-
-#include "nsPIDOMWindow.h"
+#include "mozilla/dom/SubtleCrypto.h"
+#include "nsIGlobalObject.h"
 
 #include "nsWrapperCache.h"
 #include "mozilla/dom/TypedArray.h"
@@ -31,9 +22,11 @@ namespace dom {
 class Crypto : public nsIDOMCrypto,
                public nsWrapperCache
 {
+protected:
+  virtual ~Crypto();
+
 public:
   Crypto();
-  virtual ~Crypto();
 
   NS_DECL_NSIDOMCRYPTO
 
@@ -42,57 +35,29 @@ public:
 
   void
   GetRandomValues(JSContext* aCx, const ArrayBufferView& aArray,
-		  JS::MutableHandle<JSObject*> aRetval,
-		  ErrorResult& aRv);
+                  JS::MutableHandle<JSObject*> aRetval,
+                  ErrorResult& aRv);
 
-#ifndef MOZ_DISABLE_CRYPTOLEGACY
-  virtual bool EnableSmartCardEvents();
-  virtual void SetEnableSmartCardEvents(bool aEnable, ErrorResult& aRv);
-
-  virtual void GetVersion(nsString& aVersion);
-
-  virtual mozilla::dom::CRMFObject*
-  GenerateCRMFRequest(JSContext* aContext,
-                      const nsCString& aReqDN,
-                      const nsCString& aRegToken,
-                      const nsCString& aAuthenticator,
-                      const nsCString& aEaCert,
-                      const nsCString& aJsCallback,
-                      const Sequence<JS::Value>& aArgs,
-                      ErrorResult& aRv);
-
-  virtual void ImportUserCertificates(const nsAString& aNickname,
-                                      const nsAString& aCmmfResponse,
-                                      bool aDoForcedBackup,
-                                      nsAString& aReturn,
-                                      ErrorResult& aRv);
-
-  virtual void SignText(JSContext* aContext,
-                        const nsAString& aStringToSign,
-                        const nsAString& aCaOption,
-                        const Sequence<nsCString>& aArgs,
-                        nsAString& aReturn);
-
-  virtual void Logout(ErrorResult& aRv);
-
-#endif
+  SubtleCrypto*
+  Subtle();
 
   // WebIDL
 
-  nsPIDOMWindow*
+  nsIGlobalObject*
   GetParentObject() const
   {
-    return mWindow;
+    return mParent;
   }
 
   virtual JSObject*
-  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  WrapObject(JSContext* aCx) override;
 
   static uint8_t*
   GetRandomValues(uint32_t aLength);
 
 private:
-  nsCOMPtr<nsPIDOMWindow> mWindow;
+  nsCOMPtr<nsIGlobalObject> mParent;
+  nsRefPtr<SubtleCrypto> mSubtle;
 };
 
 } // namespace dom

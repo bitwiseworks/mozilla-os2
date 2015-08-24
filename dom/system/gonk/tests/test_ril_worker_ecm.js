@@ -7,25 +7,6 @@ function run_test() {
   run_next_test();
 }
 
-function _getWorker() {
-  let _postedMessage;
-  let _worker = newWorker({
-    postRILMessage: function(data) {
-    },
-    postMessage: function(message) {
-      _postedMessage = message;
-    }
-  });
-  return {
-    get postedMessage() {
-      return _postedMessage;
-    },
-    get worker() {
-      return _worker;
-    }
-  };
-}
-
 var timeoutCallback = null;
 var timeoutDelayMs = 0;
 const TIMER_ID = 1234;
@@ -54,7 +35,7 @@ function fireTimeout() {
 }
 
 add_test(function test_enter_emergencyCbMode() {
-  let workerHelper = _getWorker();
+  let workerHelper = newInterceptWorker();
   let worker = workerHelper.worker;
   let context = worker.ContextPool._contexts[0];
 
@@ -79,7 +60,7 @@ add_test(function test_enter_emergencyCbMode() {
 });
 
 add_test(function test_exit_emergencyCbMode() {
-  let workerHelper = _getWorker();
+  let workerHelper = newInterceptWorker();
   let worker = workerHelper.worker;
   let context = worker.ContextPool._contexts[0];
 
@@ -101,7 +82,7 @@ add_test(function test_exit_emergencyCbMode() {
 });
 
 add_test(function test_request_exit_emergencyCbMode_when_timeout() {
-  let workerHelper = _getWorker();
+  let workerHelper = newInterceptWorker();
   let worker = workerHelper.worker;
   let context = worker.ContextPool._contexts[0];
 
@@ -127,7 +108,7 @@ add_test(function test_request_exit_emergencyCbMode_when_timeout() {
 });
 
 add_test(function test_request_exit_emergencyCbMode_when_dial() {
-  let workerHelper = _getWorker();
+  let workerHelper = newInterceptWorker();
   let worker = workerHelper.worker;
   let context = worker.ContextPool._contexts[0];
 
@@ -142,7 +123,8 @@ add_test(function test_request_exit_emergencyCbMode_when_dial() {
 
   // Dial non-emergency call.
   context.RIL.dial({number: "0912345678",
-                  isDialEmergency: false});
+                    isEmergency: false,
+                    isDialEmergency: false});
 
   // Should clear timeout event.
   do_check_eq(context.RIL._exitEmergencyCbModeTimeoutID, null);
@@ -154,7 +136,7 @@ add_test(function test_request_exit_emergencyCbMode_when_dial() {
 });
 
 add_test(function test_request_exit_emergencyCbMode_explicitly() {
-  let workerHelper = _getWorker();
+  let workerHelper = newInterceptWorker();
   let worker = workerHelper.worker;
   let context = worker.ContextPool._contexts[0];
 
@@ -185,4 +167,3 @@ add_test(function test_request_exit_emergencyCbMode_explicitly() {
 
   run_next_test();
 });
-

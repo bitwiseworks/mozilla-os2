@@ -1,0 +1,26 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+SOURCES += [
+    'nsCollationOS2.cpp',
+    'nsDateTimeFormatOS2.cpp',
+    'nsOS2Charset.cpp',
+    'nsOS2Locale.cpp',
+]
+
+FINAL_LIBRARY = 'xul'
+
+GENERATED_FILES = [
+    'os2charset.properties.h',
+]
+os2charset = GENERATED_FILES['os2charset.properties.h']
+os2charset.script = '../props2arrays.py'
+os2charset.inputs = ['os2charset.properties']
+
+LOCAL_INCLUDES += [
+    '..',
+]
+

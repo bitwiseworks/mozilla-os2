@@ -7,6 +7,7 @@
 #ifndef ds_LifoAlloc_h
 #define ds_LifoAlloc_h
 
+#include "mozilla/Attributes.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/MemoryChecking.h"
@@ -37,7 +38,7 @@ AlignPtr(void* orig)
                   "LIFO_ALLOC_ALIGN must be a power of two");
 
     char* result = (char*) ((uintptr_t(orig) + (LIFO_ALLOC_ALIGN - 1)) & (~LIFO_ALLOC_ALIGN + 1));
-    JS_ASSERT(uintptr_t(result) % LIFO_ALLOC_ALIGN == 0);
+    MOZ_ASSERT(uintptr_t(result) % LIFO_ALLOC_ALIGN == 0);
     return result;
 }
 
@@ -53,22 +54,22 @@ class BumpChunk
     char* bumpBase() const { return limit - bumpSpaceSize; }
 
     explicit BumpChunk(size_t bumpSpaceSize)
-      : bump(reinterpret_cast<char*>(MOZ_THIS_IN_INITIALIZER_LIST()) + sizeof(BumpChunk)),
+      : bump(reinterpret_cast<char*>(this) + sizeof(BumpChunk)),
         limit(bump + bumpSpaceSize),
         next_(nullptr), bumpSpaceSize(bumpSpaceSize)
     {
-        JS_ASSERT(bump == AlignPtr(bump));
+        MOZ_ASSERT(bump == AlignPtr(bump));
     }
 
     void setBump(void* ptr) {
-        JS_ASSERT(bumpBase() <= ptr);
-        JS_ASSERT(ptr <= limit);
+        MOZ_ASSERT(bumpBase() <= ptr);
+        MOZ_ASSERT(ptr <= limit);
 #if defined(DEBUG) || defined(MOZ_HAVE_MEM_CHECKS)
         char* prevBump = bump;
 #endif
         bump = static_cast<char*>(ptr);
 #ifdef DEBUG
-        JS_ASSERT(contains(prevBump));
+        MOZ_ASSERT(contains(prevBump));
 
         // Clobber the now-free space.
         if (prevBump > bump)
@@ -108,8 +109,8 @@ class BumpChunk
     void* mark() const { return bump; }
 
     void release(void* mark) {
-        JS_ASSERT(contains(mark));
-        JS_ASSERT(mark <= bump);
+        MOZ_ASSERT(contains(mark));
+        MOZ_ASSERT(mark <= bump);
         setBump(mark);
     }
 
@@ -136,7 +137,7 @@ class BumpChunk
         if (MOZ_UNLIKELY(newBump < bump))
             return nullptr;
 
-        JS_ASSERT(canAlloc(n)); // Ensure consistency between "can" and "try".
+        MOZ_ASSERT(canAlloc(n)); // Ensure consistency between "can" and "try".
         setBump(newBump);
         return aligned;
     }
@@ -163,8 +164,8 @@ class LifoAlloc
     size_t      curSize_;
     size_t      peakSize_;
 
-    void operator=(const LifoAlloc&) MOZ_DELETE;
-    LifoAlloc(const LifoAlloc&) MOZ_DELETE;
+    void operator=(const LifoAlloc&) = delete;
+    LifoAlloc(const LifoAlloc&) = delete;
 
     // Return a BumpChunk that can perform an allocation of at least size |n|
     // and add it to the chain appropriately.
@@ -174,7 +175,7 @@ class LifoAlloc
     BumpChunk* getOrCreateChunk(size_t n);
 
     void reset(size_t defaultChunkSize) {
-        JS_ASSERT(mozilla::RoundUpPow2(defaultChunkSize) == defaultChunkSize);
+        MOZ_ASSERT(mozilla::RoundUpPow2(defaultChunkSize) == defaultChunkSize);
         first = latest = last = nullptr;
         defaultChunkSize_ = defaultChunkSize;
         markCount = 0;
@@ -183,7 +184,7 @@ class LifoAlloc
 
     // Append unused chunks to the end of this LifoAlloc.
     void appendUnused(BumpChunk* start, BumpChunk* end) {
-        JS_ASSERT(start && end);
+        MOZ_ASSERT(start && end);
         if (last)
             last->setNext(start);
         else
@@ -194,7 +195,7 @@ class LifoAlloc
     // Append used chunks to the end of this LifoAlloc. We act as if all the
     // chunks in |this| are used, even if they're not, so memory may be wasted.
     void appendUsed(BumpChunk* otherFirst, BumpChunk* otherLatest, BumpChunk* otherLast) {
-        JS_ASSERT(otherFirst && otherLatest && otherLast);
+        MOZ_ASSERT(otherFirst && otherLatest && otherLast);
         if (last)
             last->setNext(otherFirst);
         else
@@ -209,7 +210,7 @@ class LifoAlloc
             peakSize_ = curSize_;
     }
     void decrementCurSize(size_t size) {
-        JS_ASSERT(curSize_ >= size);
+        MOZ_ASSERT(curSize_ >= size);
         curSize_ -= size;
     }
 
@@ -222,7 +223,8 @@ class LifoAlloc
 
     // Steal allocated chunks from |other|.
     void steal(LifoAlloc* other) {
-        JS_ASSERT(!other->markCount);
+        MOZ_ASSERT(!other->markCount);
+        MOZ_ASSERT(!latest);
 
         // Copy everything from |other| to |this| except for |peakSize_|, which
         // requires some care.
@@ -269,6 +271,14 @@ class LifoAlloc
         return result;
     }
 
+    MOZ_ALWAYS_INLINE
+    void* allocInfallible(size_t n) {
+        if (void* result = alloc(n))
+            return result;
+        CrashAtUnhandlableOOM("LifoAlloc::allocInfallible");
+        return nullptr;
+    }
+
     // Ensures that enough space exists to satisfy N bytes worth of
     // allocation requests, not necessarily contiguous. Note that this does
     // not guarantee a successful single allocation of N bytes.
@@ -290,7 +300,9 @@ class LifoAlloc
 
     template <typename T>
     T* newArray(size_t count) {
-        JS_STATIC_ASSERT(mozilla::IsPod<T>::value);
+        static_assert(mozilla::IsPod<T>::value,
+                      "T must be POD so that constructors (and destructors, "
+                      "when the LifoAlloc is freed) need not be called");
         return newArrayUninitialized<T>(count);
     }
 
@@ -298,7 +310,7 @@ class LifoAlloc
     // The caller is responsible for initialization.
     template <typename T>
     T* newArrayUninitialized(size_t count) {
-        if (count & mozilla::tl::MulOverflowMask<sizeof(T)>::value)
+        if (MOZ_UNLIKELY(count & mozilla::tl::MulOverflowMask<sizeof(T)>::value))
             return nullptr;
         return static_cast<T*>(alloc(sizeof(T) * count));
     }
@@ -330,7 +342,7 @@ class LifoAlloc
     }
 
     void releaseAll() {
-        JS_ASSERT(!markCount);
+        MOZ_ASSERT(!markCount);
         latest = first;
         if (latest)
             latest->resetBump();
@@ -368,6 +380,14 @@ class LifoAlloc
         return n;
     }
 
+    // Get the total size of the arena chunks (including unused space).
+    size_t computedSizeOfExcludingThis() const {
+        size_t n = 0;
+        for (BumpChunk* chunk = first; chunk; chunk = chunk->next())
+            n += chunk->computedSizeOfIncludingThis();
+        return n;
+    }
+
     // Like sizeOfExcludingThis(), but includes the size of the LifoAlloc itself.
     size_t sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const {
         return mallocSizeOf(this) + sizeOfExcludingThis(mallocSizeOf);
@@ -380,11 +400,12 @@ class LifoAlloc
     // Doesn't perform construction; useful for lazily-initialized POD types.
     template <typename T>
     MOZ_ALWAYS_INLINE
-    T* newPod() {
+    T* pod_malloc() {
         return static_cast<T*>(alloc(sizeof(T)));
     }
 
     JS_DECLARE_NEW_METHODS(new_, alloc, MOZ_ALWAYS_INLINE)
+    JS_DECLARE_NEW_METHODS(newInfallible, allocInfallible, MOZ_ALWAYS_INLINE)
 
     // A mutable enumeration of the allocated data.
     class Enum
@@ -399,7 +420,7 @@ class LifoAlloc
         // If there is not enough room in the remaining block for |size|,
         // advance to the next block and update the position.
         void ensureSpaceAndAlignment(size_t size) {
-            JS_ASSERT(!empty());
+            MOZ_ASSERT(!empty());
             char* aligned = detail::AlignPtr(position_);
             if (aligned + size > chunk_->end()) {
                 chunk_ = chunk_->next();
@@ -407,11 +428,11 @@ class LifoAlloc
             } else {
                 position_ = aligned;
             }
-            JS_ASSERT(uintptr_t(position_) + size <= uintptr_t(chunk_->end()));
+            MOZ_ASSERT(uintptr_t(position_) + size <= uintptr_t(chunk_->end()));
         }
 
       public:
-        Enum(LifoAlloc& alloc)
+        explicit Enum(LifoAlloc& alloc)
           : alloc_(&alloc),
             chunk_(alloc.first),
             position_(static_cast<char*>(alloc.first ? alloc.first->start() : nullptr))
@@ -484,34 +505,49 @@ class LifoAllocScope
     }
 
     void releaseEarly() {
-        JS_ASSERT(shouldRelease);
+        MOZ_ASSERT(shouldRelease);
         lifoAlloc->release(mark);
         shouldRelease = false;
     }
 };
 
+enum Fallibility {
+    Fallible,
+    Infallible
+};
+
+template <Fallibility fb>
 class LifoAllocPolicy
 {
     LifoAlloc& alloc_;
 
   public:
-    LifoAllocPolicy(LifoAlloc& alloc)
+    MOZ_IMPLICIT LifoAllocPolicy(LifoAlloc& alloc)
       : alloc_(alloc)
     {}
-    void* malloc_(size_t bytes) {
-        return alloc_.alloc(bytes);
+    template <typename T>
+    T* pod_malloc(size_t numElems) {
+        if (MOZ_UNLIKELY(numElems & mozilla::tl::MulOverflowMask<sizeof(T)>::value))
+            return nullptr;
+        size_t bytes = numElems * sizeof(T);
+        void* p = fb == Fallible ? alloc_.alloc(bytes) : alloc_.allocInfallible(bytes);
+        return static_cast<T*>(p);
     }
-    void* calloc_(size_t bytes) {
-        void* p = malloc_(bytes);
-        if (p)
-            memset(p, 0, bytes);
+    template <typename T>
+    T* pod_calloc(size_t numElems) {
+        T* p = pod_malloc<T>(numElems);
+        if (fb == Fallible && !p)
+            return nullptr;
+        memset(p, 0, numElems * sizeof(T));
         return p;
     }
-    void* realloc_(void* p, size_t oldBytes, size_t bytes) {
-        void* n = malloc_(bytes);
-        if (!n)
-            return n;
-        memcpy(n, p, Min(oldBytes, bytes));
+    template <typename T>
+    T* pod_realloc(T* p, size_t oldSize, size_t newSize) {
+        T* n = pod_malloc<T>(newSize);
+        if (fb == Fallible && !n)
+            return nullptr;
+        MOZ_ASSERT(!(oldSize & mozilla::tl::MulOverflowMask<sizeof(T)>::value));
+        memcpy(n, p, Min(oldSize * sizeof(T), newSize * sizeof(T)));
         return n;
     }
     void free_(void* p) {

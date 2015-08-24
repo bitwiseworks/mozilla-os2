@@ -12,7 +12,7 @@
 #include "GfxDriverInfo.h"
 
 #include "nsString.h"
-#include "mozilla/Scoped.h"
+#include "mozilla/UniquePtr.h"
 
 namespace mozilla {
 
@@ -24,6 +24,9 @@ namespace widget {
 
 class GfxInfo : public GfxInfoBase
 {
+private:
+  ~GfxInfo();
+
 public:
   GfxInfo();
 
@@ -37,6 +40,7 @@ public:
   NS_IMETHOD GetAdapterDriver(nsAString & aAdapterDriver);
   NS_IMETHOD GetAdapterVendorID(nsAString & aAdapterVendorID);
   NS_IMETHOD GetAdapterDeviceID(nsAString & aAdapterDeviceID);
+  NS_IMETHOD GetAdapterSubsysID(nsAString & aAdapterSubsysID);
   NS_IMETHOD GetAdapterRAM(nsAString & aAdapterRAM);
   NS_IMETHOD GetAdapterDriverVersion(nsAString & aAdapterDriverVersion);
   NS_IMETHOD GetAdapterDriverDate(nsAString & aAdapterDriverDate);
@@ -44,6 +48,7 @@ public:
   NS_IMETHOD GetAdapterDriver2(nsAString & aAdapterDriver);
   NS_IMETHOD GetAdapterVendorID2(nsAString & aAdapterVendorID);
   NS_IMETHOD GetAdapterDeviceID2(nsAString & aAdapterDeviceID);
+  NS_IMETHOD GetAdapterSubsysID2(nsAString & aAdapterSubsysID);
   NS_IMETHOD GetAdapterRAM2(nsAString & aAdapterRAM);
   NS_IMETHOD GetAdapterDriverVersion2(nsAString & aAdapterDriverVersion);
   NS_IMETHOD GetAdapterDriverDate2(nsAString & aAdapterDriverDate);
@@ -64,7 +69,7 @@ public:
   NS_DECL_NSIGFXINFODEBUG
 #endif
 
-  virtual uint32_t OperatingSystemVersion() MOZ_OVERRIDE;
+  virtual uint32_t OperatingSystemVersion() override;
 
 protected:
 
@@ -82,7 +87,7 @@ private:
   bool mInitialized;
 
   class GLStrings;
-  ScopedDeletePtr<GLStrings> mGLStrings;
+  UniquePtr<GLStrings> mGLStrings;
 
   nsCString mAdapterDescription;
 

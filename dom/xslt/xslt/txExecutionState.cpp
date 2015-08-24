@@ -63,7 +63,9 @@ txExecutionState::~txExecutionState()
 
     delete mResultHandler;
     delete mLocalVariables;
-    delete mEvalContext;
+    if (mEvalContext != mInitialEvalContext) {
+        delete mEvalContext;
+    }
     
     txStackIterator varsIter(&mLocalVarsStack);
     while (varsIter.hasNext()) {
@@ -87,6 +89,8 @@ txExecutionState::~txExecutionState()
     while (paramIter.hasNext()) {
         delete (txVariableMap*)paramIter.next();
     }
+
+    delete mInitialEvalContext;
 }
 
 nsresult
@@ -121,10 +125,6 @@ txExecutionState::init(const txXPathNode& aNode,
     NS_ENSURE_SUCCESS(rv, rv);
     
     mRecycler = new txResultRecycler;
-    NS_ENSURE_TRUE(mRecycler, NS_ERROR_OUT_OF_MEMORY);
-    
-    rv = mRecycler->init();
-    NS_ENSURE_SUCCESS(rv, rv);
     
     // The actual value here doesn't really matter since noone should use this
     // value. But lets put something errorlike in just in case

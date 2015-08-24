@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -9,37 +10,28 @@
 #include "mozilla/Attributes.h"
 
 #include "nsIErrorService.h"
-#include "nsHashtable.h"
+#include "nsClassHashtable.h"
+#include "nsHashKeys.h"
 
-class nsInt2StrHashtable
+class nsErrorService final : public nsIErrorService
 {
 public:
-    nsInt2StrHashtable();
+  NS_DECL_ISUPPORTS
+  NS_DECL_NSIERRORSERVICE
 
-    nsresult  Put(uint32_t key, const char* aData);
-    char*     Get(uint32_t key);
-    nsresult  Remove(uint32_t key);
+  nsErrorService()
+  {
+  }
 
-protected:
-    nsObjectHashtable mHashtable;
-};
-
-class nsErrorService MOZ_FINAL : public nsIErrorService
-{
-public:
-    NS_DECL_ISUPPORTS
-    NS_DECL_NSIERRORSERVICE
-
-    nsErrorService() {}
-
-    static nsresult
-    Create(nsISupports* outer, const nsIID& aIID, void* *aInstancePtr);
+  static nsresult
+  Create(nsISupports* aOuter, const nsIID& aIID, void** aInstancePtr);
 
 private:
-    ~nsErrorService() {}
+  ~nsErrorService()
+  {
+  }
 
-protected:
-    nsInt2StrHashtable mErrorStringBundleURLMap;
+  nsClassHashtable<nsUint32HashKey, nsCString> mErrorStringBundleURLMap;
 };
 
 #endif // nsErrorService_h__

@@ -8,6 +8,8 @@
 #include "ProfilerMarkers.h"
 #include "gfxASurface.h"
 #include "SyncProfile.h"
+#include "Layers.h"
+#include "prprf.h"
 
 ProfilerMarkerPayload::ProfilerMarkerPayload(ProfilerBacktrace* aStack)
   : mStack(aStack)
@@ -47,7 +49,21 @@ ProfilerMarkerPayload::streamCommonProps(const char* aMarkerType,
 ProfilerMarkerTracing::ProfilerMarkerTracing(const char* aCategory, TracingMetadata aMetaData)
   : mCategory(aCategory)
   , mMetaData(aMetaData)
-{}
+{
+  if (aMetaData == TRACING_EVENT_BACKTRACE) {
+    SetStack(profiler_get_backtrace());
+  }
+}
+
+ProfilerMarkerTracing::ProfilerMarkerTracing(const char* aCategory, TracingMetadata aMetaData,
+                                             ProfilerBacktrace* aCause)
+  : mCategory(aCategory)
+  , mMetaData(aMetaData)
+{
+  if (aCause) {
+    SetStack(aCause);
+  }
+}
 
 void
 ProfilerMarkerTracing::streamPayloadImp(JSStreamWriter& b)
@@ -65,6 +81,34 @@ ProfilerMarkerTracing::streamPayloadImp(JSStreamWriter& b)
         b.NameValue("interval", "end");
       }
     }
+  b.EndObject();
+}
+
+GPUMarkerPayload::GPUMarkerPayload(
+  const mozilla::TimeStamp& aCpuTimeStart,
+  const mozilla::TimeStamp& aCpuTimeEnd,
+  uint64_t aGpuTimeStart,
+  uint64_t aGpuTimeEnd)
+
+  : ProfilerMarkerPayload(aCpuTimeStart, aCpuTimeEnd)
+  , mCpuTimeStart(aCpuTimeStart)
+  , mCpuTimeEnd(aCpuTimeEnd)
+  , mGpuTimeStart(aGpuTimeStart)
+  , mGpuTimeEnd(aGpuTimeEnd)
+{
+
+}
+
+void
+GPUMarkerPayload::streamPayloadImp(JSStreamWriter& b)
+{
+  b.BeginObject();
+    streamCommonProps("gpu_timer_query", b);
+
+    b.NameValue("cpustart", profiler_time(mCpuTimeStart));
+    b.NameValue("cpuend", profiler_time(mCpuTimeEnd));
+    b.NameValue("gpustart", (int)mGpuTimeStart);
+    b.NameValue("gpuend", (int)mGpuTimeEnd);
   b.EndObject();
 }
 
@@ -110,9 +154,61 @@ IOMarkerPayload::streamPayloadImp(JSStreamWriter& b)
   b.EndObject();
 }
 
-
 void
 ProfilerJSEventMarker(const char *event)
 {
     PROFILER_MARKER(event);
+}
+
+LayerTranslationPayload::LayerTranslationPayload(mozilla::layers::Layer* aLayer,
+                                                 mozilla::gfx::Point aPoint)
+  : ProfilerMarkerPayload(mozilla::TimeStamp::Now(), mozilla::TimeStamp::Now(), nullptr)
+  , mLayer(aLayer)
+  , mPoint(aPoint)
+{
+}
+
+void
+LayerTranslationPayload::streamPayloadImpl(JSStreamWriter& b)
+{
+  const size_t bufferSize = 32;
+  char buffer[bufferSize];
+  PR_snprintf(buffer, bufferSize, "%p", mLayer);
+
+  b.BeginObject();
+  b.NameValue("layer", buffer);
+  b.NameValue("x", mPoint.x);
+  b.NameValue("y", mPoint.y);
+  b.NameValue("category", "LayerTranslation");
+  b.EndObject();
+}
+
+TouchDataPayload::TouchDataPayload(const mozilla::ScreenIntPoint& aPoint)
+  : ProfilerMarkerPayload(mozilla::TimeStamp::Now(), mozilla::TimeStamp::Now(), nullptr)
+{
+  mPoint = aPoint;
+}
+
+void
+TouchDataPayload::streamPayloadImpl(JSStreamWriter& b)
+{
+  b.BeginObject();
+  b.NameValue("x", mPoint.x);
+  b.NameValue("y", mPoint.y);
+  b.EndObject();
+}
+
+VsyncPayload::VsyncPayload(mozilla::TimeStamp aVsyncTimestamp)
+  : ProfilerMarkerPayload(aVsyncTimestamp, aVsyncTimestamp, nullptr)
+  , mVsyncTimestamp(aVsyncTimestamp)
+{
+}
+
+void
+VsyncPayload::streamPayloadImpl(JSStreamWriter& b)
+{
+  b.BeginObject();
+  b.NameValue("vsync", profiler_time(mVsyncTimestamp));
+  b.NameValue("category", "VsyncTimestamp");
+  b.EndObject();
 }

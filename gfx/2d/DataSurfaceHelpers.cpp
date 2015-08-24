@@ -3,29 +3,61 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include <cstring>
+
 #include "2D.h"
 #include "DataSurfaceHelpers.h"
 #include "Logging.h"
-#include "mozilla/CheckedInt.h"
 #include "mozilla/MathAlgorithms.h"
+#include "mozilla/PodOperations.h"
+#include "Tools.h"
 
 namespace mozilla {
 namespace gfx {
 
-void
-ConvertBGRXToBGRA(uint8_t* aData, const IntSize &aSize, int32_t aStride)
+uint8_t*
+DataAtOffset(DataSourceSurface* aSurface, IntPoint aPoint)
 {
-  uint32_t* pixel = reinterpret_cast<uint32_t*>(aData);
+  if (!SurfaceContainsPoint(aSurface, aPoint)) {
+    MOZ_CRASH("sample position needs to be inside surface!");
+  }
 
-  for (int row = 0; row < aSize.height; ++row) {
-    for (int column = 0; column < aSize.width; ++column) {
+  MOZ_ASSERT(Factory::CheckSurfaceSize(aSurface->GetSize()),
+             "surface size overflows - this should have been prevented when the surface was created");
+
+  uint8_t* data = aSurface->GetData() + aPoint.y * aSurface->Stride() +
+    aPoint.x * BytesPerPixel(aSurface->GetFormat());
+
+  if (data < aSurface->GetData()) {
+    MOZ_CRASH("out-of-range data access");
+  }
+
+  return data;
+}
+
+// This check is safe against integer overflow.
+bool
+SurfaceContainsPoint(SourceSurface* aSurface, const IntPoint& aPoint)
+{
+  IntSize size = aSurface->GetSize();
+  return aPoint.x >= 0 && aPoint.x < size.width &&
+         aPoint.y >= 0 && aPoint.y < size.height;
+}
+
+void
+ConvertBGRXToBGRA(uint8_t* aData, const IntSize &aSize, const int32_t aStride)
+{
+  int height = aSize.height, width = aSize.width * 4;
+
+  for (int row = 0; row < height; ++row) {
+    for (int column = 0; column < width; column += 4) {
 #ifdef IS_BIG_ENDIAN
-      pixel[column] |= 0x000000FF;
+      aData[column] = 0xFF;
 #else
-      pixel[column] |= 0xFF000000;
+      aData[column + 3] = 0xFF;
 #endif
     }
-    pixel += (aStride/4);
+    aData += aStride;
   }
 }
 
@@ -142,6 +174,33 @@ SurfaceToPackedBGR(DataSourceSurface *aSurface)
   return imageBuffer;
 }
 
+void
+ClearDataSourceSurface(DataSourceSurface *aSurface)
+{
+  DataSourceSurface::MappedSurface map;
+  if (!aSurface->Map(DataSourceSurface::MapType::WRITE, &map)) {
+    MOZ_ASSERT(false, "Failed to map DataSourceSurface");
+    return;
+  }
+
+  // We avoid writing into the gaps between the rows here since we can't be
+  // sure that some drivers don't use those bytes.
+
+  uint32_t width = aSurface->GetSize().width;
+  uint32_t bytesPerRow = width * BytesPerPixel(aSurface->GetFormat());
+  uint8_t* row = map.mData;
+  // converting to size_t here because otherwise the temporaries can overflow
+  // and we can end up with |end| being a bad address!
+  uint8_t* end = row + size_t(map.mStride) * size_t(aSurface->GetSize().height);
+
+  while (row != end) {
+    memset(row, 0, bytesPerRow);
+    row += map.mStride;
+  }
+
+  aSurface->Unmap();
+}
+
 size_t
 BufferSizeFromStrideAndHeight(int32_t aStride,
                               int32_t aHeight,
@@ -165,6 +224,61 @@ BufferSizeFromStrideAndHeight(int32_t aStride,
     return 0;
   }
   return requiredBytes.value();
+}
+
+/**
+ * aSrcRect: Rect relative to the aSrc surface
+ * aDestPoint: Point inside aDest surface
+ */
+void
+CopyRect(DataSourceSurface* aSrc, DataSourceSurface* aDest,
+         IntRect aSrcRect, IntPoint aDestPoint)
+{
+  if (aSrcRect.Overflows() ||
+      IntRect(aDestPoint, aSrcRect.Size()).Overflows()) {
+    MOZ_CRASH("we should never be getting invalid rects at this point");
+  }
+
+  MOZ_RELEASE_ASSERT(aSrc->GetFormat() == aDest->GetFormat(),
+                     "different surface formats");
+  MOZ_RELEASE_ASSERT(IntRect(IntPoint(), aSrc->GetSize()).Contains(aSrcRect),
+                     "source rect too big for source surface");
+  MOZ_RELEASE_ASSERT(IntRect(IntPoint(), aDest->GetSize()).Contains(IntRect(aDestPoint, aSrcRect.Size())),
+                     "dest surface too small");
+
+  if (aSrcRect.IsEmpty()) {
+    return;
+  }
+
+  uint8_t* sourceData = DataAtOffset(aSrc, aSrcRect.TopLeft());
+  uint32_t sourceStride = aSrc->Stride();
+  uint8_t* destData = DataAtOffset(aDest, aDestPoint);
+  uint32_t destStride = aDest->Stride();
+
+  if (BytesPerPixel(aSrc->GetFormat()) == 4) {
+    for (int32_t y = 0; y < aSrcRect.height; y++) {
+      PodCopy((int32_t*)destData, (int32_t*)sourceData, aSrcRect.width);
+      sourceData += sourceStride;
+      destData += destStride;
+    }
+  } else if (BytesPerPixel(aSrc->GetFormat()) == 1) {
+    for (int32_t y = 0; y < aSrcRect.height; y++) {
+      PodCopy(destData, sourceData, aSrcRect.width);
+      sourceData += sourceStride;
+      destData += destStride;
+    }
+  }
+}
+
+TemporaryRef<DataSourceSurface>
+CreateDataSourceSurfaceByCloning(DataSourceSurface* aSource)
+{
+  RefPtr<DataSourceSurface> copy =
+    Factory::CreateDataSourceSurface(aSource->GetSize(), aSource->GetFormat(), true);
+  if (copy) {
+    CopyRect(aSource, copy, IntRect(IntPoint(), aSource->GetSize()), IntPoint());
+  }
+  return copy.forget();
 }
 
 }

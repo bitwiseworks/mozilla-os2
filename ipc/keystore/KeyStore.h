@@ -1,5 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set sw=2 ts=8 et ft=cpp: */
+/* vim: set sw=2 ts=2 et ft=cpp: tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -7,11 +7,12 @@
 #ifndef mozilla_ipc_KeyStore_h
 #define mozilla_ipc_KeyStore_h 1
 
-#include "mozilla/ipc/UnixSocket.h"
 #include <sys/socket.h>
 #include <sys/un.h>
-
 #include "cert.h"
+#include "mozilla/ipc/ListenSocket.h"
+#include "mozilla/ipc/StreamSocket.h"
+#include "mozilla/ipc/UnixSocketConnector.h"
 
 namespace mozilla {
 namespace ipc {
@@ -33,14 +34,20 @@ enum ResponseCode {
   NO_RESPONSE
 };
 
+void FormatCaData(const uint8_t *aCaData, int aCaDataLength,
+                  const char *aName, const uint8_t **aFormatData,
+                  int *aFormatDataLength);
+
+ResponseCode getCertificate(const char *aCertName, const uint8_t **aCertData,
+                            int *aCertDataLength);
+
+bool checkPermission(uid_t uid);
+
 static const int MAX_PARAM = 2;
 static const int KEY_SIZE = ((NAME_MAX - 15) / 2);
 static const int VALUE_SIZE = 32768;
 static const int PASSWORD_SIZE = VALUE_SIZE;
 
-static const char *CA_BEGIN = "-----BEGIN ",
-                  *CA_END   = "-----END ",
-                  *CA_TAILER = "-----\n";
 static const int CA_LINE_SIZE = 64;
 
 struct ProtocolCommand {
@@ -85,22 +92,70 @@ public:
                              nsAString& aAddrStr);
 };
 
-class KeyStore : public mozilla::ipc::UnixSocketConsumer
+class KeyStore final
 {
 public:
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(KeyStore)
+
   KeyStore();
-  virtual ~KeyStore() {}
 
   void Shutdown();
 
 private:
-  virtual void ReceiveSocketData(nsAutoPtr<UnixSocketRawData>& aMessage);
+  enum SocketType {
+    LISTEN_SOCKET,
+    STREAM_SOCKET
+  };
 
-  virtual void OnConnectSuccess();
-  virtual void OnConnectError();
-  virtual void OnDisconnect();
+  class ListenSocket final : public mozilla::ipc::ListenSocket
+  {
+  public:
+    ListenSocket(KeyStore* aKeyStore);
+    ListenSocket();
 
-private:
+    // SocketBase
+    //
+
+    void OnConnectSuccess() override;
+    void OnConnectError() override;
+    void OnDisconnect() override;
+
+  private:
+    KeyStore* mKeyStore;
+  };
+
+  class StreamSocket final : public mozilla::ipc::StreamSocket
+  {
+  public:
+    StreamSocket(KeyStore* aKeyStore);
+    ~StreamSocket();
+
+    // SocketConsumerBase
+    //
+
+    void OnConnectSuccess() override;
+    void OnConnectError() override;
+    void OnDisconnect() override;
+
+    void ReceiveSocketData(nsAutoPtr<UnixSocketRawData>& aMessage) override;
+
+    // ConnectionOrientedSocket
+    //
+
+    ConnectionOrientedSocketIO* GetIO() override;
+
+  private:
+    KeyStore* mKeyStore;
+  };
+
+  ~KeyStore();
+
+  void ReceiveSocketData(nsAutoPtr<UnixSocketRawData>& aMessage);
+
+  void OnConnectSuccess(enum SocketType aSocketType);
+  void OnConnectError(enum SocketType aSocketType);
+  void OnDisconnect(enum SocketType aSocketType);
+
   struct {
     ProtocolHandlerState          state;
     uint8_t                       command;
@@ -111,19 +166,17 @@ private:
   void ResetHandlerInfo();
   void Listen();
 
-  void FormatCaData(const uint8_t *caData, int caDataLength, const char *name,
-                    const uint8_t **formatData, int &formatDataLength);
-
   bool CheckSize(UnixSocketRawData *aMessage, size_t aExpectSize);
-  bool ReadCommand(UnixSocketRawData *aMessage);
-  bool ReadLength(UnixSocketRawData *aMessage);
-  bool ReadData(UnixSocketRawData *aMessage);
+  ResponseCode ReadCommand(UnixSocketRawData *aMessage);
+  ResponseCode ReadLength(UnixSocketRawData *aMessage);
+  ResponseCode ReadData(UnixSocketRawData *aMessage);
   void SendResponse(ResponseCode response);
   void SendData(const uint8_t *data, int length);
 
   bool mShutdown;
 
-  CERTCertDBHandle *certdb;
+  nsRefPtr<ListenSocket> mListenSocket;
+  nsRefPtr<StreamSocket> mStreamSocket;
 };
 
 } // namespace ipc

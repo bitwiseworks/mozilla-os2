@@ -26,44 +26,44 @@ function withJitOptions(opts, fn) {
 }
 
 // N.B. Ion opts *must come before* baseline opts because there's some kind of
-// "undo eager compilation" logic. If we don't set the baseline usecount
-// *after* the Ion usecount we end up setting the baseline usecount to be the
-// default if we hit the "undo eager compilation" logic.
+// "undo eager compilation" logic. If we don't set the baseline warmup-counter
+// *after* the Ion warmup-counter we end up setting the baseline warmup-counter
+// to be the default if we hit the "undo eager compilation" logic.
 var Opts_BaselineEager =
     {
       'ion.enable': 1,
       'baseline.enable': 1,
-      'baseline.usecount.trigger': 0,
-      'parallel-compilation.enable': 1
+      'baseline.warmup.trigger': 0,
+      'offthread-compilation.enable': 1
     };
 
-// Checking for parallel compilation being off is often helpful if the test
+// Checking for offthread compilation being off is often helpful if the test
 // requires a function be Ion compiled. Each individual test will usually
 // finish before the Ion compilation thread has a chance to attach the
 // compiled code.
-var Opts_IonEagerNoParallelCompilation =
+var Opts_IonEagerNoOffthreadCompilation =
     {
       'ion.enable': 1,
-      'ion.usecount.trigger': 0,
+      'ion.warmup.trigger': 0,
       'baseline.enable': 1,
-      'baseline.usecount.trigger': 0,
-      'parallel-compilation.enable': 0,
+      'baseline.warmup.trigger': 0,
+      'offthread-compilation.enable': 0,
     };
 
-var Opts_Ion2NoParallelCompilation =
+var Opts_Ion2NoOffthreadCompilation =
     {
       'ion.enable': 1,
-      'ion.usecount.trigger': 2,
+      'ion.warmup.trigger': 2,
       'baseline.enable': 1,
-      'baseline.usecount.trigger': 1,
-      'parallel-compilation.enable': 0
+      'baseline.warmup.trigger': 1,
+      'offthread-compilation.enable': 0
     };
 
 var Opts_NoJits =
     {
       'ion.enable': 0,
-      'ion.usecount.trigger': 0,
-      'baseline.usecount.trigger': 0,
+      'ion.warmup.trigger': 0,
+      'baseline.warmup.trigger': 0,
       'baseline.enable': 0,
-      'parallel-compilation.enable': 0
+      'offthread-compilation.enable': 0
     };

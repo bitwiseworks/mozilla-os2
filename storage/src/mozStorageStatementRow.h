@@ -16,7 +16,7 @@ namespace storage {
 
 class Statement;
 
-class StatementRow MOZ_FINAL : public mozIStorageStatementRow
+class StatementRow final : public mozIStorageStatementRow
                              , public nsIXPCScriptable
 {
 public:
@@ -24,12 +24,14 @@ public:
   NS_DECL_MOZISTORAGESTATEMENTROW
   NS_DECL_NSIXPCSCRIPTABLE
 
-  StatementRow(Statement *aStatement);
+  explicit StatementRow(Statement *aStatement);
 protected:
+
+  ~StatementRow() {}
 
   Statement *mStatement;
 
-  friend class Statement;
+  friend class StatementRowHolder;
 };
 
 } // namespace storage

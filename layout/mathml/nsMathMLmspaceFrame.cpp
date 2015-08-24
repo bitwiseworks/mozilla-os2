@@ -35,6 +35,7 @@ void
 nsMathMLmspaceFrame::ProcessAttributes(nsPresContext* aPresContext)
 {
   nsAutoString value;
+  float fontSizeInflation = nsLayoutUtils::FontSizeInflationFor(this);
 
   // width 
   //
@@ -53,7 +54,7 @@ nsMathMLmspaceFrame::ProcessAttributes(nsPresContext* aPresContext)
   if (!value.IsEmpty()) {
     ParseNumericValue(value, &mWidth,
                       nsMathMLElement::PARSE_ALLOW_NEGATIVE,
-                      aPresContext, mStyleContext);
+                      aPresContext, mStyleContext, fontSizeInflation);
   }
 
   // height
@@ -70,7 +71,7 @@ nsMathMLmspaceFrame::ProcessAttributes(nsPresContext* aPresContext)
   mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::height, value);
   if (!value.IsEmpty()) {
     ParseNumericValue(value, &mHeight, 0,
-                      aPresContext, mStyleContext);
+                      aPresContext, mStyleContext, fontSizeInflation);
   }
 
   // depth
@@ -87,11 +88,11 @@ nsMathMLmspaceFrame::ProcessAttributes(nsPresContext* aPresContext)
   mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::depth_, value);
   if (!value.IsEmpty()) {
     ParseNumericValue(value, &mDepth, 0,
-                      aPresContext, mStyleContext);
+                      aPresContext, mStyleContext, fontSizeInflation);
   }
 }
 
-nsresult
+void
 nsMathMLmspaceFrame::Reflow(nsPresContext*          aPresContext,
                             nsHTMLReflowMetrics&     aDesiredSize,
                             const nsHTMLReflowState& aReflowState,
@@ -106,15 +107,14 @@ nsMathMLmspaceFrame::Reflow(nsPresContext*          aPresContext,
   mBoundingMetrics.leftBearing = 0;
   mBoundingMetrics.rightBearing = mBoundingMetrics.width;
 
-  aDesiredSize.SetTopAscent(mHeight);
+  aDesiredSize.SetBlockStartAscent(mHeight);
   aDesiredSize.Width() = std::max(0, mBoundingMetrics.width);
-  aDesiredSize.Height() = aDesiredSize.TopAscent() + mDepth;
+  aDesiredSize.Height() = aDesiredSize.BlockStartAscent() + mDepth;
   // Also return our bounding metrics
   aDesiredSize.mBoundingMetrics = mBoundingMetrics;
 
   aStatus = NS_FRAME_COMPLETE;
   NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
-  return NS_OK;
 }
 
 /* virtual */ nsresult

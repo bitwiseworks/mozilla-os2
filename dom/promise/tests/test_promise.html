@@ -116,20 +116,57 @@ function promiseGC() {
   resolve(42);
 }
 
-function promiseAsync() {
-  var global = "foo";
-  var f = new Promise(function(r1, r2) {
-    is(global, "foo", "Global should be foo");
-    r1(42);
-    is(global, "foo", "Global should still be foo");
-    setTimeout(function() {
-      is(global, "bar", "Global should still be bar!");
-      runTest();
-    }, 0);
-  }).then(function() {
-    global = "bar";
+function promiseAsync_TimeoutResolveThen() {
+  var handlerExecuted = false;
+
+  setTimeout(function() {
+    ok(handlerExecuted, "Handler should have been called before the timeout.");
+
+    // Allow other assertions to run so the test could fail before the next one.
+    setTimeout(runTest, 0);
+  }, 0);
+
+  Promise.resolve().then(function() {
+    handlerExecuted = true;
   });
-  is(global, "foo", "Global should still be foo (2)");
+
+  ok(!handlerExecuted, "Handlers are not called before 'then' returns.");
+}
+
+function promiseAsync_ResolveTimeoutThen() {
+  var handlerExecuted = false;
+
+  var promise = Promise.resolve();
+
+  setTimeout(function() {
+    ok(handlerExecuted, "Handler should have been called before the timeout.");
+
+    // Allow other assertions to run so the test could fail before the next one.
+    setTimeout(runTest, 0);
+  }, 0);
+
+  promise.then(function() {
+    handlerExecuted = true;
+  });
+
+  ok(!handlerExecuted, "Handlers are not called before 'then' returns.");
+}
+
+function promiseAsync_ResolveThenTimeout() {
+  var handlerExecuted = false;
+
+  Promise.resolve().then(function() {
+    handlerExecuted = true;
+  });
+
+  setTimeout(function() {
+    ok(handlerExecuted, "Handler should have been called before the timeout.");
+
+    // Allow other assertions to run so the test could fail before the next one.
+    setTimeout(runTest, 0);
+  }, 0);
+
+  ok(!handlerExecuted, "Handlers are not called before 'then' returns.");
 }
 
 function promiseDoubleThen() {
@@ -618,8 +655,107 @@ function promiseResolvePromise() {
   });
 }
 
+// Bug 1009569.
+// Ensure that thenables are run on a clean stack asynchronously.
+// Test case adopted from
+// https://gist.github.com/getify/d64bb01751b50ed6b281#file-bug1-js.
+function promiseResolveThenableCleanStack() {
+  function immed(s) { x++; s(); }
+  function incX(){ x++; }
+
+  var x = 0;
+  var thenable = { then: immed };
+  var results = [];
+
+  var p = Promise.resolve(thenable).then(incX);
+  results.push(x);
+
+  // check what happens after all "next cycle" steps
+  // have had a chance to complete
+  setTimeout(function(){
+    // Result should be [0, 2] since `thenable` will be called async.
+    is(results[0], 0, "Expected thenable to be called asynchronously");
+    // See Bug 1023547 comment 13 for why this check has to be gated on p.
+    p.then(function() {
+      results.push(x);
+      is(results[1], 2, "Expected thenable to be called asynchronously");
+      runTest();
+    });
+  },1000);
+}
+
+// Bug 1008467 - Promise fails with "too much recursion".
+// The bug was that the callbacks passed to a thenable would resolve the
+// promise synchronously when the fulfill handler returned a non-thenable.
+//
+// For example:
+// var p = new Promise(function(resolve) {
+//   resolve(5);
+// });
+// var m = Promise.resolve(p);
+//
+// At this point `m` is a Promise that is resolved with a thenable `p`, so it
+// calls `p.then()` with two callbacks, both of which would synchronously resolve
+// `m` when `p` invoked them (on account of itself being resolved, possibly
+// synchronously. A chain of these 'Promise resolved by a Promise' would lead to
+// stack overflow.
+function promiseTestAsyncThenableResolution()
+{
+  var k = 3000;
+  Promise.resolve().then(function next() {
+    k--;
+    if (k > 0) return Promise.resolve().then(next);
+  }).then(function () {
+    ok(true, "Resolution of a chain of thenables should not be synchronous.");
+    runTest();
+  });
+}
+
+// Bug 1062323
+function promiseWrapperAsyncResolution()
+{
+  var p = new Promise(function(resolve, reject){
+    resolve();
+  });
+
+  var results = [];
+  var q = p.then(function () {
+    results.push("1-1");
+  }).then(function () {
+    results.push("1-2");
+  }).then(function () {
+    results.push("1-3");
+  });
+
+  var r = p.then(function () {
+    results.push("2-1");
+  }).then(function () {
+    results.push("2-2");
+  }).then(function () {
+    results.push("2-3");
+  });
+
+  Promise.all([q, r]).then(function() {
+    var match = results[0] == "1-1" &&
+                results[1] == "2-1" &&
+                results[2] == "1-2" &&
+                results[3] == "2-2" &&
+                results[4] == "1-3" &&
+                results[5] == "2-3";
+                info(results);
+    ok(match, "Chained promises should resolve asynchronously.");
+    runTest();
+  }, function() {
+    ok(false, "promiseWrapperAsyncResolution: One of the promises failed.");
+    runTest();
+  });
+}
+
 var tests = [ promiseResolve, promiseReject,
-              promiseException, promiseGC, promiseAsync,
+              promiseException, promiseGC,
+              promiseAsync_TimeoutResolveThen,
+              promiseAsync_ResolveTimeoutThen,
+              promiseAsync_ResolveThenTimeout,
               promiseDoubleThen, promiseThenException,
               promiseThenCatchThen, promiseRejectThenCatchThen,
               promiseRejectThenCatchThen2,
@@ -648,6 +784,9 @@ var tests = [ promiseResolve, promiseReject,
               promiseResolveArray,
               promiseResolveThenable,
               promiseResolvePromise,
+              promiseResolveThenableCleanStack,
+              promiseTestAsyncThenableResolution,
+              promiseWrapperAsyncResolution,
             ];
 
 function runTest() {
@@ -661,6 +800,7 @@ function runTest() {
 }
 
 SimpleTest.waitForExplicitFinish();
+SimpleTest.requestFlakyTimeout("untriaged");
 runTest();
 // -->
 </script>

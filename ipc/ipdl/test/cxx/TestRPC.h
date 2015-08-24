@@ -18,34 +18,26 @@ public:
     virtual ~TestRPCParent();
 
     static bool RunTestInProcesses() { return true; }
-    static bool RunTestInThreads() { return true; }
+    static bool RunTestInThreads() { return false; }
 
     void Main();
 
-    bool AnswerTest1_Start(uint32_t* aResult) MOZ_OVERRIDE;
-    bool AnswerTest1_InnerEvent(uint32_t* aResult) MOZ_OVERRIDE;
-    bool RecvTest2_Start() MOZ_OVERRIDE;
-    bool AnswerTest2_OutOfOrder() MOZ_OVERRIDE;
-    bool RecvTest3_Start(uint32_t* aResult) MOZ_OVERRIDE;
-    bool AnswerTest3_InnerEvent(uint32_t* aResult) MOZ_OVERRIDE;
-    bool AnswerTest4_Start(uint32_t* aResult) MOZ_OVERRIDE;
-    bool AnswerTest4_Inner(uint32_t* aResult) MOZ_OVERRIDE;
+    bool RecvTest1_Start(uint32_t* aResult) override;
+    bool RecvTest1_InnerEvent(uint32_t* aResult) override;
+    bool RecvTest2_Start() override;
+    bool RecvTest2_Msg2() override;
+    bool RecvTest2_FirstUrgent() override;
+    bool RecvTest2_SecondUrgent() override;
+    bool RecvTest3_Start(uint32_t* aResult) override;
+    bool RecvTest3_InnerEvent(uint32_t* aResult) override;
 
-    virtual void ActorDestroy(ActorDestroyReason why) MOZ_OVERRIDE
+    virtual void ActorDestroy(ActorDestroyReason why) override
     {
         if (NormalShutdown != why)
             fail("unexpected destruction!");  
-        if (!reentered_)
-            fail("never processed raced RPC call!");
-        if (!resolved_first_cpow_)
-            fail("never resolved first CPOW!");
         passed("ok");
         QuitParent();
     }
-
-private:
-    bool reentered_;
-    bool resolved_first_cpow_;
 };
 
 
@@ -56,20 +48,23 @@ public:
     TestRPCChild();
     virtual ~TestRPCChild();
 
-    bool RecvStart() MOZ_OVERRIDE;
-    bool AnswerTest1_InnerQuery(uint32_t* aResult) MOZ_OVERRIDE;
-    bool AnswerTest1_NoReenter(uint32_t* aResult) MOZ_OVERRIDE;
-    bool AnswerTest2_FirstUrgent() MOZ_OVERRIDE;
-    bool AnswerTest2_SecondUrgent() MOZ_OVERRIDE;
-    bool AnswerTest3_WakeUp(uint32_t* aResult) MOZ_OVERRIDE;
-    bool AnswerTest4_WakeUp(uint32_t* aResult) MOZ_OVERRIDE;
+    bool RecvStart() override;
+    bool RecvTest1_InnerQuery(uint32_t* aResult) override;
+    bool RecvTest1_NoReenter(uint32_t* aResult) override;
+    bool RecvTest2_Msg1() override;
+    bool RecvTest2_Msg3() override;
+    bool RecvTest3_WakeUp(uint32_t* aResult) override;
 
-    virtual void ActorDestroy(ActorDestroyReason why) MOZ_OVERRIDE
+    virtual void ActorDestroy(ActorDestroyReason why) override
     {
         if (NormalShutdown != why)
             fail("unexpected destruction!");
         QuitChild();
     }
+
+private:
+    bool reentered_;
+    bool resolved_first_cpow_;
 };
 
 

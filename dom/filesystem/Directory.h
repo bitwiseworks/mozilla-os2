@@ -8,10 +8,11 @@
 #define mozilla_dom_Directory_h
 
 #include "mozilla/Attributes.h"
+#include "mozilla/ErrorResult.h"
 #include "mozilla/dom/BindingDeclarations.h"
+#include "mozilla/dom/File.h"
 #include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
-#include "nsDOMFile.h"
 #include "nsPIDOMWindow.h"
 #include "nsWrapperCache.h"
 
@@ -30,12 +31,12 @@
 namespace mozilla {
 namespace dom {
 
-class CreateFileOptions;
+struct CreateFileOptions;
 class FileSystemBase;
 class Promise;
 class StringOrFileOrDirectory;
 
-class Directory MOZ_FINAL
+class Directory final
   : public nsISupports
   , public nsWrapperCache
 {
@@ -45,10 +46,9 @@ public:
 
 public:
   static already_AddRefed<Promise>
-  GetRoot(FileSystemBase* aFileSystem);
+  GetRoot(FileSystemBase* aFileSystem, ErrorResult& aRv);
 
   Directory(FileSystemBase* aFileSystem, const nsAString& aPath);
-  ~Directory();
 
   // ========= Begin WebIDL bindings. ===========
 
@@ -56,31 +56,34 @@ public:
   GetParentObject() const;
 
   virtual JSObject*
-  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  WrapObject(JSContext* aCx) override;
 
   void
   GetName(nsString& aRetval) const;
 
   already_AddRefed<Promise>
-  CreateFile(const nsAString& aPath, const CreateFileOptions& aOptions);
+  CreateFile(const nsAString& aPath, const CreateFileOptions& aOptions,
+             ErrorResult& aRv);
 
   already_AddRefed<Promise>
-  CreateDirectory(const nsAString& aPath);
+  CreateDirectory(const nsAString& aPath, ErrorResult& aRv);
 
   already_AddRefed<Promise>
-  Get(const nsAString& aPath);
+  Get(const nsAString& aPath, ErrorResult& aRv);
 
   already_AddRefed<Promise>
-  Remove(const StringOrFileOrDirectory& aPath);
+  Remove(const StringOrFileOrDirectory& aPath, ErrorResult& aRv);
 
   already_AddRefed<Promise>
-  RemoveDeep(const StringOrFileOrDirectory& aPath);
+  RemoveDeep(const StringOrFileOrDirectory& aPath, ErrorResult& aRv);
 
   // =========== End WebIDL bindings.============
 
   FileSystemBase*
   GetFileSystem() const;
 private:
+  ~Directory();
+
   static bool
   IsValidRelativePath(const nsString& aPath);
 
@@ -92,7 +95,8 @@ private:
   DOMPathToRealPath(const nsAString& aPath, nsAString& aRealPath) const;
 
   already_AddRefed<Promise>
-  RemoveInternal(const StringOrFileOrDirectory& aPath, bool aRecursive);
+  RemoveInternal(const StringOrFileOrDirectory& aPath, bool aRecursive,
+                 ErrorResult& aRv);
 
   nsRefPtr<FileSystemBase> mFileSystem;
   nsString mPath;

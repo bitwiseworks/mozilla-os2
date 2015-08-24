@@ -31,7 +31,6 @@ C1Spewer::beginFunction(MIRGraph* graph, HandleScript script)
         return;
 
     this->graph  = graph;
-    this->script.repoint(script);
 
     fprintf(spewout_, "begin_compilation\n");
     if (script) {
@@ -102,7 +101,7 @@ DumpDefinition(FILE* fp, MDefinition* def)
 }
 
 static void
-DumpLIR(FILE* fp, LInstruction* ins)
+DumpLIR(FILE* fp, LNode* ins)
 {
     fprintf(fp, "      ");
     fprintf(fp, "%d ", ins->id());
@@ -111,7 +110,7 @@ DumpLIR(FILE* fp, LInstruction* ins)
 }
 
 void
-C1Spewer::spewIntervals(FILE* fp, LinearScanAllocator* regalloc, LInstruction* ins, size_t& nextId)
+C1Spewer::spewIntervals(FILE* fp, LinearScanAllocator* regalloc, LNode* ins, size_t& nextId)
 {
     for (size_t k = 0; k < ins->numDefs(); k++) {
         uint32_t id = ins->getDef(k)->virtualRegister();
@@ -124,11 +123,11 @@ C1Spewer::spewIntervals(FILE* fp, LinearScanAllocator* regalloc, LInstruction* i
                 fprintf(fp, "%s", live->getAllocation()->toString());
                 fprintf(fp, "\" %d -1", id);
                 for (size_t j = 0; j < live->numRanges(); j++) {
-                    fprintf(fp, " [%d, %d[", live->getRange(j)->from.pos(),
-                            live->getRange(j)->to.pos());
+                    fprintf(fp, " [%u, %u[", live->getRange(j)->from.bits(),
+                            live->getRange(j)->to.bits());
                 }
                 for (UsePositionIterator usePos(live->usesBegin()); usePos != live->usesEnd(); usePos++)
-                    fprintf(fp, " %d M", usePos->pos.pos());
+                    fprintf(fp, " %u M", usePos->pos.bits());
                 fprintf(fp, " \"\"\n");
             }
         }

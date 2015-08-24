@@ -7,7 +7,6 @@ Cu.import("resource://testing-common/httpd.js");
 XPCOMUtils.defineLazyModuleGetter(this, "Experiments",
   "resource:///modules/experiments/Experiments.jsm");
 
-const FILE_MANIFEST            = "experiments.manifest";
 const MANIFEST_HANDLER         = "manifests/handler";
 
 const SEC_IN_ONE_DAY  = 24 * 60 * 60;
@@ -47,8 +46,6 @@ add_task(function* test_setup() {
   });
   do_register_cleanup(() => gHttpServer.stop(() => {}));
 
-  disableCertificateChecks();
-
   Services.prefs.setBoolPref(PREF_EXPERIMENTS_ENABLED, true);
   Services.prefs.setIntPref(PREF_LOGGING_LEVEL, 0);
   Services.prefs.setBoolPref(PREF_LOGGING_DUMP, true);
@@ -63,7 +60,7 @@ add_task(function* test_setup() {
   gPolicy = new Experiments.Policy();
   patchPolicy(gPolicy, {
     updatechannel: () => "nightly",
-    healthReportPayload: () => {},
+    healthReportPayload: () => "{}",
     oneshotTimer: (callback, timeout, thisObj, name) => gTimerScheduleOffset = timeout,
   });
 });
@@ -165,7 +162,7 @@ add_task(function* test_cache() {
   Assert.equal(list.length, 0, "Experiment list should be empty.");
   checkExperimentSerializations(experiments._experiments.values());
 
-  yield experiments.uninit();
+  yield promiseRestartManager();
   experiments = new Experiments.Experiments(gPolicy);
 
   yield experiments._run();
@@ -178,7 +175,7 @@ add_task(function* test_cache() {
   now = futureDate(startDates[0], 5 * MS_IN_ONE_DAY);
   defineNow(gPolicy, now);
 
-  yield experiments.uninit();
+  yield promiseRestartManager();
   experiments = new Experiments.Experiments(gPolicy);
   yield experiments._run();
 
@@ -202,7 +199,7 @@ add_task(function* test_cache() {
   now = futureDate(now, 20 * MS_IN_ONE_DAY);
   defineNow(gPolicy, now);
 
-  yield experiments.uninit();
+  yield promiseRestartManager();
   experiments = new Experiments.Experiments(gPolicy);
   yield experiments._run();
 
@@ -222,7 +219,7 @@ add_task(function* test_cache() {
   now = futureDate(startDates[1], 20 * MS_IN_ONE_DAY);
   defineNow(gPolicy, now);
 
-  yield experiments.uninit();
+  yield promiseRestartManager();
   experiments = new Experiments.Experiments(gPolicy);
   yield experiments._run();
 
@@ -239,7 +236,7 @@ add_task(function* test_cache() {
   now = futureDate(now, 20 * MS_IN_ONE_DAY);
   defineNow(gPolicy, now);
 
-  yield experiments.uninit();
+  yield promiseRestartManager();
   experiments = new Experiments.Experiments(gPolicy);
   yield experiments._run();
 
@@ -254,6 +251,6 @@ add_task(function* test_cache() {
   // Cleanup.
 
   yield experiments._toggleExperimentsEnabled(false);
-  yield experiments.uninit();
+  yield promiseRestartManager();
   yield removeCacheFile();
 });

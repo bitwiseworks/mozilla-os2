@@ -41,7 +41,7 @@ this.TelemetryStopwatch = {
 
     let timers;
     if (aObj) {
-      timers = objectTimers.get(aObj, {});
+      timers = objectTimers.get(aObj) || {};
       objectTimers.set(aObj, timers);
     } else {
       timers = simpleTimers;
@@ -54,7 +54,7 @@ this.TelemetryStopwatch = {
       return false;
     }
 
-    timers[aHistogram] = Date.now();
+    timers[aHistogram] = Components.utils.now();
     return true;
   },
 
@@ -79,7 +79,7 @@ this.TelemetryStopwatch = {
       return false;
 
     let timers = aObj
-                 ? objectTimers.get(aObj, {})
+                 ? objectTimers.get(aObj) || {}
                  : simpleTimers;
 
     if (timers.hasOwnProperty(aHistogram)) {
@@ -110,14 +110,15 @@ this.TelemetryStopwatch = {
       return false;
 
     let timers = aObj
-                 ? objectTimers.get(aObj, {})
+                 ? objectTimers.get(aObj) || {}
                  : simpleTimers;
 
     let start = timers[aHistogram];
     delete timers[aHistogram];
 
     if (start) {
-      let delta = Date.now() - start;
+      let delta = Components.utils.now() - start;
+      delta = Math.round(delta);
       let histogram = Telemetry.getHistogramById(aHistogram);
       histogram.add(delta);
       return true;

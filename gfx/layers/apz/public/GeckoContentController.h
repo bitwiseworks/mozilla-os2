@@ -25,6 +25,7 @@ public:
   /**
    * Requests a paint of the given FrameMetrics |aFrameMetrics| from Gecko.
    * Implementations per-platform are responsible for actually handling this.
+   * This method will always be called on the Gecko main thread.
    */
   virtual void RequestContentRepaint(const FrameMetrics& aFrameMetrics) = 0;
 
@@ -61,12 +62,16 @@ public:
    */
   virtual void HandleLongTap(const CSSPoint& aPoint,
                              int32_t aModifiers,
-                             const ScrollableLayerGuid& aGuid) = 0;
+                             const ScrollableLayerGuid& aGuid,
+                             uint64_t aInputBlockId) = 0;
 
   /**
    * Requests handling of releasing a long tap. |aPoint| is in CSS pixels,
    * relative to the current scroll offset. HandleLongTapUp will always be
-   * preceeded by HandleLongTap
+   * preceeded by HandleLongTap. However not all calls to HandleLongTap will
+   * be followed by a HandleLongTapUp (for example, if the user drags
+   * around between the long-tap and lifting their finger, or if content
+   * notifies the APZ that the long-tap event was prevent-defaulted).
    */
   virtual void HandleLongTapUp(const CSSPoint& aPoint,
                                int32_t aModifiers,
@@ -84,6 +89,7 @@ public:
   /**
    * Schedules a runnable to run on the controller/UI thread at some time
    * in the future.
+   * This method must always be called on the controller thread.
    */
   virtual void PostDelayedTask(Task* aTask, int aDelayMs) = 0;
 
@@ -113,7 +119,7 @@ public:
     return false;
   }
 
-  MOZ_BEGIN_NESTED_ENUM_CLASS(APZStateChange, int8_t)
+  enum APZStateChange {
     /**
      * APZ started modifying the view (including panning, zooming, and fling).
      */
@@ -137,7 +143,7 @@ public:
      */
     EndTouch,
     APZStateChangeSentinel
-  MOZ_END_NESTED_ENUM_CLASS(APZStateChange)
+  };
 
   /**
    * General notices of APZ state changes for consumers.
@@ -151,13 +157,12 @@ public:
                                     int aArg = 0) {}
 
   GeckoContentController() {}
+  virtual void Destroy() {}
 
 protected:
   // Protected destructor, to discourage deletion outside of Release():
   virtual ~GeckoContentController() {}
 };
-
-MOZ_FINISH_NESTED_ENUM_CLASS(GeckoContentController::APZStateChange)
 
 }
 }

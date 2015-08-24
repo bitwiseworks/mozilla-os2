@@ -28,8 +28,6 @@ from expandlibs import (
     relativize,
     isDynamicLib,
     isObject,
-    ensureParentDir,
-    ExpandLibsDeps,
 )
 import expandlibs_config as conf
 from optparse import OptionParser
@@ -74,6 +72,12 @@ class ExpandArgsMore(ExpandArgs):
         '''
         ar_extract = conf.AR_EXTRACT.split()
         newlist = []
+
+        def lookup(base, f):
+            for root, dirs, files in os.walk(base):
+                if f in files:
+                    return os.path.join(root, f)
+
         for arg in args:
             if os.path.splitext(arg)[1] == conf.LIB_SUFFIX:
                 if os.path.exists(arg + conf.LIBS_DESC_SUFFIX):
@@ -95,8 +99,19 @@ class ExpandArgsMore(ExpandArgs):
                     else:
                         subprocess.call(ar_extract + [os.path.abspath(arg)], cwd=tmp)
                     objs = []
+                    basedir = os.path.dirname(arg)
                     for root, dirs, files in os.walk(tmp):
-                        objs += [relativize(os.path.join(root, f)) for f in files if isObject(f)]
+                        for f in files:
+                            if isObject(f):
+                                # If the file extracted from the library also
+                                # exists in the directory containing the
+                                # library, or one of its subdirectories, use
+                                # that instead.
+                                maybe_obj = lookup(os.path.join(basedir, os.path.relpath(root, tmp)), f)
+                                if maybe_obj:
+                                    objs.append(relativize(maybe_obj))
+                                else:
+                                    objs.append(relativize(os.path.join(root, f)))
                     newlist += sorted(objs)
                     continue
             newlist += [arg]
@@ -296,12 +311,8 @@ def print_command(out, args):
             print >>out, "".join(["    " + l for l in file.readlines()])
     out.flush()
 
-def main():
+def main(args, proc_callback=None):
     parser = OptionParser()
-    parser.add_option("--depend", dest="depend", metavar="FILE",
-        help="generate dependencies for the given execution and store it in the given file")
-    parser.add_option("--target", dest="target", metavar="FILE",
-        help="designate the target for dependencies")
     parser.add_option("--extract", action="store_true", dest="extract",
         help="when a library has no descriptor file, extract it first, when possible")
     parser.add_option("--uselist", action="store_true", dest="uselist",
@@ -311,17 +322,8 @@ def main():
     parser.add_option("--symbol-order", dest="symbol_order", metavar="FILE",
         help="use the given list of symbols to order symbols in the resulting binary when using with a linker")
 
-    (options, args) = parser.parse_args()
+    (options, args) = parser.parse_args(args)
 
-    if not options.target:
-        options.depend = False
-    if options.depend:
-        deps = ExpandLibsDeps(args)
-        # Filter out common command wrappers
-        while os.path.basename(deps[0]) in ['ccache', 'distcc']:
-            deps.pop(0)
-        # Remove command
-        deps.pop(0)
     with ExpandArgsMore(args) as args:
         if options.extract:
             args.extract()
@@ -334,6 +336,8 @@ def main():
             print_command(sys.stderr, args)
         try:
             proc = subprocess.Popen(args, stdout = subprocess.PIPE, stderr = subprocess.STDOUT)
+            if proc_callback:
+                proc_callback(proc)
         except Exception, e:
             print >>sys.stderr, 'error: Launching', args, ':', e
             raise e
@@ -343,20 +347,8 @@ def main():
         sys.stderr.write(stdout)
         sys.stderr.flush()
         if proc.returncode:
-            exit(proc.returncode)
-    if not options.depend:
-        return
-    ensureParentDir(options.depend)
-    mk = Makefile()
-    deps = [dep for dep in deps if os.path.isfile(dep) and dep != options.target
-            and os.path.abspath(dep) != os.path.abspath(options.depend)]
-    no_dynamic_lib = [dep for dep in deps if not isDynamicLib(dep)]
-    mk.create_rule([options.target]).add_dependencies(no_dynamic_lib)
-    if len(deps) != len(no_dynamic_lib):
-        mk.create_rule(['%s_order_only' % options.target]).add_dependencies(dep for dep in deps if isDynamicLib(dep))
-
-    with open(options.depend, 'w') as depfile:
-        mk.dump(depfile, removal_guard=True)
+            return proc.returncode
+        return 0
 
 if __name__ == '__main__':
-    main()
+    exit(main(sys.argv[1:]))

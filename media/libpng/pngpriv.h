@@ -6,7 +6,7 @@
  * (Version 0.96 Copyright (c) 1996, 1997 Andreas Dilger)
  * (Version 0.88 Copyright (c) 1995, 1996 Guy Eric Schalnat, Group 42, Inc.)
  *
- * Last changed in libpng 1.6.10 [March 6, 2014]
+ * Last changed in libpng 1.6.10 [March 6, 1014]]
  *
  * This code is released under the libpng license.
  * For conditions of distribution and use, see the disclaimer
@@ -62,8 +62,6 @@
    /* Pick up the definition of 'restrict' from config.h if it was read: */
 #  define PNG_RESTRICT restrict
 #endif
-
-#include "mozpngconf.h"
 
 /* To support symbol prefixing it is necessary to know *before* including png.h
  * whether the fixed point (and maybe other) APIs are exported, because if they
@@ -121,8 +119,12 @@
     * PNG_ARM_NEON_OPT is set in CPPFLAGS (to >0) then arm/arm_init.c will fail
     * to compile with an appropriate #error if ALIGNED_MEMORY has been turned
     * off.
+    *
+    * Note that gcc-4.9 defines __ARM_NEON instead of __ARM_NEON__, so we
+    * check both variants.
     */
-#  if defined(__ARM_NEON__) && defined(PNG_ALIGNED_MEMORY_SUPPORTED)
+#  if (defined(__ARM_NEON__) || defined(__ARM_NEON)) && \
+   defined(PNG_ALIGNED_MEMORY_SUPPORTED)
 #     define PNG_ARM_NEON_OPT 2
 #  else
 #     define PNG_ARM_NEON_OPT 0
@@ -150,7 +152,7 @@
     * libpng implementation list for incorporation in the next minor release.
     */
 #  ifndef PNG_ARM_NEON_IMPLEMENTATION
-#     ifdef __ARM_NEON__
+#     if defined(__ARM_NEON__) || defined(__ARM_NEON)
 #        if defined(__clang__)
             /* At present it is unknown by the libpng developers which versions
              * of clang support the intrinsics, however some or perhaps all
@@ -170,7 +172,7 @@
           */
 #        define PNG_ARM_NEON_IMPLEMENTATION 2
 #     endif /* __ARM_NEON__ */
-#  endif /* !defined PNG_ARM_NEON_IMPLEMENTATION */
+#  endif /* !PNG_ARM_NEON_IMPLEMENTATION */
 
 #  ifndef PNG_ARM_NEON_IMPLEMENTATION
       /* Use the intrinsics code by default. */
@@ -838,7 +840,7 @@
     * zlib version number and because this affects handling of certain broken
     * PNG files the -I directives must match.
     *
-    * The most likely explanation is that you passed a -I in CFLAGS, this will
+    * The most likely explanation is that you passed a -I in CFLAGS. This will
     * not work; all the preprocessor directories and in particular all the -I
     * directives must be in CPPFLAGS.
     */
@@ -867,7 +869,7 @@ PNG_INTERNAL_DATA(const png_byte, png_sRGB_delta, [512]);
    /* Given a value 'linear' in the range 0..255*65535 calculate the 8-bit sRGB
     * encoded value with maximum error 0.646365.  Note that the input is not a
     * 16-bit value; it has been multiplied by 255! */
-#endif /* PNG_SIMPLIFIED_READ/WRITE */
+#endif /* SIMPLIFIED_READ/WRITE */
 
 
 /* Inhibit C++ name-mangling for libpng functions but not for system calls. */
@@ -1102,7 +1104,7 @@ PNG_INTERNAL_FUNCTION(void,png_write_tEXt,(png_structrp png_ptr,
 
 #ifdef PNG_WRITE_zTXt_SUPPORTED
 PNG_INTERNAL_FUNCTION(void,png_write_zTXt,(png_structrp png_ptr, png_const_charp
-    key, png_const_charp text, png_size_t text_len, int compression),PNG_EMPTY);
+    key, png_const_charp text, int compression),PNG_EMPTY);
 #endif
 
 #ifdef PNG_WRITE_iTXt_SUPPORTED
@@ -1241,7 +1243,7 @@ PNG_INTERNAL_FUNCTION(void,png_read_finish_IDAT,(png_structrp png_ptr),
 PNG_INTERNAL_FUNCTION(void,png_read_finish_row,(png_structrp png_ptr),
    PNG_EMPTY);
    /* Finish a row while reading, dealing with interlacing passes, etc. */
-#endif /* PNG_SEQUENTIAL_READ_SUPPORTED */
+#endif /* SEQUENTIAL_READ */
 
 /* Initialize the row buffers, etc. */
 PNG_INTERNAL_FUNCTION(void,png_read_start_row,(png_structrp png_ptr),PNG_EMPTY);
@@ -1317,7 +1319,7 @@ PNG_INTERNAL_FUNCTION(void,png_handle_hIST,(png_structrp png_ptr,
 #ifdef PNG_READ_iCCP_SUPPORTED
 PNG_INTERNAL_FUNCTION(void,png_handle_iCCP,(png_structrp png_ptr,
     png_inforp info_ptr, png_uint_32 length),PNG_EMPTY);
-#endif /* PNG_READ_iCCP_SUPPORTED */
+#endif /* READ_iCCP */
 
 #ifdef PNG_READ_iTXt_SUPPORTED
 PNG_INTERNAL_FUNCTION(void,png_handle_iTXt,(png_structrp png_ptr,
@@ -1352,7 +1354,7 @@ PNG_INTERNAL_FUNCTION(void,png_handle_sCAL,(png_structrp png_ptr,
 #ifdef PNG_READ_sPLT_SUPPORTED
 PNG_INTERNAL_FUNCTION(void,png_handle_sPLT,(png_structrp png_ptr,
     png_inforp info_ptr, png_uint_32 length),PNG_EMPTY);
-#endif /* PNG_READ_sPLT_SUPPORTED */
+#endif /* READ_sPLT */
 
 #ifdef PNG_READ_sRGB_SUPPORTED
 PNG_INTERNAL_FUNCTION(void,png_handle_sRGB,(png_structrp png_ptr,
@@ -1466,7 +1468,7 @@ PNG_INTERNAL_FUNCTION(void,png_push_read_iTXt,(png_structrp png_ptr,
     png_inforp info_ptr),PNG_EMPTY);
 #  endif
 
-#endif /* PNG_PROGRESSIVE_READ_SUPPORTED */
+#endif /* PROGRESSIVE_READ */
 
 #ifdef PNG_APNG_SUPPORTED
 PNG_INTERNAL_FUNCTION(void,png_ensure_fcTL_is_valid,(png_structp png_ptr,
@@ -1492,8 +1494,8 @@ PNG_INTERNAL_FUNCTION(void,png_read_reinit,(png_structp png_ptr,
 #ifdef PNG_PROGRESSIVE_READ_SUPPORTED
 PNG_INTERNAL_FUNCTION(void,png_progressive_read_reset,(png_structp png_ptr),
    PNG_EMPTY);
-#endif /* PNG_PROGRESSIVE_READ_SUPPORTED */
-#endif /* PNG_READ_APNG_SUPPORTED */
+#endif /* PROGRESSIVE_READ */
+#endif /* READ_APNG */
 
 #ifdef PNG_WRITE_APNG_SUPPORTED
 PNG_INTERNAL_FUNCTION(void,png_write_acTL,(png_structp png_ptr,
@@ -1508,8 +1510,8 @@ PNG_INTERNAL_FUNCTION(void,png_write_fdAT,(png_structp png_ptr,
 PNG_INTERNAL_FUNCTION(void,png_write_reset,(png_structp png_ptr),PNG_EMPTY);
 PNG_INTERNAL_FUNCTION(void,png_write_reinit,(png_structp png_ptr,
    png_infop info_ptr, png_uint_32 width, png_uint_32 height),PNG_EMPTY);
-#endif /* PNG_WRITE_APNG_SUPPORTED */
-#endif /* PNG_APNG_SUPPORTED */
+#endif /* WRITE_APNG */
+#endif /* APNG */
 
 /* Added at libpng version 1.6.0 */
 #ifdef PNG_GAMMA_SUPPORTED

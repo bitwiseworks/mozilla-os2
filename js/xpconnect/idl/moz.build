@@ -6,11 +6,12 @@
 
 XPIDL_SOURCES += [
     'mozIJSSubScriptLoader.idl',
+    'nsIAddonInterposition.idl',
     'nsIJSRuntimeService.idl',
+    'nsIRemoteTagService.idl',
     'nsIScriptError.idl',
     'nsIXPConnect.idl',
     'nsIXPCScriptable.idl',
-    'nsIXPCSecurityManager.idl',
     'xpccomponents.idl',
     'xpcexception.idl',
     'xpcIJSGetFactory.idl',

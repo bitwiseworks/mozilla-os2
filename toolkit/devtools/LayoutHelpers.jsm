@@ -1,4 +1,4 @@
-/* -*- Mode: Javascript; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -15,94 +15,97 @@ XPCOMUtils.defineLazyModuleGetter(this, "Services",
 
 this.EXPORTED_SYMBOLS = ["LayoutHelpers"];
 
-this.LayoutHelpers = LayoutHelpers = function(aTopLevelWindow) {
+let LayoutHelpers = function(aTopLevelWindow) {
   this._topDocShell = aTopLevelWindow.QueryInterface(Ci.nsIInterfaceRequestor)
                                      .getInterface(Ci.nsIWebNavigation)
                                      .QueryInterface(Ci.nsIDocShell);
 };
 
+this.LayoutHelpers = LayoutHelpers;
+
 LayoutHelpers.prototype = {
 
   /**
    * Get box quads adjusted for iframes and zoom level.
-   *
-   * @param {DOMNode} node
-   *        The node for which we are to get the box model region quads
-   * @param  {String} region
-   *         The box model region to return:
-   *         "content", "padding", "border" or "margin"
+   * @param {DOMNode} node The node for which we are to get the box model region
+   * quads.
+   * @param {String} region The box model region to return: "content",
+   * "padding", "border" or "margin".
+   * @return {Array} An array of objects that have the same structure as quads
+   * returned by getBoxQuads. An empty array if the node has no quads or is
+   * invalid.
    */
   getAdjustedQuads: function(node, region) {
-    if (!node) {
-      return;
+    if (!node || !node.getBoxQuads) {
+      return [];
     }
 
-    let [quads] = node.getBoxQuads({
+    let quads = node.getBoxQuads({
       box: region
     });
 
-    if (!quads) {
-      return;
+    if (!quads.length) {
+      return [];
     }
 
-    let [xOffset, yOffset] = this._getNodeOffsets(node);
-    let scale = this.calculateScale(node);
+    let [xOffset, yOffset] = this.getFrameOffsets(node);
+    let scale = LayoutHelpers.getCurrentZoom(node);
 
-    return {
-      p1: {
-        w: quads.p1.w * scale,
-        x: quads.p1.x * scale + xOffset,
-        y: quads.p1.y * scale + yOffset,
-        z: quads.p1.z * scale
-      },
-      p2: {
-        w: quads.p2.w * scale,
-        x: quads.p2.x * scale + xOffset,
-        y: quads.p2.y * scale + yOffset,
-        z: quads.p2.z * scale
-      },
-      p3: {
-        w: quads.p3.w * scale,
-        x: quads.p3.x * scale + xOffset,
-        y: quads.p3.y * scale + yOffset,
-        z: quads.p3.z * scale
-      },
-      p4: {
-        w: quads.p4.w * scale,
-        x: quads.p4.x * scale + xOffset,
-        y: quads.p4.y * scale + yOffset,
-        z: quads.p4.z * scale
-      },
-      bounds: {
-        bottom: quads.bounds.bottom * scale + yOffset,
-        height: quads.bounds.height * scale,
-        left: quads.bounds.left * scale + xOffset,
-        right: quads.bounds.right * scale + xOffset,
-        top: quads.bounds.top * scale + yOffset,
-        width: quads.bounds.width * scale,
-        x: quads.bounds.x * scale + xOffset,
-        y: quads.bounds.y * scale + yOffset
-      }
-    };
-  },
+    let adjustedQuads = [];
+    for (let quad of quads) {
+      adjustedQuads.push({
+        p1: {
+          w: quad.p1.w * scale,
+          x: quad.p1.x * scale + xOffset,
+          y: quad.p1.y * scale + yOffset,
+          z: quad.p1.z * scale
+        },
+        p2: {
+          w: quad.p2.w * scale,
+          x: quad.p2.x * scale + xOffset,
+          y: quad.p2.y * scale + yOffset,
+          z: quad.p2.z * scale
+        },
+        p3: {
+          w: quad.p3.w * scale,
+          x: quad.p3.x * scale + xOffset,
+          y: quad.p3.y * scale + yOffset,
+          z: quad.p3.z * scale
+        },
+        p4: {
+          w: quad.p4.w * scale,
+          x: quad.p4.x * scale + xOffset,
+          y: quad.p4.y * scale + yOffset,
+          z: quad.p4.z * scale
+        },
+        bounds: {
+          bottom: quad.bounds.bottom * scale + yOffset,
+          height: quad.bounds.height * scale,
+          left: quad.bounds.left * scale + xOffset,
+          right: quad.bounds.right * scale + xOffset,
+          top: quad.bounds.top * scale + yOffset,
+          width: quad.bounds.width * scale,
+          x: quad.bounds.x * scale + xOffset,
+          y: quad.bounds.y * scale + yOffset
+        }
+      });
+    }
 
-  calculateScale: function(node) {
-    let win = node.ownerDocument.defaultView;
-    let winUtils = win.QueryInterface(Ci.nsIInterfaceRequestor)
-                      .getInterface(Ci.nsIDOMWindowUtils);
-    return winUtils.fullZoom;
+    return adjustedQuads;
   },
 
   /**
    * Compute the absolute position and the dimensions of a node, relativalely
    * to the root window.
    *
-   * @param nsIDOMNode aNode
+   * @param {DOMNode} aNode
    *        a DOM element to get the bounds for
-   * @param nsIWindow aContentWindow
+   * @param {DOMWindow} aContentWindow
    *        the content window holding the node
+   * @return {Object}
+   *         A rect object with the {top, left, width, height} properties
    */
-  getRect: function LH_getRect(aNode, aContentWindow) {
+  getRect: function(aNode, aContentWindow) {
     let frameWin = aNode.ownerDocument.defaultView;
     let clientRect = aNode.getBoundingClientRect();
 
@@ -115,7 +118,6 @@ LayoutHelpers.prototype = {
 
     // We iterate through all the parent windows.
     while (true) {
-
       // Are we in the top-level window?
       if (this.isTopLevelWindow(frameWin)) {
         break;
@@ -149,15 +151,15 @@ LayoutHelpers.prototype = {
    * suitable API for determining the offset between the iframe's content and
    * its bounding client rect. Bug 626359 should provide us with such an API.
    *
-   * @param aIframe
+   * @param {DOMNode} aIframe
    *        The iframe.
-   * @returns array [offsetTop, offsetLeft]
-   *          offsetTop is the distance from the top of the iframe and the
-   *            top of the content document.
-   *          offsetLeft is the distance from the left of the iframe and the
-   *            left of the content document.
+   * @return {Array} [offsetTop, offsetLeft]
+   *         offsetTop is the distance from the top of the iframe and the top of
+   *         the content document.
+   *         offsetLeft is the distance from the left of the iframe and the left
+   *         of the content document.
    */
-  getIframeContentOffset: function LH_getIframeContentOffset(aIframe) {
+  getIframeContentOffset: function(aIframe) {
     let style = aIframe.contentWindow.getComputedStyle(aIframe, null);
 
     // In some cases, the computed style is null
@@ -178,12 +180,14 @@ LayoutHelpers.prototype = {
    * Find an element from the given coordinates. This method descends through
    * frames to find the element the user clicked inside frames.
    *
-   * @param DOMDocument aDocument the document to look into.
-   * @param integer aX
-   * @param integer aY
-   * @returns Node|null the element node found at the given coordinates.
+   * @param {DOMDocument} aDocument the document to look into.
+   * @param {Number} aX
+   * @param {Number} aY
+   * @return {DOMNode}
+   *         the element node found at the given coordinates, or null if no node
+   *         was found
    */
-  getElementFromPoint: function LH_elementFromPoint(aDocument, aX, aY) {
+  getElementFromPoint: function(aDocument, aX, aY) {
     let node = aDocument.elementFromPoint(aX, aY);
     if (node && node.contentDocument) {
       if (node instanceof Ci.nsIDOMHTMLIFrameElement) {
@@ -214,10 +218,12 @@ LayoutHelpers.prototype = {
   /**
    * Scroll the document so that the element "elem" appears in the viewport.
    *
-   * @param Element elem the element that needs to appear in the viewport.
-   * @param bool centered true if you want it centered, false if you want it to
-   * appear on the top of the viewport. It is true by default, and that is
-   * usually what you want.
+   * @param {DOMNode} elem
+   *        The element that needs to appear in the viewport.
+   * @param {Boolean} centered
+   *        true if you want it centered, false if you want it to appear on the
+   *        top of the viewport. It is true by default, and that is usually what
+   *        you want.
    */
   scrollIntoViewIfNeeded: function(elem, centered) {
     // We want to default to centering the element in the page,
@@ -293,10 +299,10 @@ LayoutHelpers.prototype = {
    * Check if a node and its document are still alive
    * and attached to the window.
    *
-   * @param aNode
+   * @param {DOMNode} aNode
+   * @return {Boolean}
    */
-  isNodeConnected: function LH_isNodeConnected(aNode)
-  {
+  isNodeConnected: function(aNode) {
     try {
       let connected = (aNode.ownerDocument && aNode.ownerDocument.defaultView &&
                       !(aNode.compareDocumentPosition(aNode.ownerDocument.documentElement) &
@@ -310,8 +316,11 @@ LayoutHelpers.prototype = {
 
   /**
    * like win.parent === win, but goes through mozbrowsers and mozapps iframes.
+   *
+   * @param {DOMWindow} win
+   * @return {Boolean}
    */
-  isTopLevelWindow: function LH_isTopLevelWindow(win) {
+  isTopLevelWindow: function(win) {
     let docShell = win.QueryInterface(Ci.nsIInterfaceRequestor)
                    .getInterface(Ci.nsIWebNavigation)
                    .QueryInterface(Ci.nsIDocShell);
@@ -321,6 +330,9 @@ LayoutHelpers.prototype = {
 
   /**
    * Check a window is part of the top level window.
+   *
+   * @param {DOMWindow} win
+   * @return {Boolean}
    */
   isIncludedInTopLevelWindow: function LH_isIncludedInTopLevelWindow(win) {
     if (this.isTopLevelWindow(win)) {
@@ -337,8 +349,11 @@ LayoutHelpers.prototype = {
 
   /**
    * like win.parent, but goes through mozbrowsers and mozapps iframes.
+   *
+   * @param {DOMWindow} win
+   * @return {DOMWindow}
    */
-  getParentWindow: function LH_getParentWindow(win) {
+  getParentWindow: function(win) {
     if (this.isTopLevelWindow(win)) {
       return null;
     }
@@ -358,10 +373,12 @@ LayoutHelpers.prototype = {
   /**
    * like win.frameElement, but goes through mozbrowsers and mozapps iframes.
    *
-   * @param DOMWindow win The window to get the frame for
-   * @return DOMElement The element in which the window is embedded.
+   * @param {DOMWindow} win
+   *        The window to get the frame for
+   * @return {DOMNode}
+   *         The element in which the window is embedded.
    */
-  getFrameElement: function LH_getFrameElement(win) {
+  getFrameElement: function(win) {
     if (this.isTopLevelWindow(win)) {
       return null;
     }
@@ -374,16 +391,18 @@ LayoutHelpers.prototype = {
   },
 
   /**
-   * Get the x and y offsets for a node taking iframes into account.
+   * Get the x/y offsets for of all the parent frames of a given node
    *
    * @param {DOMNode} node
    *        The node for which we are to get the offset
+   * @return {Array}
+   *         The frame offset [x, y]
    */
-  _getNodeOffsets: function(node) {
+  getFrameOffsets: function(node) {
     let xOffset = 0;
     let yOffset = 0;
     let frameWin = node.ownerDocument.defaultView;
-    let scale = this.calculateScale(node);
+    let scale = LayoutHelpers.getCurrentZoom(node);
 
     while (true) {
       // Are we in the top-level window?
@@ -413,97 +432,191 @@ LayoutHelpers.prototype = {
     return [xOffset * scale, yOffset * scale];
   },
 
+  /**
+   * Get the 4 bounding points for a node taking iframes into account.
+   * Note that for transformed nodes, this will return the untransformed bound.
+   *
+   * @param {DOMNode} node
+   * @return {Object}
+   *         An object with p1,p2,p3,p4 properties being {x,y} objects
+   */
+  getNodeBounds: function(node) {
+    if (!node) {
+      return;
+    }
 
+    let scale = LayoutHelpers.getCurrentZoom(node);
 
-  /********************************************************************
-   * GetBoxQuads POLYFILL START TODO: Remove this when bug 917755 is fixed.
-   ********************************************************************/
-  _getBoxQuadsFromRect: function(rect, node) {
-    let scale = this.calculateScale(node);
-    let [xOffset, yOffset] = this._getNodeOffsets(node);
+    // Find out the offset of the node in its current frame
+    let offsetLeft = 0;
+    let offsetTop = 0;
+    let el = node;
+    while (el && el.parentNode) {
+      offsetLeft += el.offsetLeft;
+      offsetTop += el.offsetTop;
+      el = el.offsetParent;
+    }
 
-    let out = {
-      p1: {
-        x: rect.left * scale + xOffset,
-        y: rect.top * scale + yOffset
-      },
-      p2: {
-        x: (rect.left + rect.width) * scale + xOffset,
-        y: rect.top * scale + yOffset
-      },
-      p3: {
-        x: (rect.left + rect.width) * scale + xOffset,
-        y: (rect.top + rect.height) * scale + yOffset
-      },
-      p4: {
-        x: rect.left * scale + xOffset,
-        y: (rect.top + rect.height) * scale + yOffset
+    // Also take scrolled containers into account
+    el = node;
+    while (el && el.parentNode) {
+      if (el.scrollTop) {
+        offsetTop -= el.scrollTop;
       }
+      if (el.scrollLeft) {
+        offsetLeft -= el.scrollLeft;
+      }
+      el = el.parentNode;
+    }
+
+    // And add the potential frame offset if the node is nested
+    let [xOffset, yOffset] = this.getFrameOffsets(node);
+    xOffset += offsetLeft;
+    yOffset += offsetTop;
+
+    xOffset *= scale;
+    yOffset *= scale;
+
+    // Get the width and height
+    let width = node.offsetWidth * scale;
+    let height = node.offsetHeight * scale;
+
+    return {
+      p1: {x: xOffset, y: yOffset},
+      p2: {x: xOffset + width, y: yOffset},
+      p3: {x: xOffset + width, y: yOffset + height},
+      p4: {x: xOffset, y: yOffset + height}
     };
+  }
+};
 
-    out.bounds = {
-      bottom: out.p4.y,
-      height: out.p4.y - out.p1.y,
-      left: out.p1.x,
-      right: out.p2.x,
-      top: out.p1.y,
-      width: out.p2.x - out.p1.x,
-      x: out.p1.x,
-      y: out.p1.y
-    };
+/**
+ * Traverse getBindingParent until arriving upon the bound element
+ * responsible for the generation of the specified node.
+ * See https://developer.mozilla.org/en-US/docs/XBL/XBL_1.0_Reference/DOM_Interfaces#getBindingParent.
+ *
+ * @param {DOMNode} node
+ * @return {DOMNode}
+ *         If node is not anonymous, this will return node. Otherwise,
+ *         it will return the bound element
+ *
+ */
+LayoutHelpers.getRootBindingParent = function(node) {
+  let parent;
+  let doc = node.ownerDocument;
+  if (!doc) {
+    return node;
+  }
+  while ((parent = doc.getBindingParent(node))) {
+    node = parent;
+  }
+  return node;
+};
 
-    return out;
-  },
+LayoutHelpers.getBindingParent = function(node) {
+  let doc = node.ownerDocument;
+  if (!doc) {
+    return false;
+  }
 
-  _parseNb: function(distance) {
-    let nb = parseFloat(distance, 10);
-    return isNaN(nb) ? 0 : nb;
-  },
+  // If there is no binding parent then it is not anonymous.
+  let parent = doc.getBindingParent(node);
+  if (!parent) {
+    return false;
+  }
 
-  getAdjustedQuadsPolyfill: function(node, region) {
-    // Get the border-box rect
-    // Note that this is relative to the node's viewport, so before we can use
-    // it, will need to go back up the frames like getRect
-    let borderRect = node.getBoundingClientRect();
+  return parent;
+}
+/**
+ * Determine whether a node is anonymous by determining if there
+ * is a bindingParent.
+ *
+ * @param {DOMNode} node
+ * @return {Boolean}
+ *
+ */
+LayoutHelpers.isAnonymous = function(node) {
+  return LayoutHelpers.getRootBindingParent(node) !== node;
+};
 
-    // If the boxType is border, no need to go any further, we're done
-    if (region === "border") {
-      return this._getBoxQuadsFromRect(borderRect, node);
-    }
+/**
+ * Determine whether a node is native anonymous content (as opposed
+ * to XBL anonymous or shadow DOM).
+ * Native anonymous content includes elements like internals to form
+ * controls and ::before/::after.
+ *
+ * @param {DOMNode} node
+ * @return {Boolean}
+ *
+ */
+LayoutHelpers.isNativeAnonymous = function(node) {
+  if (!LayoutHelpers.getBindingParent(node)) {
+    return false;
+  }
+  return !LayoutHelpers.isXBLAnonymous(node) &&
+         !LayoutHelpers.isShadowAnonymous(node);
+};
 
-    // Else, need to get margin/padding/border distances
-    let style = node.ownerDocument.defaultView.getComputedStyle(node);
-    let camel = s => s.substring(0, 1).toUpperCase() + s.substring(1);
-    let distances = {border:{}, padding:{}, margin: {}};
+/**
+ * Determine whether a node is XBL anonymous content (as opposed
+ * to native anonymous or shadow DOM).
+ * See https://developer.mozilla.org/en-US/docs/XBL/XBL_1.0_Reference/Anonymous_Content.
+ *
+ * @param {DOMNode} node
+ * @return {Boolean}
+ *
+ */
+LayoutHelpers.isXBLAnonymous = function(node) {
+  let parent = LayoutHelpers.getBindingParent(node);
+  if (!parent) {
+    return false;
+  }
 
-    for (let side of ["top", "right", "bottom", "left"]) {
-      distances.border[side] = this._parseNb(style["border" + camel(side) + "Width"]);
-      distances.padding[side] = this._parseNb(style["padding" + camel(side)]);
-      distances.margin[side] = this._parseNb(style["margin" + camel(side)]);
-    }
+  // Shadow nodes also show up in getAnonymousNodes, so return false.
+  if (parent.shadowRoot && parent.shadowRoot.contains(node)) {
+    return false;
+  }
 
-    // From the border-box rect, calculate the content-box, padding-box and
-    // margin-box rects
-    function offsetRect(rect, offsetType, dir=1) {
-      return {
-        top: rect.top + (dir * distances[offsetType].top),
-        left: rect.left + (dir * distances[offsetType].left),
-        width: rect.width - (dir * (distances[offsetType].left + distances[offsetType].right)),
-        height: rect.height - (dir * (distances[offsetType].top + distances[offsetType].bottom))
-      };
-    }
+  let anonNodes = [...node.ownerDocument.getAnonymousNodes(parent) || []];
+  return anonNodes.indexOf(node) > -1;
+};
 
-    if (region === "margin") {
-      return this._getBoxQuadsFromRect(offsetRect(borderRect, "margin", -1), node);
-    } else if (region === "padding") {
-      return this._getBoxQuadsFromRect(offsetRect(borderRect, "border"), node);
-    } else if (region === "content") {
-      let paddingRect = offsetRect(borderRect, "border");
-      return this._getBoxQuadsFromRect(offsetRect(paddingRect, "padding"), node);
-    }
-  },
+/**
+ * Determine whether a node is a child of a shadow root.
+ * See https://w3c.github.io/webcomponents/spec/shadow/
+ *
+ * @param {DOMNode} node
+ * @return {Boolean}
+ */
+LayoutHelpers.isShadowAnonymous = function(node) {
+  let parent = LayoutHelpers.getBindingParent(node);
+  if (!parent) {
+    return false;
+  }
 
-  /********************************************************************
-   * GetBoxQuads POLYFILL END
-   ********************************************************************/
+  // If there is a shadowRoot and this is part of it then this
+  // is not native anonymous
+  return parent.shadowRoot && parent.shadowRoot.contains(node);
+};
+
+/**
+ * Get the current zoom factor applied to the container window of a given node.
+ * Container windows are used as a weakmap key to store the corresponding
+ * nsIDOMWindowUtils instance to avoid querying it every time.
+ *
+ * @param {DOMNode} The node for which the zoom factor should be calculated
+ * @return {Number}
+ */
+let windowUtils = new WeakMap;
+LayoutHelpers.getCurrentZoom = function(node, map = z=>z) {
+  let win = node.ownerDocument.defaultView;
+  let utils = windowUtils.get(win);
+  if (utils) {
+    return utils.fullZoom;
+  }
+
+  utils = win.QueryInterface(Ci.nsIInterfaceRequestor)
+             .getInterface(Ci.nsIDOMWindowUtils);
+  windowUtils.set(win, utils);
+  return utils.fullZoom;
 };

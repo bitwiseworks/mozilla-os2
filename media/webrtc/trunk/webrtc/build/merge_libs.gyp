@@ -10,7 +10,6 @@
   'includes': ['common.gypi',],
   'variables': {
     'merge_libs_dependencies': [
-      '../video_engine/video_engine.gyp:video_engine_core',
     ],
   },
   'targets': [
@@ -19,6 +18,11 @@
       'type': 'executable',
       'dependencies': [
         '<@(merge_libs_dependencies)',
+        '../webrtc.gyp:webrtc',
+        '../sound/sound.gyp:rtc_sound',
+        '../libjingle/xmllite/xmllite.gyp:rtc_xmllite',
+        '../libjingle/xmpp/xmpp.gyp:rtc_xmpp',
+        '../p2p/p2p.gyp:rtc_p2p',
       ],
       'sources': ['no_op.cc',],
     },
@@ -31,7 +35,7 @@
       'actions': [
         {
           'variables': {
-            'output_lib_name': 'webrtc',
+            'output_lib_name': 'webrtc_merged',
             'output_lib': '<(PRODUCT_DIR)/<(STATIC_LIB_PREFIX)<(output_lib_name)<(STATIC_LIB_SUFFIX)',
           },
           'action_name': 'merge_libs',

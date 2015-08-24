@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    
+
 <string name="app_name">ViEAutotest</string>
 <string name="TitleName">ViEAutotest</string>
 <string name="run_button">Run Test</string>
@@ -19,7 +19,6 @@
 	<item>Capture</item>
 	<item>Codec</item>
 	<item>Mix</item>
-	<item>Encryption</item>
 	<item>External Codec</item>
 	<item>File</item>
 	<item>Image Process</item>

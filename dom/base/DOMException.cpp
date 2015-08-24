@@ -6,7 +6,6 @@
 #include "mozilla/dom/DOMException.h"
 
 #include "jsprf.h"
-#include "js/OldDebugAPI.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/HoldDropJSObjects.h"
 #include "mozilla/dom/Exceptions.h"
@@ -22,6 +21,7 @@
 #include "xpcprivate.h"
 
 #include "mozilla/dom/DOMExceptionBinding.h"
+#include "mozilla/ErrorResult.h"
 
 using namespace mozilla;
 
@@ -69,7 +69,23 @@ enum DOM4ErrorTypeCodeMap {
   NotReadableError         = 0,
 
   /* FileHandle API errors */
-  LockedFileInactiveError = 0,
+  FileHandleInactiveError = 0,
+
+  /* WebCrypto errors https://dvcs.w3.org/hg/webcrypto-api/raw-file/tip/spec/Overview.html#dfn-DataError */
+  OperationError           = 0,
+
+  /* Bluetooth API errors */
+  BtFailError              = 0,
+  BtNotReadyError          = 0,
+  BtNoMemError             = 0,
+  BtBusyError              = 0,
+  BtDoneError              = 0,
+  BtUnsupportedError       = 0,
+  BtParmInvalidError       = 0,
+  BtUnhandledError         = 0,
+  BtAuthFailureError       = 0,
+  BtRmtDevDownError        = 0,
+  BtAuthRejectedError      = 0,
 };
 
 #define DOM4_MSG_DEF(name, message, nsresult) {(nsresult), name, #name, message},
@@ -142,6 +158,8 @@ bool Exception::sEverMadeOneFromFactory = false;
 NS_IMPL_CLASSINFO(Exception, nullptr, nsIClassInfo::DOM_OBJECT,
                   NS_XPCEXCEPTION_CID)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Exception)
+  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
+  NS_INTERFACE_MAP_ENTRY(Exception)
   NS_INTERFACE_MAP_ENTRY(nsIException)
   NS_INTERFACE_MAP_ENTRY(nsIXPCException)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIException)
@@ -183,8 +201,6 @@ Exception::Exception(const nsACString& aMessage,
   mInitialized(false),
   mHoldingJSVal(false)
 {
-  SetIsDOMBinding();
-
   // A little hack... The nsIGenericModule nsIClassInfo scheme relies on there
   // having been at least one instance made via the factory. Otherwise, the
   // shared factory/classinsance object never gets created and our QI getter
@@ -484,7 +500,7 @@ Exception::GetMessageMoz(nsString& retval)
 {
   nsCString str;
 #ifdef DEBUG
-  DebugOnly<nsresult> rv = 
+  DebugOnly<nsresult> rv =
 #endif
   GetMessageMoz(str);
   MOZ_ASSERT(NS_SUCCEEDED(rv));
@@ -551,6 +567,14 @@ Exception::GetData() const
 }
 
 void
+Exception::GetStack(nsAString& aStack, ErrorResult& aRv) const
+{
+  if (mLocation) {
+    aRv = mLocation->GetFormattedStack(aStack);
+  }
+}
+
+void
 Exception::Stringify(nsString& retval)
 {
   nsCString str;
@@ -575,7 +599,6 @@ DOMException::DOMException(nsresult aRv, const nsACString& aMessage,
     mMessage(aMessage),
     mCode(aCode)
 {
-  SetIsDOMBinding();
 }
 
 NS_IMETHODIMP
@@ -653,6 +676,35 @@ DOMException::GetMessageMoz(nsString& retval)
   CopyUTF8toUTF16(mMessage, retval);
 }
 
+already_AddRefed<DOMException>
+DOMException::Constructor(GlobalObject& /* unused */,
+                          const nsAString& aMessage,
+                          const Optional<nsAString>& aName,
+                          ErrorResult& aError)
+{
+  nsresult exceptionResult = NS_OK;
+  uint16_t exceptionCode = 0;
+  nsCString name(NS_LITERAL_CSTRING("Error"));
+
+  if (aName.WasPassed()) {
+    CopyUTF16toUTF8(aName.Value(), name);
+    for (uint32_t idx = 0; idx < ArrayLength(sDOMErrorMsgMap); idx++) {
+      if (name.EqualsASCII(sDOMErrorMsgMap[idx].mName)) {
+        exceptionResult = sDOMErrorMsgMap[idx].mNSResult;
+        exceptionCode = sDOMErrorMsgMap[idx].mCode;
+        break;
+      }
+    }
+  }
+
+  nsRefPtr<DOMException> retval =
+    new DOMException(exceptionResult,
+                     NS_ConvertUTF16toUTF8(aMessage),
+                     name,
+                     exceptionCode);
+  return retval.forget();
+}
+
 JSObject*
 DOMException::WrapObject(JSContext* aCx)
 {
@@ -669,6 +721,32 @@ DOMException::Create(nsresult aRv)
   nsRefPtr<DOMException> inst =
     new DOMException(aRv, message, name, code);
   return inst.forget();
+}
+
+bool
+DOMException::Sanitize(JSContext* aCx,
+                       JS::MutableHandle<JS::Value> aSanitizedValue)
+{
+  nsRefPtr<DOMException> retval = this;
+  if (mLocation && !mLocation->CallerSubsumes(aCx)) {
+    nsString message;
+    GetMessageMoz(message);
+    nsString name;
+    GetName(name);
+    retval = new dom::DOMException(nsresult(Result()),
+                                   NS_ConvertUTF16toUTF8(message),
+                                   NS_ConvertUTF16toUTF8(name),
+                                   Code());
+    // Now it's possible that the stack on retval still starts with
+    // stuff aCx is not supposed to touch; it depends on what's on the
+    // stack right this second.  Walk past all of that.
+    nsCOMPtr<nsIStackFrame> stack;
+    nsresult rv = retval->mLocation->GetSanitized(aCx, getter_AddRefs(stack));
+    NS_ENSURE_SUCCESS(rv, false);
+    retval->mLocation.swap(stack);
+  }
+
+  return ToJSValue(aCx, retval, aSanitizedValue);
 }
 
 } // namespace dom

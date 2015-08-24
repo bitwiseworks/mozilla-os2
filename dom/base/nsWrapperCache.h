@@ -8,11 +8,21 @@
 
 #include "nsCycleCollectionParticipant.h"
 #include "mozilla/Assertions.h"
+#include "js/Class.h"
 #include "js/Id.h"          // must come before js/RootingAPI.h
 #include "js/Value.h"       // must come before js/RootingAPI.h
 #include "js/RootingAPI.h"
 #include "js/TracingAPI.h"
 
+namespace mozilla {
+namespace dom {
+class TabChildGlobal;
+class ProcessGlobal;
+} // namespace dom
+} // namespace mozilla
+class SandboxPrivate;
+class nsInProcessTabChildGlobal;
+class nsWindowRoot;
 class XPCWrappedNativeScope;
 
 #define NS_WRAPPERCACHE_IID \
@@ -36,13 +46,21 @@ class XPCWrappedNativeScope;
  *
  * The cache can store 2 types of objects:
  *
- *  If WRAPPER_IS_DOM_BINDING is not set (IsDOMBinding() returns false):
- *    - a slim wrapper or the JSObject of an XPCWrappedNative wrapper
+ *  If WRAPPER_IS_NOT_DOM_BINDING is set (IsDOMBinding() returns false):
+ *    - the JSObject of an XPCWrappedNative wrapper
  *
- *  If WRAPPER_IS_DOM_BINDING is set (IsDOMBinding() returns true):
+ *  If WRAPPER_IS_NOT_DOM_BINDING is not set (IsDOMBinding() returns true):
  *    - a DOM binding object (regular JS object or proxy)
  *
  * The finalizer for the wrapper clears the cache.
+ *
+ * A compacting GC can move the wrapper object. Pointers to moved objects are
+ * usually found and updated by tracing the heap, however non-preserved wrappers
+ * are weak references and are not traced, so another approach is
+ * necessary. Instead a class hook (objectMovedOp) is provided that is called
+ * when an object is moved and is responsible for ensuring pointers are
+ * updated. It does this by calling UpdateWrapper() on the wrapper
+ * cache. SetWrapper() asserts that the hook is implemented for any wrapper set.
  *
  * A number of the methods are implemented in nsWrapperCacheInlines.h because we
  * have to include some JS headers that don't play nicely with the rest of the
@@ -89,6 +107,8 @@ public:
   {
     MOZ_ASSERT(!PreservingWrapper(), "Clearing a preserved wrapper!");
     MOZ_ASSERT(aWrapper, "Use ClearWrapper!");
+    MOZ_ASSERT(js::HasObjectMovedOp(aWrapper),
+               "Object has not provided the hook to update the wrapper if it is moved");
 
     SetWrapperJSObject(aWrapper);
   }
@@ -104,32 +124,35 @@ public:
     SetWrapperJSObject(nullptr);
   }
 
+  /**
+   * Update the wrapper if the object it contains is moved.
+   *
+   * This method must be called from the objectMovedOp class extension hook for
+   * any wrapper cached object.
+   */
+  void UpdateWrapper(JSObject* aNewObject, const JSObject* aOldObject)
+  {
+    if (mWrapper) {
+      MOZ_ASSERT(mWrapper == aOldObject);
+      mWrapper = aNewObject;
+    }
+  }
+
   bool PreservingWrapper()
   {
     return HasWrapperFlag(WRAPPER_BIT_PRESERVED);
   }
 
-  void SetIsDOMBinding()
-  {
-    MOZ_ASSERT(!mWrapper && !(GetWrapperFlags() & ~WRAPPER_IS_DOM_BINDING),
-               "This flag should be set before creating any wrappers.");
-    SetWrapperFlags(WRAPPER_IS_DOM_BINDING);
-  }
-
   bool IsDOMBinding() const
   {
-    return HasWrapperFlag(WRAPPER_IS_DOM_BINDING);
+    return !HasWrapperFlag(WRAPPER_IS_NOT_DOM_BINDING);
   }
 
   /**
    * Wrap the object corresponding to this wrapper cache. If non-null is
    * returned, the object has already been stored in the wrapper cache.
    */
-  virtual JSObject* WrapObject(JSContext* cx)
-  {
-    MOZ_ASSERT(!IsDOMBinding(), "Someone forgot to override WrapObject");
-    return nullptr;
-  }
+  virtual JSObject* WrapObject(JSContext* cx) = 0;
 
   /**
    * Returns true if the object has a non-gray wrapper.
@@ -162,29 +185,31 @@ public:
     }
   }
 
-  /* 
+  /*
    * The following methods for getting and manipulating flags allow the unused
    * bits of mFlags to be used by derived classes.
    */
 
-  uint32_t GetFlags() const
+  typedef uint32_t FlagsType;
+
+  FlagsType GetFlags() const
   {
     return mFlags & ~kWrapperFlagsMask;
   }
 
-  bool HasFlag(uint32_t aFlag) const
+  bool HasFlag(FlagsType aFlag) const
   {
     MOZ_ASSERT((aFlag & kWrapperFlagsMask) == 0, "Bad flag mask");
     return !!(mFlags & aFlag);
   }
 
-  void SetFlags(uint32_t aFlagsToSet)
+  void SetFlags(FlagsType aFlagsToSet)
   {
     MOZ_ASSERT((aFlagsToSet & kWrapperFlagsMask) == 0, "Bad flag mask");
     mFlags |= aFlagsToSet;
   }
 
-  void UnsetFlags(uint32_t aFlagsToUnset)
+  void UnsetFlags(FlagsType aFlagsToUnset)
   {
     MOZ_ASSERT((aFlagsToUnset & kWrapperFlagsMask) == 0, "Bad flag mask");
     mFlags &= ~aFlagsToUnset;
@@ -226,7 +251,7 @@ protected:
   void TraceWrapper(JSTracer* aTrc, const char* name)
   {
     if (mWrapper) {
-      JS_CallHeapObjectTracer(aTrc, &mWrapper, name);
+      JS_CallObjectTracer(aTrc, &mWrapper, name);
     }
   }
 
@@ -238,6 +263,18 @@ protected:
   }
 
 private:
+  friend class mozilla::dom::TabChildGlobal;
+  friend class mozilla::dom::ProcessGlobal;
+  friend class SandboxPrivate;
+  friend class nsInProcessTabChildGlobal;
+  friend class nsWindowRoot;
+  void SetIsNotDOMBinding()
+  {
+    MOZ_ASSERT(!mWrapper && !(GetWrapperFlags() & ~WRAPPER_IS_NOT_DOM_BINDING),
+               "This flag should be set before creating any wrappers.");
+    SetWrapperFlags(WRAPPER_IS_NOT_DOM_BINDING);
+  }
+
   JSObject *GetWrapperJSObject() const
   {
     return mWrapper;
@@ -246,29 +283,29 @@ private:
   void SetWrapperJSObject(JSObject* aWrapper)
   {
     mWrapper = aWrapper;
-    UnsetWrapperFlags(kWrapperFlagsMask & ~WRAPPER_IS_DOM_BINDING);
+    UnsetWrapperFlags(kWrapperFlagsMask & ~WRAPPER_IS_NOT_DOM_BINDING);
   }
 
   void TraceWrapperJSObject(JSTracer* aTrc, const char* aName);
 
-  uint32_t GetWrapperFlags() const
+  FlagsType GetWrapperFlags() const
   {
     return mFlags & kWrapperFlagsMask;
   }
 
-  bool HasWrapperFlag(uint32_t aFlag) const
+  bool HasWrapperFlag(FlagsType aFlag) const
   {
     MOZ_ASSERT((aFlag & ~kWrapperFlagsMask) == 0, "Bad wrapper flag bits");
     return !!(mFlags & aFlag);
   }
 
-  void SetWrapperFlags(uint32_t aFlagsToSet)
+  void SetWrapperFlags(FlagsType aFlagsToSet)
   {
     MOZ_ASSERT((aFlagsToSet & ~kWrapperFlagsMask) == 0, "Bad wrapper flag bits");
     mFlags |= aFlagsToSet;
   }
 
-  void UnsetWrapperFlags(uint32_t aFlagsToUnset)
+  void UnsetWrapperFlags(FlagsType aFlagsToUnset)
   {
     MOZ_ASSERT((aFlagsToUnset & ~kWrapperFlagsMask) == 0, "Bad wrapper flag bits");
     mFlags &= ~aFlagsToUnset;
@@ -296,26 +333,30 @@ private:
   enum { WRAPPER_BIT_PRESERVED = 1 << 0 };
 
   /**
-   * If this bit is set then the wrapper for the native object is a DOM binding
-   * (regular JS object or proxy).
+   * If this bit is set then the wrapper for the native object is not a DOM
+   * binding.
    */
-  enum { WRAPPER_IS_DOM_BINDING = 1 << 1 };
+  enum { WRAPPER_IS_NOT_DOM_BINDING = 1 << 1 };
 
-  enum { kWrapperFlagsMask = (WRAPPER_BIT_PRESERVED | WRAPPER_IS_DOM_BINDING) };
+  enum { kWrapperFlagsMask = (WRAPPER_BIT_PRESERVED | WRAPPER_IS_NOT_DOM_BINDING) };
 
   JS::Heap<JSObject*> mWrapper;
-  uint32_t            mFlags;
+  FlagsType           mFlags;
 };
 
 enum { WRAPPER_CACHE_FLAGS_BITS_USED = 2 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsWrapperCache, NS_WRAPPERCACHE_IID)
 
-#define NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY                                   \
+#define NS_WRAPPERCACHE_INTERFACE_TABLE_ENTRY                                 \
   if ( aIID.Equals(NS_GET_IID(nsWrapperCache)) ) {                            \
     *aInstancePtr = static_cast<nsWrapperCache*>(this);                       \
     return NS_OK;                                                             \
   }
+
+#define NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY                                   \
+  NS_WRAPPERCACHE_INTERFACE_TABLE_ENTRY                                       \
+  else
 
 
 // Cycle collector macros for wrapper caches.
@@ -341,397 +382,16 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsWrapperCache, NS_WRAPPERCACHE_IID)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END                 \
   NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(_class)
 
-#define NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(_class, _field) \
-  NS_IMPL_CYCLE_COLLECTION_CLASS(_class)                        \
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(_class)                 \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field)                     \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER           \
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_END                           \
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(_class)               \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field)                   \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS            \
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END                         \
-  NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(_class)
-
-#define NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_2(_class, _field1,\
-                                                _field2)        \
-  NS_IMPL_CYCLE_COLLECTION_CLASS(_class)                        \
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(_class)                 \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field1)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field2)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER           \
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_END                           \
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(_class)               \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field1)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field2)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS            \
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END                         \
-  NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(_class)
-
-#define NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_3(_class, _field1,\
-                                                _field2,        \
-                                                _field3)        \
-  NS_IMPL_CYCLE_COLLECTION_CLASS(_class)                        \
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(_class)                 \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field1)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field2)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field3)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER           \
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_END                           \
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(_class)               \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field1)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field2)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field3)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS            \
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END                         \
-  NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(_class)
-
-#define NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_4(_class, _field1,\
-                                                _field2,        \
-                                                _field3,        \
-                                                _field4)        \
-  NS_IMPL_CYCLE_COLLECTION_CLASS(_class)                        \
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(_class)                 \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field1)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field2)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field3)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field4)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER           \
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_END                           \
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(_class)               \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field1)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field2)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field3)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field4)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS            \
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END                         \
-  NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(_class)
-
-#define NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_5(_class, _field1,\
-                                                _field2,        \
-                                                _field3,        \
-                                                _field4,        \
-                                                _field5)        \
-  NS_IMPL_CYCLE_COLLECTION_CLASS(_class)                        \
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(_class)                 \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field1)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field2)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field3)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field4)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field5)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER           \
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_END                           \
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(_class)               \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field1)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field2)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field3)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field4)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field5)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS            \
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END                         \
-  NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(_class)
-
-#define NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_6(_class, _field1,\
-                                                _field2,        \
-                                                _field3,        \
-                                                _field4,        \
-                                                _field5,        \
-                                                _field6)        \
-  NS_IMPL_CYCLE_COLLECTION_CLASS(_class)                        \
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(_class)                 \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field1)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field2)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field3)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field4)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field5)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field6)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER           \
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_END                           \
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(_class)               \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field1)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field2)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field3)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field4)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field5)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field6)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS            \
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END                         \
-  NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(_class)
-
-#define NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_7(_class, _field1,\
-                                                _field2,        \
-                                                _field3,        \
-                                                _field4,        \
-                                                _field5,        \
-                                                _field6,        \
-                                                _field7)        \
-  NS_IMPL_CYCLE_COLLECTION_CLASS(_class)                        \
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(_class)                 \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field1)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field2)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field3)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field4)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field5)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field6)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field7)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER           \
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_END                           \
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(_class)               \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field1)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field2)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field3)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field4)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field5)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field6)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field7)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS            \
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END                         \
-  NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(_class)
-
-#define NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_8(_class, _field1,\
-                                                _field2,        \
-                                                _field3,        \
-                                                _field4,        \
-                                                _field5,        \
-                                                _field6,        \
-                                                _field7,        \
-                                                _field8)        \
-  NS_IMPL_CYCLE_COLLECTION_CLASS(_class)                        \
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(_class)                 \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field1)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field2)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field3)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field4)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field5)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field6)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field7)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field8)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER           \
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_END                           \
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(_class)               \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field1)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field2)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field3)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field4)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field5)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field6)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field7)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field8)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS            \
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END                         \
-  NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(_class)
-
-#define NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_9(_class, _field1,\
-                                                _field2,        \
-                                                _field3,        \
-                                                _field4,        \
-                                                _field5,        \
-                                                _field6,        \
-                                                _field7,        \
-                                                _field8,        \
-                                                _field9)        \
-  NS_IMPL_CYCLE_COLLECTION_CLASS(_class)                        \
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(_class)                 \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field1)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field2)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field3)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field4)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field5)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field6)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field7)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field8)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field9)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER           \
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_END                           \
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(_class)               \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field1)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field2)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field3)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field4)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field5)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field6)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field7)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field8)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field9)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS            \
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END                         \
-  NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(_class)
-
-#define NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_10(_class, _field1,\
-                                                 _field2,       \
-                                                 _field3,       \
-                                                 _field4,       \
-                                                 _field5,       \
-                                                 _field6,       \
-                                                 _field7,       \
-                                                 _field8,       \
-                                                 _field9,       \
-                                                 _field10)      \
-  NS_IMPL_CYCLE_COLLECTION_CLASS(_class)                        \
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(_class)                 \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field1)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field2)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field3)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field4)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field5)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field6)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field7)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field8)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field9)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field10)                   \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER           \
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_END                           \
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(_class)               \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field1)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field2)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field3)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field4)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field5)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field6)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field7)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field8)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field9)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field10)                 \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS            \
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END                         \
-  NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(_class)
-
-#define NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_11(_class,        \
-                                                 _field1,       \
-                                                 _field2,       \
-                                                 _field3,       \
-                                                 _field4,       \
-                                                 _field5,       \
-                                                 _field6,       \
-                                                 _field7,       \
-                                                 _field8,       \
-                                                 _field9,       \
-                                                 _field10,      \
-                                                 _field11)      \
-  NS_IMPL_CYCLE_COLLECTION_CLASS(_class)                        \
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(_class)                 \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field1)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field2)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field3)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field4)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field5)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field6)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field7)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field8)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field9)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field10)                   \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field11)                   \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER           \
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_END                           \
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(_class)               \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field1)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field2)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field3)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field4)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field5)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field6)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field7)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field8)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field9)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field10)                 \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field11)                 \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS            \
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END                         \
-  NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(_class)
-
-#define NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_12(_class,        \
-                                                 _field1,       \
-                                                 _field2,       \
-                                                 _field3,       \
-                                                 _field4,       \
-                                                 _field5,       \
-                                                 _field6,       \
-                                                 _field7,       \
-                                                 _field8,       \
-                                                 _field9,       \
-                                                 _field10,      \
-                                                 _field11,      \
-                                                 _field12)      \
-  NS_IMPL_CYCLE_COLLECTION_CLASS(_class)                        \
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(_class)                 \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field1)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field2)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field3)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field4)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field5)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field6)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field7)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field8)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field9)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field10)                   \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field11)                   \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field12)                   \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER           \
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_END                           \
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(_class)               \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field1)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field2)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field3)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field4)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field5)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field6)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field7)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field8)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field9)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field10)                 \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field11)                 \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field12)                 \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS            \
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END                         \
-  NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(_class)
-
-#define NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_13(_class,        \
-                                                 _field1,       \
-                                                 _field2,       \
-                                                 _field3,       \
-                                                 _field4,       \
-                                                 _field5,       \
-                                                 _field6,       \
-                                                 _field7,       \
-                                                 _field8,       \
-                                                 _field9,       \
-                                                 _field10,      \
-                                                 _field11,      \
-                                                 _field12,      \
-                                                 _field13)      \
-  NS_IMPL_CYCLE_COLLECTION_CLASS(_class)                        \
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(_class)                 \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field1)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field2)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field3)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field4)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field5)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field6)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field7)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field8)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field9)                    \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field10)                   \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field11)                   \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field12)                   \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(_field13)                   \
-    NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER           \
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_END                           \
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(_class)               \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field1)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field2)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field3)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field4)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field5)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field6)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field7)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field8)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field9)                  \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field10)                 \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field11)                 \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field12)                 \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_field13)                 \
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS            \
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END                         \
+#define NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(_class, ...) \
+  NS_IMPL_CYCLE_COLLECTION_CLASS(_class)                   \
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(_class)            \
+    NS_IMPL_CYCLE_COLLECTION_UNLINK(__VA_ARGS__)           \
+    NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER      \
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_END                      \
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(_class)          \
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(__VA_ARGS__)         \
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS       \
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END                    \
   NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(_class)
 
 #endif /* nsWrapperCache_h___ */

@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 package org.mozilla.gecko.tests;
 
 
@@ -7,13 +11,13 @@ public class testLinkContextMenu extends ContentContextMenuTest {
     private static String LINK_PAGE_URL;
     private static String BLANK_PAGE_URL;
     private static final String LINK_PAGE_TITLE = "Big Link";
-    private static final String linkMenuItems [] = { "Open Link in New Tab", "Open Link in Private Tab", "Copy Link", "Share Link", "Bookmark Link"};
+    private static final String linkMenuItems [] = StringHelper.CONTEXT_MENU_ITEMS_IN_NORMAL_TAB;
 
     public void testLinkContextMenu() {
         blockForGeckoReady();
 
-        LINK_PAGE_URL=getAbsoluteUrl("/robocop/robocop_big_link.html");
-        BLANK_PAGE_URL=getAbsoluteUrl("/robocop/robocop_blank_01.html");
+        LINK_PAGE_URL=getAbsoluteUrl(StringHelper.ROBOCOP_BIG_LINK_URL);
+        BLANK_PAGE_URL=getAbsoluteUrl(StringHelper.ROBOCOP_BLANK_PAGE_01_URL);
         inputAndLoadUrl(LINK_PAGE_URL);
         waitForText(LINK_PAGE_TITLE);
 

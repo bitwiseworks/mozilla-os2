@@ -260,7 +260,7 @@ class File(Node):
 
 class CppDirective(Node):
     '''represents |#[directive] [rest]|, where |rest| is any string'''
-    def __init__(self, directive, rest=''):
+    def __init__(self, directive, rest=None):
         Node.__init__(self)
         self.directive = directive
         self.rest = rest
@@ -291,6 +291,7 @@ class Type(Node):
     def __init__(self, name, const=0,
                  ptr=0, ptrconst=0, ptrptr=0, ptrconstptr=0,
                  ref=0,
+                 hasimplicitcopyctor=True,
                  T=None):
         """
 To avoid getting fancy with recursive types, we limit the kinds
@@ -315,6 +316,7 @@ Any type, naked or pointer, can be const (const T) or ref (T&).
         self.ptrptr = ptrptr
         self.ptrconstptr = ptrconstptr
         self.ref = ref
+        self.hasimplicitcopyctor = hasimplicitcopyctor
         self.T = T
         # XXX could get serious here with recursive types, but shouldn't 
         # need that for this codegen
@@ -577,7 +579,7 @@ class ExprLiteral(Node):
         return ('%'+ self.type)% (self.value)
 ExprLiteral.ZERO = ExprLiteral.Int(0)
 ExprLiteral.ONE = ExprLiteral.Int(1)
-ExprLiteral.NULL = ExprLiteral.ZERO
+ExprLiteral.NULL = ExprVar('nullptr')
 ExprLiteral.TRUE = ExprVar('true')
 ExprLiteral.FALSE = ExprVar('false')
 
@@ -660,6 +662,10 @@ class ExprCall(Node):
         Node.__init__(self)
         self.func = func
         self.args = args
+
+class ExprMove(ExprCall):
+    def __init__(self, arg):
+        ExprCall.__init__(self, ExprVar("mozilla::Move"), args=[arg])
 
 class ExprNew(Node):
     # XXX taking some poetic license ...

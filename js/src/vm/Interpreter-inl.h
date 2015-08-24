@@ -10,18 +10,16 @@
 #include "vm/Interpreter.h"
 
 #include "jscompartment.h"
-#include "jsinfer.h"
 #include "jsnum.h"
 #include "jsstr.h"
 
 #include "jit/Ion.h"
 #include "vm/ArgumentsObject.h"
-#include "vm/ForkJoin.h"
 
 #include "jsatominlines.h"
-#include "jsinferinlines.h"
 #include "jsobjinlines.h"
 
+#include "vm/ScopeObject-inl.h"
 #include "vm/Stack-inl.h"
 #include "vm/String-inl.h"
 
@@ -30,7 +28,7 @@ namespace js {
 inline bool
 ComputeThis(JSContext* cx, AbstractFramePtr frame)
 {
-    JS_ASSERT_IF(frame.isInterpreterFrame(), !frame.asInterpreterFrame()->runningInJit());
+    MOZ_ASSERT_IF(frame.isInterpreterFrame(), !frame.asInterpreterFrame()->runningInJit());
 
     if (frame.isFunctionFrame() && frame.fun()->isArrow()) {
         /*
@@ -56,7 +54,7 @@ ComputeThis(JSContext* cx, AbstractFramePtr frame)
          * and undefined |this| values will unwrap to the same object in the function and
          * eval frames, so are not required to be wrapped.
          */
-        JS_ASSERT_IF(frame.isEvalFrame(), thisv.isUndefined() || thisv.isNull());
+        MOZ_ASSERT_IF(frame.isEvalFrame(), thisv.isUndefined() || thisv.isNull());
     }
 
     JSObject* thisObj = BoxNonStrictThis(cx, thisv);
@@ -78,11 +76,11 @@ ComputeThis(JSContext* cx, AbstractFramePtr frame)
  * arguments object.
  */
 static inline bool
-IsOptimizedArguments(AbstractFramePtr frame, Value* vp)
+IsOptimizedArguments(AbstractFramePtr frame, MutableHandleValue vp)
 {
-    if (vp->isMagic(JS_OPTIMIZED_ARGUMENTS) && frame.script()->needsArgsObj())
-        *vp = ObjectValue(frame.argsObj());
-    return vp->isMagic(JS_OPTIMIZED_ARGUMENTS);
+    if (vp.isMagic(JS_OPTIMIZED_ARGUMENTS) && frame.script()->needsArgsObj())
+        vp.setObject(frame.argsObj());
+    return vp.isMagic(JS_OPTIMIZED_ARGUMENTS);
 }
 
 /*
@@ -91,18 +89,73 @@ IsOptimizedArguments(AbstractFramePtr frame, Value* vp)
  * is not the builtin Function.prototype.apply.
  */
 static inline bool
-GuardFunApplyArgumentsOptimization(JSContext* cx, AbstractFramePtr frame, HandleValue callee,
-                                   Value* args, uint32_t argc)
+GuardFunApplyArgumentsOptimization(JSContext* cx, AbstractFramePtr frame, CallArgs& args)
 {
-    if (argc == 2 && IsOptimizedArguments(frame, &args[1])) {
-        if (!IsNativeFunction(callee, js_fun_apply)) {
+    if (args.length() == 2 && IsOptimizedArguments(frame, args[1])) {
+        if (!IsNativeFunction(args.calleev(), js_fun_apply)) {
             RootedScript script(cx, frame.script());
             if (!JSScript::argumentsOptimizationFailed(cx, script))
                 return false;
-            args[1] = ObjectValue(frame.argsObj());
+            args[1].setObject(frame.argsObj());
         }
     }
 
+    return true;
+}
+
+/*
+ * Per ES6, lexical declarations may not be accessed in any fashion until they
+ * are initialized (i.e., until the actual declaring statement is
+ * executed). The various LEXICAL opcodes need to check if the slot is an
+ * uninitialized let declaration, represented by the magic value
+ * JS_UNINITIALIZED_LEXICAL.
+ */
+static inline bool
+IsUninitializedLexical(const Value& val)
+{
+    // Use whyMagic here because JS_OPTIMIZED_ARGUMENTS could flow into here.
+    return val.isMagic() && val.whyMagic() == JS_UNINITIALIZED_LEXICAL;
+}
+
+static inline bool
+IsUninitializedLexicalSlot(HandleObject obj, HandleShape shape)
+{
+    if (obj->is<DynamicWithObject>())
+        return false;
+    // We check for IsImplicitDenseOrTypedArrayElement even though the shape
+    // is always a non-indexed property because proxy hooks may return a
+    // "non-native property found" shape, which happens to be encoded in the
+    // same way as the "dense element" shape. See MarkNonNativePropertyFound.
+    if (!shape ||
+        IsImplicitDenseOrTypedArrayElement(shape) ||
+        !shape->hasSlot() ||
+        !shape->hasDefaultGetter() ||
+        !shape->hasDefaultSetter())
+    {
+        return false;
+    }
+    MOZ_ASSERT(obj->as<NativeObject>().containsPure(shape));
+    return IsUninitializedLexical(obj->as<NativeObject>().getSlot(shape->slot()));
+}
+
+static inline bool
+CheckUninitializedLexical(JSContext* cx, PropertyName* name_, HandleValue val)
+{
+    if (IsUninitializedLexical(val)) {
+        RootedPropertyName name(cx, name_);
+        ReportUninitializedLexical(cx, name);
+        return false;
+    }
+    return true;
+}
+
+static inline bool
+CheckUninitializedLexical(JSContext* cx, HandleScript script, jsbytecode* pc, HandleValue val)
+{
+    if (IsUninitializedLexical(val)) {
+        ReportUninitializedLexical(cx, script, pc);
+        return false;
+    }
     return true;
 }
 
@@ -132,7 +185,7 @@ ValuePropertyBearer(JSContext* cx, InterpreterFrame* fp, HandleValue v, int spin
     if (v.isBoolean())
         return GlobalObject::getOrCreateBooleanPrototype(cx, global);
 
-    JS_ASSERT(v.isNull() || v.isUndefined());
+    MOZ_ASSERT(v.isNull() || v.isUndefined());
     js_ReportIsNullOrUndefined(cx, spindex, v, NullPtr());
     return nullptr;
 }
@@ -156,7 +209,7 @@ GetLengthProperty(const Value& lval, MutableHandleValue vp)
             ArgumentsObject* argsobj = &obj->as<ArgumentsObject>();
             if (!argsobj->hasOverriddenLength()) {
                 uint32_t length = argsobj->initialLength();
-                JS_ASSERT(length < INT32_MAX);
+                MOZ_ASSERT(length < INT32_MAX);
                 vp.setInt32(int32_t(length));
                 return true;
             }
@@ -184,21 +237,25 @@ FetchName(JSContext* cx, HandleObject obj, HandleObject obj2, HandlePropertyName
     /* Take the slow path if shape was not found in a native object. */
     if (!obj->isNative() || !obj2->isNative()) {
         Rooted<jsid> id(cx, NameToId(name));
-        if (!JSObject::getGeneric(cx, obj, obj, id, vp))
+        if (!GetProperty(cx, obj, obj, id, vp))
             return false;
     } else {
-        Rooted<JSObject*> normalized(cx, obj);
+        RootedObject normalized(cx, obj);
         if (normalized->is<DynamicWithObject>() && !shape->hasDefaultGetter())
             normalized = &normalized->as<DynamicWithObject>().object();
         if (shape->isDataDescriptor() && shape->hasDefaultGetter()) {
             /* Fast path for Object instance properties. */
-            JS_ASSERT(shape->hasSlot());
-            vp.set(obj2->nativeGetSlot(shape->slot()));
-        } else if (!NativeGet(cx, normalized, obj2, shape, vp)) {
-            return false;
+            MOZ_ASSERT(shape->hasSlot());
+            vp.set(obj2->as<NativeObject>().getSlot(shape->slot()));
+        } else {
+            if (!NativeGetExistingProperty(cx, normalized, obj2.as<NativeObject>(), shape, vp))
+                return false;
         }
     }
-    return true;
+
+    // NAME operations are the slow paths already, so unconditionally check
+    // for uninitialized lets.
+    return CheckUninitializedLexical(cx, name, vp);
 }
 
 inline bool
@@ -207,8 +264,8 @@ FetchNameNoGC(JSObject* pobj, Shape* shape, MutableHandleValue vp)
     if (!shape || !pobj->isNative() || !shape->isDataDescriptor() || !shape->hasDefaultGetter())
         return false;
 
-    vp.set(pobj->nativeGetSlot(shape->slot()));
-    return true;
+    vp.set(pobj->as<NativeObject>().getSlot(shape->slot()));
+    return !IsUninitializedLexical(vp);
 }
 
 inline bool
@@ -225,57 +282,74 @@ SetIntrinsicOperation(JSContext* cx, JSScript* script, jsbytecode* pc, HandleVal
     return cx->global()->setIntrinsicValue(cx, name, val);
 }
 
+inline void
+SetAliasedVarOperation(JSContext* cx, JSScript* script, jsbytecode* pc,
+                       ScopeObject& obj, ScopeCoordinate sc, const Value& val,
+                       MaybeCheckLexical checkLexical)
+{
+    MOZ_ASSERT_IF(checkLexical, !IsUninitializedLexical(obj.aliasedVar(sc)));
+
+    // Avoid computing the name if no type updates are needed, as this may be
+    // expensive on scopes with large numbers of variables.
+    PropertyName* name = obj.isSingleton()
+                         ? ScopeCoordinateName(cx->runtime()->scopeCoordinateNameCache, script, pc)
+                         : nullptr;
+
+    obj.setAliasedVar(cx, sc, name, val);
+}
+
 inline bool
 SetNameOperation(JSContext* cx, JSScript* script, jsbytecode* pc, HandleObject scope,
                  HandleValue val)
 {
-    JS_ASSERT(*pc == JSOP_SETNAME || *pc == JSOP_SETGNAME);
-    JS_ASSERT_IF(*pc == JSOP_SETGNAME, scope == cx->global());
+    MOZ_ASSERT(*pc == JSOP_SETNAME ||
+               *pc == JSOP_STRICTSETNAME ||
+               *pc == JSOP_SETGNAME ||
+               *pc == JSOP_STRICTSETGNAME);
+    MOZ_ASSERT_IF(*pc == JSOP_SETGNAME, scope == cx->global());
+    MOZ_ASSERT_IF(*pc == JSOP_STRICTSETGNAME, scope == cx->global());
 
-    bool strict = script->strict();
+    bool strict = *pc == JSOP_STRICTSETNAME || *pc == JSOP_STRICTSETGNAME;
     RootedPropertyName name(cx, script->getName(pc));
     RootedValue valCopy(cx, val);
 
     /*
      * In strict-mode, we need to trigger an error when trying to assign to an
-     * undeclared global variable. To do this, we call SetPropertyHelper
+     * undeclared global variable. To do this, we call NativeSetProperty
      * directly and pass Unqualified.
      */
-    if (scope->is<GlobalObject>()) {
-        JS_ASSERT(!scope->getOps()->setProperty);
+    if (scope->isUnqualifiedVarObj()) {
+        MOZ_ASSERT(!scope->getOps()->setProperty);
         RootedId id(cx, NameToId(name));
-        return baseops::SetPropertyHelper<SequentialExecution>(cx, scope, scope, id,
-                                                               baseops::Unqualified, &valCopy,
-                                                               strict);
+        return NativeSetProperty(cx, scope.as<NativeObject>(), scope.as<NativeObject>(), id,
+                                 Unqualified, &valCopy, strict);
     }
 
-    return JSObject::setProperty(cx, scope, scope, name, &valCopy, strict);
+    return SetProperty(cx, scope, scope, name, &valCopy, strict);
 }
 
 inline bool
 DefVarOrConstOperation(JSContext* cx, HandleObject varobj, HandlePropertyName dn, unsigned attrs)
 {
-    JS_ASSERT(varobj->isVarObj());
+    MOZ_ASSERT(varobj->isQualifiedVarObj());
 
     RootedShape prop(cx);
     RootedObject obj2(cx);
-    if (!JSObject::lookupProperty(cx, varobj, dn, &obj2, &prop))
+    if (!LookupProperty(cx, varobj, dn, &obj2, &prop))
         return false;
 
     /* Steps 8c, 8d. */
     if (!prop || (obj2 != varobj && varobj->is<GlobalObject>())) {
-        if (!JSObject::defineProperty(cx, varobj, dn, UndefinedHandleValue, JS_PropertyStub,
-                                      JS_StrictPropertyStub, attrs)) {
+        if (!DefineProperty(cx, varobj, dn, UndefinedHandleValue, nullptr, nullptr, attrs))
             return false;
-        }
     } else if (attrs & JSPROP_READONLY) {
         /*
          * Extension: ordinarily we'd be done here -- but for |const|.  If we
          * see a redeclaration that's |const|, we consider it a conflict.
          */
-        unsigned oldAttrs;
         RootedId id(cx, NameToId(dn));
-        if (!JSObject::getGenericAttributes(cx, varobj, id, &oldAttrs))
+        Rooted<PropertyDescriptor> desc(cx);
+        if (!GetOwnPropertyDescriptor(cx, obj2, id, &desc))
             return false;
 
         JSAutoByteString bytes;
@@ -283,9 +357,7 @@ DefVarOrConstOperation(JSContext* cx, HandleObject varobj, HandlePropertyName dn
             JS_ALWAYS_FALSE(JS_ReportErrorFlagsAndNumber(cx, JSREPORT_ERROR,
                                                          js_GetErrorMessage,
                                                          nullptr, JSMSG_REDECLARED_VAR,
-                                                         (oldAttrs & JSPROP_READONLY)
-                                                         ? "const"
-                                                         : "var",
+                                                         desc.isReadonly() ? "const" : "var",
                                                          bytes.ptr()));
         }
         return false;
@@ -338,56 +410,55 @@ ToIdOperation(JSContext* cx, HandleScript script, jsbytecode* pc, HandleValue ob
 }
 
 static MOZ_ALWAYS_INLINE bool
-GetObjectElementOperation(JSContext* cx, JSOp op, JSObject* objArg, bool wasObject,
-                          HandleValue rref, MutableHandleValue res)
+GetObjectElementOperation(JSContext* cx, JSOp op, JS::HandleObject receiver,
+                          HandleValue key, MutableHandleValue res)
 {
-    JS_ASSERT(op == JSOP_GETELEM || op == JSOP_CALLELEM);
+    MOZ_ASSERT(op == JSOP_GETELEM || op == JSOP_CALLELEM);
 
     do {
         uint32_t index;
-        if (IsDefinitelyIndex(rref, &index)) {
-            if (JSObject::getElementNoGC(cx, objArg, objArg, index, res.address()))
+        if (IsDefinitelyIndex(key, &index)) {
+            if (GetElementNoGC(cx, receiver, receiver, index, res.address()))
                 break;
 
-            RootedObject obj(cx, objArg);
-            if (!JSObject::getElement(cx, obj, obj, index, res))
+            if (!GetElement(cx, receiver, receiver, index, res))
                 return false;
-            objArg = obj;
             break;
         }
 
-        JSAtom* name = ToAtom<NoGC>(cx, rref);
-        if (name) {
+        if (IsSymbolOrSymbolWrapper(key)) {
+            RootedId id(cx, SYMBOL_TO_JSID(ToSymbolPrimitive(key)));
+            if (!GetProperty(cx, receiver, receiver, id, res))
+                return false;
+            break;
+        }
+
+        if (JSAtom* name = ToAtom<NoGC>(cx, key)) {
             if (name->isIndex(&index)) {
-                if (JSObject::getElementNoGC(cx, objArg, objArg, index, res.address()))
+                if (GetElementNoGC(cx, receiver, receiver, index, res.address()))
                     break;
             } else {
-                if (JSObject::getPropertyNoGC(cx, objArg, objArg, name->asPropertyName(), res.address()))
+                if (GetPropertyNoGC(cx, receiver, receiver, name->asPropertyName(), res.address()))
                     break;
             }
         }
 
-        RootedObject obj(cx, objArg);
-
-        name = ToAtom<CanGC>(cx, rref);
+        JSAtom* name = ToAtom<CanGC>(cx, key);
         if (!name)
             return false;
 
         if (name->isIndex(&index)) {
-            if (!JSObject::getElement(cx, obj, obj, index, res))
+            if (!GetElement(cx, receiver, receiver, index, res))
                 return false;
         } else {
-            if (!JSObject::getProperty(cx, obj, obj, name->asPropertyName(), res))
+            if (!GetProperty(cx, receiver, receiver, name->asPropertyName(), res))
                 return false;
         }
-
-        objArg = obj;
-    } while (0);
+    } while (false);
 
 #if JS_HAS_NO_SUCH_METHOD
-    if (op == JSOP_CALLELEM && MOZ_UNLIKELY(res.isUndefined()) && wasObject) {
-        RootedObject obj(cx, objArg);
-        if (!OnUnknownMethod(cx, obj, rref, res))
+    if (op == JSOP_CALLELEM && MOZ_UNLIKELY(res.isUndefined())) {
+        if (!OnUnknownMethod(cx, receiver, key, res))
             return false;
     }
 #endif
@@ -397,12 +468,71 @@ GetObjectElementOperation(JSContext* cx, JSOp op, JSObject* objArg, bool wasObje
 }
 
 static MOZ_ALWAYS_INLINE bool
+GetPrimitiveElementOperation(JSContext* cx, JSOp op, JS::HandleValue receiver,
+                             HandleValue key, MutableHandleValue res)
+{
+    MOZ_ASSERT(op == JSOP_GETELEM || op == JSOP_CALLELEM);
+
+    // FIXME: We shouldn't be boxing here or exposing the boxed object as
+    //        receiver anywhere below (bug 603201).
+    RootedObject boxed(cx, ToObjectFromStack(cx, receiver));
+    if (!boxed)
+        return false;
+
+    do {
+        uint32_t index;
+        if (IsDefinitelyIndex(key, &index)) {
+            if (GetElementNoGC(cx, boxed, boxed, index, res.address()))
+                break;
+
+            if (!GetElement(cx, boxed, boxed, index, res))
+                return false;
+            break;
+        }
+
+        if (IsSymbolOrSymbolWrapper(key)) {
+            RootedId id(cx, SYMBOL_TO_JSID(ToSymbolPrimitive(key)));
+            if (!GetProperty(cx, boxed, boxed, id, res))
+                return false;
+            break;
+        }
+
+        if (JSAtom* name = ToAtom<NoGC>(cx, key)) {
+            if (name->isIndex(&index)) {
+                if (GetElementNoGC(cx, boxed, boxed, index, res.address()))
+                    break;
+            } else {
+                if (GetPropertyNoGC(cx, boxed, boxed, name->asPropertyName(), res.address()))
+                    break;
+            }
+        }
+
+        JSAtom* name = ToAtom<CanGC>(cx, key);
+        if (!name)
+            return false;
+
+        if (name->isIndex(&index)) {
+            if (!GetElement(cx, boxed, boxed, index, res))
+                return false;
+        } else {
+            if (!GetProperty(cx, boxed, boxed, name->asPropertyName(), res))
+                return false;
+        }
+    } while (false);
+
+    // Note: we don't call a __noSuchMethod__ hook when |this| was primitive.
+
+    assertSameCompartmentDebugOnly(cx, res);
+    return true;
+}
+
+static MOZ_ALWAYS_INLINE bool
 GetElemOptimizedArguments(JSContext* cx, AbstractFramePtr frame, MutableHandleValue lref,
                           HandleValue rref, MutableHandleValue res, bool* done)
 {
-    JS_ASSERT(!*done);
+    MOZ_ASSERT(!*done);
 
-    if (IsOptimizedArguments(frame, lref.address())) {
+    if (IsOptimizedArguments(frame, lref)) {
         if (rref.isInt32()) {
             int32_t i = rref.toInt32();
             if (i >= 0 && uint32_t(i) < frame.numActualArgs()) {
@@ -426,7 +556,7 @@ static MOZ_ALWAYS_INLINE bool
 GetElementOperation(JSContext* cx, JSOp op, MutableHandleValue lref, HandleValue rref,
                     MutableHandleValue res)
 {
-    JS_ASSERT(op == JSOP_GETELEM || op == JSOP_CALLELEM);
+    MOZ_ASSERT(op == JSOP_GETELEM || op == JSOP_CALLELEM);
 
     uint32_t index;
     if (lref.isString() && IsDefinitelyIndex(rref, &index)) {
@@ -440,11 +570,11 @@ GetElementOperation(JSContext* cx, JSOp op, MutableHandleValue lref, HandleValue
         }
     }
 
-    bool isObject = lref.isObject();
-    JSObject* obj = ToObjectFromStack(cx, lref);
-    if (!obj)
-        return false;
-    return GetObjectElementOperation(cx, op, obj, isObject, rref, res);
+    if (lref.isPrimitive())
+        return GetPrimitiveElementOperation(cx, op, lref, rref, res);
+
+    RootedObject thisv(cx, &lref.toObject());
+    return GetObjectElementOperation(cx, op, thisv, rref, res);
 }
 
 static MOZ_ALWAYS_INLINE JSString*
@@ -464,39 +594,44 @@ TypeOfObjectOperation(JSObject* obj, JSRuntime* rt)
 static MOZ_ALWAYS_INLINE bool
 InitElemOperation(JSContext* cx, HandleObject obj, HandleValue idval, HandleValue val)
 {
-    JS_ASSERT(!val.isMagic(JS_ELEMENTS_HOLE));
+    MOZ_ASSERT(!val.isMagic(JS_ELEMENTS_HOLE));
+    MOZ_ASSERT(!obj->getClass()->getProperty);
+    MOZ_ASSERT(!obj->getClass()->setProperty);
 
     RootedId id(cx);
     if (!ValueToId<CanGC>(cx, idval, &id))
         return false;
 
-    return JSObject::defineGeneric(cx, obj, id, val, nullptr, nullptr, JSPROP_ENUMERATE);
+    return DefineProperty(cx, obj, id, val, nullptr, nullptr, JSPROP_ENUMERATE);
 }
 
 static MOZ_ALWAYS_INLINE bool
 InitArrayElemOperation(JSContext* cx, jsbytecode* pc, HandleObject obj, uint32_t index, HandleValue val)
 {
     JSOp op = JSOp(*pc);
-    JS_ASSERT(op == JSOP_INITELEM_ARRAY || op == JSOP_INITELEM_INC);
+    MOZ_ASSERT(op == JSOP_INITELEM_ARRAY || op == JSOP_INITELEM_INC);
 
-    JS_ASSERT(obj->is<ArrayObject>());
+    MOZ_ASSERT(obj->is<ArrayObject>());
 
     /*
-     * If val is a hole, do not call JSObject::defineElement. In this case,
-     * if the current op is the last element initialiser, set the array length
-     * to one greater than id.
+     * If val is a hole, do not call DefineElement.
+     *
+     * Furthermore, if the current op is JSOP_INITELEM_INC, always call
+     * SetLengthProperty even if it is not the last element initialiser,
+     * because it may be followed by JSOP_SPREAD, which will not set the array
+     * length if nothing is spread.
+     *
+     * Alternatively, if the current op is JSOP_INITELEM_ARRAY, the length will
+     * have already been set by the earlier JSOP_NEWARRAY; JSOP_INITELEM_ARRAY
+     * cannot follow JSOP_SPREAD.
      */
     if (val.isMagic(JS_ELEMENTS_HOLE)) {
-        JSOp next = JSOp(*GetNextPc(pc));
-
-        if ((op == JSOP_INITELEM_ARRAY && next == JSOP_ENDINIT) ||
-            (op == JSOP_INITELEM_INC && next == JSOP_POP))
-        {
+        if (op == JSOP_INITELEM_INC) {
             if (!SetLengthProperty(cx, obj, index + 1))
                 return false;
         }
     } else {
-        if (!JSObject::defineElement(cx, obj, index, val, nullptr, nullptr, JSPROP_ENUMERATE))
+        if (!DefineElement(cx, obj, index, val, nullptr, nullptr, JSPROP_ENUMERATE))
             return false;
     }
 
@@ -505,6 +640,25 @@ InitArrayElemOperation(JSContext* cx, jsbytecode* pc, HandleObject obj, uint32_t
         return false;
     }
 
+    return true;
+}
+
+static MOZ_ALWAYS_INLINE bool
+ProcessCallSiteObjOperation(JSContext* cx, RootedObject& cso, RootedObject& raw,
+                            RootedValue& rawValue)
+{
+    bool extensible;
+    if (!IsExtensible(cx, cso, &extensible))
+        return false;
+    if (extensible) {
+        JSAtom* name = cx->names().raw;
+        if (!DefineProperty(cx, cso, name->asPropertyName(), rawValue, nullptr, nullptr, 0))
+            return false;
+        if (!FreezeObject(cx, raw))
+            return false;
+        if (!FreezeObject(cx, cso))
+            return false;
+    }
     return true;
 }
 
@@ -527,7 +681,7 @@ InitArrayElemOperation(JSContext* cx, jsbytecode* pc, HandleObject obj, uint32_t
             } else {                                                          \
                 double l, r;                                                  \
                 if (!ToNumber(cx, lhs, &l) || !ToNumber(cx, rhs, &r))         \
-                    return false;;                                            \
+                    return false;                                             \
                 *res = (l OP r);                                              \
             }                                                                 \
         }                                                                     \
@@ -649,22 +803,18 @@ class FastInvokeGuard
     InvokeArgs args_;
     RootedFunction fun_;
     RootedScript script_;
-#ifdef JS_ION
-    // Constructing an IonContext is pretty expensive due to the TLS access,
+
+    // Constructing a JitContext is pretty expensive due to the TLS access,
     // so only do this if we have to.
     bool useIon_;
-#endif
 
   public:
     FastInvokeGuard(JSContext* cx, const Value& fval)
       : args_(cx)
       , fun_(cx)
       , script_(cx)
-#ifdef JS_ION
       , useIon_(jit::IsIonEnabled(cx))
-#endif
     {
-        JS_ASSERT(!InParallelSection());
         initFunction(fval);
     }
 
@@ -681,43 +831,41 @@ class FastInvokeGuard
     }
 
     bool invoke(JSContext* cx) {
-#ifdef JS_ION
         if (useIon_ && fun_) {
             if (!script_) {
                 script_ = fun_->getOrCreateScript(cx);
                 if (!script_)
                     return false;
             }
-            JS_ASSERT(fun_->nonLazyScript() == script_);
+            MOZ_ASSERT(fun_->nonLazyScript() == script_);
 
             jit::MethodStatus status = jit::CanEnterUsingFastInvoke(cx, script_, args_.length());
             if (status == jit::Method_Error)
                 return false;
             if (status == jit::Method_Compiled) {
-                jit::IonExecStatus result = jit::FastInvoke(cx, fun_, args_);
+                jit::JitExecStatus result = jit::FastInvoke(cx, fun_, args_);
                 if (IsErrorStatus(result))
                     return false;
 
-                JS_ASSERT(result == jit::IonExec_Ok);
+                MOZ_ASSERT(result == jit::JitExec_Ok);
                 return true;
             }
 
-            JS_ASSERT(status == jit::Method_Skipped);
+            MOZ_ASSERT(status == jit::Method_Skipped);
 
             if (script_->canIonCompile()) {
                 // This script is not yet hot. Since calling into Ion is much
-                // faster here, bump the use count a bit to account for this.
-                script_->incUseCount(5);
+                // faster here, bump the warm-up counter a bit to account for this.
+                script_->incWarmUpCounter(5);
             }
         }
-#endif
 
         return Invoke(cx, args_);
     }
 
   private:
-    FastInvokeGuard(const FastInvokeGuard& other) MOZ_DELETE;
-    const FastInvokeGuard& operator=(const FastInvokeGuard& other) MOZ_DELETE;
+    FastInvokeGuard(const FastInvokeGuard& other) = delete;
+    const FastInvokeGuard& operator=(const FastInvokeGuard& other) = delete;
 };
 
 }  /* namespace js */

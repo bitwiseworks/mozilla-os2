@@ -39,6 +39,7 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
 XPIDL_MODULE = 'xpcom_base'
 
 EXPORTS += [
+    'CodeAddressService.h',
     'ErrorList.h',
     'nsAgg.h',
     'nsAutoPtr.h',
@@ -53,8 +54,8 @@ EXPORTS += [
     'nsInterfaceRequestorAgg.h',
     'nsISizeOf.h',
     'nsISupportsBase.h',
-    'nsISupportsObsolete.h',
     'nsObjCExceptions.h',
+    'nsRefPtr.h',
     'nsStackWalk.h',
     'nsTraceRefcnt.h',
     'nsWeakPtr.h',
@@ -71,8 +72,11 @@ if CONFIG['OS_ARCH'] == 'WINNT':
 EXPORTS.mozilla += [
     'AvailableMemoryTracker.h',
     'ClearOnShutdown.h',
+    'CountingAllocatorBase.h',
     'CycleCollectedJSRuntime.h',
     'Debug.h',
+    'ErrorNames.h',
+    'LinuxUtils.h',
     'nsMemoryInfoDumper.h',
     'StackWalk.h',
     'StaticMutex.h',
@@ -93,6 +97,7 @@ UNIFIED_SOURCES += [
     'ClearOnShutdown.cpp',
     'CycleCollectedJSRuntime.cpp',
     'Debug.cpp',
+    'ErrorNames.cpp',
     'nsConsoleMessage.cpp',
     'nsConsoleService.cpp',
     'nsCycleCollector.cpp',
@@ -113,20 +118,19 @@ UNIFIED_SOURCES += [
     'VisualEventTracer.cpp',
 ]
 
-# On Windows, NS_StackWalk will only work correctly if we have frame pointers available.
-# That will only be true for non-optimized builds, and for optimized builds with
-# --enable-profiling in the .mozconfig (which is turned on in Nightly by default.)
+# MOZ_STACKWALKING is defined in configure.in when the build configuration meets
+# the conditions for NS_StackWalk to work correctly.
 # We exclude this file from other build configurations so that if somebody adds a
 # new usage of NS_StackWalk it will cause a link error, which is better than having
 # NS_StackWalk silently return garbage at runtime.
-if CONFIG['OS_TARGET'] != 'WINNT' or \
-   (not CONFIG['MOZ_OPTIMIZE'] or CONFIG['MOZ_PROFILING'] or CONFIG['MOZ_DEBUG']):
-    UNIFIED_SOURCES += [
+if CONFIG['MOZ_STACKWALKING']:
+    SOURCES += [
         'nsStackWalk.cpp',
     ]
 
 if CONFIG['OS_ARCH'] == 'Linux':
     SOURCES += [
+        'LinuxUtils.cpp',
         'SystemMemoryReporter.cpp',
     ]
 
@@ -139,24 +143,18 @@ elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
         'nsCrashOnException.cpp',
     ]
 
-UNIFIED_SOURCES += [
-    'nsErrorAssertsC.c',
-]
-
 MSVC_ENABLE_PGO = True
 
 include('/ipc/chromium/chromium-config.mozbuild')
 
-FINAL_LIBRARY = 'xpcom_core'
+FINAL_LIBRARY = 'xul'
 
 LOCAL_INCLUDES += [
     '../build',
     '/xpcom/ds',
 ]
 
-if CONFIG['MOZ_OPTIMIZE']:
-    DEFINES['MOZ_OPTIMIZE'] = True
+if CONFIG['MOZ_WIDGET_GTK']:
+    CXXFLAGS += CONFIG['TK_CFLAGS']
 
-if CONFIG['GNU_CC'] and CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
-    # Work around bug 986928
-    CXXFLAGS += ['-Wno-error=format']
+FAIL_ON_WARNINGS = True

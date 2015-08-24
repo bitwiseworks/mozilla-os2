@@ -71,10 +71,6 @@ public:
 
     nsresult UpdateFontList();
 
-    nsresult ResolveFontName(const nsAString& aFontName,
-                             gfxPlatform::FontResolverCallback aCallback,
-                             void *aClosure, bool& aAborted);
-
     nsresult GetStandardFamilyName(const nsAString& aFontName, nsAString& aFamilyName);
 
     const nsTArray< nsCountedRef<FcPattern> >&
@@ -177,7 +173,7 @@ public:
         // nullptr.  The caller of PutEntry() must fill in mKey when nullptr.
         // This provides a mechanism for the caller of PutEntry() to determine
         // whether the entry has been initialized.
-        DepFcStrEntry(KeyTypePointer aName)
+        explicit DepFcStrEntry(KeyTypePointer aName)
             : mKey(nullptr) { }
 
         DepFcStrEntry(const DepFcStrEntry& toCopy)
@@ -199,7 +195,7 @@ public:
         // The caller of PutEntry() must call InitKey() when IsKeyInitialized()
         // returns false.  This provides a mechanism for the caller of
         // PutEntry() to determine whether the entry has been initialized.
-        CopiedFcStrEntry(KeyTypePointer aName) {
+        explicit CopiedFcStrEntry(KeyTypePointer aName) {
             mKey.SetIsVoid(true);
         }
 
@@ -220,7 +216,7 @@ public:
 protected:
     class FontsByFcStrEntry : public DepFcStrEntry {
     public:
-        FontsByFcStrEntry(KeyTypePointer aName)
+        explicit FontsByFcStrEntry(KeyTypePointer aName)
             : DepFcStrEntry(aName) { }
 
         FontsByFcStrEntry(const FontsByFcStrEntry& toCopy)
@@ -249,7 +245,7 @@ protected:
         // nullptr.  The caller of PutEntry() is must fill in mKey when adding
         // the first font if the key is not derived from the family and style.
         // If the key is derived from family and style, a font must be added.
-        FontsByFullnameEntry(KeyTypePointer aName)
+        explicit FontsByFullnameEntry(KeyTypePointer aName)
             : DepFcStrEntry(aName) { }
 
         FontsByFullnameEntry(const FontsByFullnameEntry& toCopy)
@@ -273,7 +269,7 @@ protected:
 
     class LangSupportEntry : public CopiedFcStrEntry {
     public:
-        LangSupportEntry(KeyTypePointer aName)
+        explicit LangSupportEntry(KeyTypePointer aName)
             : CopiedFcStrEntry(aName) { }
 
         LangSupportEntry(const LangSupportEntry& toCopy)
@@ -306,9 +302,14 @@ protected:
     nsTHashtable<LangSupportEntry> mLangSupportTable;
     const nsTArray< nsCountedRef<FcPattern> > mEmptyPatternArray;
 
-    nsTArray<nsCString> mAliasForMultiFonts;
-
     FcConfig *mLastConfig;
+
+#ifdef MOZ_BUNDLED_FONTS
+    void      ActivateBundledFonts();
+
+    nsCString mBundledFontsPath;
+    bool      mBundledFontsInitialized;
+#endif
 };
 
 #endif /* GFX_FONTCONFIG_UTILS_H */

@@ -31,7 +31,7 @@ public:
   // Forward our inherited virtual methods to the base class
   NS_FORWARD_TO_UIEVENT
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE
+  virtual JSObject* WrapObjectInternal(JSContext* aCx) override
   {
     return XULCommandEventBinding::Wrap(aCx, this);
   }
@@ -63,6 +63,8 @@ public:
   }
 
 protected:
+  ~XULCommandEvent() {}
+
   nsCOMPtr<nsIDOMEvent> mSourceEvent;
 };
 

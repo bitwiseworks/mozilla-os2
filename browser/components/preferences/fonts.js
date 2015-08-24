@@ -1,4 +1,4 @@
-/* -*- Mode: Java; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 4 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -108,6 +108,37 @@ var gFontsDialog = {
   {
     var useDocumentFonts = document.getElementById("useDocumentFonts");
     return useDocumentFonts.checked ? 1 : 0;
-  }
+  },
+
+  onBeforeAccept: function ()
+  {
+    // Only care in in-content prefs
+    if (!window.frameElement) {
+      return true;
+    }
+
+    let preferences = document.querySelectorAll("preference[id*='font.minimum-size']");
+    // It would be good if we could avoid touching languages the pref pages won't use, but
+    // unfortunately the language group APIs (deducing language groups from language codes)
+    // are C++ - only. So we just check all the things the user touched:
+    // Don't care about anything up to 24px, or if this value is the same as set previously:
+    preferences = Array.filter(preferences, prefEl => {
+      return prefEl.value > 24 && prefEl.value != prefEl.valueFromPreferences;
+    });
+    if (!preferences.length) {
+      return;
+    }
+
+    let strings = document.getElementById("bundlePreferences");
+    let title = strings.getString("veryLargeMinimumFontTitle");
+    let confirmLabel = strings.getString("acceptVeryLargeMinimumFont");
+    let warningMessage = strings.getString("veryLargeMinimumFontWarning");
+    let {Services} = Components.utils.import("resource://gre/modules/Services.jsm", {});
+    let flags = Services.prompt.BUTTON_POS_1 * Services.prompt.BUTTON_TITLE_CANCEL |
+                Services.prompt.BUTTON_POS_0 * Services.prompt.BUTTON_TITLE_IS_STRING |
+                Services.prompt.BUTTON_POS_1_DEFAULT;
+    let buttonChosen = Services.prompt.confirmEx(window, title, warningMessage, flags, confirmLabel, null, "", "", {});
+    return buttonChosen == 0;
+  },
 };
 

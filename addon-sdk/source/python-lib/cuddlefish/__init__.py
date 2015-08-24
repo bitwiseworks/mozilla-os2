@@ -5,7 +5,6 @@
 import sys
 import os
 import optparse
-import webbrowser
 import time
 
 from copy import copy
@@ -153,7 +152,7 @@ parser_groups = (
                                       "thunderbird"),
                                 metavar=None,
                                 type="choice",
-                                choices=["firefox", "fennec",
+                                choices=["firefox",
                                          "fennec-on-device", "thunderbird",
                                          "xulrunner"],
                                 default="firefox",
@@ -187,6 +186,12 @@ parser_groups = (
                                            "for doing so.  Use this to launch "
                                            "the application in a debugger like "
                                            "gdb."),
+                                     action="store_true",
+                                     default=False,
+                                     cmds=['run', 'test'])),
+        (("", "--no-quit",), dict(dest="no_quit",
+                                     help=("Prevent from killing Firefox when"
+                                           "running tests"),
                                      action="store_true",
                                      default=False,
                                      cmds=['run', 'test'])),
@@ -235,6 +240,18 @@ parser_groups = (
                                       help="JSON file to overload package.json properties",
                                       default=None,
                                       cmds=['xpi'])),
+        (("", "--abort-on-missing-module",), dict(dest="abort_on_missing",
+                                      help="Abort if required module is missing",
+                                      action="store_true",
+                                      default=False,
+                                      cmds=['test', 'run', 'xpi', 'testpkgs'])),
+        (("", "--no-connections",), dict(dest="no_connections",
+                                      help="disable/enable remote connections (on for cfx run only by default)",
+                                      type="choice",
+                                      choices=["on", "off", "default"],
+                                      default="default",
+                                      cmds=['test', 'run', 'testpkgs',
+                                            'testall', 'testaddons', 'testex'])),
         ]
      ),
 
@@ -264,10 +281,11 @@ parser_groups = (
                                  cmds=['test', 'run', 'xpi', 'testex',
                                        'testpkgs', 'testall'])),
         (("", "--e10s",), dict(dest="enable_e10s",
-                               help="enable out-of-process Jetpacks",
+                               help="enable remote windows",
                                action="store_true",
                                default=False,
-                               cmds=['test', 'run', 'testex', 'testpkgs'])),
+                               cmds=['test', 'run', 'testex', 'testpkgs',
+                                     'testaddons', 'testcfx', 'testall'])),
         (("", "--logfile",), dict(dest="logfile",
                                   help="log console output to file",
                                   metavar=None,
@@ -421,13 +439,14 @@ def test_all_testaddons(env_root, defaults):
     addons.sort()
     fail = False
     for dirname in addons:
+        # apply the filter
         if (not defaults['filter'].split(":")[0] in dirname):
             continue
 
         print >>sys.stderr, "Testing %s..." % dirname
         sys.stderr.flush()
         try:
-            run(arguments=["run",
+            run(arguments=["testrun",
                            "--pkgdir",
                            os.path.join(addons_dir, dirname)],
                 defaults=defaults,
@@ -619,7 +638,7 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
             return
         test_cfx(env_root, options.verbose)
         return
-    elif command not in ["xpi", "test", "run"]:
+    elif command not in ["xpi", "test", "run", "testrun"]:
         print >>sys.stderr, "Unknown command: %s" % command
         print >>sys.stderr, "Try using '--help' for assistance."
         sys.exit(1)
@@ -650,7 +669,8 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
     # a Mozilla application (which includes running tests).
 
     use_main = False
-    inherited_options = ['verbose', 'enable_e10s', 'parseable', 'check_memory']
+    inherited_options = ['verbose', 'enable_e10s', 'parseable', 'check_memory',
+                         'no_quit', 'abort_on_missing']
     enforce_timeouts = False
 
     if command == "xpi":
@@ -663,6 +683,9 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
         enforce_timeouts = True
     elif command == "run":
         use_main = True
+    elif command == "testrun":
+        use_main = True
+        enforce_timeouts = True
     else:
         assert 0, "shouldn't get here"
 
@@ -681,7 +704,7 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
     # TODO: Consider keeping a cache of dynamic UUIDs, based
     # on absolute filesystem pathname, in the root directory
     # or something.
-    if command in ('xpi', 'run'):
+    if command in ('xpi', 'run', 'testrun'):
         from cuddlefish.preflight import preflight_config
         if target_cfg_json:
             config_was_ok, modified = preflight_config(target_cfg,
@@ -736,15 +759,11 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
                                       "lib", "sdk", "loader", "cuddlefish.js")
     loader_modules = [("addon-sdk", "lib", "sdk/loader/cuddlefish", cuddlefish_js_path)]
     scan_tests = command == "test"
-    test_filter_re = None
-    if scan_tests and options.filter:
-        test_filter_re = options.filter
-        if ":" in options.filter:
-            test_filter_re = options.filter.split(":")[0]
+
     try:
-        manifest = build_manifest(target_cfg, pkg_cfg, deps,
-                                  scan_tests, test_filter_re,
-                                  loader_modules)
+        manifest = build_manifest(target_cfg, pkg_cfg, deps, scan_tests,
+                                  None, loader_modules,
+                                  abort_on_missing=options.abort_on_missing)
     except ModuleNotFoundError, e:
         print str(e)
         sys.exit(1)
@@ -784,10 +803,13 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
         options.force_use_bundled_sdk = False
         options.overload_modules = True
 
+    if options.pkgdir == env_root:
+        options.bundle_sdk = True
+        options.overload_modules = True
+
     extra_environment = {}
     if command == "test":
         # This should be contained in the test runner package.
-        # maybe just do: target_cfg.main = 'test-harness/run-tests'
         harness_options['main'] = 'sdk/test/runner'
         harness_options['mainPath'] = 'sdk/test/runner'
     else:
@@ -814,9 +836,6 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
         mydir = os.path.dirname(os.path.abspath(__file__))
         app_extension_dir = os.path.join(mydir, "../../app-extension")
 
-    if target_cfg.get('preferences'):
-        harness_options['preferences'] = target_cfg.get('preferences')
-
     # Do not add entries for SDK modules
     harness_options['manifest'] = manifest.get_harness_options_manifest(False)
 
@@ -834,12 +853,6 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
             sys.exit(1)
         # Pass a flag in order to force using sdk modules shipped in the xpi
         harness_options['force-use-bundled-sdk'] = True
-
-    # Pass the list of absolute path for all test modules
-    if command == "test":
-        harness_options['allTestModules'] = manifest.get_all_test_modules()
-        if len(harness_options['allTestModules']) == 0:
-            sys.exit(0)
 
     from cuddlefish.rdf import gen_manifest, RDFUpdate
 
@@ -895,12 +908,24 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
     else:
         from cuddlefish.runner import run_app
 
+        if options.no_connections == "default":
+            if command == "run":
+              no_connections = False
+            else:
+              no_connections = True
+        elif options.no_connections == "on":
+            no_connections = True
+        else:
+            no_connections = False
+
         if options.profiledir:
             options.profiledir = os.path.expanduser(options.profiledir)
             options.profiledir = os.path.abspath(options.profiledir)
 
         if options.addons is not None:
             options.addons = options.addons.split(",")
+
+        enable_e10s = options.enable_e10s or target_cfg.get('e10s', False)
 
         try:
             retval = run_app(harness_root_dir=app_extension_dir,
@@ -917,6 +942,7 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
                              args=options.cmdargs,
                              extra_environment=extra_environment,
                              norun=options.no_run,
+                             noquit=options.no_quit,
                              used_files=used_files,
                              enable_mobile=options.enable_mobile,
                              mobile_app_name=options.mobile_app_name,
@@ -924,7 +950,9 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
                              is_running_tests=(command == "test"),
                              overload_modules=options.overload_modules,
                              bundle_sdk=options.bundle_sdk,
-                             pkgdir=options.pkgdir)
+                             pkgdir=options.pkgdir,
+                             enable_e10s=enable_e10s,
+                             no_connections=no_connections)
         except ValueError, e:
             print ""
             print "A given cfx option has an inappropriate value:"

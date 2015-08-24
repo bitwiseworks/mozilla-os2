@@ -5,6 +5,7 @@
 
 
 Cu.import("resource:///modules/experiments/Experiments.jsm");
+Cu.import("resource://gre/modules/TelemetrySession.jsm", this);
 
 const FILE_MANIFEST            = "experiments.manifest";
 const SEC_IN_ONE_DAY = 24 * 60 * 60;
@@ -51,11 +52,12 @@ function run_test() {
 add_task(function* test_setup() {
   createAppInfo();
   gProfileDir = do_get_profile();
+  yield TelemetrySession.setup();
   gPolicy = new Experiments.Policy();
 
   gReporter = yield getReporter("json_payload_simple");
   yield gReporter.collectMeasurements();
-  let payload = yield gReporter.getJSONPayload(true);
+  let payload = yield gReporter.getJSONPayload(false);
   do_register_cleanup(() => gReporter._shutdown());
 
   patchPolicy(gPolicy, {
@@ -68,8 +70,6 @@ add_task(function* test_setup() {
   Services.prefs.setBoolPref(PREF_EXPERIMENTS_ENABLED, true);
   Services.prefs.setIntPref(PREF_LOGGING_LEVEL, 0);
   Services.prefs.setBoolPref(PREF_LOGGING_DUMP, true);
-
-  let experiments = new Experiments.Experiments();
 });
 
 function arraysEqual(a, b) {
@@ -309,4 +309,8 @@ add_task(function* test_times() {
       Assert.equal(reason, entry[1], "Experiment rejection reason should match for test " + i);
     }
   }
+});
+
+add_task(function* test_shutdown() {
+  yield TelemetrySession.shutdown();
 });

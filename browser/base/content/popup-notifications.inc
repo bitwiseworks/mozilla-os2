@@ -18,6 +18,18 @@
           <menupopup id="webRTC-selectCamera-menupopup"/>
         </menulist>
       </popupnotificationcontent>
+
+      <popupnotificationcontent id="webRTC-selectWindowOrScreen" orient="vertical">
+        <separator class="thin"/>
+        <label id="webRTC-selectWindow-label"
+               control="webRTC-selectWindow-menulist"/>
+        <menulist id="webRTC-selectWindow-menulist"
+                  oncommand="gWebRTCUI.updateMainActionLabel(this);">
+          <menupopup id="webRTC-selectWindow-menupopup"/>
+        </menulist>
+        <description id="webRTC-all-windows-shared" hidden="true">&getUserMedia.allWindowsShared.message;</description>
+      </popupnotificationcontent>
+
       <popupnotificationcontent id="webRTC-selectMicrophone" orient="vertical">
         <separator class="thin"/>
         <label value="&getUserMedia.selectMicrophone.label;"
@@ -44,13 +56,12 @@
     <popupnotification id="pointerLock-notification" hidden="true">
       <popupnotificationcontent orient="vertical" align="start">
         <separator class="thin"/>
-        <label id="pointerLock-cancel" value="&pointerLock.notification.message;"/>
+        <label id="pointerLock-cancel">&pointerLock.notification.message;</label>
       </popupnotificationcontent>
     </popupnotification>
 
-    <popupnotification id="mixed-content-blocked-notification" hidden="true">
-      <popupnotificationcontent orient="vertical" align="start">
-        <separator/>
-        <description id="mixed-content-blocked-moreinfo">&mixedContentBlocked.moreinfo;</description>
-      </popupnotificationcontent>
+#ifdef E10S_TESTING_ONLY
+    <popupnotification id="enable-e10s-notification" hidden="true">
+      <popupnotificationcontent orient="vertical"/>
     </popupnotification>
+#endif

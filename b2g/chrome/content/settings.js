@@ -1,16 +1,21 @@
-/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- /
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- /
 /* vim: set shiftwidth=2 tabstop=2 autoindent cindent expandtab: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-"use strict;"
+"use strict";
 
 const Cc = Components.classes;
 const Ci = Components.interfaces;
 const Cu = Components.utils;
 const Cr = Components.results;
 
+// The load order is important here SettingsRequestManager _must_ be loaded
+// prior to using SettingsListener otherwise there is a race in acquiring the
+// lock and fulfilling it. If we ever move SettingsListener or this file down in
+// the load order of shell.html things will likely break.
+Cu.import('resource://gre/modules/SettingsRequestManager.jsm');
 Cu.import('resource://gre/modules/XPCOMUtils.jsm');
 Cu.import('resource://gre/modules/Services.jsm');
 
@@ -73,19 +78,21 @@ SettingsListener.observe('debug.console.enabled', true, function(value) {
   Services.prefs.setBoolPref('layout.css.report_errors', value);
 });
 
+SettingsListener.observe('homescreen.manifestURL', 'Sentinel Value' , function(value) {
+  Services.prefs.setCharPref('dom.mozApps.homescreenURL', value);
+});
+
 // =================== Languages ====================
 SettingsListener.observe('language.current', 'en-US', function(value) {
   Services.prefs.setCharPref('general.useragent.locale', value);
 
   let prefName = 'intl.accept_languages';
-  if (Services.prefs.prefHasUserValue(prefName)) {
-    Services.prefs.clearUserPref(prefName);
-  }
+  let defaultBranch = Services.prefs.getDefaultBranch(null);
 
   let intl = '';
   try {
-    intl = Services.prefs.getComplexValue(prefName,
-                                          Ci.nsIPrefLocalizedString).data;
+    intl = defaultBranch.getComplexValue(prefName,
+                                         Ci.nsIPrefLocalizedString).data;
   } catch(e) {}
 
   // Bug 830782 - Homescreen is in English instead of selected locale after
@@ -101,27 +108,12 @@ SettingsListener.observe('language.current', 'en-US', function(value) {
   Services.prefs.setCharPref(prefName, value);
 
   if (shell.hasStarted() == false) {
-    shell.start();
+    shell.bootstrap();
   }
 });
 
 // =================== RIL ====================
 (function RILSettingsToPrefs() {
-  let strPrefs = ['ril.mms.mmsc', 'ril.mms.mmsproxy'];
-  strPrefs.forEach(function(key) {
-    SettingsListener.observe(key, "", function(value) {
-      Services.prefs.setCharPref(key, value);
-    });
-  });
-
-  ['ril.mms.mmsport'].forEach(function(key) {
-    SettingsListener.observe(key, null, function(value) {
-      if (value != null) {
-        Services.prefs.setIntPref(key, value);
-      }
-    });
-  });
-
   // DSDS default service IDs
   ['mms', 'sms', 'telephony', 'voicemail'].forEach(function(key) {
     SettingsListener.observe('ril.' + key + '.defaultServiceId', 0,
@@ -151,23 +143,34 @@ Components.utils.import('resource://gre/modules/ctypes.jsm');
   let hardware_info = null;
   let firmware_revision = null;
   let product_model = null;
+  let build_number = null;
 #ifdef MOZ_WIDGET_GONK
     hardware_info = libcutils.property_get('ro.hardware');
     firmware_revision = libcutils.property_get('ro.firmware_revision');
     product_model = libcutils.property_get('ro.product.model');
+    build_number = libcutils.property_get('ro.build.version.incremental');
 #endif
 
-  let software = os_name + ' ' + os_version;
-  let setting = {
-    'deviceinfo.os': os_version,
-    'deviceinfo.software': software,
-    'deviceinfo.platform_version': appInfo.platformVersion,
-    'deviceinfo.platform_build_id': appInfo.platformBuildID,
-    'deviceinfo.hardware': hardware_info,
-    'deviceinfo.firmware_revision': firmware_revision,
-    'deviceinfo.product_model': product_model
+  // Populate deviceinfo settings,
+  // copying any existing deviceinfo.os into deviceinfo.previous_os
+  let lock = window.navigator.mozSettings.createLock();
+  let req = lock.get('deviceinfo.os');
+  req.onsuccess = req.onerror = () => {
+    let previous_os = req.result && req.result['deviceinfo.os'] || '';
+    let software = os_name + ' ' + os_version;
+    let setting = {
+      'deviceinfo.build_number': build_number,
+      'deviceinfo.os': os_version,
+      'deviceinfo.previous_os': previous_os,
+      'deviceinfo.software': software,
+      'deviceinfo.platform_version': appInfo.platformVersion,
+      'deviceinfo.platform_build_id': appInfo.platformBuildID,
+      'deviceinfo.hardware': hardware_info,
+      'deviceinfo.firmware_revision': firmware_revision,
+      'deviceinfo.product_model': product_model
+    }
+    lock.set(setting);
   }
-  window.navigator.mozSettings.createLock().set(setting);
 })();
 
 // =================== DevTools ====================
@@ -177,7 +180,7 @@ SettingsListener.observe('devtools.overlay', false, (value) => {
   if (value) {
     if (!developerHUD) {
       let scope = {};
-      Services.scriptloader.loadSubScript('chrome://b2g/content/devtools.js', scope);
+      Services.scriptloader.loadSubScript('chrome://b2g/content/devtools/hud.js', scope);
       developerHUD = scope.developerHUD;
     }
     developerHUD.init();
@@ -188,291 +191,23 @@ SettingsListener.observe('devtools.overlay', false, (value) => {
   }
 });
 
-// =================== Debugger / ADB ====================
-
 #ifdef MOZ_WIDGET_GONK
-let AdbController = {
-  DEBUG: false,
-  locked: undefined,
-  remoteDebuggerEnabled: undefined,
-  lockEnabled: undefined,
-  disableAdbTimer: null,
-  disableAdbTimeoutHours: 12,
-  umsActive: false,
-
-  debug: function(str) {
-    dump("AdbController: " + str + "\n");
-  },
-
-  setLockscreenEnabled: function(value) {
-    this.lockEnabled = value;
-    if (this.DEBUG) {
-      this.debug("setLockscreenEnabled = " + this.lockEnabled);
+let LogShake;
+SettingsListener.observe('devtools.logshake', false, (value) => {
+  if (value) {
+    if (!LogShake) {
+      let scope = {};
+      Cu.import('resource://gre/modules/LogShake.jsm', scope);
+      LogShake = scope.LogShake;
     }
-    this.updateState();
-  },
-
-  setLockscreenState: function(value) {
-    this.locked = value;
-    if (this.DEBUG) {
-      this.debug("setLockscreenState = " + this.locked);
-    }
-    this.updateState();
-  },
-
-  setRemoteDebuggerState: function(value) {
-    this.remoteDebuggerEnabled = value;
-    if (this.DEBUG) {
-      this.debug("setRemoteDebuggerState = " + this.remoteDebuggerEnabled);
-    }
-    this.updateState();
-  },
-
-  startDisableAdbTimer: function() {
-    if (this.disableAdbTimer) {
-      this.disableAdbTimer.cancel();
-    } else {
-      this.disableAdbTimer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
-      try {
-        this.disableAdbTimeoutHours =
-          Services.prefs.getIntPref("b2g.adb.timeout-hours");
-      } catch (e) {
-        // This happens if the pref doesn't exist, in which case
-        // disableAdbTimeoutHours will still be set to the default.
-      }
-    }
-    if (this.disableAdbTimeoutHours <= 0) {
-      if (this.DEBUG) {
-        this.debug("Timer to disable ADB not started due to zero timeout");
-      }
-      return;
-    }
-
-    if (this.DEBUG) {
-      this.debug("Starting timer to disable ADB in " +
-                 this.disableAdbTimeoutHours + " hours");
-    }
-    let timeoutMilliseconds = this.disableAdbTimeoutHours * 60 * 60 * 1000;
-    this.disableAdbTimer.initWithCallback(this, timeoutMilliseconds,
-                                          Ci.nsITimer.TYPE_ONE_SHOT);
-  },
-
-  stopDisableAdbTimer: function() {
-    if (this.DEBUG) {
-      this.debug("Stopping timer to disable ADB");
-    }
-    if (this.disableAdbTimer) {
-      this.disableAdbTimer.cancel();
-      this.disableAdbTimer = null;
-    }
-  },
-
-  notify: function(aTimer) {
-    if (aTimer == this.disableAdbTimer) {
-      this.disableAdbTimer = null;
-      // The following dump will be the last thing that shows up in logcat,
-      // and will at least give the user a clue about why logcat was
-      // disconnected, if the user happens to be using logcat.
-      dump("AdbController: ADB timer expired - disabling ADB\n");
-      navigator.mozSettings.createLock().set(
-        {'devtools.debugger.remote-enabled': false});
-    }
-  },
-
-  updateState: function() {
-    this.umsActive = false;
-    this.storages = navigator.getDeviceStorages('sdcard');
-    this.updateStorageState(0);
-  },
-
-  updateStorageState: function(storageIndex) {
-    if (storageIndex >= this.storages.length) {
-      // We've iterated through all of the storage objects, now we can
-      // really do updateStateInternal.
-      this.updateStateInternal();
-      return;
-    }
-    let storage = this.storages[storageIndex];
-    if (this.DEBUG) {
-      this.debug("Checking availability of storage: '" +
-                 storage.storageName);
-    }
-
-    let req = storage.available();
-    req.onsuccess = function(e) {
-      if (this.DEBUG) {
-        this.debug("Storage: '" + storage.storageName + "' is '" +
-                   e.target.result);
-      }
-      if (e.target.result == 'shared') {
-        // We've found a storage area that's being shared with the PC.
-        // We can stop looking now.
-        this.umsActive = true;
-        this.updateStateInternal();
-        return;
-      }
-      this.updateStorageState(storageIndex + 1);
-    }.bind(this);
-    req.onerror = function(e) {
-      dump("AdbController: error querying storage availability for '" +
-           this.storages[storageIndex].storageName + "' (ignoring)\n");
-      this.updateStorageState(storageIndex + 1);
-    }.bind(this);
-  },
-
-  updateStateInternal: function() {
-    if (this.DEBUG) {
-      this.debug("updateStateInternal: called");
-    }
-
-    if (this.remoteDebuggerEnabled === undefined ||
-        this.lockEnabled === undefined ||
-        this.locked === undefined) {
-      // Part of initializing the settings database will cause the observers
-      // to trigger. We want to wait until both have been initialized before
-      // we start changing ther adb state. Without this then we can wind up
-      // toggling adb off and back on again (or on and back off again).
-      //
-      // For completeness, one scenario which toggles adb is using the unagi.
-      // The unagi has adb enabled by default (prior to b2g starting). If you
-      // have the phone lock disabled and remote debugging enabled, then we'll
-      // receive an unlock event and an rde event. However at the time we
-      // receive the unlock event we haven't yet received the rde event, so
-      // we turn adb off momentarily, which disconnects a logcat that might
-      // be running. Changing the defaults (in AdbController) just moves the
-      // problem to a different phone, which has adb disabled by default and
-      // we wind up turning on adb for a short period when we shouldn't.
-      //
-      // By waiting until both values are properly initialized, we avoid
-      // turning adb on or off accidentally.
-      if (this.DEBUG) {
-        this.debug("updateState: Waiting for all vars to be initialized");
-      }
-      return;
-    }
-
-    // Check if we have a remote debugging session going on. If so, we won't
-    // disable adb even if the screen is locked.
-    let isDebugging = RemoteDebugger.isDebugging;
-    if (this.DEBUG) {
-      this.debug("isDebugging=" + isDebugging);
-    }
-
-    // If USB Mass Storage, USB tethering, or a debug session is active,
-    // then we don't want to disable adb in an automatic fashion (i.e.
-    // when the screen locks or due to timeout).
-    let sysUsbConfig = libcutils.property_get("sys.usb.config");
-    let rndisActive = (sysUsbConfig.split(",").indexOf("rndis") >= 0);
-    let usbFuncActive = rndisActive || this.umsActive || isDebugging;
-
-    let enableAdb = this.remoteDebuggerEnabled &&
-      (!(this.lockEnabled && this.locked) || usbFuncActive);
-
-    let useDisableAdbTimer = true;
-    try {
-      if (Services.prefs.getBoolPref("marionette.defaultPrefs.enabled")) {
-        // Marionette is enabled. Marionette requires that adb be on (and also
-        // requires that remote debugging be off). The fact that marionette
-        // is enabled also implies that we're doing a non-production build, so
-        // we want adb enabled all of the time.
-        enableAdb = true;
-        useDisableAdbTimer = false;
-      }
-    } catch (e) {
-      // This means that the pref doesn't exist. Which is fine. We just leave
-      // enableAdb alone.
-    }
-    if (this.DEBUG) {
-      this.debug("updateState: enableAdb = " + enableAdb +
-                 " remoteDebuggerEnabled = " + this.remoteDebuggerEnabled +
-                 " lockEnabled = " + this.lockEnabled +
-                 " locked = " + this.locked +
-                 " usbFuncActive = " + usbFuncActive);
-    }
-
-    // Configure adb.
-    let currentConfig = libcutils.property_get("persist.sys.usb.config");
-    let configFuncs = currentConfig.split(",");
-    let adbIndex = configFuncs.indexOf("adb");
-
-    if (enableAdb) {
-      // Add adb to the list of functions, if not already present
-      if (adbIndex < 0) {
-        configFuncs.push("adb");
-      }
-    } else {
-      // Remove adb from the list of functions, if present
-      if (adbIndex >= 0) {
-        configFuncs.splice(adbIndex, 1);
-      }
-    }
-    let newConfig = configFuncs.join(",");
-    if (newConfig != currentConfig) {
-      if (this.DEBUG) {
-        this.debug("updateState: currentConfig = " + currentConfig);
-        this.debug("updateState:     newConfig = " + newConfig);
-      }
-      try {
-        libcutils.property_set("persist.sys.usb.config", newConfig);
-      } catch(e) {
-        dump("Error configuring adb: " + e);
-      }
-    }
-    if (useDisableAdbTimer) {
-      if (enableAdb && !usbFuncActive) {
-        this.startDisableAdbTimer();
-      } else {
-        this.stopDisableAdbTimer();
-      }
+    LogShake.init();
+  } else {
+    if (LogShake) {
+      LogShake.uninit();
     }
   }
-};
-
-SettingsListener.observe("lockscreen.locked", false,
-                         AdbController.setLockscreenState.bind(AdbController));
-SettingsListener.observe("lockscreen.enabled", false,
-                         AdbController.setLockscreenEnabled.bind(AdbController));
-#endif
-
-// Keep the old setting to not break people that won't have updated
-// gaia and gecko.
-SettingsListener.observe('devtools.debugger.remote-enabled', false, function(value) {
-  Services.prefs.setBoolPref('devtools.debugger.remote-enabled', value);
-  // This preference is consulted during startup
-  Services.prefs.savePrefFile(null);
-  try {
-    value ? RemoteDebugger.start() : RemoteDebugger.stop();
-  } catch(e) {
-    dump("Error while initializing devtools: " + e + "\n" + e.stack + "\n");
-  }
-
-#ifdef MOZ_WIDGET_GONK
-  AdbController.setRemoteDebuggerState(value);
-#endif
 });
-
-SettingsListener.observe('debugger.remote-mode', false, function(value) {
-  if (['disabled', 'adb-only', 'adb-devtools'].indexOf(value) == -1) {
-    dump('Illegal value for debugger.remote-mode: ' + value + '\n');
-    return;
-  }
-
-  Services.prefs.setBoolPref('devtools.debugger.remote-enabled',
-                             value == 'adb-devtools');
-  // This preference is consulted during startup
-  Services.prefs.savePrefFile(null);
-
-  try {
-    (value == 'adb-devtools') ? RemoteDebugger.start()
-                              : RemoteDebugger.stop();
-  } catch(e) {
-    dump("Error while initializing devtools: " + e + "\n" + e.stack + "\n");
-  }
-
-#ifdef MOZ_WIDGET_GONK
-  AdbController.setRemoteDebuggerState(value != 'disabled');
 #endif
-});
 
 // =================== Device Storage ====================
 SettingsListener.observe('device.storage.writable.name', 'sdcard', function(value) {
@@ -544,6 +279,36 @@ function setUpdateTrackingId() {
 }
 setUpdateTrackingId();
 
+(function syncUpdatePrefs() {
+  // The update service reads the prefs from the default branch. This is by
+  // design, as explained in bug 302721 comment 43. If we are to successfully
+  // modify them, that's where we need to make our changes.
+  let defaultBranch = Services.prefs.getDefaultBranch(null);
+
+  function syncCharPref(prefName) {
+    SettingsListener.observe(prefName, null, function(value) {
+      // If set, propagate setting value to pref.
+      if (value) {
+        defaultBranch.setCharPref(prefName, value);
+        return;
+      }
+      // If unset, initialize setting to pref value.
+      try {
+        let value = defaultBranch.getCharPref(prefName);
+        if (value) {
+          let setting = {};
+          setting[prefName] = value;
+          window.navigator.mozSettings.createLock().set(setting);
+        }
+      } catch(e) {
+        console.log('Unable to read pref ' + prefName + ': ' + e);
+      }
+    });
+  }
+
+  syncCharPref('app.update.url');
+  syncCharPref('app.update.channel');
+})();
 
 // ================ Debug ================
 (function Composer2DSettingToPref() {
@@ -562,7 +327,12 @@ setUpdateTrackingId();
         enabled = Services.prefs.getBoolPref('layers.composer2d.enabled');
       } else {
 #ifdef MOZ_WIDGET_GONK
-        enabled = (libcutils.property_get('ro.display.colorfill') === '1');
+        let androidVersion = libcutils.property_get("ro.build.version.sdk");
+        if (androidVersion >= 17 ) {
+          enabled = true;
+        } else {
+          enabled = (libcutils.property_get('ro.display.colorfill') === '1');
+        }
 #endif
       }
       navigator.mozSettings.createLock().set({'layers.composer2d.enabled': enabled });
@@ -579,12 +349,19 @@ setUpdateTrackingId();
 })();
 
 // ================ Accessibility ============
-SettingsListener.observe("accessibility.screenreader", false, function(value) {
-  if (value && !("AccessFu" in this)) {
-    Cu.import('resource://gre/modules/accessibility/AccessFu.jsm');
-    AccessFu.attach(window);
-  }
-});
+(function setupAccessibility() {
+  let accessibilityScope = {};
+  SettingsListener.observe("accessibility.screenreader", false, function(value) {
+    if (!value) {
+      return;
+    }
+    if (!('AccessFu' in accessibilityScope)) {
+      Cu.import('resource://gre/modules/accessibility/AccessFu.jsm',
+                accessibilityScope);
+      accessibilityScope.AccessFu.attach(window);
+    }
+  });
+})();
 
 // ================ Theming ============
 (function themingSettingsListener() {
@@ -600,95 +377,191 @@ SettingsListener.observe("accessibility.screenreader", false, function(value) {
   });
 })();
 
-// =================== AsyncPanZoom ======================
-SettingsListener.observe('apz.displayport.heuristics', 'default', function(value) {
-  // first reset everything to default
-  Services.prefs.clearUserPref('apz.velocity_bias');
-  Services.prefs.clearUserPref('apz.use_paint_duration');
-  Services.prefs.clearUserPref('apz.x_skate_size_multiplier');
-  Services.prefs.clearUserPref('apz.y_skate_size_multiplier');
-  Services.prefs.clearUserPref('apz.allow-checkerboarding');
-  // and then set the things that we want to change
-  switch (value) {
-  case 'default':
-    break;
-  case 'center-displayport':
-    Services.prefs.setCharPref('apz.velocity_bias', '0.0');
-    break;
-  case 'perfect-paint-times':
-    Services.prefs.setBoolPref('apz.use_paint_duration', false);
-    Services.prefs.setCharPref('apz.velocity_bias', '0.32'); // 16/50 (assumes 16ms paint times instead of 50ms)
-    break;
-  case 'taller-displayport':
-    Services.prefs.setCharPref('apz.y_skate_size_multiplier', '3.5');
-    break;
-  case 'faster-paint':
-    Services.prefs.setCharPref('apz.x_skate_size_multiplier', '1.0');
-    Services.prefs.setCharPref('apz.y_skate_size_multiplier', '1.5');
-    break;
-  case 'no-checkerboard':
-    Services.prefs.setBoolPref('apz.allow-checkerboarding', false);
-    break;
+// =================== Telemetry  ======================
+(function setupTelemetrySettings() {
+  let gaiaSettingName = 'debug.performance_data.shared';
+  let geckoPrefName = 'toolkit.telemetry.enabled';
+  SettingsListener.observe(gaiaSettingName, null, function(value) {
+    if (value !== null) {
+      // Gaia setting has been set; update Gecko pref to that.
+      Services.prefs.setBoolPref(geckoPrefName, value);
+      return;
+    }
+    // Gaia setting has not been set; set the gaia setting to default.
+#ifdef MOZ_TELEMETRY_ON_BY_DEFAULT
+    let prefValue = true;
+#else
+    let prefValue = false;
+#endif
+    try {
+      prefValue = Services.prefs.getBoolPref(geckoPrefName);
+    } catch (e) {
+      // Pref not set; use default value.
+    }
+    let setting = {};
+    setting[gaiaSettingName] = prefValue;
+    window.navigator.mozSettings.createLock().set(setting);
+  });
+})();
+
+// =================== Low-precision buffer ======================
+(function setupLowPrecisionSettings() {
+  // The gaia setting layers.low-precision maps to two gecko prefs
+  SettingsListener.observe('layers.low-precision', null, function(value) {
+    if (value !== null) {
+      // Update gecko from the new Gaia setting
+      Services.prefs.setBoolPref('layers.low-precision-buffer', value);
+      Services.prefs.setBoolPref('layers.progressive-paint', value);
+    } else {
+      // Update gaia setting from gecko value
+      try {
+        let prefValue = Services.prefs.getBoolPref('layers.low-precision-buffer');
+        let setting = { 'layers.low-precision': prefValue };
+        window.navigator.mozSettings.createLock().set(setting);
+      } catch (e) {
+        console.log('Unable to read pref layers.low-precision-buffer: ' + e);
+      }
+    }
+  });
+
+  // The gaia setting layers.low-opacity maps to a string gecko pref (0.5/1.0)
+  SettingsListener.observe('layers.low-opacity', null, function(value) {
+    if (value !== null) {
+      // Update gecko from the new Gaia setting
+      Services.prefs.setCharPref('layers.low-precision-opacity', value ? '0.5' : '1.0');
+    } else {
+      // Update gaia setting from gecko value
+      try {
+        let prefValue = Services.prefs.getCharPref('layers.low-precision-opacity');
+        let setting = { 'layers.low-opacity': (prefValue == '0.5') };
+        window.navigator.mozSettings.createLock().set(setting);
+      } catch (e) {
+        console.log('Unable to read pref layers.low-precision-opacity: ' + e);
+      }
+    }
+  });
+})();
+
+// ================ Theme selection ============
+// theme.selected holds the manifest url of the currently used theme.
+SettingsListener.observe("theme.selected",
+                         "app://default_theme.gaiamobile.org/manifest.webapp",
+                         function(value) {
+  if (!value) {
+    return;
+  }
+
+  let newTheme;
+  try {
+    let enabled = Services.prefs.getBoolPref("dom.mozApps.themable");
+    if (!enabled) {
+      return;
+    }
+
+    // Make sure this is a url, and only keep the host part to set the pref.
+    let uri = Services.io.newURI(value, null, null);
+    // We only support overriding in the app:// protocol handler.
+    if (uri.scheme !== "app") {
+      return;
+    }
+    newTheme = uri.host;
+  } catch(e) {
+    return;
+  }
+
+  let currentTheme;
+  try {
+    currentTheme = Services.prefs.getCharPref('dom.mozApps.selected_theme');
+  } catch(e) {};
+
+  if (currentTheme != newTheme) {
+    debug("New theme selected " + value);
+    Services.prefs.setCharPref('dom.mozApps.selected_theme', newTheme);
+    Services.prefs.savePrefFile(null);
+    Services.obs.notifyObservers(null, 'app-theme-changed', newTheme);
   }
 });
 
 // =================== Various simple mapping  ======================
 let settingsToObserve = {
-  'ril.mms.retrieval_mode': {
-    prefName: 'dom.mms.retrieval_mode',
-    defaultValue: 'manual'
+  'accessibility.screenreader_quicknav_modes': {
+    prefName: 'accessibility.accessfu.quicknav_modes',
+    resetToPref: true,
+    defaultValue: ''
   },
-  'ril.sms.strict7BitEncoding.enabled': {
-    prefName: 'dom.sms.strict7BitEncoding',
-    defaultValue: false
+  'accessibility.screenreader_quicknav_index': {
+    prefName: 'accessibility.accessfu.quicknav_index',
+    resetToPref: true,
+    defaultValue: 0
   },
-  'ril.sms.requestStatusReport.enabled': {
-    prefName: 'dom.sms.requestStatusReport',
-    defaultValue: false
-  },
-  'ril.mms.requestStatusReport.enabled': {
-    prefName: 'dom.mms.requestStatusReport',
-    defaultValue: false
-  },
-  'ril.mms.requestReadReport.enabled': {
-    prefName: 'dom.mms.requestReadReport',
-    defaultValue: true
-  },
-  'ril.cellbroadcast.disabled': false,
-  'ril.radio.disabled': false,
-  'wap.UAProf.url': '',
-  'wap.UAProf.tagname': 'x-wap-profile',
-  'devtools.eventlooplag.threshold': 100,
-  'privacy.donottrackheader.enabled': false,
-  'apz.force-enable': {
-    prefName: 'dom.browser_frames.useAsyncPanZoom',
-    defaultValue: false
-  },
-  'layers.enable-tiles': true,
-  'layers.simple-tiles': false,
-  'layers.progressive-paint': false,
-  'layers.draw-tile-borders': false,
-  'layers.dump': false,
+  'app.update.interval': 86400,
+  'apz.overscroll.enabled': true,
   'debug.fps.enabled': {
     prefName: 'layers.acceleration.draw-fps',
+    defaultValue: false
+  },
+  'debug.log-animations.enabled': {
+    prefName: 'layers.offmainthreadcomposition.log-animations',
     defaultValue: false
   },
   'debug.paint-flashing.enabled': {
     prefName: 'nglayout.debug.paint_flashing',
     defaultValue: false
   },
+  'devtools.eventlooplag.threshold': 100,
+  'devtools.remote.wifi.visible': {
+    resetToPref: true
+  },
+  'dom.mozApps.use_reviewer_certs': false,
+  'dom.mozApps.signed_apps_installable_from': 'https://marketplace.firefox.com',
+  'gfx.layerscope.enabled': false,
   'layers.draw-borders': false,
-  'app.update.interval': 86400,
-  'app.update.url': {
-    resetToPref: true
+  'layers.draw-tile-borders': false,
+  'layers.dump': false,
+  'layers.enable-tiles': true,
+  'layers.effect.invert': false,
+  'layers.effect.grayscale': false,
+  'layers.effect.contrast': "0.0",
+  'privacy.donottrackheader.enabled': false,
+  'ril.radio.disabled': false,
+  'ril.mms.requestReadReport.enabled': {
+    prefName: 'dom.mms.requestReadReport',
+    defaultValue: true
   },
-  'app.update.channel': {
-    resetToPref: true
-  },
-  'debug.log-animations.enabled': {
-    prefName: 'layers.offmainthreadcomposition.log-animations',
+  'ril.mms.requestStatusReport.enabled': {
+    prefName: 'dom.mms.requestStatusReport',
     defaultValue: false
-  }
+  },
+  'ril.mms.retrieval_mode': {
+    prefName: 'dom.mms.retrieval_mode',
+    defaultValue: 'manual'
+  },
+  'ril.sms.requestStatusReport.enabled': {
+    prefName: 'dom.sms.requestStatusReport',
+    defaultValue: false
+  },
+  'ril.sms.strict7BitEncoding.enabled': {
+    prefName: 'dom.sms.strict7BitEncoding',
+    defaultValue: false
+  },
+  'ril.sms.maxReadAheadEntries': {
+    prefName: 'dom.sms.maxReadAheadEntries',
+    defaultValue: 7
+  },
+  'ui.touch.radius.leftmm': {
+    resetToPref: true
+  },
+  'ui.touch.radius.topmm': {
+    resetToPref: true
+  },
+  'ui.touch.radius.rightmm': {
+    resetToPref: true
+  },
+  'ui.touch.radius.bottommm': {
+    resetToPref: true
+  },
+  'wap.UAProf.tagname': 'x-wap-profile',
+  'wap.UAProf.url': ''
 };
 
 for (let key in settingsToObserve) {

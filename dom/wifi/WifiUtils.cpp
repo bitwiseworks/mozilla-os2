@@ -8,13 +8,11 @@
 #include <cutils/properties.h>
 #include "prinit.h"
 #include "js/CharacterEncoding.h"
-#include "mozilla/dom/network/NetUtils.h"
 
 using namespace mozilla::dom;
 
 #define BUFFER_SIZE        4096
 #define COMMAND_SIZE       256
-#define PROPERTY_VALUE_MAX 80
 
 // Intentionally not trying to dlclose() this handle. That's playing
 // Russian roulette with security bugs.
@@ -44,24 +42,139 @@ GetWifiP2pSupported()
   return (0 == strcmp(propP2pSupported, "1"));
 }
 
+static int
+hex2num(char c)
+{
+  if (c >= '0' && c <= '9')
+    return c - '0';
+  if (c >= 'a' && c <= 'f')
+    return c - 'a' + 10;
+  if (c >= 'A' && c <= 'F')
+    return c - 'A' + 10;
+  return -1;
+}
+
+static int
+hex2byte(const char* hex)
+{
+  int a, b;
+  a = hex2num(*hex++);
+  if (a < 0)
+    return -1;
+  b = hex2num(*hex++);
+  if (b < 0)
+    return -1;
+  return (a << 4) | b;
+}
+
+// This function is equivalent to printf_decode() at src/utils/common.c in
+// the supplicant.
+
+static uint32_t
+convertToBytes(char* buf, uint32_t maxlen, const char* str)
+{
+  const char *pos = str;
+  uint32_t len = 0;
+  int val;
+
+  while (*pos) {
+    if (len == maxlen)
+      break;
+    switch (*pos) {
+    case '\\':
+      pos++;
+      switch (*pos) {
+      case '\\':
+        buf[len++] = '\\';
+        pos++;
+        break;
+      case '"':
+        buf[len++] = '"';
+        pos++;
+        break;
+      case 'n':
+        buf[len++] = '\n';
+        pos++;
+        break;
+      case 'r':
+        buf[len++] = '\r';
+        pos++;
+        break;
+      case 't':
+        buf[len++] = '\t';
+        pos++;
+        break;
+      case 'e':
+        buf[len++] = '\e';
+        pos++;
+        break;
+      case 'x':
+        pos++;
+        val = hex2byte(pos);
+        if (val < 0) {
+          val = hex2num(*pos);
+          if (val < 0)
+            break;
+          buf[len++] = val;
+          pos++;
+        } else {
+          buf[len++] = val;
+          pos += 2;
+        }
+        break;
+      case '0':
+      case '1':
+      case '2':
+      case '3':
+      case '4':
+      case '5':
+      case '6':
+      case '7':
+        val = *pos++ - '0';
+        if (*pos >= '0' && *pos <= '7')
+          val = val * 8 + (*pos++ - '0');
+        if (*pos >= '0' && *pos <= '7')
+          val = val * 8 + (*pos++ - '0');
+        buf[len++] = val;
+        break;
+      default:
+        break;
+      }
+      break;
+    default:
+      buf[len++] = *pos++;
+	  break;
+    }
+  }
+  return len;
+}
+
 // This is the same algorithm as in InflateUTF8StringToBuffer with Copy and
 // while ignoring invalids.
 // https://mxr.mozilla.org/mozilla-central/source/js/src/vm/CharacterEncoding.cpp#231
 
 static const uint32_t REPLACE_UTF8 = 0xFFFD;
 
-void LossyConvertUTF8toUTF16(const char* aInput, uint32_t aLength, nsAString& aOut)
+static void
+LossyConvertUTF8toUTF16(const char* aInput, uint32_t aLength, nsAString& aOut)
 {
   JS::UTF8Chars src(aInput, aLength);
 
   char16_t dst[aLength]; // Allocating for worst case.
 
-  // First, count how many jschars need to be in the inflated string.
+  // Count how many char16_t characters are needed in the inflated string.
   // |i| is the index into |src|, and |j| is the the index into |dst|.
   size_t srclen = src.length();
   uint32_t j = 0;
   for (uint32_t i = 0; i < srclen; i++, j++) {
     uint32_t v = uint32_t(src[i]);
+    if (v == uint32_t('\0') && i < srclen - 1) {
+      // If the leading byte is '\0' and it's not the last byte,
+      // just ignore it to prevent from being truncated. This could
+      // be caused by |convertToBytes| (e.g. \x00 would be converted to '\0')
+      j--;
+      continue;
+    }
     if (!(v & 0x80)) {
       // ASCII code unit.  Simple copy.
       dst[j] = char16_t(v);
@@ -100,20 +213,20 @@ void LossyConvertUTF8toUTF16(const char* aInput, uint32_t aLength, nsAString& aO
         if ((src[i + m] & 0xC0) != 0x80)
           INVALID(ReportInvalidCharacter, i, m);
 
-      // Determine the code unit's length in jschars and act accordingly.
+      // Determine the code unit's length in char16_t units and act accordingly.
       v = JS::Utf8ToOneUcs4Char((uint8_t *)&src[i], n);
       if (v < 0x10000) {
-        // The n-byte UTF8 code unit will fit in a single jschar.
-        dst[j] = jschar(v);
+        // The n-byte UTF8 code unit will fit in a single char16_t.
+        dst[j] = char16_t(v);
       } else {
         v -= 0x10000;
         if (v <= 0xFFFFF) {
-          // The n-byte UTF8 code unit will fit in two jschars.
-          dst[j] = jschar((v >> 10) + 0xD800);
+          // The n-byte UTF8 code unit will fit in two char16_t units.
+          dst[j] = char16_t((v >> 10) + 0xD800);
           j++;
-          dst[j] = jschar((v & 0x3FF) + 0xDC00);
+          dst[j] = char16_t((v & 0x3FF) + 0xDC00);
         } else {
-          // The n-byte UTF8 code unit won't fit in two jschars.
+          // The n-byte UTF8 code unit won't fit in two char16_t units.
           INVALID(ReportTooBigCharacter, v, 1);
         }
       }
@@ -266,14 +379,18 @@ public:
 // Concrete class to use to access the wpa supplicant.
 WpaSupplicant::WpaSupplicant()
 {
-  if (NetUtils::SdkVersion() < 16) {
+  char propVersion[PROPERTY_VALUE_MAX];
+  property_get("ro.build.version.sdk", propVersion, "0");
+  mSdkVersion = strtol(propVersion, nullptr, 10);
+
+  if (mSdkVersion < 16) {
     mImpl = new ICSWpaSupplicantImpl();
-  } else if (NetUtils::SdkVersion() < 19) {
+  } else if (mSdkVersion < 19) {
     mImpl = new JBWpaSupplicantImpl();
   } else {
     mImpl = new KKWpaSupplicantImpl();
   }
-  mNetUtils = new NetUtils();
+  mWifiHotspotUtils = new WifiHotspotUtils();
 };
 
 void WpaSupplicant::WaitForEvent(nsAString& aEvent, const nsCString& aInterface)
@@ -303,7 +420,8 @@ bool WpaSupplicant::ExecuteCommand(CommandOptions aOptions,
                                    const nsCString& aInterface)
 {
   CHECK_HWLIB(false)
-  if (!mNetUtils->GetSharedLibrary()) {
+
+  if (!mWifiHotspotUtils->GetSharedLibrary()) {
     return false;
   }
 
@@ -336,81 +454,51 @@ bool WpaSupplicant::ExecuteCommand(CommandOptions aOptions,
     aResult.mStatus = mImpl->do_wifi_stop_supplicant(0);
   } else if (aOptions.mCmd.EqualsLiteral("connect_to_supplicant")) {
     aResult.mStatus = mImpl->do_wifi_connect_to_supplicant(aInterface.get());
-  } else if (aOptions.mCmd.EqualsLiteral("ifc_enable")) {
-    aResult.mStatus = mNetUtils->do_ifc_enable(GET_CHAR(mIfname));
-  } else if (aOptions.mCmd.EqualsLiteral("ifc_disable")) {
-    aResult.mStatus = mNetUtils->do_ifc_disable(GET_CHAR(mIfname));
-  } else if (aOptions.mCmd.EqualsLiteral("ifc_configure")) {
-    aResult.mStatus = mNetUtils->do_ifc_configure(
-      GET_CHAR(mIfname), aOptions.mIpaddr, aOptions.mMask,
-      aOptions.mGateway, aOptions.mDns1, aOptions.mDns2
-    );
-  } else if (aOptions.mCmd.EqualsLiteral("ifc_reset_connections")) {
-    aResult.mStatus = mNetUtils->do_ifc_reset_connections(
-      GET_CHAR(mIfname), RESET_ALL_ADDRESSES
-    );
-  } else if (aOptions.mCmd.EqualsLiteral("dhcp_stop")) {
-    aResult.mStatus = mNetUtils->do_dhcp_stop(GET_CHAR(mIfname));
-  } else if (aOptions.mCmd.EqualsLiteral("dhcp_do_request")) {
-    char ipaddr[PROPERTY_VALUE_MAX];
-    char gateway[PROPERTY_VALUE_MAX];
-    uint32_t prefixLength;
-    char dns1[PROPERTY_VALUE_MAX];
-    char dns2[PROPERTY_VALUE_MAX];
-    char server[PROPERTY_VALUE_MAX];
-    uint32_t lease;
-    char vendorinfo[PROPERTY_VALUE_MAX];
-    aResult.mStatus =
-      mNetUtils->do_dhcp_do_request(GET_CHAR(mIfname),
-                                    ipaddr,
-                                    gateway,
-                                    &prefixLength,
-                                    dns1,
-                                    dns2,
-                                    server,
-                                    &lease,
-                                    vendorinfo);
-
-    if (aResult.mStatus == -1) {
-      // Early return since we failed.
-      return true;
+  } else if (aOptions.mCmd.EqualsLiteral("hostapd_command")) {
+    size_t len = BUFFER_SIZE - 1;
+    char buffer[BUFFER_SIZE];
+    NS_ConvertUTF16toUTF8 request(aOptions.mRequest);
+    aResult.mStatus = mWifiHotspotUtils->do_wifi_hostapd_command(request.get(),
+                                                                 buffer,
+                                                                 &len);
+    nsString value;
+    if (aResult.mStatus == 0) {
+      if (buffer[len - 1] == '\n') { // remove trailing new lines.
+        len--;
+      }
+      buffer[len] = '\0';
+      CheckBuffer(buffer, len, value);
     }
-
-    aResult.mIpaddr_str = NS_ConvertUTF8toUTF16(ipaddr);
-    aResult.mGateway_str = NS_ConvertUTF8toUTF16(gateway);
-    aResult.mDns1_str = NS_ConvertUTF8toUTF16(dns1);
-    aResult.mDns2_str = NS_ConvertUTF8toUTF16(dns2);
-    aResult.mServer_str = NS_ConvertUTF8toUTF16(server);
-    aResult.mVendor_str = NS_ConvertUTF8toUTF16(vendorinfo);
-    aResult.mLease = lease;
-    aResult.mMask = MakeMask(prefixLength);
-
-    uint32_t inet4; // only support IPv4 for now.
-
-#define INET_PTON(var, field)                                                 \
-  PR_BEGIN_MACRO                                                              \
-    inet_pton(AF_INET, var, &inet4);                                          \
-    aResult.field = inet4;                                                    \
-  PR_END_MACRO
-
-    INET_PTON(ipaddr, mIpaddr);
-    INET_PTON(gateway, mGateway);
-
-    if (dns1[0] != '\0') {
-      INET_PTON(dns1, mDns1);
+    aResult.mReply = value;
+  } else if (aOptions.mCmd.EqualsLiteral("hostapd_get_stations")) {
+    aResult.mStatus = mWifiHotspotUtils->do_wifi_hostapd_get_stations();
+  } else if (aOptions.mCmd.EqualsLiteral("connect_to_hostapd")) {
+    aResult.mStatus = mWifiHotspotUtils->do_wifi_connect_to_hostapd();
+  } else if (aOptions.mCmd.EqualsLiteral("close_hostapd_connection")) {
+    aResult.mStatus = mWifiHotspotUtils->do_wifi_close_hostapd_connection();
+  } else if (aOptions.mCmd.EqualsLiteral("hostapd_command")) {
+    size_t len = BUFFER_SIZE - 1;
+    char buffer[BUFFER_SIZE];
+    NS_ConvertUTF16toUTF8 request(aOptions.mRequest);
+    aResult.mStatus = mWifiHotspotUtils->do_wifi_hostapd_command(request.get(),
+                                                                 buffer,
+                                                                 &len);
+    nsString value;
+    if (aResult.mStatus == 0) {
+      if (buffer[len - 1] == '\n') { // remove trailing new lines.
+        len--;
+      }
+      buffer[len] = '\0';
+      CheckBuffer(buffer, len, value);
     }
+    aResult.mReply = value;
+  } else if (aOptions.mCmd.EqualsLiteral("hostapd_get_stations")) {
+    aResult.mStatus = mWifiHotspotUtils->do_wifi_hostapd_get_stations();
+  } else if (aOptions.mCmd.EqualsLiteral("connect_to_hostapd")) {
+    aResult.mStatus = mWifiHotspotUtils->do_wifi_connect_to_hostapd();
+  } else if (aOptions.mCmd.EqualsLiteral("close_hostapd_connection")) {
+    aResult.mStatus = mWifiHotspotUtils->do_wifi_close_hostapd_connection();
 
-    if (dns2[0] != '\0') {
-      INET_PTON(dns2, mDns2);
-    }
-
-    INET_PTON(server, mServer);
-
-    //aResult.mask_str = netHelpers.ipToString(obj.mask);
-    char inet_str[64];
-    if (inet_ntop(AF_INET, &aResult.mMask, inet_str, sizeof(inet_str))) {
-      aResult.mMask_str = NS_ConvertUTF8toUTF16(inet_str);
-    }
   } else {
     NS_WARNING("WpaSupplicant::ExecuteCommand : Unknown command");
     printf_stderr("WpaSupplicant::ExecuteCommand : Unknown command: %s",
@@ -426,8 +514,27 @@ void
 WpaSupplicant::CheckBuffer(char* buffer, int32_t length,
                            nsAString& aEvent)
 {
-  if (length > 0 && length < BUFFER_SIZE) {
+  if (length <= 0 || length >= (BUFFER_SIZE - 1)) {
+    NS_WARNING("WpaSupplicant::CheckBuffer: Invalid buffer length");
+    return;
+  }
+
+  if (mSdkVersion < 18) {
     buffer[length] = 0;
     LossyConvertUTF8toUTF16(buffer, length, aEvent);
+    return;
   }
+
+  // After Android JB4.3, the SSIDs have been converted into printable form.
+  // In most of cases, SSIDs do not use unprintable characters, but IEEE 802.11
+  // standard does not limit the used character set, so anything could be used
+  // in an SSID. Convert it to raw data form here.
+  char bytesBuffer[BUFFER_SIZE];
+  uint32_t bytes = convertToBytes(bytesBuffer, length, buffer);
+  if (bytes <= 0 || bytes >= BUFFER_SIZE) {
+    NS_WARNING("WpaSupplicant::CheckBuffer: Invalid bytesbuffer length");
+    return;
+  }
+  bytesBuffer[bytes] = 0;
+  LossyConvertUTF8toUTF16(bytesBuffer, bytes, aEvent);
 }

@@ -11,6 +11,7 @@
 #include "nsTArray.h"
 #include "nsAutoPtr.h"
 #include "mozilla/Monitor.h"
+#include "mozilla/DebugOnly.h"
 
 class nsIRunnable;
 
@@ -19,12 +20,13 @@ namespace net {
 
 class CacheIOThread : public nsIThreadObserver
 {
+  virtual ~CacheIOThread();
+
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSITHREADOBSERVER
 
   CacheIOThread();
-  virtual ~CacheIOThread();
 
   enum ELevel {
     OPEN_PRIORITY,
@@ -93,6 +95,7 @@ private:
   bool mHasXPCOMEvents;
   bool mRerunCurrentEvent;
   bool mShutdown;
+  DebugOnly<bool> mInsideLoop;
 };
 
 } // net

@@ -18,8 +18,8 @@ const PAGE_CONTENT = [
   'Testing the color picker tooltip!'
 ].join("\n");
 
-let test = asyncTest(function*() {
-  yield addTab("data:text/html,rule view color picker tooltip test");
+add_task(function*() {
+  yield addTab("data:text/html;charset=utf-8,rule view color picker tooltip test");
   content.document.body.innerHTML = PAGE_CONTENT;
   let {toolbox, inspector, view} = yield openRuleView();
 
@@ -37,7 +37,7 @@ let test = asyncTest(function*() {
 });
 
 function* testColorPickerAppearsOnColorSwatchClick(view, swatch) {
-  let cPicker = view.colorPicker;
+  let cPicker = view.tooltips.colorPicker;
   ok(cPicker, "The rule-view has the expected colorPicker property");
 
   let cPickerPanel = cPicker.tooltip.panel;

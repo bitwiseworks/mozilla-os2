@@ -8,15 +8,18 @@
 #include "nsStructuredCloneContainer.h"
 
 #include "nsCOMPtr.h"
-#include "nsIScriptContext.h"
+#include "nsIGlobalObject.h"
 #include "nsIVariant.h"
 #include "nsIXPConnect.h"
 #include "nsServiceManagerUtils.h"
 #include "nsContentUtils.h"
 #include "jsapi.h"
+#include "jsfriendapi.h"
 #include "js/StructuredClone.h"
+#include "xpcpublic.h"
 
 #include "mozilla/Base64.h"
+#include "mozilla/dom/ScriptSettings.h"
 
 using namespace mozilla;
 
@@ -43,18 +46,18 @@ nsStructuredCloneContainer::InitFromJSVal(JS::Handle<JS::Value> aData,
                                           JSContext* aCx)
 {
   NS_ENSURE_STATE(!mData);
-  NS_ENSURE_ARG_POINTER(aCx);
-
-  // Make sure that we serialize in the right context.
-  MOZ_ASSERT(aCx == nsContentUtils::GetCurrentJSContext());
-  JS::Rooted<JS::Value> jsData(aCx, aData);
-  bool success = JS_WrapValue(aCx, &jsData);
-  NS_ENSURE_STATE(success);
 
   uint64_t* jsBytes = nullptr;
-  success = JS_WriteStructuredClone(aCx, jsData, &jsBytes, &mSize,
-                                    nullptr, nullptr,
-                                    JS::UndefinedHandleValue);
+  bool success = false;
+  if (aData.isPrimitive()) {
+    success = JS_WriteStructuredClone(aCx, aData, &jsBytes, &mSize,
+                                      nullptr, nullptr,
+                                      JS::UndefinedHandleValue);
+  } else {
+    success = JS_WriteStructuredClone(aCx, aData, &jsBytes, &mSize,
+                                      nullptr, nullptr,
+                                      JS::UndefinedHandleValue);
+  }
   NS_ENSURE_STATE(success);
   NS_ENSURE_STATE(jsBytes);
 

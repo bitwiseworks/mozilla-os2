@@ -11,16 +11,12 @@
 #include "mozilla/MemoryReporting.h"
 
 #include "jscntxt.h"
-#include "jsproxy.h"
 
 #include "gc/Marking.h"
 #include "gc/Zone.h"
+#include "proxy/Proxy.h"
+#include "vm/ArrayObject.h"
 #include "vm/Shape.h"
-#if ENABLE_YARR_JIT
-#include "yarr/YarrJIT.h"
-#else
-#include "yarr/YarrInterpreter.h"
-#endif
 
 /*
  * JavaScript Regular Expressions
@@ -42,8 +38,7 @@
  */
 namespace js {
 
-class MatchConduit;
-class MatchPair;
+struct MatchPair;
 class MatchPairs;
 class RegExpShared;
 
@@ -73,10 +68,10 @@ class RegExpObjectBuilder
     Rooted<RegExpObject*> reobj_;
 
     bool getOrCreate();
-    bool getOrCreateClone(HandleTypeObject type);
+    bool getOrCreateClone(HandleObjectGroup group);
 
   public:
-    RegExpObjectBuilder(ExclusiveContext* cx, RegExpObject* reobj = nullptr);
+    explicit RegExpObjectBuilder(ExclusiveContext* cx, RegExpObject* reobj = nullptr);
 
     RegExpObject* reobj() { return reobj_; }
 
@@ -94,167 +89,171 @@ CloneRegExpObject(JSContext* cx, JSObject* obj);
  * A RegExpShared is the compiled representation of a regexp. A RegExpShared is
  * potentially pointed to by multiple RegExpObjects. Additionally, C++ code may
  * have pointers to RegExpShareds on the stack. The RegExpShareds are kept in a
- * cache so that they can be reused when compiling the same regex string.
+ * table so that they can be reused when compiling the same regex string.
  *
- * During a GC, the trace hook for RegExpObject clears any pointers to
- * RegExpShareds so that there will be no dangling pointers when they are
- * deleted. However, some RegExpShareds are not deleted:
- *
- *   1. Any RegExpShared with pointers from the C++ stack is not deleted.
- *   2. Any RegExpShared which has been embedded into jitcode is not deleted.
- *      This rarely comes into play, as jitcode is usually purged before the
- *      RegExpShared are sweeped.
- *   3. Any RegExpShared that was installed in a RegExpObject during an
- *      incremental GC is not deleted. This is because the RegExpObject may have
- *      been traced through before the new RegExpShared was installed, in which
- *      case deleting the RegExpShared would turn the RegExpObject's reference
- *      into a dangling pointer
- *
- * The activeUseCount and gcNumberWhenUsed fields are used to track these
- * conditions.
- *
- * There are two tables used to track RegExpShareds. map_ implements the cache
- * and is cleared on every GC. inUse_ logically owns all RegExpShareds in the
- * compartment and attempts to delete all RegExpShareds that aren't kept alive
- * by the above conditions on every GC sweep phase. It is necessary to use two
- * separate tables since map_ *must* be fully cleared on each GC since the Key
- * points to a JSAtom that can become garbage.
+ * During a GC, RegExpShared instances are marked and swept like GC things.
+ * Usually, RegExpObjects clear their pointers to their RegExpShareds rather
+ * than explicitly tracing them, so that the RegExpShared and any jitcode can
+ * be reclaimed quicker. However, the RegExpShareds are traced through by
+ * objects when we are preserving jitcode in their zone, to avoid the same
+ * recompilation inefficiencies as normal Ion and baseline compilation.
  */
 class RegExpShared
 {
+  public:
+    enum CompilationMode {
+        Normal,
+        MatchOnly
+    };
+
+    enum ForceByteCodeEnum {
+        DontForceByteCode,
+        ForceByteCode
+    };
+
+  private:
     friend class RegExpCompartment;
     friend class RegExpStatics;
-    friend class RegExpGuard;
 
     typedef frontend::TokenStream TokenStream;
-    typedef JSC::Yarr::BytecodePattern BytecodePattern;
-    typedef JSC::Yarr::ErrorCode ErrorCode;
-    typedef JSC::Yarr::YarrPattern YarrPattern;
-#if ENABLE_YARR_JIT
-    typedef JSC::Yarr::JSGlobalData JSGlobalData;
-    typedef JSC::Yarr::YarrCodeBlock YarrCodeBlock;
-    typedef JSC::Yarr::YarrJITCompileMode YarrJITCompileMode;
-#endif
 
-    /*
-     * Source to the RegExp, for lazy compilation.
-     * The source must be rooted while activeUseCount is non-zero
-     * via RegExpGuard or explicit calls to trace().
-     */
-    JSAtom *           source;
+    struct RegExpCompilation
+    {
+        RelocatablePtrJitCode jitCode;
+        uint8_t* byteCode;
+
+        RegExpCompilation() : byteCode(nullptr) {}
+        ~RegExpCompilation() { js_free(byteCode); }
+
+        bool compiled(ForceByteCodeEnum force = DontForceByteCode) const {
+            return byteCode || (force == DontForceByteCode && jitCode);
+        }
+    };
+
+    /* Source to the RegExp, for lazy compilation. */
+    RelocatablePtrAtom source;
 
     RegExpFlag         flags;
-    unsigned           parenCount;
+    size_t             parenCount;
+    bool               canStringMatch;
+    bool               marked_;
 
-#if ENABLE_YARR_JIT
-    /* Note: Native code is valid only if |codeBlock.isFallBack() == false|. */
-    YarrCodeBlock   codeBlock;
-#endif
-    BytecodePattern* bytecode;
+    RegExpCompilation  compilationArray[4];
 
-    /* Lifetime-preserving variables: see class-level comment above. */
-    size_t             activeUseCount;
-    uint64_t           gcNumberWhenUsed;
+    static int CompilationIndex(CompilationMode mode, bool latin1) {
+        switch (mode) {
+          case Normal:    return latin1 ? 0 : 1;
+          case MatchOnly: return latin1 ? 2 : 3;
+        }
+        MOZ_CRASH();
+    }
+
+    // Tables referenced by JIT code.
+    Vector<uint8_t*, 0, SystemAllocPolicy> tables;
 
     /* Internal functions. */
-    bool compile(JSContext* cx, bool matchOnly);
-    bool compile(JSContext* cx, JSLinearString& pattern, bool matchOnly);
+    bool compile(JSContext* cx, HandleLinearString input,
+                 CompilationMode mode, ForceByteCodeEnum force);
+    bool compile(JSContext* cx, HandleAtom pattern, HandleLinearString input,
+                 CompilationMode mode, ForceByteCodeEnum force);
 
-    bool compileIfNecessary(JSContext* cx);
-    bool compileMatchOnlyIfNecessary(JSContext* cx);
+    bool compileIfNecessary(JSContext* cx, HandleLinearString input,
+                            CompilationMode mode, ForceByteCodeEnum force);
+
+    const RegExpCompilation& compilation(CompilationMode mode, bool latin1) const {
+        return compilationArray[CompilationIndex(mode, latin1)];
+    }
+
+    RegExpCompilation& compilation(CompilationMode mode, bool latin1) {
+        return compilationArray[CompilationIndex(mode, latin1)];
+    }
 
   public:
-    RegExpShared(JSAtom* source, RegExpFlag flags, uint64_t gcNumber);
+    RegExpShared(JSAtom* source, RegExpFlag flags);
     ~RegExpShared();
 
-    /* Explicit trace function for use by the RegExpStatics and JITs. */
-    void trace(JSTracer* trc) {
-        MarkStringUnbarriered(trc, &source, "regexpshared source");
+    // Execute this RegExp on input starting from searchIndex, filling in
+    // matches if specified and otherwise only determining if there is a match.
+    RegExpRunStatus execute(JSContext* cx, HandleLinearString input, size_t searchIndex,
+                            MatchPairs* matches);
+
+    // Register a table with this RegExpShared, and take ownership.
+    bool addTable(uint8_t* table) {
+        return tables.append(table);
     }
-
-    /* Static functions to expose some Yarr logic. */
-
-    // This function should be deleted once bad Android platforms phase out. See bug 604774.
-    static bool isJITRuntimeEnabled(JSContext* cx) {
-        #if ENABLE_YARR_JIT
-        # if defined(ANDROID)
-            return !cx->jitIsBroken;
-        # else
-            return true;
-        # endif
-        #else
-            return false;
-        #endif
-    }
-    static void reportYarrError(ExclusiveContext* cx, TokenStream* ts, ErrorCode error);
-    static bool checkSyntax(ExclusiveContext* cx, TokenStream* tokenStream, JSLinearString* source);
-
-    /* Called when a RegExpShared is installed into a RegExpObject. */
-    void prepareForUse(ExclusiveContext* cx) {
-        gcNumberWhenUsed = cx->zone()->gcNumber();
-    }
-
-    /* Primary interface: run this regular expression on the given string. */
-    RegExpRunStatus execute(JSContext* cx, const jschar* chars, size_t length,
-                            size_t* lastIndex, MatchPairs& matches);
-
-    /* Run the regular expression without collecting matches, for test(). */
-    RegExpRunStatus executeMatchOnly(JSContext* cx, const jschar* chars, size_t length,
-                                     size_t* lastIndex, MatchPair& match);
 
     /* Accessors */
 
-    size_t getParenCount() const        { JS_ASSERT(isCompiled()); return parenCount; }
-    void incRef()                       { activeUseCount++; }
-    void decRef()                       { JS_ASSERT(activeUseCount > 0); activeUseCount--; }
+    size_t getParenCount() const {
+        MOZ_ASSERT(isCompiled());
+        return parenCount;
+    }
 
     /* Accounts for the "0" (whole match) pair. */
     size_t pairCount() const            { return getParenCount() + 1; }
 
+    JSAtom* getSource() const           { return source; }
     RegExpFlag getFlags() const         { return flags; }
     bool ignoreCase() const             { return flags & IgnoreCaseFlag; }
     bool global() const                 { return flags & GlobalFlag; }
     bool multiline() const              { return flags & MultilineFlag; }
     bool sticky() const                 { return flags & StickyFlag; }
 
-#ifdef ENABLE_YARR_JIT
-    bool hasCode() const                { return codeBlock.has16BitCode(); }
-    bool hasMatchOnlyCode() const       { return codeBlock.has16BitCodeMatchOnly(); }
-#else
-    bool hasCode() const                { return false; }
-    bool hasMatchOnlyCode() const       { return false; }
-#endif
-    bool hasBytecode() const            { return bytecode != nullptr; }
-    bool isCompiled() const             { return hasBytecode() || hasCode() || hasMatchOnlyCode(); }
+    bool isCompiled(CompilationMode mode, bool latin1,
+                    ForceByteCodeEnum force = DontForceByteCode) const {
+        return compilation(mode, latin1).compiled(force);
+    }
+    bool isCompiled() const {
+        return isCompiled(Normal, true) || isCompiled(Normal, false)
+            || isCompiled(MatchOnly, true) || isCompiled(MatchOnly, false);
+    }
+
+    void trace(JSTracer* trc);
+
+    bool marked() const { return marked_; }
+    void clearMarked() { marked_ = false; }
+
+    static size_t offsetOfSource() {
+        return offsetof(RegExpShared, source);
+    }
+
+    static size_t offsetOfFlags() {
+        return offsetof(RegExpShared, flags);
+    }
+
+    static size_t offsetOfParenCount() {
+        return offsetof(RegExpShared, parenCount);
+    }
+
+    static size_t offsetOfJitCode(CompilationMode mode, bool latin1) {
+        return offsetof(RegExpShared, compilationArray)
+             + (CompilationIndex(mode, latin1) * sizeof(RegExpCompilation))
+             + offsetof(RegExpCompilation, jitCode);
+    }
+
+    size_t sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf);
 };
 
 /*
  * Extend the lifetime of a given RegExpShared to at least the lifetime of
  * the guard object. See Regular Expression comment at the top.
  */
-class RegExpGuard
+class RegExpGuard : public JS::CustomAutoRooter
 {
     RegExpShared* re_;
 
-    /*
-     * Prevent the RegExp source from being collected:
-     * because RegExpShared objects compile at execution time, the source
-     * must remain rooted for the active lifetime of the RegExpShared.
-     */
-    RootedAtom source_;
-
-    RegExpGuard(const RegExpGuard&) MOZ_DELETE;
-    void operator=(const RegExpGuard&) MOZ_DELETE;
+    RegExpGuard(const RegExpGuard&) = delete;
+    void operator=(const RegExpGuard&) = delete;
 
   public:
-    RegExpGuard(ExclusiveContext* cx)
-      : re_(nullptr), source_(cx)
+    explicit RegExpGuard(ExclusiveContext* cx)
+      : CustomAutoRooter(cx), re_(nullptr)
     {}
 
     RegExpGuard(ExclusiveContext* cx, RegExpShared& re)
-      : re_(&re), source_(cx, re.source)
+      : CustomAutoRooter(cx), re_(nullptr)
     {
-        re_->incRef();
+        init(re);
     }
 
     ~RegExpGuard() {
@@ -263,22 +262,21 @@ class RegExpGuard
 
   public:
     void init(RegExpShared& re) {
-        JS_ASSERT(!initialized());
+        MOZ_ASSERT(!initialized());
         re_ = &re;
-        re_->incRef();
-        source_ = re_->source;
     }
 
     void release() {
-        if (re_) {
-            re_->decRef();
-            re_ = nullptr;
-            source_ = nullptr;
-        }
+        re_ = nullptr;
+    }
+
+    virtual void trace(JSTracer* trc) {
+        if (re_)
+            re_->trace(trc);
     }
 
     bool initialized() const { return !!re_; }
-    RegExpShared* re() const { JS_ASSERT(initialized()); return re_; }
+    RegExpShared* re() const { MOZ_ASSERT(initialized()); return re_; }
     RegExpShared* operator->() { return re(); }
     RegExpShared& operator*() { return *re(); }
 };
@@ -293,6 +291,9 @@ class RegExpCompartment
         Key(JSAtom* atom, RegExpFlag flag)
           : atom(atom), flag(flag)
         { }
+        MOZ_IMPLICIT Key(RegExpShared* shared)
+          : atom(shared->getSource()), flag(shared->getFlags())
+        { }
 
         typedef Key Lookup;
         static HashNumber hash(const Lookup& l) {
@@ -304,44 +305,37 @@ class RegExpCompartment
     };
 
     /*
-     * Cache to reuse RegExpShareds with the same source/flags/etc. The cache
-     * is entirely cleared on each GC.
-     */
-    typedef HashMap<Key, RegExpShared*, Key, RuntimeAllocPolicy> Map;
-    Map map_;
-
-    /*
      * The set of all RegExpShareds in the compartment. On every GC, every
-     * RegExpShared that is not actively being used is deleted and removed from
-     * the set.
+     * RegExpShared that was not marked is deleted and removed from the set.
      */
-    typedef HashSet<RegExpShared*, DefaultHasher<RegExpShared*>, RuntimeAllocPolicy> PendingSet;
-    PendingSet inUse_;
+    typedef HashSet<RegExpShared*, Key, RuntimeAllocPolicy> Set;
+    Set set_;
 
     /*
      * This is the template object where the result of re.exec() is based on,
      * if there is a result. This is used in CreateRegExpMatchResult to set
      * the input/index properties faster.
      */
-    ReadBarriered<JSObject> matchResultTemplateObject_;
+    ReadBarriered<ArrayObject*> matchResultTemplateObject_;
 
-    JSObject* createMatchResultTemplateObject(JSContext* cx);
+    ArrayObject* createMatchResultTemplateObject(JSContext* cx);
 
   public:
-    RegExpCompartment(JSRuntime* rt);
+    explicit RegExpCompartment(JSRuntime* rt);
     ~RegExpCompartment();
 
     bool init(JSContext* cx);
     void sweep(JSRuntime* rt);
-    void clearTables();
 
-    bool get(ExclusiveContext* cx, JSAtom* source, RegExpFlag flags, RegExpGuard* g);
+    bool empty() { return set_.empty(); }
+
+    bool get(JSContext* cx, JSAtom* source, RegExpFlag flags, RegExpGuard* g);
 
     /* Like 'get', but compile 'maybeOpt' (if non-null). */
     bool get(JSContext* cx, HandleAtom source, JSString* maybeOpt, RegExpGuard* g);
 
     /* Get or create template object used to base the result of .exec() on. */
-    JSObject* getOrCreateMatchResultTemplateObject(JSContext* cx) {
+    ArrayObject* getOrCreateMatchResultTemplateObject(JSContext* cx) {
         if (matchResultTemplateObject_)
             return matchResultTemplateObject_;
         return createMatchResultTemplateObject(cx);
@@ -350,7 +344,7 @@ class RegExpCompartment
     size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf);
 };
 
-class RegExpObject : public JSObject
+class RegExpObject : public NativeObject
 {
     static const unsigned LAST_INDEX_SLOT          = 0;
     static const unsigned SOURCE_SLOT              = 1;
@@ -361,6 +355,7 @@ class RegExpObject : public JSObject
 
   public:
     static const unsigned RESERVED_SLOTS = 6;
+    static const unsigned PRIVATE_SLOT = 7;
 
     static const Class class_;
 
@@ -370,15 +365,16 @@ class RegExpObject : public JSObject
      * execution, as opposed to during something like XDR.
      */
     static RegExpObject*
-    create(ExclusiveContext* cx, RegExpStatics* res, const jschar* chars, size_t length,
-           RegExpFlag flags, frontend::TokenStream* ts);
+    create(ExclusiveContext* cx, RegExpStatics* res, const char16_t* chars, size_t length,
+           RegExpFlag flags, frontend::TokenStream* ts, LifoAlloc& alloc);
 
     static RegExpObject*
-    createNoStatics(ExclusiveContext* cx, const jschar* chars, size_t length, RegExpFlag flags,
-                    frontend::TokenStream* ts);
+    createNoStatics(ExclusiveContext* cx, const char16_t* chars, size_t length, RegExpFlag flags,
+                    frontend::TokenStream* ts, LifoAlloc& alloc);
 
     static RegExpObject*
-    createNoStatics(ExclusiveContext* cx, HandleAtom atom, RegExpFlag flags, frontend::TokenStream* ts);
+    createNoStatics(ExclusiveContext* cx, HandleAtom atom, RegExpFlag flags,
+                    frontend::TokenStream* ts, LifoAlloc& alloc);
 
     /* Accessors. */
 
@@ -411,6 +407,10 @@ class RegExpObject : public JSObject
         return RegExpFlag(flags);
     }
 
+    bool needUpdateLastIndex() const {
+        return sticky() || global();
+    }
+
     /* Flags. */
 
     void setIgnoreCase(bool enabled) {
@@ -434,23 +434,14 @@ class RegExpObject : public JSObject
     bool multiline() const  { return getFixedSlot(MULTILINE_FLAG_SLOT).toBoolean(); }
     bool sticky() const     { return getFixedSlot(STICKY_FLAG_SLOT).toBoolean(); }
 
-    void shared(RegExpGuard* g) const {
-        JS_ASSERT(maybeShared() != nullptr);
-        g->init(*maybeShared());
+    bool getShared(JSContext* cx, RegExpGuard* g);
+
+    void setShared(RegExpShared& shared) {
+        MOZ_ASSERT(!maybeShared());
+        NativeObject::setPrivate(&shared);
     }
 
-    bool getShared(ExclusiveContext* cx, RegExpGuard* g) {
-        if (RegExpShared* shared = maybeShared()) {
-            g->init(*shared);
-            return true;
-        }
-        return createShared(cx, g);
-    }
-
-    void setShared(ExclusiveContext* cx, RegExpShared& shared) {
-        shared.prepareForUse(cx);
-        JSObject::setPrivate(&shared);
-    }
+    static void trace(JSTracer* trc, JSObject* obj);
 
   private:
     friend class RegExpObjectBuilder;
@@ -474,13 +465,13 @@ class RegExpObject : public JSObject
      * Precondition: the syntax for |source| has already been validated.
      * Side effect: sets the private field.
      */
-    bool createShared(ExclusiveContext* cx, RegExpGuard* g);
+    bool createShared(JSContext* cx, RegExpGuard* g);
     RegExpShared* maybeShared() const {
-        return static_cast<RegExpShared*>(JSObject::getPrivate());
+        return static_cast<RegExpShared*>(NativeObject::getPrivate(PRIVATE_SLOT));
     }
 
     /* Call setShared in preference to setPrivate. */
-    void setPrivate(void* priv) MOZ_DELETE;
+    void setPrivate(void* priv) = delete;
 };
 
 /*
@@ -492,28 +483,25 @@ class RegExpObject : public JSObject
 bool
 ParseRegExpFlags(JSContext* cx, JSString* flagStr, RegExpFlag* flagsOut);
 
-/*
- * Assuming ObjectClassIs(obj, ESClass_RegExp), return obj's RegExpShared.
- *
- * Beware: this RegExpShared can be owned by a compartment other than
- * cx->compartment. Normal RegExpGuard (which is necessary anyways)
- * will protect the object but it is important not to assign the return value
- * to be the private of any RegExpObject.
- */
+/* Assuming ObjectClassIs(obj, ESClass_RegExp), return a RegExpShared for obj. */
 inline bool
 RegExpToShared(JSContext* cx, HandleObject obj, RegExpGuard* g)
 {
     if (obj->is<RegExpObject>())
         return obj->as<RegExpObject>().getShared(cx, g);
+    MOZ_ASSERT(Proxy::objectClassIs(obj, ESClass_RegExp, cx));
     return Proxy::regexp_toShared(cx, obj, g);
 }
 
 template<XDRMode mode>
 bool
-XDRScriptRegExpObject(XDRState<mode>* xdr, HeapPtrObject* objp);
+XDRScriptRegExpObject(XDRState<mode>* xdr, MutableHandle<RegExpObject*> objp);
 
 extern JSObject*
 CloneScriptRegExpObject(JSContext* cx, RegExpObject& re);
+
+JSAtom*
+EscapeRegExpPattern(JSContext* cx, HandleAtom src);
 
 } /* namespace js */
 

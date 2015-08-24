@@ -49,7 +49,6 @@ struct nsGlobalNameStruct
     eTypeProperty,
     eTypeNavigatorProperty,
     eTypeExternalConstructor,
-    eTypeStaticNameSet,
     eTypeClassConstructor,
     eTypeClassProto,
     eTypeExternalClassInfoCreator,
@@ -96,10 +95,8 @@ public:
   NS_DECL_NSIMEMORYREPORTER
 
   nsScriptNameSpaceManager();
-  virtual ~nsScriptNameSpaceManager();
 
   nsresult Init();
-  nsresult InitForContext(nsIScriptContext *aContext);
 
   // Returns a nsGlobalNameStruct for aName, or null if one is not
   // found. The returned nsGlobalNameStruct is only guaranteed to be
@@ -184,6 +181,8 @@ public:
   size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf);
 
 private:
+  virtual ~nsScriptNameSpaceManager();
+
   // Adds a new entry to the hash and returns the nsGlobalNameStruct
   // that aKey will be mapped to. If mType in the returned
   // nsGlobalNameStruct is != eTypeNotInitialized, an entry for aKey

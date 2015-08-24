@@ -7,36 +7,35 @@
 #define mozilla_dom_Console_h
 
 #include "mozilla/dom/BindingDeclarations.h"
-#include "mozilla/dom/UnionConversions.h"
 #include "mozilla/ErrorResult.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsDataHashtable.h"
 #include "nsHashKeys.h"
 #include "nsIObserver.h"
-#include "nsITimer.h"
 #include "nsWrapperCache.h"
+#include "nsDOMNavigationTiming.h"
+#include "nsPIDOMWindow.h"
 
 class nsIConsoleAPIStorage;
+class nsIXPConnectJSObjectHolder;
 
 namespace mozilla {
 namespace dom {
 
 class ConsoleCallData;
-class ConsoleStackEntry;
+struct ConsoleStackEntry;
 
-class Console MOZ_FINAL : public nsITimerCallback
-                        , public nsIObserver
+class Console final : public nsIObserver
                         , public nsWrapperCache
 {
+  ~Console();
+
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(Console,
-                                                         nsITimerCallback)
-  NS_DECL_NSITIMERCALLBACK
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(Console)
   NS_DECL_NSIOBSERVER
 
-  Console(nsPIDOMWindow* aWindow);
-  ~Console();
+  explicit Console(nsPIDOMWindow* aWindow);
 
   // WebIDL methods
   nsISupports* GetParentObject() const
@@ -45,7 +44,7 @@ public:
   }
 
   virtual JSObject*
-  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  WrapObject(JSContext* aCx) override;
 
   void
   Log(JSContext* aCx, const Sequence<JS::Value>& aData);
@@ -64,6 +63,9 @@ public:
 
   void
   Debug(JSContext* aCx, const Sequence<JS::Value>& aData);
+
+  void
+  Table(JSContext* aCx, const Sequence<JS::Value>& aData);
 
   void
   Trace(JSContext* aCx);
@@ -110,6 +112,7 @@ private:
     MethodError,
     MethodException,
     MethodDebug,
+    MethodTable,
     MethodTrace,
     MethodDir,
     MethodGroup,
@@ -124,9 +127,6 @@ private:
   void
   Method(JSContext* aCx, MethodName aName, const nsAString& aString,
          const Sequence<JS::Value>& aData);
-
-  void
-  AppendCallData(ConsoleCallData* aData);
 
   void
   ProcessCallData(ConsoleCallData* aData);
@@ -185,17 +185,16 @@ private:
   IncreaseCounter(JSContext* aCx, const ConsoleStackEntry& aFrame,
                    const nsTArray<JS::Heap<JS::Value>>& aArguments);
 
-  void
-  ClearConsoleData();
-
   bool
-  ShouldIncludeStackrace(MethodName aMethodName);
+  ShouldIncludeStackTrace(MethodName aMethodName);
+
+  nsIXPConnectJSObjectHolder*
+  GetOrCreateSandbox(JSContext* aCx, nsIPrincipal* aPrincipal);
 
   nsCOMPtr<nsPIDOMWindow> mWindow;
-  nsCOMPtr<nsITimer> mTimer;
   nsCOMPtr<nsIConsoleAPIStorage> mStorage;
+  nsCOMPtr<nsIXPConnectJSObjectHolder> mSandbox;
 
-  LinkedList<ConsoleCallData> mQueuedCalls;
   nsDataHashtable<nsStringHashKey, DOMHighResTimeStamp> mTimerRegistry;
   nsDataHashtable<nsStringHashKey, uint32_t> mCounterRegistry;
 
@@ -203,6 +202,7 @@ private:
   uint64_t mInnerID;
 
   friend class ConsoleCallData;
+  friend class ConsoleRunnable;
   friend class ConsoleCallDataRunnable;
   friend class ConsoleProfileRunnable;
 };

@@ -42,29 +42,6 @@
 typedef bool
 (* JSNative)(JSContext* cx, unsigned argc, JS::Value* vp);
 
-/* Typedef for native functions that may be called in parallel. */
-typedef bool
-(* JSParallelNative)(js::ForkJoinContext* cx, unsigned argc, JS::Value* vp);
-
-/*
- * Typedef for native functions that may be called either in parallel or
- * sequential execution.
- */
-typedef bool
-(* JSThreadSafeNative)(js::ThreadSafeContext* cx, unsigned argc, JS::Value* vp);
-
-/*
- * Convenience wrappers for passing in ThreadSafeNative to places that expect
- * a JSNative or a JSParallelNative.
- */
-template <JSThreadSafeNative threadSafeNative>
-inline bool
-JSNativeThreadSafeWrapper(JSContext* cx, unsigned argc, JS::Value* vp);
-
-template <JSThreadSafeNative threadSafeNative>
-inline bool
-JSParallelNativeThreadSafeWrapper(js::ForkJoinContext* cx, unsigned argc, JS::Value* vp);
-
 /*
  * Compute |this| for the |vp| inside a JSNative, either boxing primitives or
  * replacing with the global object as necessary.
@@ -362,6 +339,13 @@ class MOZ_STACK_CLASS CallArgs : public detail::CallArgsBase<detail::IncludeUsed
         return args;
     }
 
+  public:
+    /*
+     * Returns true if there are at least |required| arguments passed in. If
+     * false, it reports an error message on the context.
+     */
+    bool requireAtLeast(JSContext* cx, const char* fnname, unsigned required);
+
 };
 
 MOZ_ALWAYS_INLINE CallArgs
@@ -388,7 +372,7 @@ CallArgsFromSp(unsigned argc, Value* sp)
  * take a const JS::CallArgs&.
  */
 
-#define JS_THIS_OBJECT(cx,vp)   (JSVAL_TO_OBJECT(JS_THIS(cx,vp)))
+#define JS_THIS_OBJECT(cx,vp)   (JS_THIS(cx,vp).toObjectOrNull())
 
 /*
  * Note: if this method returns null, an error has occurred and must be
@@ -397,7 +381,7 @@ CallArgsFromSp(unsigned argc, Value* sp)
 MOZ_ALWAYS_INLINE JS::Value
 JS_THIS(JSContext* cx, JS::Value* vp)
 {
-    return JSVAL_IS_PRIMITIVE(vp[1]) ? JS_ComputeThis(cx, vp) : vp[1];
+    return vp[1].isPrimitive() ? JS_ComputeThis(cx, vp) : vp[1];
 }
 
 /*

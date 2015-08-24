@@ -71,17 +71,12 @@ CompareCacheMatchEntry(PLDHashTable *table, const PLDHashEntryHdr *hdr,
   return entryPtr->entry->key == key;
 }
 
-static bool
-CompareCacheInitEntry(PLDHashTable *table, PLDHashEntryHdr *hdr,
-                     const void *key)
+static void
+CompareCacheInitEntry(PLDHashEntryHdr *hdr, const void *key)
 {
   new (hdr) CompareCacheHashEntryPtr();
   CompareCacheHashEntryPtr *entryPtr = static_cast<CompareCacheHashEntryPtr*>(hdr);
-  if (!entryPtr->entry) {
-    return false;
-  }
   entryPtr->entry->key = (void*)key;
-  return true;
 }
 
 static void
@@ -92,13 +87,10 @@ CompareCacheClearEntry(PLDHashTable *table, PLDHashEntryHdr *hdr)
 }
 
 static const PLDHashTableOps gMapOps = {
-  PL_DHashAllocTable,
-  PL_DHashFreeTable,
   PL_DHashVoidPtrKeyStub,
   CompareCacheMatchEntry,
   PL_DHashMoveEntryStub,
   CompareCacheClearEntry,
-  PL_DHashFinalizeStub,
   CompareCacheInitEntry
 };
 
@@ -164,7 +156,6 @@ nsCertTree::nsCertTree() : mTreeArray(nullptr)
 {
   static NS_DEFINE_CID(kNSSComponentCID, NS_NSSCOMPONENT_CID);
 
-  mCompareCache.ops = nullptr;
   mNSSComponent = do_GetService(kNSSComponentCID);
   mOverrideService = do_GetService("@mozilla.org/security/certoverride;1");
   // Might be a different service if someone is overriding the contract
@@ -177,18 +168,16 @@ nsCertTree::nsCertTree() : mTreeArray(nullptr)
 
 void nsCertTree::ClearCompareHash()
 {
-  if (mCompareCache.ops) {
+  if (mCompareCache.IsInitialized()) {
     PL_DHashTableFinish(&mCompareCache);
-    mCompareCache.ops = nullptr;
   }
 }
 
 nsresult nsCertTree::InitCompareHash()
 {
   ClearCompareHash();
-  if (!PL_DHashTableInit(&mCompareCache, &gMapOps, nullptr,
-                         sizeof(CompareCacheHashEntryPtr), 128, fallible_t())) {
-    mCompareCache.ops = nullptr;
+  if (!PL_DHashTableInit(&mCompareCache, &gMapOps,
+                         sizeof(CompareCacheHashEntryPtr), fallible, 64)) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
   return NS_OK;
@@ -210,15 +199,14 @@ CompareCacheHashEntry *
 nsCertTree::getCacheEntry(void *cache, void *aCert)
 {
   PLDHashTable &aCompareCache = *reinterpret_cast<PLDHashTable*>(cache);
-  CompareCacheHashEntryPtr *entryPtr = 
-    static_cast<CompareCacheHashEntryPtr*>
-               (PL_DHashTableOperate(&aCompareCache, aCert, PL_DHASH_ADD));
+  CompareCacheHashEntryPtr *entryPtr = static_cast<CompareCacheHashEntryPtr*>
+    (PL_DHashTableAdd(&aCompareCache, aCert, fallible));
   return entryPtr ? entryPtr->entry : nullptr;
 }
 
 void nsCertTree::RemoveCacheEntry(void *key)
 {
-  PL_DHashTableOperate(&mCompareCache, key, PL_DHASH_REMOVE);
+  PL_DHashTableRemove(&mCompareCache, key);
 }
 
 // CountOrganizations
@@ -330,7 +318,7 @@ nsCertTree::nsCertCompareFunc
 nsCertTree::GetCompareFuncFromCertType(uint32_t aType)
 {
   switch (aType) {
-    case nsIX509Cert2::ANY_CERT:
+    case nsIX509Cert::ANY_CERT:
     case nsIX509Cert::USER_CERT:
       return CmpUserCert;
     case nsIX509Cert::CA_CERT:
@@ -477,7 +465,7 @@ nsCertTree::GetCertsByTypeFromCertList(CERTCertList *aCertList,
        !CERT_LIST_END(node, aCertList);
        node = CERT_LIST_NEXT(node)) {
 
-    bool wantThisCert = (aWantedType == nsIX509Cert2::ANY_CERT);
+    bool wantThisCert = (aWantedType == nsIX509Cert::ANY_CERT);
     bool wantThisCertIfNoOverrides = false;
     bool wantThisCertIfHaveOverrides = false;
     bool addOverrides = false;
@@ -638,8 +626,7 @@ nsCertTree::GetCertsByType(uint32_t           aType,
 {
   nsNSSShutDownPreventionLock locker;
   nsCOMPtr<nsIInterfaceRequestor> cxt = new PipUIContext();
-  mozilla::pkix::ScopedCERTCertList certList(
-    PK11_ListCerts(PK11CertListUnique, cxt));
+  ScopedCERTCertList certList(PK11_ListCerts(PK11CertListUnique, cxt));
   return GetCertsByTypeFromCertList(certList.get(), aType, aCertCmpFn,
                                     aCertCmpFnArg);
 }
@@ -809,12 +796,7 @@ nsCertTree::DeleteEntryObject(uint32_t index)
             // although there are still overrides stored,
             // so, we keep the cert, but remove the trust
 
-            mozilla::pkix::ScopedCERTCertificate nsscert;
-
-            nsCOMPtr<nsIX509Cert2> cert2 = do_QueryInterface(cert);
-            if (cert2) {
-              nsscert = cert2->GetCert();
-            }
+            ScopedCERTCertificate nsscert(cert->GetCert());
 
             if (nsscert) {
               CERTCertTrust trust;
@@ -1235,12 +1217,8 @@ nsCertTree::GetCellText(int32_t row, nsITreeColumn* col,
       (certdi->mIsTemporary) ? "CertExceptionTemporary" : "CertExceptionPermanent";
     rv = mNSSComponent->GetPIPNSSBundleString(stringID, _retval);
   } else if (NS_LITERAL_STRING("typecol").Equals(colID) && cert) {
-    nsCOMPtr<nsIX509Cert2> pipCert = do_QueryInterface(cert);
     uint32_t type = nsIX509Cert::UNKNOWN_CERT;
-
-    if (pipCert) {
-	rv = pipCert->GetCertType(&type);
-    }
+    rv = cert->GetCertType(&type);
 
     switch (type) {
     case nsIX509Cert::USER_CERT:

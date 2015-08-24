@@ -33,7 +33,6 @@
 #include "nsAppDirectoryServiceDefs.h"
 #include "nsThreadUtils.h"
 #include "nsProxyRelease.h"
-#include "nsVoidArray.h"
 #include "nsDeleteDir.h"
 #include "nsNetCID.h"
 #include <math.h>  // for log()
@@ -120,6 +119,8 @@ const int32_t PRE_GECKO_2_0_DEFAULT_CACHE_SIZE = 50 * 1024;
 
 class nsCacheProfilePrefObserver : public nsIObserver
 {
+    virtual ~nsCacheProfilePrefObserver() {}
+
 public:
     NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSIOBSERVER
@@ -141,8 +142,6 @@ public:
         , mClearCacheOnShutdown(false)
     {
     }
-
-    virtual ~nsCacheProfilePrefObserver() {}
     
     nsresult        Install();
     void            Remove();
@@ -203,12 +202,14 @@ private:
 
 NS_IMPL_ISUPPORTS(nsCacheProfilePrefObserver, nsIObserver)
 
-class nsSetDiskSmartSizeCallback MOZ_FINAL : public nsITimerCallback
+class nsSetDiskSmartSizeCallback final : public nsITimerCallback
 {
+    ~nsSetDiskSmartSizeCallback() {}
+
 public:
     NS_DECL_THREADSAFE_ISUPPORTS
 
-    NS_IMETHOD Notify(nsITimer* aTimer) {
+    NS_IMETHOD Notify(nsITimer* aTimer) override {
         if (nsCacheService::gService) {
             nsCacheServiceAutoLock autoLock(LOCK_TELEM(NSSETDISKSMARTSIZECALLBACK_NOTIFY));
             nsCacheService::gService->SetDiskSmartSize_Locked();
@@ -225,7 +226,7 @@ NS_IMPL_ISUPPORTS(nsSetDiskSmartSizeCallback, nsITimerCallback)
 class nsSetSmartSizeEvent: public nsRunnable 
 {
 public:
-    nsSetSmartSizeEvent(int32_t smartSize)
+    explicit nsSetSmartSizeEvent(int32_t smartSize)
         : mSmartSize(smartSize) {}
 
     NS_IMETHOD Run() 
@@ -403,9 +404,7 @@ nsCacheProfilePrefObserver::Observe(nsISupports *     subject,
         mHaveProfile = false;
 
         // XXX shutdown devices
-        nsCacheService::OnProfileShutdown(!strcmp("shutdown-cleanse",
-                                                  data.get()));
-        
+        nsCacheService::OnProfileShutdown();
     } else if (!strcmp("suspend_process_notification", topic)) {
         // A suspended process may never return, so shutdown the cache to reduce
         // cache corruption.
@@ -972,7 +971,7 @@ nsCacheProfilePrefObserver::CacheCompressionLevel()
 
 class nsProcessRequestEvent : public nsRunnable {
 public:
-    nsProcessRequestEvent(nsCacheRequest *aRequest)
+    explicit nsProcessRequestEvent(nsCacheRequest *aRequest)
     {
         MOZ_EVENT_TRACER_NAME_OBJECT(aRequest, aRequest->mKey.get());
         MOZ_EVENT_TRACER_WAIT(aRequest, "net::cache::ProcessRequest");
@@ -1309,12 +1308,21 @@ nsCacheService::CreateSession(const char *          clientID,
 {
     *result = nullptr;
 
-    if (this == nullptr)  return NS_ERROR_NOT_AVAILABLE;
+    if (net::CacheObserver::UseNewCache())
+        return NS_ERROR_NOT_IMPLEMENTED;
 
-    nsCacheSession * session = new nsCacheSession(clientID, storagePolicy, streamBased);
-    if (!session)  return NS_ERROR_OUT_OF_MEMORY;
+    return CreateSessionInternal(clientID, storagePolicy, streamBased, result);
+}
 
-    NS_ADDREF(*result = session);
+nsresult
+nsCacheService::CreateSessionInternal(const char *          clientID,
+                                      nsCacheStoragePolicy  storagePolicy,
+                                      bool                  streamBased,
+                                      nsICacheSession     **result)
+{
+    nsRefPtr<nsCacheSession> session =
+        new nsCacheSession(clientID, storagePolicy, streamBased);
+    session.forget(result);
 
     return NS_OK;
 }
@@ -1333,7 +1341,7 @@ namespace {
 class EvictionNotifierRunnable : public nsRunnable
 {
 public:
-    EvictionNotifierRunnable(nsISupports* aSubject)
+    explicit EvictionNotifierRunnable(nsISupports* aSubject)
         : mSubject(aSubject)
     { }
 
@@ -1461,6 +1469,14 @@ nsCacheService::IsStorageEnabledForPolicy_Locked(nsCacheStoragePolicy  storagePo
 
 NS_IMETHODIMP nsCacheService::VisitEntries(nsICacheVisitor *visitor)
 {
+    if (net::CacheObserver::UseNewCache())
+        return NS_ERROR_NOT_IMPLEMENTED;
+
+    return VisitEntriesInternal(visitor);
+}
+
+nsresult nsCacheService::VisitEntriesInternal(nsICacheVisitor *visitor)
+{
     NS_ENSURE_ARG_POINTER(visitor);
 
     nsCacheServiceAutoLock lock(LOCK_TELEM(NSCACHESERVICE_VISITENTRIES));
@@ -1515,12 +1531,20 @@ void nsCacheService::FireClearNetworkCacheStoredAnywhereNotification()
 
 NS_IMETHODIMP nsCacheService::EvictEntries(nsCacheStoragePolicy storagePolicy)
 {
+    if (net::CacheObserver::UseNewCache())
+        return NS_ERROR_NOT_IMPLEMENTED;
+
+    return EvictEntriesInternal(storagePolicy);
+}
+
+nsresult nsCacheService::EvictEntriesInternal(nsCacheStoragePolicy storagePolicy)
+{
     if (storagePolicy == nsICache::STORE_ANYWHERE) {
         // if not called on main thread, dispatch the notification to the main thread to notify observers
         if (!NS_IsMainThread()) { 
             nsCOMPtr<nsIRunnable> event = NS_NewRunnableMethod(this,
                                                                &nsCacheService::FireClearNetworkCacheStoredAnywhereNotification);
-            NS_DispatchToMainThread(event, NS_DISPATCH_NORMAL);
+            NS_DispatchToMainThread(event);
         } else {
             // else you're already on main thread - notify observers
             FireClearNetworkCacheStoredAnywhereNotification(); 
@@ -2368,7 +2392,7 @@ nsCacheService::DoomEntry_Internal(nsCacheEntry * entry,
 
 
 void
-nsCacheService::OnProfileShutdown(bool cleanse)
+nsCacheService::OnProfileShutdown()
 {
     if (!gService)  return;
     if (!gService->mInitialized) {
@@ -2392,17 +2416,11 @@ nsCacheService::OnProfileShutdown(bool cleanse)
     (void) SyncWithCacheIOThread();
 
     if (gService->mDiskDevice && gService->mEnableDiskDevice) {
-        if (cleanse)
-            gService->mDiskDevice->EvictEntries(nullptr);
-
         gService->mDiskDevice->Shutdown();
     }
     gService->mEnableDiskDevice = false;
 
     if (gService->mOfflineDevice && gService->mEnableOfflineDevice) {
-        if (cleanse)
-            gService->mOfflineDevice->EvictEntries(nullptr);
-
         gService->mOfflineDevice->Shutdown();
     }
     gService->mCustomOfflineDevices.Enumerate(
@@ -2948,7 +2966,7 @@ nsCacheService::GetActiveEntries(PLDHashTable *    table,
                                  uint32_t          number,
                                  void *            arg)
 {
-    static_cast<nsVoidArray *>(arg)->AppendElement(
+    static_cast<nsTArray<nsCacheEntry*>*>(arg)->AppendElement(
         ((nsCacheEntryHashTableEntry *)hdr)->cacheEntry);
     return PL_DHASH_NEXT;
 }
@@ -3003,12 +3021,12 @@ nsCacheService::CloseAllStreams()
     {
         nsCacheServiceAutoLock lock(LOCK_TELEM(NSCACHESERVICE_CLOSEALLSTREAMS));
 
-        nsVoidArray entries;
+        nsTArray<nsCacheEntry*> entries;
 
 #if DEBUG
         // make sure there is no active entry
         mActiveEntries.VisitEntries(GetActiveEntries, &entries);
-        NS_ASSERTION(entries.Count() == 0, "Bad state");
+        NS_ASSERTION(entries.IsEmpty(), "Bad state");
 #endif
 
         // Get doomed entries
@@ -3020,8 +3038,8 @@ nsCacheService::CloseAllStreams()
         }
 
         // Iterate through all entries and collect input and output streams
-        for (int32_t i = 0 ; i < entries.Count() ; i++) {
-            entry = static_cast<nsCacheEntry *>(entries.ElementAt(i));
+        for (size_t i = 0; i < entries.Length(); i++) {
+            entry = entries.ElementAt(i);
 
             nsTArray<nsRefPtr<nsCacheEntryDescriptor> > descs;
             entry->GetDescriptors(descs);
@@ -3030,10 +3048,8 @@ nsCacheService::CloseAllStreams()
                 if (descs[j]->mOutputWrapper)
                     outputs.AppendElement(descs[j]->mOutputWrapper);
 
-                for (int32_t k = 0 ; k < descs[j]->mInputWrappers.Count() ; k++)
-                    inputs.AppendElement(static_cast<
-                        nsCacheEntryDescriptor::nsInputStreamWrapper *>(
-                        descs[j]->mInputWrappers[k]));
+                for (size_t k = 0; k < descs[j]->mInputWrappers.Length(); k++)
+                    inputs.AppendElement(descs[j]->mInputWrappers[k]);
             }
         }
     }
@@ -3240,7 +3256,7 @@ MOZ_DEFINE_MALLOC_SIZE_OF(DiskCacheDeviceMallocSizeOf)
 
 NS_IMETHODIMP
 nsCacheService::CollectReports(nsIHandleReportCallback* aHandleReport,
-                               nsISupports* aData)
+                               nsISupports* aData, bool aAnonymize)
 {
     size_t disk = 0;
     if (mDiskDevice) {

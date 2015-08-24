@@ -11,11 +11,16 @@
  * and create derivative works of this document.
  */
 
-// No support for [Unforgeable] on interfaces yet
-//[Unforgeable]
+[Unforgeable]
 interface Location {
+  [Throws, UnsafeInPrerendering]
   void assign(DOMString url);
+  [Throws, CrossOriginCallable, UnsafeInPrerendering]
   void replace(DOMString url);
-  void reload();
+  // XXXbz there is no forceget argument in the spec!  See bug 1037721.
+  [Throws, UnsafeInPrerendering]
+  void reload(optional boolean forceget = false);
 };
+// No support for .searchParams on Location yet.  See bug 1082734.
+
 Location implements URLUtils;

@@ -14,9 +14,11 @@
 #include "nsIAsyncOutputStream.h"
 #include "nsITimer.h"
 #include "nsIDNSListener.h"
+#include "nsIObserver.h"
 #include "nsIProtocolProxyCallback.h"
 #include "nsIChannelEventSink.h"
 #include "nsIHttpChannelInternal.h"
+#include "nsIStringStream.h"
 #include "BaseWebSocketChannel.h"
 
 #ifdef MOZ_WIDGET_GONK
@@ -41,7 +43,7 @@ namespace mozilla { namespace net {
 class OutboundMessage;
 class OutboundEnqueuer;
 class nsWSAdmissionManager;
-class nsWSCompression;
+class PMCECompression;
 class CallOnMessageAvailable;
 class CallOnStop;
 class CallOnServerClose;
@@ -62,6 +64,7 @@ class WebSocketChannel : public BaseWebSocketChannel,
                          public nsIOutputStreamCallback,
                          public nsITimerCallback,
                          public nsIDNSListener,
+                         public nsIObserver,
                          public nsIProtocolProxyCallback,
                          public nsIInterfaceRequestor,
                          public nsIChannelEventSink
@@ -78,21 +81,27 @@ public:
   NS_DECL_NSIPROTOCOLPROXYCALLBACK
   NS_DECL_NSIINTERFACEREQUESTOR
   NS_DECL_NSICHANNELEVENTSINK
+  NS_DECL_NSIOBSERVER
 
   // nsIWebSocketChannel methods BaseWebSocketChannel didn't implement for us
   //
   NS_IMETHOD AsyncOpen(nsIURI *aURI,
                        const nsACString &aOrigin,
                        nsIWebSocketListener *aListener,
-                       nsISupports *aContext);
-  NS_IMETHOD Close(uint16_t aCode, const nsACString & aReason);
-  NS_IMETHOD SendMsg(const nsACString &aMsg);
-  NS_IMETHOD SendBinaryMsg(const nsACString &aMsg);
-  NS_IMETHOD SendBinaryStream(nsIInputStream *aStream, uint32_t length);
-  NS_IMETHOD GetSecurityInfo(nsISupports **aSecurityInfo);
+                       nsISupports *aContext) override;
+  NS_IMETHOD Close(uint16_t aCode, const nsACString & aReason) override;
+  NS_IMETHOD SendMsg(const nsACString &aMsg) override;
+  NS_IMETHOD SendBinaryMsg(const nsACString &aMsg) override;
+  NS_IMETHOD SendBinaryStream(nsIInputStream *aStream, uint32_t length) override;
+  NS_IMETHOD GetSecurityInfo(nsISupports **aSecurityInfo) override;
 
   WebSocketChannel();
   static void Shutdown();
+  bool IsOnTargetThread();
+
+  // Off main thread URI access.
+  void GetEffectiveURL(nsAString& aEffectiveURL) const override;
+  bool IsEncrypted() const override;
 
   enum {
     // Non Control Frames
@@ -109,6 +118,8 @@ public:
   const static uint32_t kControlFrameMask   = 0x8;
   const static uint8_t kMaskBit             = 0x80;
   const static uint8_t kFinalFragBit        = 0x80;
+  const static uint8_t kRsvBitsMask         = 0x70;
+  const static uint8_t kRsv1Bit             = 0x40;
 
 protected:
   virtual ~WebSocketChannel();
@@ -160,8 +171,8 @@ private:
 
   inline void ResetPingTimer()
   {
+    mPingOutstanding = 0;
     if (mPingTimer) {
-      mPingOutstanding = 0;
       mPingTimer->SetDelay(mPingInterval);
     }
   }
@@ -182,6 +193,7 @@ private:
 
   // Used for off main thread access to the URI string.
   nsCString                       mHost;
+  nsString                        mEffectiveURL;
 
   nsCOMPtr<nsISocketTransport>    mTransport;
   nsCOMPtr<nsIAsyncInputStream>   mSocketIn;
@@ -211,7 +223,6 @@ private:
   uint32_t                        mStopped                   : 1;
   uint32_t                        mCalledOnStop              : 1;
   uint32_t                        mPingOutstanding           : 1;
-  uint32_t                        mAllowCompression          : 1;
   uint32_t                        mAutoFollowRedirects       : 1;
   uint32_t                        mReleaseOnTransmit         : 1;
   uint32_t                        mTCPClosed                 : 1;
@@ -219,6 +230,7 @@ private:
   uint32_t                        mDataStarted               : 1;
   uint32_t                        mIncrementedSessionCount   : 1;
   uint32_t                        mDecrementedSessionCount   : 1;
+  uint32_t                        mAllowPMCE                 : 1;
 
   int32_t                         mMaxMessageSize;
   nsresult                        mStopOnClose;
@@ -240,8 +252,6 @@ private:
   uint32_t                        mFragmentAccumulator;
   uint32_t                        mBuffered;
   uint32_t                        mBufferSize;
-  nsCOMPtr<nsIStreamListener>     mInflateReader;
-  nsCOMPtr<nsIStringInputStream>  mInflateStream;
 
   // These are for the send buffers
   const static int32_t kCopyBreak = 1000;
@@ -254,7 +264,7 @@ private:
   uint32_t                        mHdrOutToSend;
   uint8_t                        *mHdrOut;
   uint8_t                         mOutHeader[kCopyBreak + 16];
-  nsWSCompression                *mCompressor;
+  nsAutoPtr<PMCECompression>      mPMCECompressor;
   uint32_t                        mDynamicOutputSize;
   uint8_t                        *mDynamicOutput;
   bool                            mPrivateBrowsing;
@@ -268,6 +278,7 @@ private:
   uint64_t                        mCountRecv;
   uint64_t                        mCountSent;
   uint32_t                        mAppId;
+  bool                            mIsInBrowser;
 #ifdef MOZ_WIDGET_GONK
   nsMainThreadPtrHandle<nsINetworkInterface> mActiveNetwork;
 #endif

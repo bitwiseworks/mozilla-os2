@@ -20,7 +20,10 @@ class CxxCodeGen(CodePrinter, Visitor):
         self.write(ws.ws)
 
     def visitCppDirective(self, cd):
-        self.println('#%s %s'% (cd.directive, cd.rest))
+        if cd.rest:
+            self.println('#%s %s'% (cd.directive, cd.rest))
+        else:
+            self.println('#%s'% (cd.directive))
 
     def visitNamespace(self, ns):
         self.println('namespace '+ ns.name +' {')
@@ -44,7 +47,7 @@ class CxxCodeGen(CodePrinter, Visitor):
         elif t.ptrptr:       ts += '**'
         elif t.ptrconstptr:  ts += '* const*'
 
-        if t.ref:  ts += '&'
+        ts += '&' * t.ref
 
         self.write(ts)
 
@@ -135,7 +138,7 @@ class CxxCodeGen(CodePrinter, Visitor):
             self.write(' /*NS_ABSTRACT_CLASS*/')
         self.write(' '+ c.name)
         if c.final:
-            self.write(' MOZ_FINAL')
+            self.write(' final')
 
         if c.specializes is not None:
             self.write(' <')
@@ -217,6 +220,9 @@ class CxxCodeGen(CodePrinter, Visitor):
 
 
     def visitMethodDefn(self, md):
+        if md.decl.pure:
+            return
+
         self.printdent()
         md.decl.accept(self)
         self.println()
@@ -231,6 +237,8 @@ class CxxCodeGen(CodePrinter, Visitor):
     def visitConstructorDecl(self, cd):
         if cd.explicit:
             self.write('explicit ')
+        else:
+            self.write('MOZ_IMPLICIT ')
         self.visitMethodDecl(cd)
 
     def visitConstructorDefn(self, cd):
@@ -348,6 +356,9 @@ class CxxCodeGen(CodePrinter, Visitor):
         self.write('(')
         self.writeExprList(ec.args)
         self.write(')')
+
+    def visitExprMove(self, em):
+        self.visitExprCall(em)
 
     def visitExprNew(self, en):
         self.write('new ')

@@ -2,20 +2,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-include protocol PGrallocBuffer;
-
-
 using struct gfxPoint from "gfxPoint.h";
 using struct nsIntRect from "nsRect.h";
 using nsIntRegion from "nsRegion.h";
 using struct nsIntSize from "nsSize.h";
 using struct mozilla::layers::MagicGrallocBufferHandle from "gfxipc/ShadowLayerUtils.h";
+using struct mozilla::layers::GrallocBufferRef from "gfxipc/ShadowLayerUtils.h";
 using struct mozilla::layers::SurfaceDescriptorX11 from "gfxipc/ShadowLayerUtils.h";
 using struct mozilla::null_t from "ipc/IPCMessageUtils.h";
 using mozilla::WindowsHandle from "ipc/IPCMessageUtils.h";
-using mozilla::gl::SharedTextureHandle from "GLContextTypes.h";
-using mozilla::gl::SharedTextureShareType from "GLContextTypes.h";
-using mozilla::gfx::SurfaceStreamHandle from "SurfaceTypes.h";
 using mozilla::gfx::SurfaceFormat from "mozilla/gfx/Types.h";
 using mozilla::gfx::IntSize from "mozilla/gfx/Point.h";
 using gfxImageFormat from "gfxTypes.h";
@@ -23,8 +18,19 @@ using gfxImageFormat from "gfxTypes.h";
 namespace mozilla {
 namespace layers {
 
+union OverlayHandle {
+  int32_t;
+  null_t;
+};
+
+struct OverlaySource {
+  OverlayHandle handle;
+  IntSize size;
+};
+
 union MaybeMagicGrallocBufferHandle {
   MagicGrallocBufferHandle;
+  GrallocBufferRef;
   null_t;
 };
 
@@ -47,29 +53,33 @@ struct SurfaceDescriptorD3D10 {
 struct SurfaceDescriptorMacIOSurface {
   uint32_t surface;
   double scaleFactor;
-  bool hasAlpha;
+  bool isOpaque;
 };
 
-struct SharedTextureDescriptor {
-  SharedTextureShareType shareType;
-  SharedTextureHandle handle;
+struct SurfaceTextureDescriptor {
+  uintptr_t surfTex;
   IntSize size;
-  bool inverted;
+};
+
+struct EGLImageDescriptor {
+  uintptr_t image; // `EGLImage` is a `void*`.
+  uintptr_t fence;
+  IntSize size;
 };
 
 struct NewSurfaceDescriptorGralloc {
-  PGrallocBuffer buffer;
+  MaybeMagicGrallocBufferHandle buffer;
   /**
    * android::GraphicBuffer has a size information. But there are cases
    * that GraphicBuffer's size and actual video's size are different.
    * Extra size member is necessary. See Bug 850566.
    */
   IntSize size;
+  bool isOpaque;
 };
 
-struct SurfaceStreamDescriptor {
-  SurfaceStreamHandle handle;
-  bool yflip;
+struct SharedSurfaceDescriptor {
+  uintptr_t surf;
 };
 
 /**
@@ -95,10 +105,11 @@ union SurfaceDescriptor {
   SurfaceDescriptorDIB;
   SurfaceDescriptorD3D10;
   SurfaceDescriptorX11;
-  SharedTextureDescriptor;
-  SurfaceStreamDescriptor;
+  SurfaceTextureDescriptor;
+  EGLImageDescriptor;
   SurfaceDescriptorMacIOSurface;
   NewSurfaceDescriptorGralloc;
+  SharedSurfaceDescriptor;
   null_t;
 };
 

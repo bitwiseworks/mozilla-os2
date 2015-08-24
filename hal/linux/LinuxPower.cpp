@@ -4,35 +4,74 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "Hal.h"
+#include "HalLog.h"
 
 #include <unistd.h>
 #include <sys/reboot.h>
 #include "nsIObserverService.h"
 #include "mozilla/Services.h"
+#include "MainThreadUtils.h"
+
+#if defined(MOZ_WIDGET_GONK)
+#include "cutils/android_reboot.h"
+#include "cutils/properties.h"
+#endif
 
 namespace mozilla {
 namespace hal_impl {
 
+#if (defined(MOZ_WIDGET_GONK) && ANDROID_VERSION >= 19)
+static void
+PowerCtl(const char* aValue, int aCmd)
+{
+  // this invokes init's powerctl builtin via /init.rc
+  property_set("sys.powerctl", aValue);
+  // device should reboot in few moments, but if it doesn't - call
+  // android_reboot() to make sure that init isn't stuck somewhere
+  sleep(10);
+  HAL_LOG("Powerctl call takes too long, forcing %s.", aValue);
+  android_reboot(aCmd, 0, nullptr);
+}
+#endif
+
 void
 Reboot()
 {
-  nsCOMPtr<nsIObserverService> obsServ = services::GetObserverService();
-  if (obsServ) {
-    obsServ->NotifyObservers(nullptr, "system-reboot", nullptr);
+  if (NS_IsMainThread()) {
+    nsCOMPtr<nsIObserverService> obsServ = services::GetObserverService();
+    if (obsServ) {
+      obsServ->NotifyObservers(nullptr, "system-reboot", nullptr);
+    }
   }
+
+#if !defined(MOZ_WIDGET_GONK)
   sync();
   reboot(RB_AUTOBOOT);
+#elif (ANDROID_VERSION < 19)
+  android_reboot(ANDROID_RB_RESTART, 0, nullptr);
+#else
+  PowerCtl("reboot", ANDROID_RB_RESTART);
+#endif
 }
 
 void
 PowerOff()
 {
-  nsCOMPtr<nsIObserverService> obsServ = services::GetObserverService();
-  if (obsServ) {
-    obsServ->NotifyObservers(nullptr, "system-power-off", nullptr);
+  if (NS_IsMainThread()) {
+    nsCOMPtr<nsIObserverService> obsServ = services::GetObserverService();
+    if (obsServ) {
+      obsServ->NotifyObservers(nullptr, "system-power-off", nullptr);
+    }
   }
+
+#if !defined(MOZ_WIDGET_GONK)
   sync();
   reboot(RB_POWER_OFF);
+#elif (ANDROID_VERSION < 19)
+  android_reboot(ANDROID_RB_POWEROFF, 0, nullptr);
+#else
+  PowerCtl("shutdown", ANDROID_RB_POWEROFF);
+#endif
 }
 
 // Structure to specify how watchdog pthread is going to work.

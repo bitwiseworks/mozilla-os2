@@ -20,7 +20,7 @@
 inline JSAtom*
 js::AtomStateEntry::asPtr() const
 {
-    JS_ASSERT(bits != 0);
+    MOZ_ASSERT(bits != 0);
     JSAtom* atom = reinterpret_cast<JSAtom*>(bits & NO_TAG_MASK);
     JSString::readBarrier(atom);
     return atom;
@@ -49,6 +49,11 @@ ValueToIdPure(const Value& v, jsid* id)
         return true;
     }
 
+    if (js::IsSymbolOrSymbolWrapper(v)) {
+        *id = SYMBOL_TO_JSID(js::ToSymbolPrimitive(v));
+        return true;
+    }
+
     if (!v.isString() || !v.toString()->isAtom())
         return false;
 
@@ -64,6 +69,11 @@ ValueToId(JSContext* cx, typename MaybeRooted<Value, allowGC>::HandleType v,
     int32_t i;
     if (ValueFitsInInt32(v, &i) && INT_FITS_IN_JSID(i)) {
         idp.set(INT_TO_JSID(i));
+        return true;
+    }
+
+    if (js::IsSymbolOrSymbolWrapper(v)) {
+        idp.set(SYMBOL_TO_JSID(js::ToSymbolPrimitive(v)));
         return true;
     }
 
@@ -137,9 +147,15 @@ IdToString(JSContext* cx, jsid id)
 
 inline
 AtomHasher::Lookup::Lookup(const JSAtom* atom)
-  : chars(atom->chars()), length(atom->length()), atom(atom)
+  : isLatin1(atom->hasLatin1Chars()), length(atom->length()), atom(atom)
 {
-    hash = mozilla::HashString(chars, length);
+    if (isLatin1) {
+        latin1Chars = atom->latin1Chars(nogc);
+        hash = mozilla::HashString(latin1Chars, length);
+    } else {
+        twoByteChars = atom->twoByteChars(nogc);
+        hash = mozilla::HashString(twoByteChars, length);
+    }
 }
 
 inline bool
@@ -150,15 +166,26 @@ AtomHasher::match(const AtomStateEntry& entry, const Lookup& lookup)
         return lookup.atom == key;
     if (key->length() != lookup.length)
         return false;
-    return mozilla::PodEqual(key->chars(), lookup.chars, lookup.length);
+
+    if (key->hasLatin1Chars()) {
+        const Latin1Char* keyChars = key->latin1Chars(lookup.nogc);
+        if (lookup.isLatin1)
+            return mozilla::PodEqual(keyChars, lookup.latin1Chars, lookup.length);
+        return EqualChars(keyChars, lookup.twoByteChars, lookup.length);
+    }
+
+    const char16_t* keyChars = key->twoByteChars(lookup.nogc);
+    if (lookup.isLatin1)
+        return EqualChars(lookup.latin1Chars, keyChars, lookup.length);
+    return mozilla::PodEqual(keyChars, lookup.twoByteChars, lookup.length);
 }
 
 inline Handle<PropertyName*>
 TypeName(JSType type, const JSAtomState& names)
 {
-    JS_ASSERT(type < JSTYPE_LIMIT);
+    MOZ_ASSERT(type < JSTYPE_LIMIT);
     JS_STATIC_ASSERT(offsetof(JSAtomState, undefined) +
-                     JSTYPE_LIMIT * sizeof(FixedHeapPtr<PropertyName>) <=
+                     JSTYPE_LIMIT * sizeof(ImmutablePropertyNamePtr) <=
                      sizeof(JSAtomState));
     JS_STATIC_ASSERT(JSTYPE_VOID == 0);
     return (&names.undefined)[type];
@@ -167,9 +194,9 @@ TypeName(JSType type, const JSAtomState& names)
 inline Handle<PropertyName*>
 ClassName(JSProtoKey key, JSAtomState& atomState)
 {
-    JS_ASSERT(key < JSProto_LIMIT);
+    MOZ_ASSERT(key < JSProto_LIMIT);
     JS_STATIC_ASSERT(offsetof(JSAtomState, Null) +
-                     JSProto_LIMIT * sizeof(FixedHeapPtr<PropertyName>) <=
+                     JSProto_LIMIT * sizeof(ImmutablePropertyNamePtr) <=
                      sizeof(JSAtomState));
     JS_STATIC_ASSERT(JSProto_Null == 0);
     return (&atomState.Null)[key];

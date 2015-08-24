@@ -3,6 +3,13 @@
  * http://creativecommons.org/publicdomain/zero/1.0/
  */
 
+///////////////////
+//
+// Whitelisting this test.
+// As part of bug 1077403, the leaking uncaught rejection should be fixed.
+//
+thisTestLeaksUncaughtRejectionsAndShouldBeFixed("null");
+
 // Test the webconsole output for various types of objects.
 
 const TEST_URI = "http://example.com/browser/browser/devtools/webconsole/test/test-console-output-04.html";
@@ -50,7 +57,7 @@ let inputTests = [
   {
     input: "testDOMException()",
     output: 'DOMException [SyntaxError: "An invalid or illegal string was specified"',
-    printOutput: '[Exception... "An invalid or illegal string was specified"',
+    printOutput: '"SyntaxError: An invalid or illegal string was specified"',
     inspectable: true,
     variablesViewLabel: "SyntaxError",
   },
@@ -110,11 +117,11 @@ let inputTests = [
 ];
 
 function test() {
-  addTab(TEST_URI);
-  browser.addEventListener("load", function onLoad() {
-    browser.removeEventListener("load", onLoad, true);
-    openConsole().then((hud) => {
-      return checkOutputForInputs(hud, inputTests);
-    }).then(finishTest);
-  }, true);
+  requestLongerTimeout(2);
+  Task.spawn(function*() {
+    const {tab} = yield loadTab(TEST_URI);
+    const hud = yield openConsole(tab);
+    yield checkOutputForInputs(hud, inputTests);
+    inputTests = null;
+  }).then(finishTest);
 }

@@ -14,7 +14,7 @@
 namespace mozilla {
 namespace dom {
 
-class CallsList MOZ_FINAL : public nsISupports,
+class CallsList final : public nsISupports,
                             public nsWrapperCache
 {
   nsRefPtr<Telephony> mTelephony;
@@ -24,14 +24,14 @@ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(CallsList)
 
-  CallsList(Telephony* aTelephony, TelephonyCallGroup* aGroup = nullptr);
+  explicit CallsList(Telephony* aTelephony, TelephonyCallGroup* aGroup = nullptr);
 
   nsPIDOMWindow*
   GetParentObject() const;
 
   // WrapperCache
   virtual JSObject*
-  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  WrapObject(JSContext* aCx) override;
 
   // CallsList WebIDL
   already_AddRefed<TelephonyCall>

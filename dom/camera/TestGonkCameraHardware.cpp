@@ -16,7 +16,7 @@
 
 #include "TestGonkCameraHardware.h"
 
-#include "mozilla/Preferences.h"
+#include "CameraPreferences.h"
 #include "nsThreadUtils.h"
 
 using namespace android;
@@ -39,11 +39,44 @@ TestGonkCameraHardware::~TestGonkCameraHardware()
   DOM_CAMERA_LOGA("^===== Destroyed TestGonkCameraHardware =====^\n");
 }
 
+void
+TestGonkCameraHardware::InjectFakeSystemFailure()
+{
+  DOM_CAMERA_LOGA("====== Fake Camera Hardware Failure ======\n");
+  // The values '100' and '0' below seem to be what the AOSP layer
+  // throws back when the mediaserver process fails.
+  OnSystemError(mTarget, CameraControlListener::kSystemService, 100, 0);
+}
+
 nsresult
 TestGonkCameraHardware::Init()
 {
+  class DeferredSystemFailure : public nsRunnable
+  {
+  public:
+    DeferredSystemFailure(TestGonkCameraHardware* aCameraHw)
+      : mCameraHw(aCameraHw)
+    { }
+
+    NS_IMETHODIMP
+    Run()
+    {
+      mCameraHw->InjectFakeSystemFailure();
+      return NS_OK;
+    }
+
+  protected:
+    android::sp<TestGonkCameraHardware> mCameraHw;
+  };
+
   if (IsTestCase("init-failure")) {
-    return NS_ERROR_FAILURE;
+    return NS_ERROR_NOT_INITIALIZED;
+  }
+  if (IsTestCase("post-init-system-failure")) {
+    nsCOMPtr<nsIThread> me = NS_GetCurrentThread();
+    if (me) {
+      me->Dispatch(new DeferredSystemFailure(this), NS_DISPATCH_NORMAL);
+    }
   }
 
   return GonkCameraHardware::Init();
@@ -52,7 +85,8 @@ TestGonkCameraHardware::Init()
 const nsCString
 TestGonkCameraHardware::TestCase()
 {
-  const nsCString test = Preferences::GetCString("camera.control.test.hardware");
+  nsCString test;
+  CameraPreferences::GetPref("camera.control.test.hardware", test);
   return test;
 }
 
@@ -77,7 +111,8 @@ TestGonkCameraHardware::GetExtraParameters()
    * may contain equals signs or semicolons. We don't enforce that here
    * so that we can also test correct handling of improperly-formatted values.
    */
-  const nsCString parameters = Preferences::GetCString("camera.control.test.hardware.gonk.parameters");
+  nsCString parameters;
+  CameraPreferences::GetPref("camera.control.test.hardware.gonk.parameters", parameters);
   DOM_CAMERA_LOGA("TestGonkCameraHardware : extra-parameters '%s'\n",
     parameters.get());
   return parameters;
@@ -191,7 +226,7 @@ public:
   { }
 
   nsresult
-  InitMetaData() MOZ_OVERRIDE
+  InitMetaData() override
   {
     mMetaData.number_of_faces = 1;
     AllocateFacesArray(1);
@@ -220,7 +255,7 @@ public:
   { }
 
   nsresult
-  InitMetaData() MOZ_OVERRIDE
+  InitMetaData() override
   {
     mMetaData.number_of_faces = 2;
     AllocateFacesArray(2);
@@ -261,7 +296,7 @@ public:
   { }
 
   nsresult
-  InitMetaData() MOZ_OVERRIDE
+  InitMetaData() override
   {
     mMetaData.number_of_faces = 1;
     AllocateFacesArray(1);
@@ -294,7 +329,7 @@ public:
   { }
 
   nsresult
-  InitMetaData() MOZ_OVERRIDE
+  InitMetaData() override
   {
     mMetaData.number_of_faces = 0;
     mMetaData.faces = nullptr;

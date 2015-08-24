@@ -5,8 +5,11 @@
 
 #include "nsIChannel.idl"
 
-[scriptable, builtinclass, uuid(6e6cc56d-51eb-4299-a795-dcfd1229ab3d)]
-interface nsIJARChannel : nsIChannel 
+interface nsIFile;
+interface nsIZipEntry;
+
+[scriptable, builtinclass, uuid(6b438dc3-9ba0-4f5f-b83f-82e1d7b98604)]
+interface nsIJARChannel : nsIChannel
 {
     /**
      * Returns TRUE if the JAR file is not safe (if the content type reported
@@ -20,4 +23,29 @@ interface nsIJARChannel : nsIChannel
      * Forces the uri to be a app:// uri.
      */
     void setAppURI(in nsIURI uri);
+
+    /**
+     * Returns the JAR file.
+     */
+    readonly attribute nsIFile jarFile;
+
+    /**
+     * Returns the zip entry if the file is synchronously accessible.
+     * This will work even without opening the channel.
+     */
+    readonly attribute nsIZipEntry zipEntry;
+
+    /**
+     * For child process, set this to make sure that a valid file descriptor of
+     * JAR file is always provided when calling NSPRFileDesc().
+     * Must be set before Open() or AsyncOpen() to be effective.
+     *
+     * Note that the file descriptor returned by NSPRFileDesc() is duplicated
+     * from the original, which shares its file offset with the original.  If
+     * the file offset is modified (ex: by lseek/read/write) on one of the
+     * shared descriptors, the offset is also changed for the other.
+     * It can be safely used only with operations that take absolute offsets,
+     * such as mmap/pread/pwrite.
+     */
+    void ensureChildFd();
 };

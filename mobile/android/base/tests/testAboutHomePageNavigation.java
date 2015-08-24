@@ -1,11 +1,18 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 package org.mozilla.gecko.tests;
 
-import org.mozilla.gecko.tests.components.AboutHomeComponent.PanelType;
+import org.mozilla.gecko.home.HomeConfig;
+import org.mozilla.gecko.home.HomeConfig.PanelType;
 import org.mozilla.gecko.tests.helpers.DeviceHelper;
 import org.mozilla.gecko.tests.helpers.GeckoHelper;
 
 /**
  * Tests functionality related to navigating between the various about:home panels.
+ *
+ * TODO: Update this test to account for recent tabs panel (bug 1028727).
  */
 public class testAboutHomePageNavigation extends UITest {
     // TODO: Define this test dynamically by creating dynamic representations of the Page

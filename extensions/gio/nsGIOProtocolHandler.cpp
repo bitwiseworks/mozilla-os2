@@ -17,6 +17,7 @@
 #include "nsIStandardURL.h"
 #include "nsMimeTypes.h"
 #include "nsNetUtil.h"
+#include "nsNullPrincipal.h"
 #include "mozilla/Monitor.h"
 #include <gio/gio.h>
 #include <algorithm>
@@ -135,13 +136,15 @@ static void mount_operation_ask_password (GMountOperation   *mount_op,
                                           gpointer          user_data);
 //-----------------------------------------------------------------------------
 
-class nsGIOInputStream MOZ_FINAL : public nsIInputStream
+class nsGIOInputStream final : public nsIInputStream
 {
+   ~nsGIOInputStream() { Close(); }
+
   public:
     NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSIINPUTSTREAM
 
-    nsGIOInputStream(const nsCString &uriSpec)
+    explicit nsGIOInputStream(const nsCString &uriSpec)
       : mSpec(uriSpec)
       , mChannel(nullptr)
       , mHandle(nullptr)
@@ -153,8 +156,6 @@ class nsGIOInputStream MOZ_FINAL : public nsIInputStream
       , mDirBufCursor(0)
       , mDirOpen(false)
       , mMonitorMountInProgress("GIOInputStream::MountFinished") { }
-
-   ~nsGIOInputStream() { Close(); }
 
     void SetChannel(nsIChannel *channel)
     {
@@ -285,18 +286,18 @@ nsGIOInputStream::DoOpenDirectory()
   mDirListPtr = mDirList;
 
   // Write base URL (make sure it ends with a '/')
-  mDirBuf.Append("300: ");
+  mDirBuf.AppendLiteral("300: ");
   mDirBuf.Append(mSpec);
   if (mSpec.get()[mSpec.Length() - 1] != '/')
     mDirBuf.Append('/');
   mDirBuf.Append('\n');
 
   // Write column names
-  mDirBuf.Append("200: filename content-length last-modified file-type\n");
+  mDirBuf.AppendLiteral("200: filename content-length last-modified file-type\n");
 
   // Write charset (assume UTF-8)
   // XXX is this correct?
-  mDirBuf.Append("301: UTF-8\n");
+  mDirBuf.AppendLiteral("301: UTF-8\n");
   SetContentTypeOfChannel(APPLICATION_HTTP_INDEX_FORMAT);
   return NS_OK;
 }
@@ -473,7 +474,7 @@ nsGIOInputStream::DoRead(char *aBuf, uint32_t aCount, uint32_t *aCountRead)
           continue;
         }
 
-        mDirBuf.Assign("201: ");
+        mDirBuf.AssignLiteral("201: ");
 
         // The "filename" field
         nsCString escName;
@@ -512,13 +513,13 @@ nsGIOInputStream::DoRead(char *aBuf, uint32_t aCount, uint32_t *aCountRead)
         switch (g_file_info_get_file_type(info))
         {
           case G_FILE_TYPE_REGULAR:
-            mDirBuf.Append("FILE ");
+            mDirBuf.AppendLiteral("FILE ");
             break;
           case G_FILE_TYPE_DIRECTORY:
-            mDirBuf.Append("DIRECTORY ");
+            mDirBuf.AppendLiteral("DIRECTORY ");
             break;
           case G_FILE_TYPE_SYMBOLIC_LINK:
-            mDirBuf.Append("SYMBOLIC-LINK ");
+            mDirBuf.AppendLiteral("SYMBOLIC-LINK ");
             break;
           default:
             break;
@@ -788,7 +789,7 @@ mount_operation_ask_password (GMountOperation   *mount_op,
   nsAutoString key, realm;
 
   NS_ConvertUTF8toUTF16 dispHost(scheme);
-  dispHost.Append(NS_LITERAL_STRING("://"));
+  dispHost.AppendLiteral("://");
   dispHost.Append(NS_ConvertUTF8toUTF16(hostPort));
 
   key = dispHost;
@@ -881,7 +882,7 @@ mount_operation_ask_password (GMountOperation   *mount_op,
 
 //-----------------------------------------------------------------------------
 
-class nsGIOProtocolHandler MOZ_FINAL : public nsIProtocolHandler
+class nsGIOProtocolHandler final : public nsIProtocolHandler
                                      , public nsIObserver
 {
   public:
@@ -892,6 +893,8 @@ class nsGIOProtocolHandler MOZ_FINAL : public nsIProtocolHandler
     nsresult Init();
 
   private:
+    ~nsGIOProtocolHandler() {}
+
     void InitSupportedProtocolsPref(nsIPrefBranch *prefs);
     bool IsSupportedProtocol(const nsCString &spec);
 
@@ -932,7 +935,7 @@ nsGIOProtocolHandler::InitSupportedProtocolsPref(nsIPrefBranch *prefs)
     ToLowerCase(mSupportedProtocols);
   }
   else
-    mSupportedProtocols.Assign("smb:,sftp:"); // use defaults
+    mSupportedProtocols.AssignLiteral("smb:,sftp:"); // use defaults
 
   LOG(("gio: supported protocols \"%s\"\n", mSupportedProtocols.get()));
 }
@@ -1043,7 +1046,9 @@ nsGIOProtocolHandler::NewURI(const nsACString &aSpec,
 }
 
 NS_IMETHODIMP
-nsGIOProtocolHandler::NewChannel(nsIURI *aURI, nsIChannel **aResult)
+nsGIOProtocolHandler::NewChannel2(nsIURI* aURI,
+                                  nsILoadInfo* aLoadInfo,
+                                  nsIChannel** aResult)
 {
   NS_ENSURE_ARG_POINTER(aURI);
   nsresult rv;
@@ -1054,22 +1059,26 @@ nsGIOProtocolHandler::NewChannel(nsIURI *aURI, nsIChannel **aResult)
     return rv;
 
   nsRefPtr<nsGIOInputStream> stream = new nsGIOInputStream(spec);
-  if (!stream)
-  {
-    rv = NS_ERROR_OUT_OF_MEMORY;
+  if (!stream) {
+    return NS_ERROR_OUT_OF_MEMORY;
   }
-  else
-  {
-    // start out assuming an unknown content-type.  we'll set the content-type
-    // to something better once we open the URI.
-    rv = NS_NewInputStreamChannel(aResult,
-                                  aURI,
-                                  stream,
-                                  NS_LITERAL_CSTRING(UNKNOWN_CONTENT_TYPE));
-    if (NS_SUCCEEDED(rv))
-      stream->SetChannel(*aResult);
+
+  rv = NS_NewInputStreamChannelInternal(aResult,
+                                        aURI,
+                                        stream,
+                                        NS_LITERAL_CSTRING(UNKNOWN_CONTENT_TYPE),
+                                        EmptyCString(), // aContentCharset
+                                        aLoadInfo);
+  if (NS_SUCCEEDED(rv)) {
+    stream->SetChannel(*aResult);
   }
   return rv;
+}
+
+NS_IMETHODIMP
+nsGIOProtocolHandler::NewChannel(nsIURI *aURI, nsIChannel **aResult)
+{
+    return NewChannel2(aURI, nullptr, aResult);
 }
 
 NS_IMETHODIMP

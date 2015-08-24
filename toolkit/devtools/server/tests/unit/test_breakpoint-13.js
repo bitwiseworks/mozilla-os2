@@ -9,27 +9,37 @@
 var gDebuggee;
 var gClient;
 var gThreadClient;
+var gCallback;
 
 function run_test()
 {
-  initTestDebuggerServer();
-  gDebuggee = addTestGlobal("test-stack");
-  gClient = new DebuggerClient(DebuggerServer.connectPipe());
+  run_test_with_server(DebuggerServer, function () {
+    run_test_with_server(WorkerDebuggerServer, do_test_finished);
+  });
+  do_test_pending();
+};
+
+function run_test_with_server(aServer, aCallback)
+{
+  gCallback = aCallback;
+  initTestDebuggerServer(aServer);
+  gDebuggee = addTestGlobal("test-stack", aServer);
+  gClient = new DebuggerClient(aServer.connectPipe());
   gClient.connect(function () {
     attachTestTabAndResume(gClient, "test-stack", function (aResponse, aTabClient, aThreadClient) {
       gThreadClient = aThreadClient;
       test_simple_breakpoint();
     });
   });
-  do_test_pending();
 }
 
 function test_simple_breakpoint()
 {
   gThreadClient.addOneTimeListener("paused", function (aEvent, aPacket) {
-    let path = getFilePath('test_breakpoint-13.js');
-    let location = { url: path, line: gDebuggee.line0 + 2};
-    gThreadClient.setBreakpoint(location, function (aResponse, bpClient) {
+    let source = gThreadClient.source(aPacket.frame.where.source);
+    let location = { line: gDebuggee.line0 + 2 };
+
+    source.setBreakpoint(location, function (aResponse, bpClient) {
       gThreadClient.addOneTimeListener("paused", function (aEvent, aPacket) {
         // Check that the stepping worked.
         do_check_eq(aPacket.frame.where.line, gDebuggee.line0 + 5);
@@ -70,7 +80,7 @@ function test_simple_breakpoint()
                   do_check_eq(aPacket.why.type, "resumeLimit");
 
                   // Remove the breakpoint and finish.
-                  bpClient.remove(() => gThreadClient.resume(() => finishClient(gClient)));
+                  bpClient.remove(() => gThreadClient.resume(() => gClient.close(gCallback)));
 
                 });
                 // Step past the debugger statement.

@@ -10,37 +10,21 @@ import pexpect
 import time
 import sys
 
-def init_dsa(db_dir):
-    """
-    Initialize dsa parameters
-
-    Sets up a set of params to be reused for DSA key generation
-
-    Arguments:
-      db_dir     -- location of the temporary params for the certificate
-    """
-    dsa_key_params = db_dir + "/dsa_param.pem"
-    os.system("openssl dsaparam -out " + dsa_key_params + " 2048")
-
-
 def generate_cert_generic(db_dir, dest_dir, serial_num,  key_type, name,
                           ext_text, signer_key_filename = "",
                           signer_cert_filename = "",
-                          subject_string = ""):
+                          subject_string = "",
+                          key_size = '2048'):
     """
     Generate an x509 certificate with a sha256 signature
-
-    Preconditions:
-      if dsa keys are to be generated init_dsa must have been called before.
-
 
     Arguments:
       db_dir     -- location of the temporary params for the certificate
       dest_dir   -- location of the x509 cert
       serial_num -- serial number for the cert (must be unique for each signer
                     key)
-      key_type   -- the type of key generated: potential values: 'rsa', 'dsa',
-                    or any of the curves found by 'openssl ecparam -list_curves'
+      key_type   -- the type of key generated: potential values: 'rsa' or any
+	                of the curves found by 'openssl ecparam -list_curves'
       name       -- the common name for the cert, will match the prefix of the
                     output cert
       ext_text   -- the text for the x509 extensions to be added to the
@@ -50,6 +34,7 @@ def generate_cert_generic(db_dir, dest_dir, serial_num,  key_type, name,
                     roots).
       signer_cert_filename -- the certificate that will sign the certificate
                     (used to extract signer info) it must be in DER format.
+      key_size   -- public key size for RSA certs
 
     output:
       key_name   -- the filename of the key file (PEM format)
@@ -58,10 +43,7 @@ def generate_cert_generic(db_dir, dest_dir, serial_num,  key_type, name,
     key_name = db_dir + "/"+ name + ".key"
     if key_type == 'rsa':
       os.system ("openssl genpkey -algorithm RSA -out " + key_name +
-                 " -pkeyopt rsa_keygen_bits:2048")
-    elif key_type == 'dsa':
-      dsa_key_params = db_dir + "/dsa_param.pem"
-      os.system("openssl gendsa -out " + key_name + "  " + dsa_key_params)
+                 " -pkeyopt rsa_keygen_bits:" + key_size)
     else:
       #assume is ec
       os.system("openssl ecparam -out " + key_name + " -name "+ key_type +
@@ -120,8 +102,8 @@ def generate_int_and_ee(db_dir, dest_dir, ca_key, ca_cert, name, int_ext_text,
                     intermediate certificate
       ee_ext_text  -- the text for the x509 extensions to be added to the
                     end entity certificate
-      key_type   -- the type of key generated: potential values: 'rsa', 'dsa',
-                    or any of the curves found by 'openssl ecparam -list_curves'
+      key_type   -- the type of key generated: potential values: 'rsa' or any
+	                of the curves found by 'openssl ecparam -list_curves'
 
     output:
       int_key   -- the filename of the intermeidate key file (PEM format)
@@ -177,10 +159,41 @@ def generate_pkcs12(db_dir, dest_dir, der_cert_filename, key_pem_filename,
     child.expect(pexpect.EOF)
     return pk12_filename
 
+def import_cert_and_pkcs12(db_dir, cert_filename, pkcs12_filename, nickname,
+                           trust_flags):
+    """
+    Imports a given certificate file and PKCS12 file into the SQL NSS DB.
+
+    Arguments:
+      db_dir -- the location of the database and password file
+      cert_filename -- the filename of the cert in DER format
+      pkcs12_filename -- the filename of the private key of the cert in PEM
+                         format
+      nickname -- the nickname to assign to the cert
+      trust_flags -- the trust flags the cert should have
+    """
+    os.system('certutil -A -d sql:' + db_dir + ' -n ' + nickname + ' -i ' +
+              cert_filename + ' -t "' + trust_flags + '"')
+    os.system('pk12util -i ' + pkcs12_filename + ' -d sql:' + db_dir +
+              ' -w ' + db_dir + '/pwfile')
+
+def print_cert_info(cert_filename):
+    """
+    Prints out information (such as fingerprints) for the given cert.
+    The information printed is sufficient for enabling EV for the given cert
+    if necessary.
+
+    Note: The utility 'pp' is available as part of NSS.
+
+    Arguments:
+      cert_filename -- the filename of the cert in DER format
+    """
+    os.system('pp -t certificate-identity -i ' + cert_filename)
+
 def init_nss_db(db_dir):
     """
     Remove the current nss database in the specified directory and create a new
-    nss database with the cert8 format.
+    nss database with the sql format.
     Arguments
       db_dir -- the desired location of the new database
     output
@@ -190,7 +203,7 @@ def init_nss_db(db_dir):
      pwd_file   -- the patch to the secret file used for the database.
                    this file should be empty.
     """
-    nss_db_files = ["cert8.db", "key3.db", "secmod.db", "noise", "pwdfile"]
+    nss_db_files = ["cert9.db", "key4.db", "pkcs11.txt"]
     for file in nss_db_files:
         if os.path.isfile(file):
             os.remove(file)
@@ -205,8 +218,49 @@ def init_nss_db(db_dir):
     pf.write("\n")
     pf.close()
     # create nss db
-    os.system("certutil -d " + db_dir + " -N -f " + pwd_file);
+    os.system("certutil -d sql:" + db_dir + " -N -f " + pwd_file);
     return [noise_file, pwd_file]
+
+def generate_self_signed_cert(db_dir, dest_dir, noise_file, name, version, do_bc, is_ca):
+    """
+    Creates a new self-signed certificate in an sql NSS database and as a der file
+    Arguments:
+      db_dir     -- the location of the nss database (in sql format)
+      dest_dir   -- the location of for the output file
+      noise_file -- the location of a noise file.
+      name       -- the nickname of the new certificate in the database and the
+                    common name of the certificate
+      version    -- the version number of the certificate (valid certs must use
+                    3)
+      do_bc      -- if the certificate should include the basic constraints
+                    (valid ca's should be true)
+      is_ca      -- mark the extenstion true or false
+    output:
+      outname    -- the location of the der file.
+    """
+    out_name = dest_dir + "/" + name + ".der"
+    base_exec_string = ("certutil -S -z " + noise_file + " -g 2048 -d sql:" +
+                        db_dir + "/ -n " + name + " -v 120 -s 'CN=" + name +
+                        ",O=PSM Testing,L=Mountain View,ST=California,C=US'" +
+                        " -t C,C,C -x --certVersion=" + str(int(version)))
+    if (do_bc):
+        child = pexpect.spawn(base_exec_string + " -2")
+        child.logfile = sys.stdout
+        child.expect('Is this a CA certificate \[y/N\]?')
+        if (is_ca):
+          child.sendline('y')
+        else:
+          child.sendline('N')
+        child.expect('Enter the path length constraint, enter to skip \[<0 for unlimited path\]: >')
+        child.sendline('')
+        child.expect('Is this a critical extension \[y/N\]?')
+        child.sendline('')
+        child.expect(pexpect.EOF)
+    else:
+        os.system(base_exec_string)
+    os.system("certutil -d sql:" + db_dir + "/ -L -n " + name + " -r > " +
+              out_name)
+    return out_name
 
 def generate_ca_cert(db_dir, dest_dir, noise_file, name, version, do_bc):
     """
@@ -224,26 +278,8 @@ def generate_ca_cert(db_dir, dest_dir, noise_file, name, version, do_bc):
     output:
       outname    -- the location of the der file.
     """
-    out_name = dest_dir + "/" + name + ".der"
-    base_exec_string = ("certutil -S -z " + noise_file + " -g 2048 -d " +
-                        db_dir + "/ -n " + name + " -v 120 -s 'CN=" + name +
-                        ",O=PSM Testing,L=Mountain View,ST=California,C=US'" +
-                        " -t C,C,C -x --certVersion=" + str(int(version)))
-    if (do_bc):
-        child = pexpect.spawn(base_exec_string + " -2")
-        child.logfile = sys.stdout
-        child.expect('Is this a CA certificate \[y/N\]?')
-        child.sendline('y')
-        child.expect('Enter the path length constraint, enter to skip \[<0 for unlimited path\]: >')
-        child.sendline('')
-        child.expect('Is this a critical extension \[y/N\]?')
-        child.sendline('')
-        child.expect(pexpect.EOF)
-    else:
-        os.system(base_exec_string)
-    os.system("certutil -d " + db_dir + "/ -L -n " + name + " -r > " +
-              out_name)
-    return out_name
+    return generate_self_signed_cert(db_dir, dest_dir, noise_file, name, version, do_bc, True)
+
 
 def generate_child_cert(db_dir, dest_dir, noise_file, name, ca_nick, version,
                         do_bc, is_ee, ocsp_url):
@@ -268,7 +304,7 @@ def generate_child_cert(db_dir, dest_dir, noise_file, name, ca_nick, version,
     """
 
     out_name = dest_dir + "/" + name + ".der"
-    base_exec_string = ("certutil -S -z " + noise_file + " -g 2048 -d " +
+    base_exec_string = ("certutil -S -z " + noise_file + " -g 2048 -d sql:" +
                         db_dir + "/ -n " + name + " -v 120 -m " +
                         str(random.randint(100, 40000000)) + " -s 'CN=" + name +
                         ",O=PSM Testing,L=Mountain View,ST=California,C=US'" +
@@ -305,7 +341,7 @@ def generate_child_cert(db_dir, dest_dir, noise_file, name, ca_nick, version,
         child.expect(pexpect.EOF)
     else:
         os.system(base_exec_string)
-    os.system("certutil -d " + db_dir + "/ -L -n " + name + " -r > " +
+    os.system("certutil -d sql:" + db_dir + "/ -L -n " + name + " -r > " +
               out_name)
     return out_name
 

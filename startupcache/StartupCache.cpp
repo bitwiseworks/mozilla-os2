@@ -56,7 +56,7 @@ MOZ_DEFINE_MALLOC_SIZE_OF(StartupCacheMallocSizeOf)
 
 NS_IMETHODIMP
 StartupCache::CollectReports(nsIHandleReportCallback* aHandleReport,
-                             nsISupports* aData)
+                             nsISupports* aData, bool aAnonymize)
 {
 #define REPORT(_path, _kind, _amount, _desc)                                \
   do {                                                                      \
@@ -93,7 +93,7 @@ StartupCache::GetSingleton()
     if (XRE_GetProcessType() != GeckoProcessType_Default) {
       return nullptr;
     }
-#ifdef MOZ_B2G
+#ifdef MOZ_DISABLE_STARTUPCACHE
     return nullptr;
 #endif
 

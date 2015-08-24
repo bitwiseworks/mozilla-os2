@@ -100,7 +100,7 @@ struct PageData
 class AsyncFaviconHelperBase : public nsRunnable
 {
 protected:
-  AsyncFaviconHelperBase(nsCOMPtr<nsIFaviconDataCallback>& aCallback);
+  explicit AsyncFaviconHelperBase(nsCOMPtr<nsIFaviconDataCallback>& aCallback);
 
   virtual ~AsyncFaviconHelperBase();
 
@@ -193,9 +193,9 @@ public:
                                   bool aFaviconLoadPrivate,
                                   nsCOMPtr<nsIFaviconDataCallback>& aCallback);
 
+protected:
   virtual ~AsyncFetchAndSetIconFromNetwork();
 
-protected:
   IconData mIcon;
   PageData mPage;
   const bool mFaviconLoadPrivate;

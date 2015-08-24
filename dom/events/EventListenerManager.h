@@ -16,10 +16,12 @@
 #include "nsIDOMEventListener.h"
 #include "nsTObserverArray.h"
 
+class nsIDocShell;
 class nsIDOMEvent;
 class nsIEventListenerInfo;
 class nsIScriptContext;
 class nsPIDOMWindow;
+class JSTracer;
 
 struct EventTypeData;
 
@@ -148,8 +150,10 @@ inline EventListenerFlags AllEventsAtSystemGroupCapture()
  * Event listener manager
  */
 
-class EventListenerManager MOZ_FINAL
+class EventListenerManager final
 {
+  ~EventListenerManager();
+
 public:
   struct Listener
   {
@@ -158,7 +162,7 @@ public:
     nsString mTypeString; // for non-main-threads
     uint16_t mEventType;
 
-    enum ListenerType MOZ_ENUM_TYPE(uint8_t)
+    enum ListenerType : uint8_t
     {
       eNativeListener = 0,
       eJSEventListener,
@@ -208,8 +212,7 @@ public:
     }
   };
 
-  EventListenerManager(dom::EventTarget* aTarget);
-  virtual ~EventListenerManager();
+  explicit EventListenerManager(dom::EventTarget* aTarget);
 
   NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(EventListenerManager)
 
@@ -291,7 +294,6 @@ public:
   // documents?  Need to double-check the spec here.
   nsresult SetEventHandler(nsIAtom *aName,
                            const nsAString& aFunc,
-                           uint32_t aLanguage,
                            bool aDeferCompilation,
                            bool aPermitUntrustedEvents,
                            dom::Element* aElement);
@@ -392,6 +394,12 @@ public:
    */
   bool MayHaveTouchEventListener() { return mMayHaveTouchEventListener; }
 
+  /**
+   * Returns true if there may be a scroll wheel listener registered,
+   * false if there definitely isn't.
+   */
+  bool MayHaveScrollWheelEventListener() { return mMayHaveScrollWheelEventListener; }
+
   bool MayHaveMouseEnterLeaveEventListener() { return mMayHaveMouseEnterLeaveEventListener; }
   bool MayHavePointerEnterLeaveEventListener() { return mMayHavePointerEnterLeaveEventListener; }
 
@@ -403,6 +411,8 @@ public:
   }
 
   void MarkForCC();
+
+  void TraceListeners(JSTracer* aTrc);
 
   dom::EventTarget* GetTarget() { return mTarget; }
 
@@ -416,6 +426,8 @@ protected:
   nsresult HandleEventSubType(Listener* aListener,
                               nsIDOMEvent* aDOMEvent,
                               dom::EventTarget* aCurrentTarget);
+
+  nsIDocShell* GetDocShellForTarget();
 
   /**
    * Compile the "inline" event listener for aListener.  The
@@ -538,6 +550,7 @@ protected:
   uint32_t mMayHaveCapturingListeners : 1;
   uint32_t mMayHaveSystemGroupListeners : 1;
   uint32_t mMayHaveTouchEventListener : 1;
+  uint32_t mMayHaveScrollWheelEventListener : 1;
   uint32_t mMayHaveMouseEnterLeaveEventListener : 1;
   uint32_t mMayHavePointerEnterLeaveEventListener : 1;
   uint32_t mClearingListeners : 1;
@@ -545,7 +558,7 @@ protected:
   uint32_t mNoListenerForEvent : 23;
 
   nsAutoTObserverArray<Listener, 2> mListeners;
-  dom::EventTarget* mTarget;  // WEAK
+  dom::EventTarget* MOZ_NON_OWNING_REF mTarget;
   nsCOMPtr<nsIAtom> mNoListenerForEventAtom;
 
   friend class ELMCreationDetector;

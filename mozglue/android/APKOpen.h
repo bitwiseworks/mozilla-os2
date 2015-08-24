@@ -18,7 +18,8 @@ struct mapping_info {
   size_t offset;
 };
 
-const struct mapping_info * getLibraryMapping();
+NS_EXPORT const struct mapping_info * getLibraryMapping();
+NS_EXPORT void abortThroughJava(const char* msg);
 
 static const int SUCCESS = 0;
 static const int FAILURE = 1;

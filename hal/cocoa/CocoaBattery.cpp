@@ -38,6 +38,7 @@ class MacPowerInformationService
 public:
   static MacPowerInformationService* GetInstance();
   static void Shutdown();
+  static bool IsShuttingDown();
 
   void BeginListening();
   void StopListening();
@@ -60,6 +61,7 @@ private:
   friend void GetCurrentBatteryInformation(hal::BatteryInformation* aBatteryInfo);
 
   static MacPowerInformationService* sInstance;
+  static bool sShuttingDown;
 
   static void* sIOKitFramework;
   static IOPSGetTimeRemainingEstimateFunc sIOPSGetTimeRemainingEstimate;
@@ -77,13 +79,17 @@ IOPSGetTimeRemainingEstimateFunc MacPowerInformationService::sIOPSGetTimeRemaini
 void
 EnableBatteryNotifications()
 {
-  MacPowerInformationService::GetInstance()->BeginListening();
+  if (!MacPowerInformationService::IsShuttingDown()) {
+    MacPowerInformationService::GetInstance()->BeginListening();
+  }
 }
 
 void
 DisableBatteryNotifications()
 {
-  MacPowerInformationService::GetInstance()->StopListening();
+  if (!MacPowerInformationService::IsShuttingDown()) {
+    MacPowerInformationService::GetInstance()->StopListening();
+  }
 }
 
 void
@@ -96,6 +102,8 @@ GetCurrentBatteryInformation(hal::BatteryInformation* aBatteryInfo)
   aBatteryInfo->remainingTime() = powerService->mRemainingTime;
 }
 
+bool MacPowerInformationService::sShuttingDown = false;
+
 /*
  * Following is the implementation of MacPowerInformationService.
  */
@@ -103,10 +111,13 @@ GetCurrentBatteryInformation(hal::BatteryInformation* aBatteryInfo)
 MacPowerInformationService* MacPowerInformationService::sInstance = nullptr;
 
 namespace {
-struct SingletonDestroyer MOZ_FINAL : public nsIObserver
+struct SingletonDestroyer final : public nsIObserver
 {
   NS_DECL_ISUPPORTS
   NS_DECL_NSIOBSERVER
+
+private:
+  ~SingletonDestroyer() {}
 };
 
 NS_IMPL_ISUPPORTS(SingletonDestroyer, nsIObserver)
@@ -137,9 +148,16 @@ MacPowerInformationService::GetInstance()
   return sInstance;
 }
 
+bool
+MacPowerInformationService::IsShuttingDown()
+{
+  return sShuttingDown;
+}
+
 void
 MacPowerInformationService::Shutdown()
 {
+  sShuttingDown = true;
   delete sInstance;
   sInstance = nullptr;
 }

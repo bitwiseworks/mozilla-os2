@@ -19,40 +19,43 @@ namespace layers {
 class TextureClientX11 : public TextureClient
 {
  public:
-  TextureClientX11(gfx::SurfaceFormat format, TextureFlags aFlags = TEXTURE_FLAGS_DEFAULT);
+  TextureClientX11(ISurfaceAllocator* aAllocator, gfx::SurfaceFormat format, TextureFlags aFlags = TextureFlags::DEFAULT);
 
   ~TextureClientX11();
 
   // TextureClient
 
-  virtual bool IsAllocated() const MOZ_OVERRIDE;
+  virtual bool IsAllocated() const override;
 
-  virtual bool ToSurfaceDescriptor(SurfaceDescriptor& aOutDescriptor) MOZ_OVERRIDE;
+  virtual bool ToSurfaceDescriptor(SurfaceDescriptor& aOutDescriptor) override;
 
-  virtual TextureClientData* DropTextureData() MOZ_OVERRIDE;
+  virtual gfx::IntSize GetSize() const override { return mSize; }
 
-  virtual gfx::IntSize GetSize() const MOZ_OVERRIDE { return mSize; }
+  virtual bool Lock(OpenMode aMode) override;
 
-  virtual bool Lock(OpenMode aMode) MOZ_OVERRIDE;
+  virtual void Unlock() override;
 
-  virtual void Unlock() MOZ_OVERRIDE;
+  virtual bool IsLocked() const override { return mLocked; }
 
-  virtual bool IsLocked() const MOZ_OVERRIDE { return mLocked; }
+  virtual bool AllocateForSurface(gfx::IntSize aSize, TextureAllocationFlags flags) override;
 
-  virtual bool AllocateForSurface(gfx::IntSize aSize, TextureAllocationFlags flags) MOZ_OVERRIDE;
+  virtual bool CanExposeDrawTarget() const override { return true; }
 
-  virtual bool CanExposeDrawTarget() const MOZ_OVERRIDE { return true; }
+  virtual gfx::DrawTarget* BorrowDrawTarget() override;
 
-  virtual TemporaryRef<gfx::DrawTarget> GetAsDrawTarget() MOZ_OVERRIDE;
+  virtual gfx::SurfaceFormat GetFormat() const override { return mFormat; }
 
-  virtual gfx::SurfaceFormat GetFormat() const { return mFormat; }
+  virtual bool HasInternalBuffer() const override { return false; }
 
-  virtual bool HasInternalBuffer() const MOZ_OVERRIDE { return false; }
+  virtual TemporaryRef<TextureClient>
+  CreateSimilar(TextureFlags aFlags = TextureFlags::DEFAULT,
+                TextureAllocationFlags aAllocFlags = ALLOC_DEFAULT) const override;
 
  private:
   gfx::SurfaceFormat mFormat;
   gfx::IntSize mSize;
   RefPtr<gfxXlibSurface> mSurface;
+  RefPtr<gfx::DrawTarget> mDrawTarget;
   bool mLocked;
 };
 

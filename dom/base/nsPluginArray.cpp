@@ -27,7 +27,6 @@ using namespace mozilla::dom;
 nsPluginArray::nsPluginArray(nsPIDOMWindow* aWindow)
   : mWindow(aWindow)
 {
-  SetIsDOMBinding();
 }
 
 void
@@ -66,10 +65,10 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsPluginArray)
   NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_3(nsPluginArray,
-                                        mWindow,
-                                        mPlugins,
-                                        mHiddenPlugins)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(nsPluginArray,
+                                      mWindow,
+                                      mPlugins,
+                                      mHiddenPlugins)
 
 static void
 GetPluginMimeTypes(const nsTArray<nsRefPtr<nsPluginElement> >& aPlugins,
@@ -79,6 +78,13 @@ GetPluginMimeTypes(const nsTArray<nsRefPtr<nsPluginElement> >& aPlugins,
     nsPluginElement *plugin = aPlugins[i];
     aMimeTypes.AppendElements(plugin->MimeTypes());
   }
+}
+
+static bool
+operator<(const nsRefPtr<nsMimeType>& lhs, const nsRefPtr<nsMimeType>& rhs)
+{
+  // Sort MIME types alphabetically by type name.
+  return lhs->Type() < rhs->Type();
 }
 
 void
@@ -96,6 +102,10 @@ nsPluginArray::GetMimeTypes(nsTArray<nsRefPtr<nsMimeType> >& aMimeTypes,
 
   GetPluginMimeTypes(mPlugins, aMimeTypes);
   GetPluginMimeTypes(mHiddenPlugins, aHiddenMimeTypes);
+
+  // Alphabetize the enumeration order of non-hidden MIME types to reduce
+  // fingerprintable entropy based on plugins' installation file times.
+  aMimeTypes.Sort();
 }
 
 nsPluginElement*
@@ -270,7 +280,7 @@ nsPluginArray::Observe(nsISupports *aSubject, const char *aTopic,
 bool
 nsPluginArray::AllowPlugins() const
 {
-  nsCOMPtr<nsIDocShell> docShell = do_GetInterface(mWindow);
+  nsCOMPtr<nsIDocShell> docShell = mWindow ? mWindow->GetDocShell() : nullptr;
 
   return docShell && docShell->PluginsAllowedInCurrentDoc();
 }
@@ -295,6 +305,14 @@ IsPluginEnumerable(const nsTArray<nsCString>& enumerableNames,
   }
 
   return false; // hide plugin!
+}
+
+static bool
+operator<(const nsRefPtr<nsPluginElement>& lhs,
+          const nsRefPtr<nsPluginElement>& rhs)
+{
+  // Sort plugins alphabetically by name.
+  return lhs->PluginTag()->mName < rhs->PluginTag()->mName;
 }
 
 void
@@ -345,6 +363,10 @@ nsPluginArray::EnsurePlugins()
 
     pluginArray.AppendElement(new nsPluginElement(mWindow, pluginTag));
   }
+
+  // Alphabetize the enumeration order of non-hidden plugins to reduce
+  // fingerprintable entropy based on plugins' installation file times.
+  mPlugins.Sort();
 }
 
 // nsPluginElement implementation.
@@ -356,14 +378,17 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsPluginElement)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_2(nsPluginElement, mWindow, mMimeTypes)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(nsPluginElement, mWindow, mMimeTypes)
 
 nsPluginElement::nsPluginElement(nsPIDOMWindow* aWindow,
                                  nsPluginTag* aPluginTag)
   : mWindow(aWindow),
     mPluginTag(aPluginTag)
 {
-  SetIsDOMBinding();
+}
+
+nsPluginElement::~nsPluginElement()
+{
 }
 
 nsPIDOMWindow*

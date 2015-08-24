@@ -8,28 +8,25 @@ package org.mozilla.gecko.menu;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.mozilla.gecko.AppConstants.Versions;
 import org.mozilla.gecko.R;
 
 import android.annotation.TargetApi;
 import android.content.Context;
-import android.content.res.TypedArray;
 import android.graphics.drawable.Drawable;
 import android.util.AttributeSet;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
-import android.os.Build;
 
 public class MenuItemActionView extends LinearLayout
                                 implements GeckoMenuItem.Layout,
                                            View.OnClickListener {
-    private static final String LOGTAG = "GeckoMenuItemActionView";
-
-    private MenuItemDefault mMenuItem;
-    private MenuItemActionBar mMenuButton;
-    private List<ImageButton> mActionButtons;
-    private List<View.OnClickListener> mActionButtonListeners = new ArrayList<View.OnClickListener>();
+    private final MenuItemDefault mMenuItem;
+    private final MenuItemActionBar mMenuButton;
+    private final List<ImageButton> mActionButtons;
+    private final List<View.OnClickListener> mActionButtonListeners = new ArrayList<View.OnClickListener>();
 
     public MenuItemActionView(Context context) {
         this(context, null);
@@ -42,16 +39,6 @@ public class MenuItemActionView extends LinearLayout
     @TargetApi(14)
     public MenuItemActionView(Context context, AttributeSet attrs, int defStyle) {
         super(context, attrs);
-
-        // Set these explicitly, since setting a style isn't supported for LinearLayouts until V11.
-        if (Build.VERSION.SDK_INT >= 11) {
-            setShowDividers(LinearLayout.SHOW_DIVIDER_MIDDLE);
-            setDividerDrawable(getResources().getDrawable(R.drawable.divider_vertical));
-        }
-
-        if (Build.VERSION.SDK_INT >= 14) {
-            setDividerPadding(0);
-        }
 
         LayoutInflater.from(context).inflate(R.layout.menu_item_action_view, this);
         mMenuItem = (MenuItemDefault) findViewById(R.id.menu_item);
@@ -79,8 +66,9 @@ public class MenuItemActionView extends LinearLayout
 
     @Override
     public void initialize(GeckoMenuItem item) {
-        if (item == null)
+        if (item == null) {
             return;
+        }
 
         mMenuItem.initialize(item);
         mMenuButton.initialize(item);
@@ -102,6 +90,11 @@ public class MenuItemActionView extends LinearLayout
     public void setMenuItemClickListener(View.OnClickListener listener) {
         mMenuItem.setOnClickListener(listener);
         mMenuButton.setOnClickListener(listener);
+    }
+
+    public void setMenuItemLongClickListener(View.OnLongClickListener listener) {
+        mMenuItem.setOnLongClickListener(listener);
+        mMenuButton.setOnLongClickListener(listener);
     }
 
     public void addActionButtonClickListener(View.OnClickListener listener) {
@@ -132,7 +125,7 @@ public class MenuItemActionView extends LinearLayout
         mMenuItem.setSubMenuIndicator(hasSubMenu);
     }
 
-    public void addActionButton(Drawable drawable) {
+    public void addActionButton(Drawable drawable, CharSequence label) {
         // If this is the first icon, retain the text.
         // If not, make the menu item an icon.
         final int count = mActionButtons.size();
@@ -142,6 +135,7 @@ public class MenuItemActionView extends LinearLayout
         if (drawable != null) {
             ImageButton button = new ImageButton(getContext(), null, R.attr.menuItemShareActionButtonStyle);
             button.setImageDrawable(drawable);
+            button.setContentDescription(label);
             button.setOnClickListener(this);
             button.setTag(count);
 
@@ -156,10 +150,28 @@ public class MenuItemActionView extends LinearLayout
         }
     }
 
+    protected int getActionButtonCount() {
+        return mActionButtons.size();
+    }
+
     @Override
     public void onClick(View view) {
         for (View.OnClickListener listener : mActionButtonListeners) {
             listener.onClick(view);
         }
+    }
+
+    /**
+     * Update the styles if this view is being used in the context menus.
+     *
+     * Ideally, we just use different layout files and styles to set this, but
+     * MenuItemActionView is too integrated into GeckoActionProvider to provide
+     * an easy separation so instead I provide this hack. I'm sorry.
+     */
+    public void initContextMenuStyles() {
+        final int defaultContextMenuPadding = getContext().getResources().getDimensionPixelOffset(
+                R.dimen.context_menu_item_horizontal_padding);
+        mMenuItem.setPadding(defaultContextMenuPadding, getPaddingTop(),
+                defaultContextMenuPadding, getPaddingBottom());
     }
 }

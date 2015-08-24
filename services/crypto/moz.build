@@ -5,8 +5,20 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 DIRS += ['component']
-TEST_DIRS += ['tests']
+
+XPCSHELL_TESTS_MANIFESTS += ['tests/unit/xpcshell.ini']
+
+EXTRA_JS_MODULES['services-crypto'] += [
+    'modules/utils.js',
+]
+
+EXTRA_PP_JS_MODULES['services-crypto'] += [
+    'modules/WeaveCrypto.js',
+]
 
 EXTRA_COMPONENTS += [
     'cryptoComponents.manifest',
 ]
+
+if CONFIG['MOZ_NATIVE_NSS']:
+    DEFINES['MOZ_NATIVE_NSS'] = 1

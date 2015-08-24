@@ -5,18 +5,22 @@
 package org.mozilla.gecko;
 
 import org.mozilla.gecko.widget.GeckoPopupMenu;
+import org.mozilla.gecko.menu.GeckoMenuItem;
 
+import android.view.Gravity;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
+import android.widget.Toast;
 
 class ActionModeCompat implements GeckoPopupMenu.OnMenuItemClickListener,
+                                  GeckoPopupMenu.OnMenuItemLongClickListener,
                                   View.OnClickListener {
     private final String LOGTAG = "GeckoActionModeCompat";
 
-    private Callback mCallback;
-    private ActionModeCompatView mView;
-    private Presenter mPresenter;
+    private final Callback mCallback;
+    private final ActionModeCompatView mView;
+    private final Presenter mPresenter;
 
     /* A set of callbacks to be called during this ActionMode's lifecycle. These will control the
      * creation, interaction with, and destruction of menuitems for the view */
@@ -93,9 +97,31 @@ class ActionModeCompat implements GeckoPopupMenu.OnMenuItemClickListener,
         return false;
     }
 
+    /* GeckoPopupMenu.onMenuItemLongClickListener */
+    @Override
+    public boolean onMenuItemLongClick(MenuItem item) {
+        showTooltip((GeckoMenuItem) item);
+        return true;
+    }
+
     /* View.OnClickListener*/
     @Override
     public void onClick(View v) {
         mPresenter.endActionModeCompat();
+    }
+
+    private void showTooltip(GeckoMenuItem item) {
+        // Computes the tooltip toast screen position (shown when long-tapping the menu item) with regards to the
+        // menu item's position (i.e below the item and slightly to the left)
+        int[] location = new int[2];
+        final View view = item.getActionView();
+        view.getLocationOnScreen(location);
+
+        int xOffset = location[0] - view.getWidth();
+        int yOffset = location[1] + view.getHeight() / 2;
+
+        Toast toast = Toast.makeText(view.getContext(), item.getTitle(), Toast.LENGTH_SHORT);
+        toast.setGravity(Gravity.TOP|Gravity.LEFT, xOffset, yOffset);
+        toast.show();
     }
 }

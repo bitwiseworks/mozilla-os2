@@ -4,6 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "nsJSUtils.h"
 #include "nsMemory.h"
 #include "nsString.h"
 
@@ -39,7 +40,7 @@ NS_IMPL_ISUPPORTS(
 #define XPC_MAP_QUOTED_CLASSNAME "StatementParams"
 #define XPC_MAP_WANT_SETPROPERTY
 #define XPC_MAP_WANT_NEWENUMERATE
-#define XPC_MAP_WANT_NEWRESOLVE
+#define XPC_MAP_WANT_RESOLVE
 #define XPC_MAP_FLAGS nsIXPCScriptable::ALLOW_PROP_MODS_DURING_RESOLVE
 #include "xpc_map_end.h"
 
@@ -63,10 +64,12 @@ StatementParams::SetProperty(nsIXPConnectWrappedNative *aWrapper,
   }
   else if (JSID_IS_STRING(aId)) {
     JSString *str = JSID_TO_STRING(aId);
-    size_t length;
-    const jschar *chars = JS_GetStringCharsAndLength(aCtx, str, &length);
-    NS_ENSURE_TRUE(chars, NS_ERROR_UNEXPECTED);
-    NS_ConvertUTF16toUTF8 name(chars, length);
+    nsAutoJSString autoStr;
+    if (!autoStr.init(aCtx, str)) {
+      return NS_ERROR_FAILURE;
+    }
+
+    NS_ConvertUTF16toUTF8 name(autoStr);
 
     // check to see if there's a parameter with this name
     nsCOMPtr<nsIVariant> variant(convertJSValToVariant(aCtx, *_vp));
@@ -86,79 +89,48 @@ NS_IMETHODIMP
 StatementParams::NewEnumerate(nsIXPConnectWrappedNative *aWrapper,
                               JSContext *aCtx,
                               JSObject *aScopeObj,
-                              uint32_t aEnumOp,
-                              jsval *_statep,
-                              jsid *_idp,
+                              JS::AutoIdVector &aProperties,
                               bool *_retval)
 {
   NS_ENSURE_TRUE(mStatement, NS_ERROR_NOT_INITIALIZED);
+  JS::RootedObject scope(aCtx, aScopeObj);
 
-  switch (aEnumOp) {
-    case JSENUMERATE_INIT:
-    case JSENUMERATE_INIT_ALL:
-    {
-      // Start our internal index at zero.
-      *_statep = JSVAL_ZERO;
+  if (!aProperties.reserve(mParamCount)) {
+    *_retval = false;
+    return NS_OK;
+  }
 
-      // And set our length, if needed.
-      if (_idp)
-        *_idp = INT_TO_JSID(mParamCount);
+  for (uint32_t i = 0; i < mParamCount; i++) {
+    // Get the name of our parameter.
+    nsAutoCString name;
+    nsresult rv = mStatement->GetParameterName(i, name);
+    NS_ENSURE_SUCCESS(rv, rv);
 
-      break;
+    // But drop the first character, which is going to be a ':'.
+    JS::RootedString jsname(aCtx, ::JS_NewStringCopyN(aCtx, &(name.get()[1]),
+                                                      name.Length() - 1));
+    NS_ENSURE_TRUE(jsname, NS_ERROR_OUT_OF_MEMORY);
+
+    // Set our name.
+    JS::Rooted<jsid> id(aCtx);
+    if (!::JS_StringToId(aCtx, jsname, &id)) {
+      *_retval = false;
+      return NS_OK;
     }
-    case JSENUMERATE_NEXT:
-    {
-      NS_ASSERTION(*_statep != JSVAL_NULL, "Internal state is null!");
 
-      // Make sure we are in range first.
-      uint32_t index = static_cast<uint32_t>(JSVAL_TO_INT(*_statep));
-      if (index >= mParamCount) {
-        *_statep = JSVAL_NULL;
-        return NS_OK;
-      }
-
-      // Get the name of our parameter.
-      nsAutoCString name;
-      nsresult rv = mStatement->GetParameterName(index, name);
-      NS_ENSURE_SUCCESS(rv, rv);
-
-      // But drop the first character, which is going to be a ':'.
-      JS::RootedString jsname(aCtx, ::JS_NewStringCopyN(aCtx, &(name.get()[1]),
-                                                        name.Length() - 1));
-      NS_ENSURE_TRUE(jsname, NS_ERROR_OUT_OF_MEMORY);
-
-      // Set our name.
-      JS::Rooted<jsid> id(aCtx);
-      if (!::JS_StringToId(aCtx, jsname, &id)) {
-        *_retval = false;
-        return NS_OK;
-      }
-      *_idp = id;
-
-      // And increment our index.
-      *_statep = INT_TO_JSVAL(++index);
-
-      break;
-    }
-    case JSENUMERATE_DESTROY:
-    {
-      // Clear our state.
-      *_statep = JSVAL_NULL;
-
-      break;
-    }
+    aProperties.infallibleAppend(id);
   }
 
   return NS_OK;
 }
 
 NS_IMETHODIMP
-StatementParams::NewResolve(nsIXPConnectWrappedNative *aWrapper,
-                            JSContext *aCtx,
-                            JSObject *aScopeObj,
-                            jsid aId,
-                            JSObject **_objp,
-                            bool *_retval)
+StatementParams::Resolve(nsIXPConnectWrappedNative *aWrapper,
+                         JSContext *aCtx,
+                         JSObject *aScopeObj,
+                         jsid aId,
+                         bool *resolvedp,
+                         bool *_retval)
 {
   NS_ENSURE_TRUE(mStatement, NS_ERROR_NOT_INITIALIZED);
   // We do not throw at any point after this unless our index is out of range
@@ -177,30 +149,29 @@ StatementParams::NewResolve(nsIXPConnectWrappedNative *aWrapper,
     if (idx >= mParamCount)
       return NS_ERROR_INVALID_ARG;
 
-    ok = ::JS_DefineElement(aCtx, scope, idx, JSVAL_VOID, nullptr,
-                            nullptr, JSPROP_ENUMERATE);
+    ok = ::JS_DefineElement(aCtx, scope, idx, JS::UndefinedHandleValue, JSPROP_ENUMERATE);
     resolved = true;
   }
   else if (JSID_IS_STRING(id)) {
     JSString *str = JSID_TO_STRING(id);
-    size_t nameLength;
-    const jschar *nameChars = JS_GetStringCharsAndLength(aCtx, str, &nameLength);
-    NS_ENSURE_TRUE(nameChars, NS_ERROR_UNEXPECTED);
+    nsAutoJSString autoStr;
+    if (!autoStr.init(aCtx, str)) {
+      return NS_ERROR_FAILURE;
+    }
 
     // Check to see if there's a parameter with this name, and if not, let
     // the rest of the prototype chain be checked.
-    NS_ConvertUTF16toUTF8 name(nameChars, nameLength);
+    NS_ConvertUTF16toUTF8 name(autoStr);
     uint32_t idx;
     nsresult rv = mStatement->GetParameterIndex(name, &idx);
     if (NS_SUCCEEDED(rv)) {
-      ok = ::JS_DefinePropertyById(aCtx, scope, id, JSVAL_VOID, nullptr,
-                                   nullptr, JSPROP_ENUMERATE);
+      ok = ::JS_DefinePropertyById(aCtx, scope, id, JS::UndefinedHandleValue, JSPROP_ENUMERATE);
       resolved = true;
     }
   }
 
   *_retval = ok;
-  *_objp = resolved && ok ? scope.get() : nullptr;
+  *resolvedp = resolved && ok;
   return NS_OK;
 }
 

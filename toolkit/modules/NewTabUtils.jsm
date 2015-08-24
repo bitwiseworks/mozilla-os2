@@ -22,10 +22,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "PageThumbs",
 XPCOMUtils.defineLazyModuleGetter(this, "BinarySearch",
   "resource://gre/modules/BinarySearch.jsm");
 
-XPCOMUtils.defineLazyGetter(this, "Timer", () => {
-  return Cu.import("resource://gre/modules/Timer.jsm", {});
-});
-
 XPCOMUtils.defineLazyGetter(this, "gPrincipal", function () {
   let uri = Services.io.newURI("about:newtab", null, null);
   return Services.scriptSecurityManager.getNoAppCodebasePrincipal(uri);
@@ -42,8 +38,9 @@ XPCOMUtils.defineLazyGetter(this, "gUnicodeConverter", function () {
   return converter;
 });
 
-// The preference that tells whether this feature is enabled.
+// Boolean preferences that control newtab content
 const PREF_NEWTAB_ENABLED = "browser.newtabpage.enabled";
+const PREF_NEWTAB_ENHANCED = "browser.newtabpage.enhanced";
 
 // The preference that tells the number of rows of the newtab grid.
 const PREF_NEWTAB_ROWS = "browser.newtabpage.rows";
@@ -59,9 +56,6 @@ const LINKS_GET_LINKS_LIMIT = 100;
 
 // The gather telemetry topic.
 const TOPIC_GATHER_TELEMETRY = "gather-telemetry";
-
-// The amount of time we wait while coalescing updates for hidden pages.
-const SCHEDULE_UPDATE_TIMEOUT_MS = 1000;
 
 /**
  * Calculate the MD5 hash for a string.
@@ -210,6 +204,11 @@ let AllPages = {
   _enabled: null,
 
   /**
+   * Cached value that tells whether the New Tab Page feature is enhanced.
+   */
+  _enhanced: null,
+
+  /**
    * Adds a page to the internal list of pages.
    * @param aPage The page to register.
    */
@@ -247,6 +246,24 @@ let AllPages = {
   },
 
   /**
+   * Returns whether the history tiles are enhanced.
+   */
+  get enhanced() {
+    if (this._enhanced === null)
+      this._enhanced = Services.prefs.getBoolPref(PREF_NEWTAB_ENHANCED);
+
+    return this._enhanced;
+  },
+
+  /**
+   * Enables or disables the enhancement of history tiles feature.
+   */
+  set enhanced(aEnhanced) {
+    if (this.enhanced != aEnhanced)
+      Services.prefs.setBoolPref(PREF_NEWTAB_ENHANCED, !!aEnhanced);
+  },
+
+  /**
    * Returns the number of registered New Tab Pages (i.e. the number of open
    * about:newtab instances).
    */
@@ -257,32 +274,14 @@ let AllPages = {
   /**
    * Updates all currently active pages but the given one.
    * @param aExceptPage The page to exclude from updating.
-   * @param aHiddenPagesOnly If true, only pages hidden in the preloader are
-   *                         updated.
+   * @param aReason The reason for updating all pages.
    */
-  update: function AllPages_update(aExceptPage, aHiddenPagesOnly=false) {
-    this._pages.forEach(function (aPage) {
-      if (aExceptPage != aPage)
-        aPage.update(aHiddenPagesOnly);
-    });
-  },
-
-  /**
-   * Many individual link changes may happen in a small amount of time over
-   * multiple turns of the event loop.  This method coalesces updates by waiting
-   * a small amount of time before updating hidden pages.
-   */
-  scheduleUpdateForHiddenPages: function AllPages_scheduleUpdateForHiddenPages() {
-    if (!this._scheduleUpdateTimeout) {
-      this._scheduleUpdateTimeout = Timer.setTimeout(() => {
-        delete this._scheduleUpdateTimeout;
-        this.update(null, true);
-      }, SCHEDULE_UPDATE_TIMEOUT_MS);
+  update(aExceptPage, aReason = "") {
+    for (let page of this._pages.slice()) {
+      if (aExceptPage != page) {
+        page.update(aReason);
+      }
     }
-  },
-
-  get updateScheduledForHiddenPages() {
-    return !!this._scheduleUpdateTimeout;
   },
 
   /**
@@ -292,7 +291,14 @@ let AllPages = {
   observe: function AllPages_observe(aSubject, aTopic, aData) {
     if (aTopic == "nsPref:changed") {
       // Clear the cached value.
-      this._enabled = null;
+      switch (aData) {
+        case PREF_NEWTAB_ENABLED:
+          this._enabled = null;
+          break;
+        case PREF_NEWTAB_ENHANCED:
+          this._enhanced = null;
+          break;
+      }
     }
     // and all notifications get forwarded to each page.
     this._pages.forEach(function (aPage) {
@@ -306,6 +312,7 @@ let AllPages = {
    */
   _addObserver: function AllPages_addObserver() {
     Services.prefs.addObserver(PREF_NEWTAB_ENABLED, this, true);
+    Services.prefs.addObserver(PREF_NEWTAB_ENHANCED, this, true);
     Services.obs.addObserver(this, "page-thumbnail:create", true);
     this._addObserver = function () {};
   },
@@ -577,9 +584,7 @@ let PlacesProvider = {
               title: title,
               frecency: frecency,
               lastVisitDate: lastVisitDate,
-              bgColor: "transparent",
               type: "history",
-              imageURI: null,
             });
           }
         }
@@ -606,8 +611,7 @@ let PlacesProvider = {
             i++;
         }
         for (let link of outOfOrder) {
-          i = BinarySearch.insertionIndexOf(links, link,
-                                            Links.compareLinks.bind(Links));
+          i = BinarySearch.insertionIndexOf(Links.compareLinks, links, link);
           links.splice(i, 0, link);
         }
 
@@ -654,6 +658,7 @@ let PlacesProvider = {
         url: aURI.spec,
         frecency: aNewFrecency,
         lastVisitDate: aLastVisitDate,
+        type: "history",
       });
     }
   },
@@ -715,9 +720,10 @@ let Links = {
   _providers: new Set(),
 
   /**
-   * A mapping from each provider to an object { sortedLinks, linkMap }.
-   * sortedLinks is the cached, sorted array of links for the provider.  linkMap
-   * is a Map from link URLs to link objects.
+   * A mapping from each provider to an object { sortedLinks, siteMap, linkMap }.
+   * sortedLinks is the cached, sorted array of links for the provider.
+   * siteMap is a mapping from base domains to URL count associated with the domain.
+   * linkMap is a Map from link URLs to link objects.
    */
   _providerLinks: new Map(),
 
@@ -802,8 +808,19 @@ let Links = {
     let pinnedLinks = Array.slice(PinnedLinks.links);
     let links = this._getMergedProviderLinks();
 
-    // Filter blocked and pinned links.
+    let sites = new Set();
+    for (let link of pinnedLinks) {
+      if (link)
+        sites.add(NewTabUtils.extractSite(link.url));
+    }
+
+    // Filter blocked and pinned links and duplicate base domains.
     links = links.filter(function (link) {
+      let site = NewTabUtils.extractSite(link.url);
+      if (site == null || sites.has(site))
+        return false;
+      sites.add(site);
+
       return !BlockedLinks.isBlocked(link) && !PinnedLinks.isPinned(link);
     });
 
@@ -833,6 +850,8 @@ let Links = {
    * @return A negative number if aLink1 is ordered before aLink2, zero if
    *         aLink1 and aLink2 have the same ordering, or a positive number if
    *         aLink1 is ordered after aLink2.
+   *
+   * @note compareLinks's this object is bound to Links below.
    */
   compareLinks: function Links_compareLinks(aLink1, aLink2) {
     for (let prop of this._sortProperties) {
@@ -842,6 +861,21 @@ let Links = {
     return aLink2.frecency - aLink1.frecency ||
            aLink2.lastVisitDate - aLink1.lastVisitDate ||
            aLink1.url.localeCompare(aLink2.url);
+  },
+
+  _incrementSiteMap: function(map, link) {
+    let site = NewTabUtils.extractSite(link.url);
+    map.set(site, (map.get(site) || 0) + 1);
+  },
+
+  _decrementSiteMap: function(map, link) {
+    let site = NewTabUtils.extractSite(link.url);
+    let previousURLCount = map.get(site);
+    if (previousURLCount === 1) {
+      map.delete(site);
+    } else {
+      map.set(site, previousURLCount - 1);
+    }
   },
 
   /**
@@ -861,6 +895,10 @@ let Links = {
         links = links.filter((link) => !!link);
         this._providerLinks.set(aProvider, {
           sortedLinks: links,
+          siteMap: links.reduce((map, link) => {
+            this._incrementSiteMap(map, link);
+            return map;
+          }, new Map()),
           linkMap: links.reduce((map, link) => {
             map.set(link.url, link);
             return map;
@@ -920,7 +958,7 @@ let Links = {
       // a change.
       return;
 
-    let { sortedLinks, linkMap } = links;
+    let { sortedLinks, siteMap, linkMap } = links;
     let existingLink = linkMap.get(aLink.url);
     let insertionLink = null;
     let updatePages = false;
@@ -965,6 +1003,7 @@ let Links = {
         insertionLink[prop] = aLink[prop];
       }
       linkMap.set(aLink.url, insertionLink);
+      this._incrementSiteMap(siteMap, aLink);
     }
 
     if (insertionLink) {
@@ -973,12 +1012,14 @@ let Links = {
       if (sortedLinks.length > aProvider.maxNumLinks) {
         let lastLink = sortedLinks.pop();
         linkMap.delete(lastLink.url);
+        this._decrementSiteMap(siteMap, lastLink);
       }
       updatePages = true;
     }
 
-    if (updatePages)
-      AllPages.scheduleUpdateForHiddenPages();
+    if (updatePages) {
+      AllPages.update(null, "links-changed");
+    }
   },
 
   /**
@@ -986,7 +1027,7 @@ let Links = {
    */
   onManyLinksChanged: function Links_onManyLinksChanged(aProvider) {
     this._populateProviderCache(aProvider, () => {
-      AllPages.scheduleUpdateForHiddenPages();
+      AllPages.update(null, "links-changed");
     }, true);
   },
 
@@ -999,7 +1040,7 @@ let Links = {
   },
 
   _binsearch: function Links__binsearch(aArray, aLink, aMethod) {
-    return BinarySearch[aMethod](aArray, aLink, this.compareLinks.bind(this));
+    return BinarySearch[aMethod](this.compareLinks, aArray, aLink);
   },
 
   /**
@@ -1027,6 +1068,8 @@ let Links = {
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver,
                                          Ci.nsISupportsWeakReference])
 };
+
+Links.compareLinks = Links.compareLinks.bind(Links);
 
 /**
  * Singleton used to collect telemetry data.
@@ -1131,6 +1174,24 @@ let ExpirationFilter = {
 this.NewTabUtils = {
   _initialized: false,
 
+  /**
+   * Extract a "site" from a url in a way that multiple urls of a "site" returns
+   * the same "site."
+   * @param aUrl Url spec string
+   * @return The "site" string or null
+   */
+  extractSite: function Links_extractSite(url) {
+    let uri;
+    try {
+      uri = Services.io.newURI(url, null, null);
+    } catch (ex) {
+      return null;
+    }
+
+    // Strip off common subdomains of the same site (e.g., www, load balancer)
+    return uri.asciiHost.replace(/^(m|mobile|www\d*)\./, "");
+  },
+
   init: function NewTabUtils_init() {
     if (this.initWithoutProviders()) {
       PlacesProvider.init();
@@ -1146,6 +1207,14 @@ this.NewTabUtils = {
       return true;
     }
     return false;
+  },
+
+  isTopSiteGivenProvider: function(aSite, aProvider) {
+    return Links._providerLinks.get(aProvider).siteMap.has(aSite);
+  },
+
+  isTopPlacesSite: function(aSite) {
+    return this.isTopSiteGivenProvider(aSite, PlacesProvider);
   },
 
   /**

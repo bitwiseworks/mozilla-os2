@@ -64,13 +64,46 @@ MozNDEFRecord::DropData()
   mozilla::DropJSObjects(this);
 }
 
+/**
+ * Validate TNF.
+ * See section 3.3 THE NDEF Specification Test Requirements,
+ * NDEF specification 1.0
+ */
+/* static */
+bool
+MozNDEFRecord::ValidateTNF(const MozNDEFRecordOptions& aOptions,
+                           ErrorResult& aRv)
+{
+  // * The TNF field MUST have a value between 0x00 and 0x06.
+  // * The TNF value MUST NOT be 0x07.
+  // These two requirements are already handled by WebIDL bindings.
+
+  // If the TNF value is 0x00 (Empty), the TYPE, ID, and PAYLOAD fields MUST be
+  // omitted from the record.
+  if ((aOptions.mTnf == TNF::Empty) &&
+      (aOptions.mType.WasPassed() || aOptions.mId.WasPassed() ||
+       aOptions.mPayload.WasPassed())) {
+    NS_WARNING("tnf is empty but type/id/payload is not null.");
+    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    return false;
+  }
+
+  // If the TNF value is 0x05 (Unknown) or 0x06(Unchanged), the TYPE field MUST
+  // be omitted from the NDEF record.
+  if ((aOptions.mTnf == TNF::Unknown || aOptions.mTnf == TNF::Unchanged) &&
+      aOptions.mType.WasPassed()) {
+    NS_WARNING("tnf is unknown/unchanged but type  is not null.");
+    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    return false;
+  }
+
+  return true;
+}
+
 /* static */
 already_AddRefed<MozNDEFRecord>
 MozNDEFRecord::Constructor(const GlobalObject& aGlobal,
-                           uint8_t aTnf,
-                           const Optional<Uint8Array>& aType,
-                           const Optional<Uint8Array>& aId,
-                           const Optional<Uint8Array>& aPayload,
+                           const MozNDEFRecordOptions& aOptions,
                            ErrorResult& aRv)
 {
   nsCOMPtr<nsPIDOMWindow> win = do_QueryInterface(aGlobal.GetAsSupports());
@@ -79,9 +112,12 @@ MozNDEFRecord::Constructor(const GlobalObject& aGlobal,
     return nullptr;
   }
 
-  nsRefPtr<MozNDEFRecord> ndefrecord = new MozNDEFRecord(aGlobal.GetContext(),
-                                                         win, aTnf, aType, aId,
-                                                         aPayload);
+  if (!ValidateTNF(aOptions, aRv)) {
+    return nullptr;
+  }
+
+  nsRefPtr<MozNDEFRecord> ndefrecord = new MozNDEFRecord(aGlobal.Context(),
+                                                         win, aOptions);
   if (!ndefrecord) {
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;
@@ -90,27 +126,37 @@ MozNDEFRecord::Constructor(const GlobalObject& aGlobal,
 }
 
 MozNDEFRecord::MozNDEFRecord(JSContext* aCx, nsPIDOMWindow* aWindow,
-                             uint8_t aTnf,
-                             const Optional<Uint8Array>& aType,
-                             const Optional<Uint8Array>& aId,
-                             const Optional<Uint8Array>& aPayload)
-  : mTnf(aTnf)
+                             const MozNDEFRecordOptions& aOptions)
 {
   mWindow = aWindow; // For GetParentObject()
 
-  if (aType.WasPassed()) {
-    mType = Uint8Array::Create(aCx, this, aType.Value().Length(), aType.Value().Data());
+  mTnf = aOptions.mTnf;
+  mSize = 3; // 1(flags) + 1(type_length) + 1(payload_length)
+
+  if (aOptions.mType.WasPassed()) {
+    const Uint8Array& type = aOptions.mType.Value();
+    type.ComputeLengthAndData();
+    mType = Uint8Array::Create(aCx, this, type.Length(), type.Data());
+    mSize += type.Length();
   }
 
-  if (aId.WasPassed()) {
-    mId = Uint8Array::Create(aCx, this, aId.Value().Length(), aId.Value().Data());
+  if (aOptions.mId.WasPassed()) {
+    const Uint8Array& id = aOptions.mId.Value();
+    id.ComputeLengthAndData();
+    mId = Uint8Array::Create(aCx, this, id.Length(), id.Data());
+    mSize += 1 /* id_length */ + id.Length();
   }
 
-  if (aPayload.WasPassed()) {
-    mPayload = Uint8Array::Create(aCx, this, aPayload.Value().Length(), aPayload.Value().Data());
+  if (aOptions.mPayload.WasPassed()) {
+    const Uint8Array& payload = aOptions.mPayload.Value();
+    payload.ComputeLengthAndData();
+    mPayload = Uint8Array::Create(aCx, this, payload.Length(), payload.Data());
+    if (payload.Length() > 0xff) {
+      mSize += 3;
+    }
+    mSize += payload.Length();
   }
 
-  SetIsDOMBinding();
   HoldData();
 }
 

@@ -1,4 +1,4 @@
-/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim:set ts=2 sw=2 sts=2 et: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -91,7 +91,7 @@ var tests = [
     folderId:   null,
     run:        function () {
       this.file = Services.dirsvc.get("ProfD", Ci.nsILocalFile);
-      this.file.append("this file doesn't exist because nobody created it");
+      this.file.append("this file doesn't exist because nobody created it 1");
       Task.spawn(function() {
         try {
           yield BookmarkJSONUtils.importFromFile(this.file, true);
@@ -152,16 +152,15 @@ var tests = [
     finalTopic: NSIOBSERVER_TOPIC_FAILED,
     data:       NSIOBSERVER_DATA_HTML,
     folderId:   null,
-    run:        function () {
+    run:        Task.async(function* () {
       this.file = Services.dirsvc.get("ProfD", Ci.nsILocalFile);
-      this.file.append("this file doesn't exist because nobody created it");
+      this.file.append("this file doesn't exist because nobody created it 2");
       try {
-        BookmarkHTMLUtils.importFromFile(this.file, false)
-                         .then(function onSuccess() do_throw("Should fail!"),
-                               null);
+        yield BookmarkHTMLUtils.importFromFile(this.file, false);
+        do_throw("Should fail!");
       }
       catch (e) {}
-    }
+    }.bind(this))
   },
 
   {
@@ -213,16 +212,15 @@ var tests = [
     finalTopic: NSIOBSERVER_TOPIC_FAILED,
     data:       NSIOBSERVER_DATA_HTML_INIT,
     folderId:   null,
-    run:        function () {
+    run:        Task.async(function* () {
       this.file = Services.dirsvc.get("ProfD", Ci.nsILocalFile);
-      this.file.append("this file doesn't exist because nobody created it");
+      this.file.append("this file doesn't exist because nobody created it 3");
       try {
-        BookmarkHTMLUtils.importFromFile(this.file, true)
-                         .then(function onSuccess() do_throw("Should fail!"),
-                               null);
+        yield BookmarkHTMLUtils.importFromFile(this.file, true);
+        do_throw("Should fail!");
       }
       catch (e) {}
-    }
+    }.bind(this))
   }
 ];
 

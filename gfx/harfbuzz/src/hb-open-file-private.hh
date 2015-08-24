@@ -110,9 +110,9 @@ typedef struct OffsetTable
   protected:
   Tag		sfnt_version;	/* '\0\001\0\00' if TrueType / 'OTTO' if CFF */
   USHORT	numTables;	/* Number of tables. */
-  USHORT	searchRange;	/* (Maximum power of 2 <= numTables) x 16 */
-  USHORT	entrySelector;	/* Log2(maximum power of 2 <= numTables). */
-  USHORT	rangeShift;	/* NumTables x 16-searchRange. */
+  USHORT	searchRangeZ;	/* (Maximum power of 2 <= numTables) x 16 */
+  USHORT	entrySelectorZ;	/* Log2(maximum power of 2 <= numTables). */
+  USHORT	rangeShiftZ;	/* NumTables x 16-searchRange. */
   TableRecord	tables[VAR];	/* TableRecord entries. numTables items */
   public:
   DEFINE_SIZE_ARRAY (12, tables);
@@ -138,8 +138,8 @@ struct TTCHeaderVersion1
   protected:
   Tag		ttcTag;		/* TrueType Collection ID string: 'ttcf' */
   FixedVersion	version;	/* Version of the TTC Header (1.0),
-				 * 0x00010000 */
-  LongOffsetLongArrayOf<OffsetTable>
+				 * 0x00010000u */
+  ArrayOf<OffsetTo<OffsetTable, ULONG>, ULONG>
 		table;		/* Array of offsets to the OffsetTable for each font
 				 * from the beginning of the file */
   public:
@@ -184,7 +184,7 @@ struct TTCHeader
   struct {
   Tag		ttcTag;		/* TrueType Collection ID string: 'ttcf' */
   FixedVersion	version;	/* Version of the TTC Header (1.0 or 2.0),
-				 * 0x00010000 or 0x00020000 */
+				 * 0x00010000u or 0x00020000u */
   }			header;
   TTCHeaderVersion1	version1;
   } u;
@@ -197,6 +197,8 @@ struct TTCHeader
 
 struct OpenTypeFontFile
 {
+  static const hb_tag_t tableTag	= HB_TAG ('_','_','_','_'); /* Sanitizer needs this. */
+
   static const hb_tag_t CFFTag		= HB_TAG ('O','T','T','O'); /* OpenType with Postscript outlines */
   static const hb_tag_t TrueTypeTag	= HB_TAG ( 0 , 1 , 0 , 0 ); /* OpenType with TrueType outlines */
   static const hb_tag_t TTCTag		= HB_TAG ('t','t','c','f'); /* TrueType Collection */

@@ -6,8 +6,9 @@
 
 /* nsIVariant implementation for xpconnect. */
 
+#include "mozilla/Range.h"
+
 #include "xpcprivate.h"
-#include "nsCxPusher.h"
 
 #include "jsfriendapi.h"
 #include "jsprf.h"
@@ -56,14 +57,11 @@ XPCTraceableVariant::~XPCTraceableVariant()
 {
     jsval val = GetJSValPreserveColor();
 
-    MOZ_ASSERT(JSVAL_IS_GCTHING(val), "Must be traceable or unlinked");
+    MOZ_ASSERT(val.isGCThing(), "Must be traceable or unlinked");
 
-    // If val is JSVAL_STRING, we don't need to clean anything up; simply
-    // removing the string from the root set is good.
-    if (!JSVAL_IS_STRING(val))
-        nsVariant::Cleanup(&mData);
+    nsVariant::Cleanup(&mData);
 
-    if (!JSVAL_IS_NULL(val))
+    if (!val.isNull())
         RemoveFromRootSet();
 }
 
@@ -71,7 +69,7 @@ void XPCTraceableVariant::TraceJS(JSTracer* trc)
 {
     MOZ_ASSERT(mJSVal.isMarkable());
     trc->setTracingDetails(GetTraceName, this, 0);
-    JS_CallHeapValueTracer(trc, &mJSVal, "XPCTraceableVariant::mJSVal");
+    JS_CallValueTracer(trc, &mJSVal, "XPCTraceableVariant::mJSVal");
 }
 
 // static
@@ -85,9 +83,9 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(XPCVariant)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(XPCVariant)
     JS::Value val = tmp->GetJSValPreserveColor();
-    if (val.isObjectOrNull()) {
+    if (val.isObject()) {
         NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mJSVal");
-        cb.NoteJSChild(JSVAL_TO_OBJECT(val));
+        cb.NoteJSObject(&val.toObject());
     }
 
     nsVariant::Traverse(tmp->mData, cb);
@@ -96,10 +94,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(XPCVariant)
     JS::Value val = tmp->GetJSValPreserveColor();
 
-    // We're sharing val's buffer, clear the pointer to it so Cleanup() won't
-    // try to delete it
-    if (val.isString())
-        tmp->mData.u.wstr.mWStringValue = nullptr;
     nsVariant::Cleanup(&tmp->mData);
 
     if (val.isMarkable()) {
@@ -196,7 +190,7 @@ XPCArrayHomogenizer::GetTypeForArray(JSContext* cx, HandleObject array,
             type = tDbl;
         } else if (val.isBoolean()) {
             type = tBool;
-        } else if (val.isUndefined()) {
+        } else if (val.isUndefined() || val.isSymbol()) {
             state = tVar;
             break;
         } else if (val.isNull()) {
@@ -279,7 +273,8 @@ bool XPCVariant::InitializeData(JSContext* cx)
         return NS_SUCCEEDED(nsVariant::SetFromDouble(&mData, val.toDouble()));
     if (val.isBoolean())
         return NS_SUCCEEDED(nsVariant::SetFromBool(&mData, val.toBoolean()));
-    if (val.isUndefined())
+    // We can't represent symbol on C++ side, so pretend it is void.
+    if (val.isUndefined() || val.isSymbol())
         return NS_SUCCEEDED(nsVariant::SetToVoid(&mData));
     if (val.isNull())
         return NS_SUCCEEDED(nsVariant::SetToEmpty(&mData));
@@ -288,25 +283,18 @@ bool XPCVariant::InitializeData(JSContext* cx)
         if (!str)
             return false;
 
-        // Don't use nsVariant::SetFromWStringWithSize, because that will copy
-        // the data.  Just handle this ourselves.  Note that it's ok to not
-        // copy because we added mJSVal as a GC root.
         MOZ_ASSERT(mData.mType == nsIDataType::VTYPE_EMPTY,
                    "Why do we already have data?");
 
-        // Despite the fact that the variant holds the length, there are
-        // implicit assumptions that mWStringValue[mWStringLength] == 0
-        size_t length;
-        const jschar* chars = JS_GetStringCharsZAndLength(cx, str, &length);
-        if (!chars)
+        size_t length = JS_GetStringLength(str);
+        if (!NS_SUCCEEDED(nsVariant::AllocateWStringWithSize(&mData, length)))
             return false;
 
-        mData.u.wstr.mWStringValue = const_cast<jschar*>(chars);
-        // Use C-style cast, because reinterpret cast from size_t to
-        // uint32_t is not valid on some platforms.
-        mData.u.wstr.mWStringLength = (uint32_t)length;
-        mData.mType = nsIDataType::VTYPE_WSTRING_SIZE_IS;
+        mozilla::Range<char16_t> destChars(mData.u.wstr.mWStringValue, length);
+        if (!JS_CopyStringChars(cx, destChars, str))
+            return false;
 
+        MOZ_ASSERT(mData.u.wstr.mWStringValue[length] == '\0');
         return true;
     }
 
@@ -384,7 +372,7 @@ XPCVariant::VariantDataToJS(nsIVariant* variant,
     nsresult rv = variant->GetAsJSVal(&realVal);
 
     if (NS_SUCCEEDED(rv) &&
-        (JSVAL_IS_PRIMITIVE(realVal) ||
+        (realVal.isPrimitive() ||
          type == nsIDataType::VTYPE_ARRAY ||
          type == nsIDataType::VTYPE_EMPTY_ARRAY ||
          type == nsIDataType::VTYPE_ID)) {
@@ -824,5 +812,3 @@ NS_IMETHODIMP XPCVariant::GetAsWStringWithSize(uint32_t* size, char16_t** str)
 {
     return nsVariant::ConvertToWStringWithSize(mData, size, str);
 }
-
-

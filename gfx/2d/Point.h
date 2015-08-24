@@ -8,27 +8,48 @@
 
 #include "mozilla/Attributes.h"
 #include "Types.h"
+#include "Coord.h"
+#include "BaseCoord.h"
 #include "BasePoint.h"
 #include "BasePoint3D.h"
 #include "BasePoint4D.h"
 #include "BaseSize.h"
+#include "mozilla/TypeTraits.h"
 
 #include <cmath>
 
 namespace mozilla {
+
+template <typename> struct IsPixel;
+
 namespace gfx {
 
 // This should only be used by the typedefs below.
 struct UnknownUnits {};
 
+}  // close namespace 'gfx' because IsPixel specialization must be in 'mozilla'
+
+template<> struct IsPixel<gfx::UnknownUnits> : TrueType {};
+
+namespace gfx {
+
 template<class units>
 struct IntPointTyped :
-  public BasePoint< int32_t, IntPointTyped<units> >,
+  public BasePoint< int32_t, IntPointTyped<units>, IntCoordTyped<units> >,
   public units {
-  typedef BasePoint< int32_t, IntPointTyped<units> > Super;
+  static_assert(IsPixel<units>::value,
+                "'units' must be a coordinate system tag");
+
+  typedef IntCoordTyped<units> Coord;
+  typedef BasePoint< int32_t, IntPointTyped<units>, IntCoordTyped<units> > Super;
 
   MOZ_CONSTEXPR IntPointTyped() : Super() {}
-  MOZ_CONSTEXPR IntPointTyped(int32_t aX, int32_t aY) : Super(aX, aY) {}
+  MOZ_CONSTEXPR IntPointTyped(int32_t aX, int32_t aY) : Super(Coord(aX), Coord(aY)) {}
+  // The mixed-type constructors (int, Coord) and (Coord, int) are needed to
+  // avoid ambiguities because Coord is implicitly convertible to int.
+  MOZ_CONSTEXPR IntPointTyped(int32_t aX, Coord aY) : Super(Coord(aX), aY) {}
+  MOZ_CONSTEXPR IntPointTyped(Coord aX, int32_t aY) : Super(aX, Coord(aY)) {}
+  MOZ_CONSTEXPR IntPointTyped(Coord aX, Coord aY) : Super(aX, aY) {}
 
   // XXX When all of the code is ported, the following functions to convert to and from
   // unknown types should be removed.
@@ -45,13 +66,22 @@ typedef IntPointTyped<UnknownUnits> IntPoint;
 
 template<class units>
 struct PointTyped :
-  public BasePoint< Float, PointTyped<units> >,
+  public BasePoint< Float, PointTyped<units>, CoordTyped<units> >,
   public units {
-  typedef BasePoint< Float, PointTyped<units> > Super;
+  static_assert(IsPixel<units>::value,
+                "'units' must be a coordinate system tag");
+
+  typedef CoordTyped<units> Coord;
+  typedef BasePoint< Float, PointTyped<units>, CoordTyped<units> > Super;
 
   MOZ_CONSTEXPR PointTyped() : Super() {}
-  MOZ_CONSTEXPR PointTyped(Float aX, Float aY) : Super(aX, aY) {}
-  MOZ_CONSTEXPR PointTyped(const IntPointTyped<units>& point) : Super(float(point.x), float(point.y)) {}
+  MOZ_CONSTEXPR PointTyped(Float aX, Float aY) : Super(Coord(aX), Coord(aY)) {}
+  // The mixed-type constructors (Float, Coord) and (Coord, Float) are needed to
+  // avoid ambiguities because Coord is implicitly convertible to Float.
+  MOZ_CONSTEXPR PointTyped(Float aX, Coord aY) : Super(Coord(aX), aY) {}
+  MOZ_CONSTEXPR PointTyped(Coord aX, Float aY) : Super(aX, Coord(aY)) {}
+  MOZ_CONSTEXPR PointTyped(Coord aX, Coord aY) : Super(aX.value, aY.value) {}
+  MOZ_CONSTEXPR MOZ_IMPLICIT PointTyped(const IntPointTyped<units>& point) : Super(float(point.x), float(point.y)) {}
 
   // XXX When all of the code is ported, the following functions to convert to and from
   // unknown types should be removed.
@@ -73,8 +103,17 @@ IntPointTyped<units> RoundedToInt(const PointTyped<units>& aPoint) {
 }
 
 template<class units>
+IntPointTyped<units> TruncatedToInt(const PointTyped<units>& aPoint) {
+  return IntPointTyped<units>(int32_t(aPoint.x),
+                              int32_t(aPoint.y));
+}
+
+template<class units>
 struct Point3DTyped :
   public BasePoint3D< Float, Point3DTyped<units> > {
+  static_assert(IsPixel<units>::value,
+                "'units' must be a coordinate system tag");
+
   typedef BasePoint3D< Float, Point3DTyped<units> > Super;
 
   Point3DTyped() : Super() {}
@@ -96,6 +135,9 @@ typedef Point3DTyped<UnknownUnits> Point3D;
 template<class units>
 struct Point4DTyped :
   public BasePoint4D< Float, Point4DTyped<units> > {
+  static_assert(IsPixel<units>::value,
+                "'units' must be a coordinate system tag");
+
   typedef BasePoint4D< Float, Point4DTyped<units> > Super;
 
   Point4DTyped() : Super() {}
@@ -111,6 +153,10 @@ struct Point4DTyped :
   Point4DTyped<UnknownUnits> ToUnknownPoint() const {
     return Point4DTyped<UnknownUnits>(this->x, this->y, this->z, this->w);
   }
+
+  PointTyped<units> As2DPoint() {
+    return PointTyped<units>(this->x / this->w, this->y / this->w);
+  }
 };
 typedef Point4DTyped<UnknownUnits> Point4D;
 
@@ -118,6 +164,9 @@ template<class units>
 struct IntSizeTyped :
   public BaseSize< int32_t, IntSizeTyped<units> >,
   public units {
+  static_assert(IsPixel<units>::value,
+                "'units' must be a coordinate system tag");
+
   typedef BaseSize< int32_t, IntSizeTyped<units> > Super;
 
   MOZ_CONSTEXPR IntSizeTyped() : Super() {}
@@ -140,6 +189,9 @@ template<class units>
 struct SizeTyped :
   public BaseSize< Float, SizeTyped<units> >,
   public units {
+  static_assert(IsPixel<units>::value,
+                "'units' must be a coordinate system tag");
+
   typedef BaseSize< Float, SizeTyped<units> > Super;
 
   MOZ_CONSTEXPR SizeTyped() : Super() {}

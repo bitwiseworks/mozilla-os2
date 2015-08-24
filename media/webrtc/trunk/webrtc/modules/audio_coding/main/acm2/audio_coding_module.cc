@@ -13,7 +13,6 @@
 #include "webrtc/common_types.h"
 #include "webrtc/modules/audio_coding/main/acm2/acm_codec_database.h"
 #include "webrtc/modules/audio_coding/main/acm2/audio_coding_module_impl.h"
-#include "webrtc/modules/audio_coding/main/source/audio_coding_module_impl.h"
 #include "webrtc/system_wrappers/interface/clock.h"
 #include "webrtc/system_wrappers/interface/trace.h"
 
@@ -21,22 +20,25 @@ namespace webrtc {
 
 // Create module
 AudioCodingModule* AudioCodingModule::Create(int id) {
-  return new acm1::AudioCodingModuleImpl(id, Clock::GetRealTimeClock());
+  return Create(id, Clock::GetRealTimeClock());
 }
 
 AudioCodingModule* AudioCodingModule::Create(int id, Clock* clock) {
-  return new acm1::AudioCodingModuleImpl(id, clock);
+  AudioCodingModule::Config config;
+  config.id = id;
+  config.clock = clock;
+  return new acm2::AudioCodingModuleImpl(config);
 }
 
 // Get number of supported codecs
 int AudioCodingModule::NumberOfCodecs() {
-  return ACMCodecDB::kNumCodecs;
+  return acm2::ACMCodecDB::kNumCodecs;
 }
 
 // Get supported codec parameters with id
 int AudioCodingModule::Codec(int list_id, CodecInst* codec) {
   // Get the codec settings for the codec with the given list ID
-  return ACMCodecDB::Codec(list_id, codec);
+  return acm2::ACMCodecDB::Codec(list_id, codec);
 }
 
 // Get supported codec parameters with name, frequency and number of channels.
@@ -47,7 +49,8 @@ int AudioCodingModule::Codec(const char* payload_name,
   int codec_id;
 
   // Get the id of the codec from the database.
-  codec_id = ACMCodecDB::CodecId(payload_name, sampling_freq_hz, channels);
+  codec_id = acm2::ACMCodecDB::CodecId(
+      payload_name, sampling_freq_hz, channels);
   if (codec_id < 0) {
     // We couldn't find a matching codec, set the parameters to unacceptable
     // values and return.
@@ -60,7 +63,7 @@ int AudioCodingModule::Codec(const char* payload_name,
   }
 
   // Get default codec settings.
-  ACMCodecDB::Codec(codec_id, codec);
+  acm2::ACMCodecDB::Codec(codec_id, codec);
 
   // Keep the number of channels from the function call. For most codecs it
   // will be the same value as in default codec settings, but not for all.
@@ -73,14 +76,14 @@ int AudioCodingModule::Codec(const char* payload_name,
 int AudioCodingModule::Codec(const char* payload_name,
                              int sampling_freq_hz,
                              int channels) {
-  return ACMCodecDB::CodecId(payload_name, sampling_freq_hz, channels);
+  return acm2::ACMCodecDB::CodecId(payload_name, sampling_freq_hz, channels);
 }
 
 // Checks the validity of the parameters of the given codec
 bool AudioCodingModule::IsCodecValid(const CodecInst& codec) {
   int mirror_id;
 
-  int codec_number = ACMCodecDB::CodecNumber(codec, &mirror_id);
+  int codec_number = acm2::ACMCodecDB::CodecNumber(codec, &mirror_id);
 
   if (codec_number < 0) {
     WEBRTC_TRACE(webrtc::kTraceError, webrtc::kTraceAudioCoding, -1,
@@ -91,13 +94,8 @@ bool AudioCodingModule::IsCodecValid(const CodecInst& codec) {
   }
 }
 
-AudioCodingModule* AudioCodingModuleFactory::Create(int id) const {
-  return new acm1::AudioCodingModuleImpl(static_cast<int32_t>(id),
-                                         Clock::GetRealTimeClock());
-}
-
-AudioCodingModule* NewAudioCodingModuleFactory::Create(int id) const {
-  return new AudioCodingModuleImpl(id);
+AudioCoding* AudioCoding::Create(const Config& config) {
+  return new AudioCodingImpl(config);
 }
 
 }  // namespace webrtc

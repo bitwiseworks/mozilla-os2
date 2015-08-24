@@ -7,6 +7,7 @@ package org.mozilla.gecko.tests.helpers;
 import static org.mozilla.gecko.tests.helpers.AssertionHelper.fAssertNotNull;
 import static org.mozilla.gecko.tests.helpers.AssertionHelper.fAssertTrue;
 
+import android.os.SystemClock;
 import java.util.regex.Pattern;
 
 import org.mozilla.gecko.Actions;
@@ -24,9 +25,11 @@ import com.jayway.android.robotium.solo.Solo;
 public final class WaitHelper {
     // TODO: Make public for when Solo.waitForCondition is used directly (i.e. do not want
     // assertion from waitFor)?
-    private static final int DEFAULT_MAX_WAIT_MS = 5000;
+    // DEFAULT_MAX_WAIT_MS of 5000 was intermittently insufficient during
+    // initialization on Android 2.3 emulator -- bug 1114655
+    private static final int DEFAULT_MAX_WAIT_MS = 15000;
     private static final int PAGE_LOAD_WAIT_MS = 10000;
-    private static final int CHANGE_WAIT_MS = 10000;
+    private static final int CHANGE_WAIT_MS = 15000;
 
     // TODO: via lucasr - Add ThrobberVisibilityChangeVerifier?
     private static final ChangeVerifier[] PAGE_LOAD_VERIFIERS = new ChangeVerifier[] {
@@ -84,27 +87,36 @@ public final class WaitHelper {
         }
 
         // Wait for the page load and title changed event.
-        final EventExpecter contentEventExpecter = sActions.expectGeckoEvent("DOMContentLoaded");
-        final EventExpecter titleEventExpecter = sActions.expectGeckoEvent("DOMTitleChanged");
+        final EventExpecter[] eventExpecters = new EventExpecter[] {
+            sActions.expectGeckoEvent("DOMContentLoaded"),
+            sActions.expectGeckoEvent("DOMTitleChanged")
+        };
 
         initiatingAction.run();
 
-        contentEventExpecter.blockForEventDataWithTimeout(PAGE_LOAD_WAIT_MS);
-        contentEventExpecter.unregisterListener();
-        titleEventExpecter.blockForEventDataWithTimeout(PAGE_LOAD_WAIT_MS);
-        titleEventExpecter.unregisterListener();
+        // PAGE_LOAD_WAIT_MS is the total time we wait for all events to finish.
+        final long expecterStartMillis = SystemClock.uptimeMillis();
+        for (final EventExpecter expecter : eventExpecters) {
+            final int eventWaitTimeMillis = PAGE_LOAD_WAIT_MS - (int)(SystemClock.uptimeMillis() - expecterStartMillis);
+            expecter.blockForEventDataWithTimeout(eventWaitTimeMillis);
+            expecter.unregisterListener();
+        }
+
+        // The timeout wait time should be the aggregate time for all ChangeVerifiers.
+        final long verifierStartMillis = SystemClock.uptimeMillis();
 
         // Verify remaining state has changed.
         for (final ChangeVerifier verifier : pageLoadVerifiers) {
             // If we timeout, either the state is set to the same value (which is fine), or
             // the state has not yet changed. Since we can't be sure it will ever change, move
             // on and let the assertions fail if applicable.
+            final int verifierWaitMillis = CHANGE_WAIT_MS - (int)(SystemClock.uptimeMillis() - verifierStartMillis);
             final boolean hasTimedOut = !sSolo.waitForCondition(new Condition() {
                 @Override
                 public boolean isSatisfied() {
                     return verifier.hasStateChanged();
                 }
-            }, CHANGE_WAIT_MS);
+            }, verifierWaitMillis);
 
             sContext.dumpLog(verifier.getLogTag(),
                     (hasTimedOut ? "timed out." : "was satisfied."));

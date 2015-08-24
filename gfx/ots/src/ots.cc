@@ -14,7 +14,7 @@
 #include <map>
 #include <vector>
 
-#ifdef MOZ_OTS_WOFF2
+#ifndef OTS_DISABLE_WOFF2
 #include "woff2.h"
 #endif
 
@@ -24,15 +24,7 @@
 namespace {
 
 bool g_debug_output = true;
-#ifdef MOZ_OTS_WOFF2
 bool g_enable_woff2 = false;
-#endif
-
-ots::MessageFunc  g_message_func = NULL;
-void             *g_message_user_data = NULL;
-
-ots::TableActionFunc  g_table_action_func = NULL;
-void                 *g_table_action_user_data = NULL;
 
 // Generate a message with or without a table tag, when 'header' is the OpenTypeFile pointer
 #define OTS_FAILURE_MSG_TAG(msg_,tag_) OTS_FAILURE_MSG_TAG_(header, msg_, tag_)
@@ -207,7 +199,7 @@ bool ProcessTTF(ots::OpenTypeFile *header,
   // Don't call ots_failure() here since ~25% of fonts (250+ fonts) in
   // http://www.princexml.com/fonts/ have unexpected search_range value.
   if (header->search_range != expected_search_range) {
-    OTS_WARNING("bad search range");
+    OTS_FAILURE_MSG_HDR("bad search range");
     header->search_range = expected_search_range;  // Fix the value.
   }
 
@@ -219,10 +211,10 @@ bool ProcessTTF(ots::OpenTypeFile *header,
   // range_shift is NumTables x 16-searchRange. We know that 16*num_tables
   // doesn't over flow because we range checked it above. Also, we know that
   // it's > header->search_range by construction of search_range.
-  const uint32_t expected_range_shift
-      = 16 * header->num_tables - header->search_range;
+  const uint16_t expected_range_shift =
+      16 * header->num_tables - header->search_range;
   if (header->range_shift != expected_range_shift) {
-    OTS_WARNING("bad range shift");
+    OTS_FAILURE_MSG_HDR("bad range shift");
     header->range_shift = expected_range_shift;  // the same as above.
   }
 
@@ -404,7 +396,7 @@ bool ProcessWOFF(ots::OpenTypeFile *header,
   return ProcessGeneric(header, woff_tag, output, data, length, tables, file);
 }
 
-#ifdef MOZ_OTS_WOFF2
+#ifndef OTS_DISABLE_WOFF2
 bool ProcessWOFF2(ots::OpenTypeFile *header,
                   ots::OTSStream *output, const uint8_t *data, size_t length) {
   size_t decompressed_size = ots::ComputeWOFF2FinalSize(data, length);
@@ -417,7 +409,7 @@ bool ProcessWOFF2(ots::OpenTypeFile *header,
   }
 
   std::vector<uint8_t> decompressed_buffer(decompressed_size);
-  if (!ots::ConvertWOFF2ToTTF(&decompressed_buffer[0], decompressed_size,
+  if (!ots::ConvertWOFF2ToTTF(header, &decompressed_buffer[0], decompressed_size,
                               data, length)) {
     return OTS_FAILURE();
   }
@@ -425,12 +417,10 @@ bool ProcessWOFF2(ots::OpenTypeFile *header,
 }
 #endif
 
-ots::TableAction GetTableAction(uint32_t tag) {
+ots::TableAction GetTableAction(ots::OpenTypeFile *header, uint32_t tag) {
   ots::TableAction action = ots::TABLE_ACTION_DEFAULT;
 
-  if (g_table_action_func != NULL) {
-    action = g_table_action_func(htonl(tag), g_table_action_user_data);
-  }
+  action = header->context->GetTableAction(htonl(tag));
 
   if (action == ots::TABLE_ACTION_DEFAULT) {
     action = ots::TABLE_ACTION_DROP;
@@ -578,10 +568,10 @@ bool ProcessGeneric(ots::OpenTypeFile *header, uint32_t signature,
   for (unsigned i = 0; ; ++i) {
     if (table_parsers[i].parse == NULL) break;
 
-    const std::map<uint32_t, OpenTypeTable>::const_iterator it
-        = table_map.find(Tag(table_parsers[i].tag));
+    uint32_t tag = Tag(table_parsers[i].tag);
+    const std::map<uint32_t, OpenTypeTable>::const_iterator it = table_map.find(tag);
 
-    ots::TableAction action = GetTableAction(Tag(table_parsers[i].tag));
+    ots::TableAction action = GetTableAction(header, tag);
     if (it == table_map.end()) {
       if (table_parsers[i].required && action == ots::TABLE_ACTION_SANITIZE) {
         return OTS_FAILURE_MSG_TAG("missing required table", table_parsers[i].tag);
@@ -621,7 +611,7 @@ bool ProcessGeneric(ots::OpenTypeFile *header, uint32_t signature,
     }
   }
 
-  unsigned num_output_tables = 0;
+  uint16_t num_output_tables = 0;
   for (unsigned i = 0; ; ++i) {
     if (table_parsers[i].parse == NULL) {
       break;
@@ -634,13 +624,13 @@ bool ProcessGeneric(ots::OpenTypeFile *header, uint32_t signature,
 
   for (std::map<uint32_t, OpenTypeTable>::const_iterator it = table_map.begin();
        it != table_map.end(); ++it) {
-    ots::TableAction action = GetTableAction(it->first);
+    ots::TableAction action = GetTableAction(header, it->first);
     if (action == ots::TABLE_ACTION_PASSTHRU) {
       num_output_tables++;
     }
   }
 
-  unsigned max_pow2 = 0;
+  uint16_t max_pow2 = 0;
   while (1u << (max_pow2 + 1) <= num_output_tables) {
     max_pow2++;
   }
@@ -706,7 +696,7 @@ bool ProcessGeneric(ots::OpenTypeFile *header, uint32_t signature,
 
   for (std::map<uint32_t, OpenTypeTable>::const_iterator it = table_map.begin();
        it != table_map.end(); ++it) {
-    ots::TableAction action = GetTableAction(it->first);
+    ots::TableAction action = GetTableAction(header, it->first);
     if (action == ots::TABLE_ACTION_PASSTHRU) {
       OutputTable out;
       out.tag = it->second.tag;
@@ -806,27 +796,16 @@ void DisableDebugOutput() {
   g_debug_output = false;
 }
 
-#ifdef MOZ_OTS_WOFF2
 void EnableWOFF2() {
   g_enable_woff2 = true;
 }
-#endif
 
-void SetMessageCallback(MessageFunc func, void *user_data) {
-  g_message_func = func;
-  g_message_user_data = user_data;
-}
-
-void SetTableActionCallback(TableActionFunc func, void *user_data) {
-  g_table_action_func = func;
-  g_table_action_user_data = user_data;
-}
-
-bool Process(OTSStream *output, const uint8_t *data, size_t length) {
+bool OTSContext::Process(OTSStream *output,
+                         const uint8_t *data,
+                         size_t length) {
   OpenTypeFile header;
 
-  header.message_func = g_message_func;
-  header.user_data = g_message_user_data;
+  header.context = this;
 
   if (length < 4) {
     return OTS_FAILURE_MSG_(&header, "file less than 4 bytes");
@@ -835,7 +814,7 @@ bool Process(OTSStream *output, const uint8_t *data, size_t length) {
   bool result;
   if (data[0] == 'w' && data[1] == 'O' && data[2] == 'F' && data[3] == 'F') {
     result = ProcessWOFF(&header, output, data, length);
-#ifdef MOZ_OTS_WOFF2
+#ifndef OTS_DISABLE_WOFF2
   } else if (g_enable_woff2 &&
              data[0] == 'w' && data[1] == 'O' && data[2] == 'F' &&
              data[3] == '2') {
@@ -852,6 +831,12 @@ bool Process(OTSStream *output, const uint8_t *data, size_t length) {
   return result;
 }
 
+// For backward compatibility
+bool Process(OTSStream *output, const uint8_t *data, size_t length) {
+  static OTSContext context;
+  return context.Process(output, data, length);
+}
+
 #if !defined(_MSC_VER) && defined(OTS_DEBUG)
 bool Failure(const char *f, int l, const char *fn) {
   if (g_debug_output) {
@@ -859,18 +844,6 @@ bool Failure(const char *f, int l, const char *fn) {
     std::fflush(stderr);
   }
   return false;
-}
-
-void Warning(const char *f, int l, const char *format, ...) {
-  if (g_debug_output) {
-    std::fprintf(stderr, "WARNING at %s:%d: ", f, l);
-    std::va_list va;
-    va_start(va, format);
-    std::vfprintf(stderr, format, va);
-    va_end(va);
-    std::fprintf(stderr, "\n");
-    std::fflush(stderr);
-  }
 }
 #endif
 

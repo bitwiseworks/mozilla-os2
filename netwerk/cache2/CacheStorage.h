@@ -34,14 +34,14 @@ public:
     ALL_ENTRIES
   };
 
-  CacheEntryTable(EType aType) : mType(aType) { }
+  explicit CacheEntryTable(EType aType) : mType(aType) { }
   EType Type() const
   {
     return mType;
   }
 private:
   EType const mType;
-  CacheEntryTable() MOZ_DELETE;
+  CacheEntryTable() = delete;
 };
 
 class CacheStorage : public nsICacheStorage
@@ -64,7 +64,6 @@ protected:
   bool mLookupAppCache : 1;
 
 public:
-  nsIApplicationCache* AppCache() const { return nullptr; }
   nsILoadContextInfo* LoadInfo() const { return mLoadContextInfo; }
   bool WriteToDisk() const { return mWriteToDisk && !mLoadContextInfo->IsPrivate(); }
   bool LookupAppCache() const { return mLookupAppCache; }

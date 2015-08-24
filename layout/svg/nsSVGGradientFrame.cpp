@@ -27,14 +27,14 @@ using namespace mozilla::dom;
 class MOZ_STACK_CLASS nsSVGGradientFrame::AutoGradientReferencer
 {
 public:
-  AutoGradientReferencer(nsSVGGradientFrame *aFrame
-                         MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+  explicit AutoGradientReferencer(nsSVGGradientFrame *aFrame
+                                  MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
     : mFrame(aFrame)
   {
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     // Reference loops should normally be detected in advance and handled, so
     // we're not expecting to encounter them here
-    NS_ABORT_IF_FALSE(!mFrame->mLoopFlag, "Undetected reference loop!");
+    MOZ_ASSERT(!mFrame->mLoopFlag, "Undetected reference loop!");
     mFrame->mLoopFlag = true;
   }
   ~AutoGradientReferencer() {
@@ -209,11 +209,12 @@ static void GetStopInformation(nsIFrame* aStopFrame,
 }
 
 already_AddRefed<gfxPattern>
-nsSVGGradientFrame::GetPaintServerPattern(nsIFrame *aSource,
+nsSVGGradientFrame::GetPaintServerPattern(nsIFrame* aSource,
+                                          const DrawTarget* aDrawTarget,
                                           const gfxMatrix& aContextMatrix,
                                           nsStyleSVGPaint nsStyleSVG::*aFillOrStroke,
                                           float aGraphicOpacity,
-                                          const gfxRect *aOverrideBounds)
+                                          const gfxRect* aOverrideBounds)
 {
   uint16_t gradientUnits = GetGradientUnits();
   MOZ_ASSERT(gradientUnits == SVG_UNIT_TYPE_OBJECTBOUNDINGBOX ||
@@ -262,12 +263,17 @@ nsSVGGradientFrame::GetPaintServerPattern(nsIFrame *aSource,
     return nullptr;
   }
 
-  // revert the vector effect transform so that the gradient appears unchanged
+  // revert any vector effect transform so that the gradient appears unchanged
   if (aFillOrStroke == &nsStyleSVG::mStroke) {
-    patternMatrix.Multiply(nsSVGUtils::GetStrokeTransform(aSource).Invert());
+    gfxMatrix userToOuterSVG;
+    if (nsSVGUtils::GetNonScalingStrokeTransform(aSource, &userToOuterSVG)) {
+      patternMatrix *= userToOuterSVG;
+    }
   }
 
-  patternMatrix.Invert();
+  if (!patternMatrix.Invert()) {
+    return nullptr;
+  }
 
   nsRefPtr<gfxPattern> gradient = CreateGradient();
   if (!gradient || gradient->CairoStatus())
@@ -400,9 +406,9 @@ nsSVGGradientFrame::GetStopFrames(nsTArray<nsIFrame*>* aStopFrames)
 
 #ifdef DEBUG
 void
-nsSVGLinearGradientFrame::Init(nsIContent* aContent,
-                               nsIFrame* aParent,
-                               nsIFrame* aPrevInFlow)
+nsSVGLinearGradientFrame::Init(nsIContent*       aContent,
+                               nsContainerFrame* aParent,
+                               nsIFrame*         aPrevInFlow)
 {
   NS_ASSERTION(aContent->IsSVG(nsGkAtoms::linearGradient),
                "Content is not an SVG linearGradient");
@@ -444,7 +450,7 @@ nsSVGLinearGradientFrame::GetLengthValue(uint32_t aIndex)
       static_cast<dom::SVGLinearGradientElement*>(mContent));
   // We passed in mContent as a fallback, so, assuming mContent is non-null, the
   // return value should also be non-null.
-  NS_ABORT_IF_FALSE(lengthElement,
+  MOZ_ASSERT(lengthElement,
     "Got unexpected null element from GetLinearGradientWithLength");
   const nsSVGLength2 &length = lengthElement->mLengthAttributes[aIndex];
 
@@ -509,9 +515,9 @@ nsSVGLinearGradientFrame::CreateGradient()
 
 #ifdef DEBUG
 void
-nsSVGRadialGradientFrame::Init(nsIContent* aContent,
-                               nsIFrame* aParent,
-                               nsIFrame* aPrevInFlow)
+nsSVGRadialGradientFrame::Init(nsIContent*       aContent,
+                               nsContainerFrame* aParent,
+                               nsIFrame*         aPrevInFlow)
 {
   NS_ASSERTION(aContent->IsSVG(nsGkAtoms::radialGradient),
                "Content is not an SVG radialGradient");
@@ -554,7 +560,7 @@ nsSVGRadialGradientFrame::GetLengthValue(uint32_t aIndex)
       static_cast<dom::SVGRadialGradientElement*>(mContent));
   // We passed in mContent as a fallback, so, assuming mContent is non-null,
   // the return value should also be non-null.
-  NS_ABORT_IF_FALSE(lengthElement,
+  MOZ_ASSERT(lengthElement,
     "Got unexpected null element from GetRadialGradientWithLength");
   return GetLengthValueFromElement(aIndex, *lengthElement);
 }

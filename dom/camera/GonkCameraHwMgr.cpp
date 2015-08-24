@@ -23,7 +23,7 @@
 #include "base/basictypes.h"
 #include "nsDebug.h"
 #include "mozilla/layers/TextureClient.h"
-#include "mozilla/Preferences.h"
+#include "CameraPreferences.h"
 #include "mozilla/RefPtr.h"
 #include "GonkCameraControl.h"
 #include "GonkNativeWindow.h"
@@ -45,6 +45,12 @@ GonkCameraHardware::GonkCameraHardware(mozilla::nsGonkCameraControl* aTarget, ui
 }
 
 void
+GonkCameraHardware::OnRateLimitPreview(bool aLimit)
+{
+  ::OnRateLimitPreview(mTarget, aLimit);
+}
+
+void
 GonkCameraHardware::OnNewFrame()
 {
   if (mClosing) {
@@ -52,7 +58,7 @@ GonkCameraHardware::OnNewFrame()
   }
   RefPtr<TextureClient> buffer = mNativeWindow->getCurrentBuffer();
   if (!buffer) {
-    DOM_CAMERA_LOGW("received null frame");
+    DOM_CAMERA_LOGE("received null frame");
     return;
   }
   OnNewPreviewFrame(mTarget, buffer);
@@ -113,7 +119,7 @@ GonkCameraHardware::notify(int32_t aMsgType, int32_t ext1, int32_t ext2)
       break;
 
     case CAMERA_MSG_ERROR:
-      OnError(mTarget, CameraControlListener::kErrorServiceFailed, ext1, ext2);
+      OnSystemError(mTarget, CameraControlListener::kSystemService, ext1, ext2);
       break;
 
     default:
@@ -132,7 +138,10 @@ GonkCameraHardware::postDataTimestamp(nsecs_t aTimestamp, int32_t aMsgType, cons
 
   if (mListener.get()) {
     DOM_CAMERA_LOGI("Listener registered, posting recording frame!");
-    mListener->postDataTimestamp(aTimestamp, aMsgType, aDataPtr);
+    if (!mListener->postDataTimestamp(aTimestamp, aMsgType, aDataPtr)) {
+      DOM_CAMERA_LOGW("Listener unable to process. Drop a recording frame.");
+      mCamera->releaseRecordingFrame(aDataPtr);
+    }
   } else {
     DOM_CAMERA_LOGW("No listener was set. Drop a recording frame.");
     mCamera->releaseRecordingFrame(aDataPtr);
@@ -148,7 +157,7 @@ GonkCameraHardware::Init()
   int rv = Camera::getCameraInfo(mCameraId, &info);
   if (rv != 0) {
     DOM_CAMERA_LOGE("%s: failed to get CameraInfo mCameraId %d\n", __func__, mCameraId);
-    return NS_ERROR_FAILURE;
+    return NS_ERROR_NOT_INITIALIZED;
    }
 
   mRawSensorOrientation = info.orientation;
@@ -172,19 +181,30 @@ GonkCameraHardware::Init()
   // Disable shutter sound in android CameraService because gaia camera app will play it
   mCamera->sendCommand(CAMERA_CMD_ENABLE_SHUTTER_SOUND, 0, 0);
 
-  mNativeWindow = new GonkNativeWindow();
-  mNativeWindow->setNewFrameCallback(this);
-  mCamera->setListener(this);
-
 #if defined(MOZ_WIDGET_GONK)
 
-#if ANDROID_VERSION >= 19
+#if ANDROID_VERSION >= 21
+  sp<IGraphicBufferProducer> producer;
+  sp<IGonkGraphicBufferConsumer> consumer;
+  GonkBufferQueue::createBufferQueue(&producer, &consumer);
+  mNativeWindow = new GonkNativeWindow(consumer, GonkCameraHardware::MIN_UNDEQUEUED_BUFFERS);
+  mCamera->setPreviewTarget(producer);
+#elif ANDROID_VERSION >= 19
+  mNativeWindow = new GonkNativeWindow(GonkCameraHardware::MIN_UNDEQUEUED_BUFFERS);
+  sp<GonkBufferQueue> bq = mNativeWindow->getBufferQueue();
+  bq->setSynchronousMode(false);
   mCamera->setPreviewTarget(mNativeWindow->getBufferQueue());
-#elif (ANDROID_VERSION == 17) || (ANDROID_VERSION == 18)
+#elif ANDROID_VERSION >= 17
+  mNativeWindow = new GonkNativeWindow(GonkCameraHardware::MIN_UNDEQUEUED_BUFFERS);
+  sp<GonkBufferQueue> bq = mNativeWindow->getBufferQueue();
+  bq->setSynchronousMode(false);
   mCamera->setPreviewTexture(mNativeWindow->getBufferQueue());
 #else
+  mNativeWindow = new GonkNativeWindow();
   mCamera->setPreviewTexture(mNativeWindow);
 #endif
+  mNativeWindow->setNewFrameCallback(this);
+  mCamera->setListener(this);
 
 #if ANDROID_VERSION >= 16
   rv = mCamera->sendCommand(CAMERA_CMD_ENABLE_FOCUS_MOVE_MSG, 1, 0);
@@ -211,8 +231,8 @@ GonkCameraHardware::Connect(mozilla::nsGonkCameraControl* aTarget, uint32_t aCam
     return nullptr;
   }
 
-  const nsAdoptingCString& test =
-    mozilla::Preferences::GetCString("camera.control.test.enabled");
+  nsCString test;
+  CameraPreferences::GetPref("camera.control.test.enabled", test);
   sp<GonkCameraHardware> cameraHardware;
   if (test.EqualsASCII("hardware")) {
     NS_WARNING("Using test Gonk hardware layer");
@@ -224,6 +244,7 @@ GonkCameraHardware::Connect(mozilla::nsGonkCameraControl* aTarget, uint32_t aCam
   nsresult rv = cameraHardware->Init();
   if (NS_FAILED(rv)) {
     DOM_CAMERA_LOGE("Failed to initialize camera hardware (0x%X)\n", rv);
+    cameraHardware->Close();
     return nullptr;
   }
 
@@ -253,18 +274,6 @@ GonkCameraHardware::~GonkCameraHardware()
   DOM_CAMERA_LOGT("%s:%d : this=%p\n", __func__, __LINE__, (void*)this);
   mCamera.clear();
   mNativeWindow.clear();
-
-  if (mClosing) {
-    return;
-  }
-
-  /**
-   * Trigger the OnClosed event; the upper layers can't do anything
-   * with the hardware layer once they receive this event.
-   */
-  if (mTarget) {
-    OnClosed(mTarget);
-  }
 }
 
 int

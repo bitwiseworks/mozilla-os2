@@ -6,6 +6,7 @@
 #include "mozilla/BasicEvents.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventListenerManager.h"
+#include "mozilla/dom/WindowRootBinding.h"
 #include "nsCOMPtr.h"
 #include "nsWindowRoot.h"
 #include "nsPIDOMWindow.h"
@@ -20,7 +21,7 @@
 #include "nsIDOMHTMLTextAreaElement.h"
 #include "nsIControllers.h"
 #include "nsIController.h"
-
+#include "xpcpublic.h"
 #include "nsCycleCollectionParticipant.h"
 
 #ifdef MOZ_XUL
@@ -33,6 +34,7 @@ using namespace mozilla::dom;
 nsWindowRoot::nsWindowRoot(nsPIDOMWindow* aWindow)
 {
   mWindow = aWindow;
+  MOZ_ASSERT(mWindow->IsOuterWindow());
 }
 
 nsWindowRoot::~nsWindowRoot()
@@ -42,11 +44,11 @@ nsWindowRoot::~nsWindowRoot()
   }
 }
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_4(nsWindowRoot,
-                                        mWindow,
-                                        mListenerManager,
-                                        mPopupNode,
-                                        mParent)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(nsWindowRoot,
+                                      mWindow,
+                                      mListenerManager,
+                                      mPopupNode,
+                                      mParent)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsWindowRoot)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
@@ -280,6 +282,75 @@ nsWindowRoot::GetControllerForCommand(const char * aCommand,
   return NS_OK;
 }
 
+void
+nsWindowRoot::GetEnabledDisabledCommandsForControllers(nsIControllers* aControllers,
+                                                       nsTHashtable<nsCharPtrHashKey>& aCommandsHandled,
+                                                       nsTArray<nsCString>& aEnabledCommands,
+                                                       nsTArray<nsCString>& aDisabledCommands)
+{
+  uint32_t controllerCount;
+  aControllers->GetControllerCount(&controllerCount);
+  for (uint32_t c = 0; c < controllerCount; c++) {
+    nsCOMPtr<nsIController> controller;
+    aControllers->GetControllerAt(c, getter_AddRefs(controller));
+
+    nsCOMPtr<nsICommandController> commandController(do_QueryInterface(controller));
+    if (commandController) {
+      uint32_t commandsCount;
+      char** commands;
+      if (NS_SUCCEEDED(commandController->GetSupportedCommands(&commandsCount, &commands))) {
+        for (uint32_t e = 0; e < commandsCount; e++) {
+          // Use a hash to determine which commands have already been handled by
+          // earlier controllers, as the earlier controller's result should get
+          // priority.
+          if (!aCommandsHandled.Contains(commands[e])) {
+            aCommandsHandled.PutEntry(commands[e]);
+
+            bool enabled = false;
+            controller->IsCommandEnabled(commands[e], &enabled);
+
+            const nsDependentCSubstring commandStr(commands[e], strlen(commands[e]));
+            if (enabled) {
+              aEnabledCommands.AppendElement(commandStr);
+            } else {
+              aDisabledCommands.AppendElement(commandStr);
+            }
+          }
+        }
+
+        NS_FREE_XPCOM_ALLOCATED_POINTER_ARRAY(commandsCount, commands);
+      }
+    }
+  }
+}
+
+void
+nsWindowRoot::GetEnabledDisabledCommands(nsTArray<nsCString>& aEnabledCommands,
+                                         nsTArray<nsCString>& aDisabledCommands)
+{
+  nsTHashtable<nsCharPtrHashKey> commandsHandled;
+
+  nsCOMPtr<nsIControllers> controllers;
+  GetControllers(getter_AddRefs(controllers));
+  if (controllers) {
+    GetEnabledDisabledCommandsForControllers(controllers, commandsHandled,
+                                             aEnabledCommands, aDisabledCommands);
+  }
+
+  nsCOMPtr<nsPIDOMWindow> focusedWindow;
+  nsFocusManager::GetFocusedDescendant(mWindow, true, getter_AddRefs(focusedWindow));
+  while (focusedWindow) {
+    focusedWindow->GetControllers(getter_AddRefs(controllers));
+    if (controllers) {
+      GetEnabledDisabledCommandsForControllers(controllers, commandsHandled,
+                                               aEnabledCommands, aDisabledCommands);
+    }
+
+    nsGlobalWindow* win = static_cast<nsGlobalWindow*>(focusedWindow.get());
+    focusedWindow = win->GetPrivateParent();
+  }
+}
+
 nsIDOMNode*
 nsWindowRoot::GetPopupNode()
 {
@@ -290,6 +361,18 @@ void
 nsWindowRoot::SetPopupNode(nsIDOMNode* aNode)
 {
   mPopupNode = aNode;
+}
+
+nsIGlobalObject*
+nsWindowRoot::GetParentObject()
+{
+  return xpc::NativeGlobal(xpc::PrivilegedJunkScope());
+}
+
+JSObject*
+nsWindowRoot::WrapObject(JSContext* aCx)
+{
+  return mozilla::dom::WindowRootBinding::Wrap(aCx, this);
 }
 
 ///////////////////////////////////////////////////////////////////////////////////

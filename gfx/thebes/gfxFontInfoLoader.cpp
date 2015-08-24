@@ -10,7 +10,7 @@
 #include "gfxPlatformFontList.h"
 
 using namespace mozilla;
-using mozilla::services::GetObserverService;
+using services::GetObserverService;
 
 void
 FontInfoData::Load()
@@ -27,29 +27,31 @@ FontInfoData::Load()
 }
 
 class FontInfoLoadCompleteEvent : public nsRunnable {
-    NS_DECL_THREADSAFE_ISUPPORTS
-
-    FontInfoLoadCompleteEvent(FontInfoData *aFontInfo) :
-        mFontInfo(aFontInfo)
-    {}
     virtual ~FontInfoLoadCompleteEvent() {}
 
-    NS_IMETHOD Run();
+    NS_DECL_ISUPPORTS_INHERITED
+
+    explicit FontInfoLoadCompleteEvent(FontInfoData *aFontInfo) :
+        mFontInfo(aFontInfo)
+    {}
+
+    NS_IMETHOD Run() override;
 
     nsRefPtr<FontInfoData> mFontInfo;
 };
 
 class AsyncFontInfoLoader : public nsRunnable {
-    NS_DECL_THREADSAFE_ISUPPORTS
+    virtual ~AsyncFontInfoLoader() {}
 
-    AsyncFontInfoLoader(FontInfoData *aFontInfo) :
+    NS_DECL_ISUPPORTS_INHERITED
+
+    explicit AsyncFontInfoLoader(FontInfoData *aFontInfo) :
         mFontInfo(aFontInfo)
     {
         mCompleteEvent = new FontInfoLoadCompleteEvent(aFontInfo);
     }
-    virtual ~AsyncFontInfoLoader() {}
 
-    NS_IMETHOD Run();
+    NS_IMETHOD Run() override;
 
     nsRefPtr<FontInfoData> mFontInfo;
     nsRefPtr<FontInfoLoadCompleteEvent> mCompleteEvent;
@@ -68,7 +70,7 @@ FontInfoLoadCompleteEvent::Run()
     return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS(FontInfoLoadCompleteEvent, nsIRunnable);
+NS_IMPL_ISUPPORTS_INHERITED0(FontInfoLoadCompleteEvent, nsRunnable);
 
 // runs on separate thread
 nsresult
@@ -78,13 +80,13 @@ AsyncFontInfoLoader::Run()
     mFontInfo->Load();
 
     // post a completion event that transfer the data to the fontlist
-    NS_DispatchToMainThread(mCompleteEvent, NS_DISPATCH_NORMAL);
+    NS_DispatchToMainThread(mCompleteEvent);
     mFontInfo = nullptr;
 
     return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS(AsyncFontInfoLoader, nsIRunnable);
+NS_IMPL_ISUPPORTS_INHERITED0(AsyncFontInfoLoader, nsRunnable);
 
 NS_IMPL_ISUPPORTS(gfxFontInfoLoader::ShutdownObserver, nsIObserver)
 
@@ -209,6 +211,7 @@ gfxFontInfoLoader::LoadFontInfoTimerFire()
 gfxFontInfoLoader::~gfxFontInfoLoader()
 {
     RemoveShutdownObserver();
+    MOZ_COUNT_DTOR(gfxFontInfoLoader);
 }
 
 void

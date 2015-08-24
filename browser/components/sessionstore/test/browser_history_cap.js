@@ -47,9 +47,8 @@ add_task(function *test_history_cap() {
 
   info("Testing situation where only a subset of session history entries should be restored.");
 
-  ss.setTabState(tab, JSON.stringify(tabState));
-  yield promiseTabRestored(tab);
-  SyncHandlers.get(tab.linkedBrowser).flush();
+  yield promiseTabState(tab, tabState);
+  TabState.flush(tab.linkedBrowser);
 
   let restoredTabState = JSON.parse(ss.getTabState(tab));
   is(restoredTabState.entries.length, maxBack1 + 1 + maxFwd1,
@@ -68,9 +67,8 @@ add_task(function *test_history_cap() {
 
   info("Testing situation where all of the entries in the session history should be restored.");
 
-  ss.setTabState(tab, JSON.stringify(tabState));
-  yield promiseTabRestored(tab);
-  SyncHandlers.get(tab.linkedBrowser).flush();
+  yield promiseTabState(tab, tabState);
+  TabState.flush(tab.linkedBrowser);
 
   restoredTabState = JSON.parse(ss.getTabState(tab));
   is(restoredTabState.entries.length, maxEntries,
@@ -87,9 +85,8 @@ add_task(function *test_history_cap() {
   // Set the one-based tab-state index to the oldest session history entry.
   tabState.index = 1;
 
-  ss.setTabState(tab, JSON.stringify(tabState));
-  yield promiseTabRestored(tab);
-  SyncHandlers.get(tab.linkedBrowser).flush();
+  yield promiseTabState(tab, tabState);
+  TabState.flush(tab.linkedBrowser);
 
   restoredTabState = JSON.parse(ss.getTabState(tab));
   is(restoredTabState.entries.length, 1 + maxFwd2,
@@ -106,9 +103,8 @@ add_task(function *test_history_cap() {
   // Set the one-based tab-state index to the newest session history entry.
   tabState.index = maxEntries;
 
-  ss.setTabState(tab, JSON.stringify(tabState));
-  yield promiseTabRestored(tab);
-  SyncHandlers.get(tab.linkedBrowser).flush();
+  yield promiseTabState(tab, tabState);
+  TabState.flush(tab.linkedBrowser);
 
   restoredTabState = JSON.parse(ss.getTabState(tab));
   is(restoredTabState.entries.length, maxBack2 + 1,

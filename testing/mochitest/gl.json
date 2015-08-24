@@ -1,5 +1,5 @@
 {
- "runtests": {"content/canvas/test/webgl": ""},
+ "runtests": { "dom/canvas/test/webgl-conformance": "bug 865443" },
  "excludetests": {}
 }
 

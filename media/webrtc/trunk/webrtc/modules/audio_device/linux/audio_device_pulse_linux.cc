@@ -33,35 +33,6 @@ namespace webrtc
 //                              Static Methods
 // ============================================================================
 
-bool AudioDeviceLinuxPulse::PulseAudioIsSupported()
-{
-    WEBRTC_TRACE(kTraceInfo, kTraceAudioDevice, -1, "%s",
-                 __FUNCTION__);
-
-    bool pulseAudioIsSupported(true);
-
-    // Check that we can initialize
-    AudioDeviceLinuxPulse* admPulse = new AudioDeviceLinuxPulse(-1);
-    if (admPulse->InitPulseAudio() == -1)
-    {
-        pulseAudioIsSupported = false;
-    }
-    admPulse->TerminatePulseAudio();
-    delete admPulse;
-
-    if (pulseAudioIsSupported)
-    {
-        WEBRTC_TRACE(kTraceStateInfo, kTraceAudioDevice, -1,
-                     "*** Linux Pulse Audio is supported ***");
-    } else
-    {
-        WEBRTC_TRACE(kTraceStateInfo, kTraceAudioDevice, -1,
-                     "*** Linux Pulse Audio is NOT supported => will revert to the ALSA API ***");
-    }
-
-    return (pulseAudioIsSupported);
-}
-
 AudioDeviceLinuxPulse::AudioDeviceLinuxPulse(const int32_t id) :
     _ptrAudioBuffer(NULL),
     _critSect(*CriticalSectionWrapper::CreateCriticalSection()),
@@ -374,34 +345,6 @@ bool AudioDeviceLinuxPulse::Initialized() const
     return (_initialized);
 }
 
-int32_t AudioDeviceLinuxPulse::SpeakerIsAvailable(bool& available)
-{
-
-    bool wasInitialized = _mixerManager.SpeakerIsInitialized();
-
-    // Make an attempt to open up the
-    // output mixer corresponding to the currently selected output device.
-    //
-    if (!wasInitialized && InitSpeaker() == -1)
-    {
-        available = false;
-        return 0;
-    }
-
-    // Given that InitSpeaker was successful, we know that a valid speaker exists
-    //
-    available = true;
-
-    // Close the initialized output mixer
-    //
-    if (!wasInitialized)
-    {
-        _mixerManager.CloseSpeaker();
-    }
-
-    return 0;
-}
-
 int32_t AudioDeviceLinuxPulse::InitSpeaker()
 {
 
@@ -443,34 +386,6 @@ int32_t AudioDeviceLinuxPulse::InitSpeaker()
     // clear _deviceIndex
     _deviceIndex = -1;
     _paDeviceIndex = -1;
-
-    return 0;
-}
-
-int32_t AudioDeviceLinuxPulse::MicrophoneIsAvailable(bool& available)
-{
-
-    bool wasInitialized = _mixerManager.MicrophoneIsInitialized();
-
-    // Make an attempt to open up the
-    // input mixer corresponding to the currently selected output device.
-    //
-    if (!wasInitialized && InitMicrophone() == -1)
-    {
-        available = false;
-        return 0;
-    }
-
-    // Given that InitMicrophone was successful, we know that a valid microphone
-    // exists
-    available = true;
-
-    // Close the initialized input mixer
-    //
-    if (!wasInitialized)
-    {
-        _mixerManager.CloseMicrophone();
-    }
 
     return 0;
 }
@@ -2502,6 +2417,18 @@ void AudioDeviceLinuxPulse::PaStreamReadCallbackHandler()
         return;
     }
 
+    // PulseAudio record streams can have holes (for reasons not entirely clear
+    // to the PA developers themselves). Since version 4 of PA, these are passed
+    // over to the application (us), signaled by a non-zero sample data size
+    // (the size of the hole) and a NULL sample data.
+    // We handle stream holes as recommended by PulseAudio, i.e. by skipping
+    // it, which is done with a stream drop.
+    if (_tempSampleDataSize && !_tempSampleData) {
+        LATE(pa_stream_drop)(_recStream);
+        _tempSampleDataSize = 0; // reset
+        return;
+    }
+
     // Since we consume the data asynchronously on a different thread, we have
     // to temporarily disable the read callback or else Pulse will call it
     // continuously until we consume the data. We re-enable it below
@@ -2646,7 +2573,7 @@ int32_t AudioDeviceLinuxPulse::ReadRecordedData(const void* bufferData,
 int32_t AudioDeviceLinuxPulse::ProcessRecordedData(
     int8_t *bufferData,
     uint32_t bufferSizeInSamples,
-    uint32_t recDelay)
+    uint32_t recDelay) EXCLUSIVE_LOCKS_REQUIRED(_critSect)
 {
     uint32_t currentMicLevel(0);
     uint32_t newMicLevel(0);
@@ -3114,18 +3041,16 @@ bool AudioDeviceLinuxPulse::RecThreadProcess()
 }
 
 bool AudioDeviceLinuxPulse::KeyPressed() const{
-
+#ifdef USE_X11
   char szKey[32];
   unsigned int i = 0;
   char state = 0;
 
-#ifdef USE_X11
   if (!_XDisplay)
     return false;
 
   // Check key map status
   XQueryKeymap(_XDisplay, szKey);
-#endif
 
   // A bit change in keymap means a key is pressed
   for (i = 0; i < sizeof(szKey); i++)
@@ -3134,5 +3059,8 @@ bool AudioDeviceLinuxPulse::KeyPressed() const{
   // Save old state
   memcpy((char*)_oldKeyState, (char*)szKey, sizeof(_oldKeyState));
   return (state != 0);
+#else
+  return false;
+#endif
 }
 }

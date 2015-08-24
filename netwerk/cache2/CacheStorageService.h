@@ -10,11 +10,13 @@
 
 #include "nsITimer.h"
 #include "nsClassHashtable.h"
+#include "nsDataHashtable.h"
 #include "nsString.h"
 #include "nsThreadUtils.h"
 #include "nsProxyRelease.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/Atomics.h"
+#include "mozilla/TimeStamp.h"
 #include "nsTArray.h"
 
 class nsIURI;
@@ -42,7 +44,7 @@ private:
   uint32_t mFlags : 2;
 
 private:
-  CacheMemoryConsumer() MOZ_DELETE;
+  CacheMemoryConsumer() = delete;
 
 protected:
   enum {
@@ -57,14 +59,14 @@ protected:
     DONT_REPORT = 1 << 1
   };
 
-  CacheMemoryConsumer(uint32_t aFlags);
+  explicit CacheMemoryConsumer(uint32_t aFlags);
   ~CacheMemoryConsumer() { DoMemoryReport(0); }
   void DoMemoryReport(uint32_t aCurrentSize);
 };
 
-class CacheStorageService : public nsICacheStorageService
-                          , public nsIMemoryReporter
-                          , public nsITimerCallback
+class CacheStorageService final : public nsICacheStorageService
+                                    , public nsIMemoryReporter
+                                    , public nsITimerCallback
 {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
@@ -77,8 +79,9 @@ public:
   void Shutdown();
   void DropPrivateBrowsingEntries();
 
-  // Wipes out the new or the old cache directory completely.
-  static void WipeCacheDirectory(uint32_t aVersion);
+  // Takes care of deleting any pending trashes for both cache1 and cache2
+  // as well as the cache directory of an inactive cache version when requested.
+  static void CleaupCacheDirectories(uint32_t aVersion, uint32_t aActive);
 
   static CacheStorageService* Self() { return sSelf; }
   static nsISupports* SelfISupports() { return static_cast<nsICacheStorageService*>(Self()); }
@@ -87,6 +90,23 @@ public:
   static bool IsOnManagementThread();
   already_AddRefed<nsIEventTarget> Thread() const;
   mozilla::Mutex& Lock() { return mLock; }
+
+  // Tracks entries that may be forced valid in a pruned hashtable.
+  nsDataHashtable<nsCStringHashKey, TimeStamp> mForcedValidEntries;
+  void ForcedValidEntriesPrune(TimeStamp &now);
+
+  // Helper thread-safe interface to pass entry info, only difference from
+  // nsICacheStorageVisitor is that instead of nsIURI only the uri spec is
+  // passed.
+  class EntryInfoCallback {
+  public:
+    virtual void OnEntryInfo(const nsACString & aURISpec, const nsACString & aIdEnhance,
+                             int64_t aDataSize, int32_t aFetchCount,
+                             uint32_t aLastModifiedTime, uint32_t aExpirationTime) = 0;
+  };
+
+  // Invokes OnEntryInfo for the given aEntry, synchronously.
+  static void GetCacheEntryInfo(CacheEntry* aEntry, EntryInfoCallback *aVisitor);
 
   // Memory reporting
   size_t SizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
@@ -130,6 +150,32 @@ private:
                              bool aOnlyInMemory,
                              bool aOverwrite);
 
+  /**
+   * Sets a cache entry valid (overrides the default loading behavior by loading
+   * directly from cache) for the given number of seconds
+   * See nsICacheEntry.idl for more details
+   */
+  void ForceEntryValidFor(nsACString &aCacheEntryKey,
+                          uint32_t aSecondsToTheFuture);
+
+private:
+  friend class CacheIndex;
+
+  /**
+   * Retrieves the status of the cache entry to see if it has been forced valid
+   * (so it will loaded directly from cache without further validation)
+   * CacheIndex uses this to prevent a cache entry from being prememptively
+   * thrown away when forced valid
+   * See nsICacheEntry.idl for more details
+   */
+  bool IsForcedValidEntry(nsACString &aCacheEntryKey);
+
+private:
+  // These are helpers for telemetry monitorying of the memory pools.
+  void TelemetryPrune(TimeStamp &now);
+  void TelemetryRecordEntryCreation(CacheEntry const* entry);
+  void TelemetryRecordEntryRemoval(CacheEntry const* entry);
+
 private:
   // Following methods are thread safe to call.
   friend class CacheStorage;
@@ -144,6 +190,15 @@ private:
                            bool aCreateIfNotExist,
                            bool aReplace,
                            CacheEntryHandle** aResult);
+
+  /**
+   * Check existance of an entry.  This may throw NS_ERROR_NOT_AVAILABLE
+   * when the information cannot be obtained synchronously w/o blocking.
+   */
+  nsresult CheckStorageEntry(CacheStorage const* aStorage,
+                             nsIURI* aURI,
+                             const nsACString & aIdExtension,
+                             bool* aResult);
 
   /**
    * Removes the entry from the related entry hash table, if still present
@@ -178,6 +233,19 @@ private:
   void CacheFileDoomed(nsILoadContextInfo* aLoadContextInfo,
                        const nsACString & aIdExtension,
                        const nsACString & aURISpec);
+
+  /**
+   * Tries to find an existing entry in the hashtables and synchronously call
+   * OnCacheEntryInfo of the aVisitor callback when found.
+   * @retuns
+   *   true, when the entry has been found that also implies the callbacks has
+   *        beem invoked
+   *   false, when an entry has not been found
+   */
+  bool GetCacheEntryInfo(nsILoadContextInfo* aLoadContextInfo,
+                         const nsACString & aIdExtension,
+                         const nsACString & aURISpec,
+                         EntryInfoCallback *aCallback);
 
 private:
   friend class CacheMemoryConsumer;
@@ -219,6 +287,7 @@ private:
   static CacheStorageService* sSelf;
 
   mozilla::Mutex mLock;
+  mozilla::Mutex mForcedValidEntriesLock;
 
   bool mShutdown;
 
@@ -232,7 +301,7 @@ private:
       MEMORY,
     } mType;
 
-    MemoryPool(EType aType);
+    explicit MemoryPool(EType aType);
     ~MemoryPool();
 
     nsTArray<nsRefPtr<CacheEntry> > mFrecencyArray;
@@ -251,7 +320,7 @@ private:
 
   private:
     uint32_t const Limit() const;
-    MemoryPool() MOZ_DELETE;
+    MemoryPool() = delete;
   };
 
   MemoryPool mDiskPool;
@@ -287,6 +356,12 @@ private:
     nsRefPtr<CacheStorageService> mService;
     uint32_t mWhat;
   };
+
+  // Used just for telemetry purposes, accessed only on the management thread.
+  // Note: not included in the memory reporter, this is not expected to be huge
+  // and also would be complicated to report since reporting happens on the main
+  // thread but this table is manipulated on the management thread.
+  nsDataHashtable<nsCStringHashKey, mozilla::TimeStamp> mPurgeTimeStamps;
 };
 
 template<class T>
@@ -314,5 +389,8 @@ void ProxyReleaseMainThread(nsCOMPtr<T> &object)
 
 #define NS_CACHE_STORAGE_SERVICE_CONTRACTID \
   "@mozilla.org/netwerk/cache-storage-service;1"
+
+#define NS_CACHE_STORAGE_SERVICE_CONTRACTID2 \
+  "@mozilla.org/network/cache-storage-service;1"
 
 #endif

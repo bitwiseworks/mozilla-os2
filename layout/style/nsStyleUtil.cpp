@@ -10,9 +10,11 @@
 #include "nsCSSProps.h"
 #include "nsRuleNode.h"
 #include "nsROCSSPrimitiveValue.h"
+#include "nsStyleStruct.h"
 #include "nsIContentPolicy.h"
 #include "nsIContentSecurityPolicy.h"
 #include "nsIURI.h"
+#include "nsPrintfCString.h"
 
 using namespace mozilla;
 
@@ -81,13 +83,16 @@ void nsStyleUtil::AppendEscapedCSSString(const nsAString& aString,
 nsStyleUtil::AppendEscapedCSSIdent(const nsAString& aIdent, nsAString& aReturn)
 {
   // The relevant parts of the CSS grammar are:
-  //   ident    [-]?{nmstart}{nmchar}*
+  //   ident    ([-]?{nmstart}|[-][-]){nmchar}*
   //   nmstart  [_a-z]|{nonascii}|{escape}
   //   nmchar   [_a-z0-9-]|{nonascii}|{escape}
   //   nonascii [^\0-\177]
   //   escape   {unicode}|\\[^\n\r\f0-9a-f]
   //   unicode  \\[0-9a-f]{1,6}(\r\n|[ \n\r\t\f])?
-  // from http://www.w3.org/TR/CSS21/syndata.html#tokenization
+  // from http://www.w3.org/TR/CSS21/syndata.html#tokenization but
+  // modified for idents by
+  // http://dev.w3.org/csswg/cssom/#serialize-an-identifier and
+  // http://dev.w3.org/csswg/css-syntax/#would-start-an-identifier
 
   const char16_t* in = aIdent.BeginReading();
   const char16_t* const end = aIdent.EndReading();
@@ -97,7 +102,13 @@ nsStyleUtil::AppendEscapedCSSIdent(const nsAString& aIdent, nsAString& aReturn)
 
   // A leading dash does not need to be escaped as long as it is not the
   // *only* character in the identifier.
-  if (in + 1 != end && *in == '-') {
+  if (*in == '-') {
+    if (in + 1 == end) {
+      aReturn.Append(char16_t('\\'));
+      aReturn.Append(char16_t('-'));
+      return true;
+    }
+
     aReturn.Append(char16_t('-'));
     ++in;
   }
@@ -105,16 +116,8 @@ nsStyleUtil::AppendEscapedCSSIdent(const nsAString& aIdent, nsAString& aReturn)
   // Escape a digit at the start (including after a dash),
   // numerically.  If we didn't escape it numerically, it would get
   // interpreted as a numeric escape for the wrong character.
-  // A second dash immediately after a leading dash must also be
-  // escaped, but this may be done symbolically.
-  if (in != end && (*in == '-' ||
-                    ('0' <= *in && *in <= '9'))) {
-    if (*in == '-') {
-      aReturn.Append(char16_t('\\'));
-      aReturn.Append(char16_t('-'));
-    } else {
-      aReturn.AppendPrintf("\\%hX ", *in);
-    }
+  if (in != end && ('0' <= *in && *in <= '9')) {
+    aReturn.AppendPrintf("\\%hX ", *in);
     ++in;
   }
 
@@ -142,6 +145,60 @@ nsStyleUtil::AppendEscapedCSSIdent(const nsAString& aIdent, nsAString& aReturn)
   return true;
 }
 
+// unquoted family names must be a sequence of idents
+// so escape any parts that require escaping
+static void
+AppendUnquotedFamilyName(const nsAString& aFamilyName, nsAString& aResult)
+{
+  const char16_t *p, *p_end;
+  aFamilyName.BeginReading(p);
+  aFamilyName.EndReading(p_end);
+
+   bool moreThanOne = false;
+   while (p < p_end) {
+     const char16_t* identStart = p;
+     while (++p != p_end && *p != ' ')
+       /* nothing */ ;
+
+     nsDependentSubstring ident(identStart, p);
+     if (!ident.IsEmpty()) {
+       if (moreThanOne) {
+         aResult.Append(' ');
+       }
+       nsStyleUtil::AppendEscapedCSSIdent(ident, aResult);
+       moreThanOne = true;
+     }
+
+     ++p;
+  }
+}
+
+/* static */ void
+nsStyleUtil::AppendEscapedCSSFontFamilyList(
+  const mozilla::FontFamilyList& aFamilyList,
+  nsAString& aResult)
+{
+  const nsTArray<FontFamilyName>& fontlist = aFamilyList.GetFontlist();
+  size_t i, len = fontlist.Length();
+  for (i = 0; i < len; i++) {
+    if (i != 0) {
+      aResult.Append(',');
+    }
+    const FontFamilyName& name = fontlist[i];
+    switch (name.mType) {
+      case eFamily_named:
+        AppendUnquotedFamilyName(name.mName, aResult);
+        break;
+      case eFamily_named_quoted:
+        AppendEscapedCSSString(name.mName, aResult);
+        break;
+      default:
+        name.AppendToString(aResult);
+    }
+  }
+}
+
+
 /* static */ void
 nsStyleUtil::AppendBitmaskCSSValue(nsCSSProperty aProperty,
                                    int32_t aMaskedValue,
@@ -159,7 +216,7 @@ nsStyleUtil::AppendBitmaskCSSValue(nsCSSProperty aProperty,
       }
     }
   }
-  NS_ABORT_IF_FALSE(aMaskedValue == 0, "unexpected bit remaining in bitfield");
+  MOZ_ASSERT(aMaskedValue == 0, "unexpected bit remaining in bitfield");
 }
 
 /* static */ void
@@ -218,7 +275,7 @@ nsStyleUtil::AppendPaintOrderValue(uint8_t aValue,
 
   for (uint32_t position = 0; position <= lastPositionToSerialize; position++) {
     if (position > 0) {
-      aResult.AppendLiteral(" ");
+      aResult.Append(' ');
     }
     uint8_t component = aValue & MASK;
     switch (component) {
@@ -268,7 +325,7 @@ nsStyleUtil::AppendFontFeatureSettings(const nsTArray<gfxFontFeature>& aFeatures
       // 0 ==> off
       aResult.AppendLiteral(" off");
     } else if (feat.mValue > 1) {
-      aResult.AppendLiteral(" ");
+      aResult.Append(' ');
       aResult.AppendInt(feat.mValue);
     }
     // else, omit value if 1, implied by default
@@ -341,7 +398,7 @@ nsStyleUtil::SerializeFunctionalAlternates(
       AppendEscapedCSSIdent(v.value, funcParams);
     } else {
       if (!funcParams.IsEmpty()) {
-        funcParams.Append(NS_LITERAL_STRING(", "));
+        funcParams.AppendLiteral(", ");
       }
       AppendEscapedCSSIdent(v.value, funcParams);
     }
@@ -406,6 +463,106 @@ nsStyleUtil::ComputeFunctionalAlternates(const nsCSSValueList* aList,
   }
 }
 
+// print all characters with at least four hex digits
+static void
+AppendSerializedUnicodePoint(uint32_t aCode, nsACString& aBuf)
+{
+  aBuf.Append(nsPrintfCString("%04X", aCode));
+}
+
+// A unicode-range: descriptor is represented as an array of integers,
+// to be interpreted as a sequence of pairs: min max min max ...
+// It is in source order.  (Possibly it should be sorted and overlaps
+// consolidated, but right now we don't do that.)
+/* static */ void
+nsStyleUtil::AppendUnicodeRange(const nsCSSValue& aValue, nsAString& aResult)
+{
+  NS_PRECONDITION(aValue.GetUnit() == eCSSUnit_Null ||
+                  aValue.GetUnit() == eCSSUnit_Array,
+                  "improper value unit for unicode-range:");
+  aResult.Truncate();
+  if (aValue.GetUnit() != eCSSUnit_Array)
+    return;
+
+  nsCSSValue::Array const & sources = *aValue.GetArrayValue();
+  nsAutoCString buf;
+
+  MOZ_ASSERT(sources.Count() % 2 == 0,
+             "odd number of entries in a unicode-range: array");
+
+  for (uint32_t i = 0; i < sources.Count(); i += 2) {
+    uint32_t min = sources[i].GetIntValue();
+    uint32_t max = sources[i+1].GetIntValue();
+
+    // We don't try to replicate the U+XX?? notation.
+    buf.AppendLiteral("U+");
+    AppendSerializedUnicodePoint(min, buf);
+
+    if (min != max) {
+      buf.Append('-');
+      AppendSerializedUnicodePoint(max, buf);
+    }
+    buf.AppendLiteral(", ");
+  }
+  buf.Truncate(buf.Length() - 2); // remove the last comma-space
+  CopyASCIItoUTF16(buf, aResult);
+}
+
+/* static */ void
+nsStyleUtil::AppendSerializedFontSrc(const nsCSSValue& aValue,
+                                     nsAString& aResult)
+{
+  // A src: descriptor is represented as an array value; each entry in
+  // the array can be eCSSUnit_URL, eCSSUnit_Local_Font, or
+  // eCSSUnit_Font_Format.  Blocks of eCSSUnit_Font_Format may appear
+  // only after one of the first two.  (css3-fonts only contemplates
+  // annotating URLs with formats, but we handle the general case.)
+
+  NS_PRECONDITION(aValue.GetUnit() == eCSSUnit_Array,
+                  "improper value unit for src:");
+
+  const nsCSSValue::Array& sources = *aValue.GetArrayValue();
+  size_t i = 0;
+
+  while (i < sources.Count()) {
+    nsAutoString formats;
+
+    if (sources[i].GetUnit() == eCSSUnit_URL) {
+      aResult.AppendLiteral("url(");
+      nsDependentString url(sources[i].GetOriginalURLValue());
+      nsStyleUtil::AppendEscapedCSSString(url, aResult);
+      aResult.Append(')');
+    } else if (sources[i].GetUnit() == eCSSUnit_Local_Font) {
+      aResult.AppendLiteral("local(");
+      nsDependentString local(sources[i].GetStringBufferValue());
+      nsStyleUtil::AppendEscapedCSSString(local, aResult);
+      aResult.Append(')');
+    } else {
+      NS_NOTREACHED("entry in src: descriptor with improper unit");
+      i++;
+      continue;
+    }
+
+    i++;
+    formats.Truncate();
+    while (i < sources.Count() &&
+           sources[i].GetUnit() == eCSSUnit_Font_Format) {
+      formats.Append('"');
+      formats.Append(sources[i].GetStringBufferValue());
+      formats.AppendLiteral("\", ");
+      i++;
+    }
+    if (formats.Length() > 0) {
+      formats.Truncate(formats.Length() - 2); // remove the last comma
+      aResult.AppendLiteral(" format(");
+      aResult.Append(formats);
+      aResult.Append(')');
+    }
+    aResult.AppendLiteral(", ");
+  }
+  aResult.Truncate(aResult.Length() - 2); // remove the last comma-space
+}
+
 /* static */ float
 nsStyleUtil::ColorComponentToFloat(uint8_t aAlpha)
 {
@@ -439,6 +596,57 @@ nsStyleUtil::IsSignificantChild(nsIContent* aChild, bool aTextIsSignificant,
          (aWhitespaceIsSignificant ||
           !aChild->TextIsOnlyWhitespace());
 }
+
+// For a replaced element whose concrete object size is no larger than the
+// element's content-box, this method checks whether the given
+// "object-position" coordinate might cause overflow in its dimension.
+typedef nsStyleBackground::Position::PositionCoord PositionCoord;
+static bool
+ObjectPositionCoordMightCauseOverflow(const PositionCoord& aCoord)
+{
+  // Any nonzero length in "object-position" can push us to overflow
+  // (particularly if our concrete object size is exactly the same size as the
+  // replaced element's content-box).
+  if (aCoord.mLength != 0) {
+    return true;
+  }
+
+  // Percentages are interpreted as a fraction of the extra space. So,
+  // percentages in the 0-100% range are safe, but values outside of that
+  // range could cause overflow.
+  if (aCoord.mHasPercent &&
+      (aCoord.mPercent < 0.0f || aCoord.mPercent > 1.0f)) {
+    return true;
+  }
+  return false;
+}
+
+
+/* static */ bool
+nsStyleUtil::ObjectPropsMightCauseOverflow(const nsStylePosition* aStylePos)
+{
+  auto objectFit = aStylePos->mObjectFit;
+
+  // "object-fit: cover" & "object-fit: none" can give us a render rect that's
+  // larger than our container element's content-box.
+  if (objectFit == NS_STYLE_OBJECT_FIT_COVER ||
+      objectFit == NS_STYLE_OBJECT_FIT_NONE) {
+    return true;
+  }
+  // (All other object-fit values produce a concrete object size that's no larger
+  // than the constraint region.)
+
+  // Check each of our "object-position" coords to see if it could cause
+  // overflow in its dimension:
+  const nsStyleBackground::Position& objectPosistion = aStylePos->mObjectPosition;
+  if (ObjectPositionCoordMightCauseOverflow(objectPosistion.mXPosition) ||
+      ObjectPositionCoordMightCauseOverflow(objectPosistion.mYPosition)) {
+    return true;
+  }
+
+  return false;
+}
+
 
 /* static */ bool
 nsStyleUtil::CSPAllowsInlineStyle(nsIContent* aContent,

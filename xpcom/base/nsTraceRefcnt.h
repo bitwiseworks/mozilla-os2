@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -11,7 +12,6 @@
 class nsTraceRefcnt
 {
 public:
-  static void Startup();
   static void Shutdown();
 
   enum StatisticsType {
@@ -19,16 +19,25 @@ public:
     NEW_STATS
   };
 
-  static nsresult DumpStatistics(StatisticsType type = ALL_STATS,
-                                        FILE* out = 0);
+  static nsresult DumpStatistics(StatisticsType aType = ALL_STATS,
+                                 FILE* aOut = 0);
 
-  static void ResetStatistics(void);
+  static void ResetStatistics();
 
-  static void DemangleSymbol(const char * aSymbol,
-                                    char * aBuffer,
-                                    int aBufLen);
+  static void DemangleSymbol(const char* aSymbol, char* aBuffer, int aBufLen);
 
   static void WalkTheStack(FILE* aStream);
+
+  /**
+   * This is a variant of |WalkTheStack| that uses |CodeAddressService| to cache
+   * the results of |NS_DescribeCodeAddress|. If |WalkTheStackCached| is being
+   * called frequently, it will be a few orders of magnitude faster than
+   * |WalkTheStack|. However, the cache uses a lot of memory, which can cause
+   * OOM crashes. Therefore, this should only be used for things like refcount
+   * logging which walk the stack extremely frequently.
+   */
+  static void WalkTheStackCached(FILE* aStream);
+
   /**
    * Tell nsTraceRefcnt whether refcounting, allocation, and destruction
    * activity is legal.  This is used to trigger assertions for any such
@@ -50,8 +59,9 @@ public:
 // And now for that utility that you've all been asking for...
 
 extern "C" void
-NS_MeanAndStdDev(double n, double sumOfValues, double sumOfSquaredValues,
-                 double *meanResult, double *stdDevResult);
+NS_MeanAndStdDev(double aNumberOfValues,
+                 double aSumOfValues, double aSumOfSquaredValues,
+                 double* aMeanResult, double* aStdDevResult);
 
 ////////////////////////////////////////////////////////////////////////////////
 #endif

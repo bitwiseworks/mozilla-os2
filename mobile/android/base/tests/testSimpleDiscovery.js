@@ -1,4 +1,4 @@
-// -*- Mode: js2; tab-width: 2; indent-tabs-mode: nil; js2-basic-offset: 2; js2-skip-preprocessor-directives: t; -*-
+// -*- indent-tabs-mode: nil; js-indent-level: 2 -*-
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -12,7 +12,7 @@ Cu.import("resource://gre/modules/SimpleServiceDiscovery.jsm");
 function discovery_observer(subject, topic, data) {
   do_print("Observer: " + data);
 
-  let service = SimpleServiceDiscovery.findServiceForLocation(data);
+  let service = SimpleServiceDiscovery.findServiceForID(data);
   if (!service)
     return;
 
@@ -24,12 +24,24 @@ function discovery_observer(subject, topic, data) {
   run_next_test();
 };
 
+var testDevice = {
+  id: "test:dummy",
+  target: "test:service",
+  factory: function(service) { /* dummy */  },
+  types: ["video/mp4"],
+  extensions: ["mp4"]
+};
+
 add_test(function test_default() {
   do_register_cleanup(function cleanup() {
+    SimpleServiceDiscovery.unregisterDevice(testDevice);
     Services.obs.removeObserver(discovery_observer, "ssdp-service-found");
   });
 
   Services.obs.addObserver(discovery_observer, "ssdp-service-found", false);
+
+  // We need to register a device or processService will ignore us
+  SimpleServiceDiscovery.registerDevice(testDevice);
 
   // Create a pretend service
   let service = {

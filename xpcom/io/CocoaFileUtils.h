@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-// vim:set ts=2 sts=2 sw=2 et cin:
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -15,12 +15,12 @@
 
 namespace CocoaFileUtils {
 
-nsresult RevealFileInFinder(CFURLRef url);
-nsresult OpenURL(CFURLRef url);
-nsresult GetFileCreatorCode(CFURLRef url, OSType *creatorCode);
-nsresult SetFileCreatorCode(CFURLRef url, OSType creatorCode);
-nsresult GetFileTypeCode(CFURLRef url, OSType *typeCode);
-nsresult SetFileTypeCode(CFURLRef url, OSType typeCode);
+nsresult RevealFileInFinder(CFURLRef aUrl);
+nsresult OpenURL(CFURLRef aUrl);
+nsresult GetFileCreatorCode(CFURLRef aUrl, OSType* aCreatorCode);
+nsresult SetFileCreatorCode(CFURLRef aUrl, OSType aCreatorCode);
+nsresult GetFileTypeCode(CFURLRef aUrl, OSType* aTypeCode);
+nsresult SetFileTypeCode(CFURLRef aUrl, OSType aTypeCode);
 
 } // namespace CocoaFileUtils
 

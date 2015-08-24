@@ -30,17 +30,18 @@ public:
   NS_DECL_NSIALARMHALSERVICE
 
   void Init();
-  virtual ~AlarmHalService();
 
   static already_AddRefed<AlarmHalService> GetInstance();
 
   // Implementing hal::AlarmObserver
-  void Notify(const void_t& aVoid);
+  void Notify(const void_t& aVoid) override;
 
   // Implementing hal::SystemTimezoneChangeObserver
-  void Notify(const hal::SystemTimezoneChangeInformation& aSystemTimezoneChangeInfo);
+  void Notify(const hal::SystemTimezoneChangeInformation& aSystemTimezoneChangeInfo) override;
 
 private:
+  virtual ~AlarmHalService();
+
   bool mAlarmEnabled;
   static StaticRefPtr<AlarmHalService> sSingleton;
 

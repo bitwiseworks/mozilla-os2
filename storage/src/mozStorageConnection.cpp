@@ -51,6 +51,19 @@
 PRLogModuleInfo* gStorageLog = nullptr;
 #endif
 
+// Checks that the protected code is running on the main-thread only if the
+// connection was also opened on it.
+#ifdef DEBUG
+#define CHECK_MAINTHREAD_ABUSE() \
+  do { \
+    nsCOMPtr<nsIThread> mainThread = do_GetMainThread(); \
+    NS_WARN_IF_FALSE(threadOpenedOn == mainThread || !NS_IsMainThread(), \
+               "Using Storage synchronous API on main-thread, but the connection was opened on another thread."); \
+  } while(0)
+#else
+#define CHECK_MAINTHREAD_ABUSE() do { /* Nothing */ } while(0)
+#endif
+
 namespace mozilla {
 namespace storage {
 
@@ -329,7 +342,7 @@ WaitForUnlockNotify(sqlite3* aDatabase)
 
 namespace {
 
-class AsyncCloseConnection MOZ_FINAL: public nsRunnable
+class AsyncCloseConnection final: public nsRunnable
 {
 public:
   AsyncCloseConnection(Connection *aConnection,
@@ -388,7 +401,7 @@ private:
  *
  * Must be executed on the clone's async execution thread.
  */
-class AsyncInitializeClone MOZ_FINAL: public nsRunnable
+class AsyncInitializeClone final: public nsRunnable
 {
 public:
   /**
@@ -563,7 +576,8 @@ nsresult
 Connection::initialize()
 {
   NS_ASSERTION (!mDBConn, "Initialize called on already opened database!");
-  PROFILER_LABEL("storage", "Connection::initialize");
+  PROFILER_LABEL("mozStorageConnection", "initialize",
+    js::ProfileEntry::Category::STORAGE);
 
   // in memory database requested, sqlite uses a magic file name
   int srv = ::sqlite3_open_v2(":memory:", &mDBConn, mFlags, nullptr);
@@ -580,7 +594,8 @@ Connection::initialize(nsIFile *aDatabaseFile)
 {
   NS_ASSERTION (aDatabaseFile, "Passed null file!");
   NS_ASSERTION (!mDBConn, "Initialize called on already opened database!");
-  PROFILER_LABEL("storage", "Connection::initialize");
+  PROFILER_LABEL("mozStorageConnection", "initialize",
+    js::ProfileEntry::Category::STORAGE);
 
   mDatabaseFile = aDatabaseFile;
 
@@ -608,7 +623,8 @@ Connection::initialize(nsIFileURL *aFileURL)
 {
   NS_ASSERTION (aFileURL, "Passed null file URL!");
   NS_ASSERTION (!mDBConn, "Initialize called on already opened database!");
-  PROFILER_LABEL("storage", "Connection::initialize");
+  PROFILER_LABEL("mozStorageConnection", "initialize",
+    js::ProfileEntry::Category::STORAGE);
 
   nsCOMPtr<nsIFile> databaseFile;
   nsresult rv = aFileURL->GetFile(getter_AddRefs(databaseFile));
@@ -644,13 +660,17 @@ Connection::initializeInternal(nsIFile* aDatabaseFile)
   if (!gStorageLog)
     gStorageLog = ::PR_NewLogModule("mozStorage");
 
-  ::sqlite3_trace(mDBConn, tracefunc, this);
+  // SQLite tracing can slow down queries (especially long queries)
+  // significantly. Don't trace unless the user is actively monitoring SQLite.
+  if (PR_LOG_TEST(gStorageLog, PR_LOG_DEBUG)) {
+    ::sqlite3_trace(mDBConn, tracefunc, this);
 
-  nsAutoCString leafName(":memory");
-  if (aDatabaseFile)
-    (void)aDatabaseFile->GetNativeLeafName(leafName);
-  PR_LOG(gStorageLog, PR_LOG_NOTICE, ("Opening connection to '%s' (%p)",
-                                      leafName.get(), this));
+    nsAutoCString leafName(":memory");
+    if (aDatabaseFile)
+      (void)aDatabaseFile->GetNativeLeafName(leafName);
+    PR_LOG(gStorageLog, PR_LOG_NOTICE, ("Opening connection to '%s' (%p)",
+                                        leafName.get(), this));
+  }
 #endif
 
   int64_t pageSize = Service::getDefaultPageSize();
@@ -733,19 +753,19 @@ Connection::databaseElementExists(enum DatabaseElementType aElementType,
     element.Assign(Substring(aElementName, ind + 1, aElementName.Length()));
     query.Append(db);
   }
-  query.Append("sqlite_master UNION ALL SELECT * FROM sqlite_temp_master) WHERE type = '");
+  query.AppendLiteral("sqlite_master UNION ALL SELECT * FROM sqlite_temp_master) WHERE type = '");
 
   switch (aElementType) {
     case INDEX:
-      query.Append("index");
+      query.AppendLiteral("index");
       break;
     case TABLE:
-      query.Append("table");
+      query.AppendLiteral("table");
       break;
   }
-  query.Append("' AND name ='");
+  query.AppendLiteral("' AND name ='");
   query.Append(element);
-  query.Append("'");
+  query.Append('\'');
 
   sqlite3_stmt *stmt;
   int srv = prepareStatement(mDBConn, query, &stmt);
@@ -852,7 +872,8 @@ nsresult
 Connection::internalClose(sqlite3 *aNativeConnection)
 {
   // Sanity checks to make sure we are in the proper state before calling this.
-  MOZ_ASSERT(aNativeConnection, "Database connection is invalid!");
+  // aNativeConnection can be null if OpenAsyncDatabase failed and is now just
+  // cleaning up the async thread.
   MOZ_ASSERT(!isClosed());
 
 #ifdef DEBUG
@@ -881,6 +902,11 @@ Connection::internalClose(sqlite3 *aNativeConnection)
     MutexAutoLock lockedScope(sharedAsyncExecutionMutex);
     mConnectionClosed = true;
   }
+
+  // Nothing else needs to be done if we don't have a connection here.
+  if (!aNativeConnection)
+    return NS_OK;
+
   int srv = sqlite3_close(aNativeConnection);
 
   if (srv == SQLITE_BUSY) {
@@ -1128,11 +1154,14 @@ Connection::AsyncClose(mozIStorageCompletionCallback *aCallback)
   if (!NS_IsMainThread()) {
     return NS_ERROR_NOT_SAME_THREAD;
   }
-  if (!mDBConn)
-    return NS_ERROR_NOT_INITIALIZED;
 
+  // It's possible to get here with a null mDBConn but a non-null async
+  // execution target if OpenAsyncDatabase failed somehow, so don't exit early
+  // in that case.
   nsIEventTarget *asyncThread = getAsyncExecutionTarget();
-  NS_ENSURE_TRUE(asyncThread, NS_ERROR_NOT_INITIALIZED);
+
+  if (!mDBConn && !asyncThread)
+    return NS_ERROR_NOT_INITIALIZED;
 
   // setClosedState nullifies our connection pointer, so we take a raw pointer
   // off it, to pass it through the close procedure.
@@ -1167,7 +1196,9 @@ NS_IMETHODIMP
 Connection::AsyncClone(bool aReadOnly,
                        mozIStorageCompletionCallback *aCallback)
 {
-  PROFILER_LABEL("storage", "Connection::Clone");
+  PROFILER_LABEL("mozStorageConnection", "AsyncClone",
+    js::ProfileEntry::Category::STORAGE);
+
   if (!NS_IsMainThread()) {
     return NS_ERROR_NOT_SAME_THREAD;
   }
@@ -1213,6 +1244,7 @@ Connection::initializeClone(Connection* aClone, bool aReadOnly)
     "journal_size_limit",
     "synchronous",
     "wal_autocheckpoint",
+    "busy_timeout"
   };
   for (uint32_t i = 0; i < ArrayLength(pragmas); ++i) {
     // Read-only connections just need cache_size and temp_store pragmas.
@@ -1248,7 +1280,9 @@ Connection::Clone(bool aReadOnly,
 {
   MOZ_ASSERT(threadOpenedOn == NS_GetCurrentThread());
 
-  PROFILER_LABEL("storage", "Connection::Clone");
+  PROFILER_LABEL("mozStorageConnection", "Clone",
+    js::ProfileEntry::Category::STORAGE);
+
   if (!mDBConn)
     return NS_ERROR_NOT_INITIALIZED;
   if (!mDatabaseFile)
@@ -1410,6 +1444,7 @@ Connection::CreateAsyncStatement(const nsACString &aSQLStatement,
 NS_IMETHODIMP
 Connection::ExecuteSimpleSQL(const nsACString &aSQLStatement)
 {
+  CHECK_MAINTHREAD_ABUSE();
   if (!mDBConn) return NS_ERROR_NOT_INITIALIZED;
 
   int srv = executeSql(mDBConn, PromiseFlatCString(aSQLStatement).get());

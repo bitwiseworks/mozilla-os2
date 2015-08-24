@@ -8,7 +8,9 @@ const Cc = Components.classes;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/Prompt.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "Prompt",
+                                  "resource://gre/modules/Prompt.jsm");
 
 // -----------------------------------------------------------------------
 // NSS Dialog Service
@@ -83,9 +85,9 @@ NSSDialogs.prototype = {
       }
 
       aTrust.value = Ci.nsIX509CertDB.UNTRUSTED;
-      if (response.trustSSL == "true") aTrust.value |= Ci.nsIX509CertDB.TRUSTED_SSL;
-      if (response.trustEmail == "true") aTrust.value |= Ci.nsIX509CertDB.TRUSTED_EMAIL;
-      if (response.trustSign == "true") aTrust.value |= Ci.nsIX509CertDB.TRUSTED_OBJSIGN;
+      if (response.trustSSL) aTrust.value |= Ci.nsIX509CertDB.TRUSTED_SSL;
+      if (response.trustEmail) aTrust.value |= Ci.nsIX509CertDB.TRUSTED_EMAIL;
+      if (response.trustSign) aTrust.value |= Ci.nsIX509CertDB.TRUSTED_OBJSIGN;
       return true;
     }
   },
@@ -141,8 +143,8 @@ NSSDialogs.prototype = {
                           ["certmgr.begins", aCert.validity.notBeforeLocalDay,
                            "certmgr.expires", aCert.validity.notAfterLocalDay])})
      .addLabel({ label: this.certInfoSection("certmgr.fingerprints.label",
-                          ["certmgr.certdetail.sha1fingerprint", aCert.sha1Fingerprint,
-                           "certmgr.certdetail.md5fingerprint", aCert.md5Fingerprint], false) });
+                          ["certmgr.certdetail.sha256fingerprint", aCert.sha256Fingerprint,
+                           "certmgr.certdetail.sha1fingerprint", aCert.sha1Fingerprint], false) });
     this.showPrompt(p);
   },
 
@@ -198,7 +200,7 @@ NSSDialogs.prototype = {
         continue;
       } else if (response.button == 0) {
         canceled.value = false;
-        if (response.rememberBox == "true") {
+        if (response.rememberBox == true) {
           aCtx.QueryInterface(Ci.nsIClientAuthUserDecision).rememberClientAuthCertificate = true;
         }
         return true;

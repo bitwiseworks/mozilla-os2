@@ -21,13 +21,6 @@
 #include "nsISupportsImpl.h"            // for MOZ_COUNT_CTOR, etc
 
 namespace mozilla {
-
-namespace gfx {
-class SurfaceStream;
-class SharedSurface;
-class SurfaceFactory;
-}
-
 namespace layers {
 
 class CanvasClientWebGL;
@@ -40,29 +33,31 @@ class CopyableCanvasLayer : public CanvasLayer
 {
 public:
   CopyableCanvasLayer(LayerManager* aLayerManager, void *aImplData);
+
+protected:
   virtual ~CopyableCanvasLayer();
 
-  virtual void Initialize(const Data& aData);
+public:
+  virtual void Initialize(const Data& aData) override;
 
-  virtual bool IsDataValid(const Data& aData);
+  virtual bool IsDataValid(const Data& aData) override;
+
+  bool IsGLLayer() { return !!mGLContext; }
 
 protected:
   void UpdateTarget(gfx::DrawTarget* aDestTarget = nullptr);
 
   RefPtr<gfx::SourceSurface> mSurface;
-  nsRefPtr<mozilla::gl::GLContext> mGLContext;
+  nsRefPtr<gl::GLContext> mGLContext;
+  GLuint mCanvasFrontbufferTexID;
   mozilla::RefPtr<mozilla::gfx::DrawTarget> mDrawTarget;
 
-  RefPtr<gfx::SurfaceStream> mStream;
+  UniquePtr<gl::SharedSurface> mGLFrontbuffer;
 
-  uint32_t mCanvasFramebuffer;
-
-  bool mIsGLAlphaPremult;
-  bool mNeedsYFlip;
+  bool mIsAlphaPremultiplied;
+  gl::OriginPos mOriginPos;
 
   RefPtr<gfx::DataSourceSurface> mCachedTempSurface;
-  gfx::IntSize mCachedSize;
-  gfx::SurfaceFormat mCachedFormat;
 
   gfx::DataSourceSurface* GetTempSurface(const gfx::IntSize& aSize,
                                          const gfx::SurfaceFormat aFormat);

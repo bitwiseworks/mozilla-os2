@@ -14,11 +14,14 @@ import java.io.OutputStream;
 
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.mozilla.gecko.EventDispatcher;
 import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.GeckoEvent;
 import org.mozilla.gecko.GeckoProfile;
 import org.mozilla.gecko.gfx.BitmapUtils;
-import org.mozilla.gecko.util.GeckoEventListener;
+import org.mozilla.gecko.util.EventCallback;
+import org.mozilla.gecko.util.NativeEventListener;
+import org.mozilla.gecko.util.NativeJSObject;
 import org.mozilla.gecko.util.ThreadUtils;
 
 import android.content.Context;
@@ -26,7 +29,7 @@ import android.graphics.Bitmap;
 import android.net.Uri;
 import android.util.Log;
 
-public class InstallHelper implements GeckoEventListener {
+public class InstallHelper implements NativeEventListener {
     private static final String LOGTAG = "GeckoWebappInstallHelper";
     private static final String[] INSTALL_EVENT_NAMES = new String[] {"Webapps:Postinstall"};
     private final Context mContext;
@@ -35,7 +38,7 @@ public class InstallHelper implements GeckoEventListener {
 
     public static interface InstallCallback {
         // on the GeckoThread
-        void installCompleted(InstallHelper installHelper, String event, JSONObject message);
+        void installCompleted(InstallHelper installHelper, String event, NativeJSObject message);
 
         // on the GeckoBackgroundThread
         void installErrored(InstallHelper installHelper, Exception exception);
@@ -72,7 +75,7 @@ public class InstallHelper implements GeckoEventListener {
         }
     }
 
-    private void install(String profileName, JSONObject message) throws IOException {
+    void install(String profileName, JSONObject message) throws IOException {
         if (message == null) {
             message = new JSONObject();
         }
@@ -149,9 +152,7 @@ public class InstallHelper implements GeckoEventListener {
     }
 
     public void registerGeckoListener() {
-        for (String eventName : INSTALL_EVENT_NAMES) {
-            GeckoAppShell.registerEventListener(eventName, this);
-        }
+        EventDispatcher.getInstance().registerGeckoThreadListener(this, INSTALL_EVENT_NAMES);
     }
 
     private void calculateColor() {
@@ -163,10 +164,8 @@ public class InstallHelper implements GeckoEventListener {
     }
 
     @Override
-    public void handleMessage(String event, JSONObject message) {
-        for (String eventName : INSTALL_EVENT_NAMES) {
-            GeckoAppShell.unregisterEventListener(eventName, this);
-        }
+    public void handleMessage(String event, NativeJSObject message, EventCallback callback) {
+        EventDispatcher.getInstance().unregisterGeckoThreadListener(this, INSTALL_EVENT_NAMES);
 
         if (mCallback != null) {
             mCallback.installCompleted(this, event, message);

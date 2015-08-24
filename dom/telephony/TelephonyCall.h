@@ -7,23 +7,25 @@
 #ifndef mozilla_dom_telephony_telephonycall_h__
 #define mozilla_dom_telephony_telephonycall_h__
 
-#include "mozilla/dom/telephony/TelephonyCommon.h"
-
 #include "mozilla/dom/DOMError.h"
+#include "mozilla/dom/Promise.h"
+#include "mozilla/dom/TelephonyCallId.h"
+#include "mozilla/dom/telephony/TelephonyCommon.h"
 
 class nsPIDOMWindow;
 
 namespace mozilla {
 namespace dom {
 
-class TelephonyCall MOZ_FINAL : public DOMEventTargetHelper
+class TelephonyCall final : public DOMEventTargetHelper
 {
   nsRefPtr<Telephony> mTelephony;
   nsRefPtr<TelephonyCallGroup> mGroup;
 
+  nsRefPtr<TelephonyCallId> mId;
+  nsRefPtr<TelephonyCallId> mSecondId;
+
   uint32_t mServiceId;
-  nsString mNumber;
-  nsString mSecondNumber;
   nsString mState;
   bool mEmergency;
   nsRefPtr<DOMError> mError;
@@ -39,7 +41,6 @@ public:
   NS_REALLY_FORWARD_NSIDOMEVENTTARGET(DOMEventTargetHelper)
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(TelephonyCall,
                                            DOMEventTargetHelper)
-
   friend class Telephony;
 
   nsPIDOMWindow*
@@ -50,20 +51,14 @@ public:
 
   // WrapperCache
   virtual JSObject*
-  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  WrapObject(JSContext* aCx) override;
 
   // WebIDL
-  void
-  GetNumber(nsString& aNumber) const
-  {
-    aNumber.Assign(mNumber);
-  }
+  already_AddRefed<TelephonyCallId>
+  Id() const;
 
-  void
-  GetSecondNumber(nsString& aSecondNumber) const
-  {
-    aSecondNumber.Assign(mSecondNumber);
-  }
+  already_AddRefed<TelephonyCallId>
+  GetSecondId() const;
 
   void
   GetState(nsString& aState) const
@@ -95,36 +90,31 @@ public:
   already_AddRefed<TelephonyCallGroup>
   GetGroup() const;
 
-  void
+  already_AddRefed<Promise>
   Answer(ErrorResult& aRv);
 
-  void
+  already_AddRefed<Promise>
   HangUp(ErrorResult& aRv);
 
-  void
+  already_AddRefed<Promise>
   Hold(ErrorResult& aRv);
 
-  void
+  already_AddRefed<Promise>
   Resume(ErrorResult& aRv);
 
   IMPL_EVENT_HANDLER(statechange)
   IMPL_EVENT_HANDLER(dialing)
   IMPL_EVENT_HANDLER(alerting)
-  IMPL_EVENT_HANDLER(connecting)
   IMPL_EVENT_HANDLER(connected)
-  IMPL_EVENT_HANDLER(disconnecting)
   IMPL_EVENT_HANDLER(disconnected)
-  IMPL_EVENT_HANDLER(holding)
   IMPL_EVENT_HANDLER(held)
-  IMPL_EVENT_HANDLER(resuming)
   IMPL_EVENT_HANDLER(error)
   IMPL_EVENT_HANDLER(groupchange)
 
   static already_AddRefed<TelephonyCall>
-  Create(Telephony* aTelephony, uint32_t aServiceId,
-         const nsAString& aNumber, uint16_t aCallState,
-         uint32_t aCallIndex = telephony::kOutgoingPlaceholderCallIndex,
-         bool aEmergency = false, bool aIsConference = false,
+  Create(Telephony* aTelephony, TelephonyCallId* aId,
+         uint32_t aServiceId, uint32_t aCallIndex, uint16_t aCallState,
+         bool aEmergency = false, bool aConference = false,
          bool aSwitchable = true, bool aMergeable = true);
 
   void
@@ -145,14 +135,6 @@ public:
     return mCallIndex;
   }
 
-  void
-  UpdateCallIndex(uint32_t aCallIndex)
-  {
-    NS_ASSERTION(mCallIndex == telephony::kOutgoingPlaceholderCallIndex,
-                 "Call index should not be set!");
-    mCallIndex = aCallIndex;
-  }
-
   uint16_t
   CallState() const
   {
@@ -166,12 +148,6 @@ public:
   }
 
   void
-  UpdateSecondNumber(const nsAString& aNumber)
-  {
-    mSecondNumber = aNumber;
-  }
-
-  void
   UpdateSwitchable(bool aSwitchable) {
     mSwitchable = aSwitchable;
   }
@@ -182,13 +158,18 @@ public:
   }
 
   void
+  UpdateSecondId(TelephonyCallId* aId) {
+    mSecondId = aId;
+  }
+
+  void
   NotifyError(const nsAString& aError);
 
   void
   ChangeGroup(TelephonyCallGroup* aGroup);
 
 private:
-  TelephonyCall(nsPIDOMWindow* aOwner);
+  explicit TelephonyCall(nsPIDOMWindow* aOwner);
 
   ~TelephonyCall();
 
@@ -198,6 +179,9 @@ private:
   nsresult
   DispatchCallEvent(const nsAString& aType,
                     TelephonyCall* aCall);
+
+  already_AddRefed<Promise>
+  CreatePromise(ErrorResult& aRv);
 };
 
 } // namespace dom

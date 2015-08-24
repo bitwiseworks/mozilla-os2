@@ -33,7 +33,7 @@ public:
               const AnimationEventInit& aParam,
               ErrorResult& aRv);
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE
+  virtual JSObject* WrapObjectInternal(JSContext* aCx) override
   {
     return AnimationEventBinding::Wrap(aCx, this);
   }
@@ -43,6 +43,9 @@ public:
   // GetPseudoElement(nsAString& aPseudoElement);
 
   float ElapsedTime();
+
+protected:
+  ~AnimationEvent() {}
 };
 
 } // namespace dom

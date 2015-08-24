@@ -11,6 +11,16 @@ let handlerCount = 0;
 
 let orig_w3c_touch_events = Services.prefs.getIntPref('dom.w3c_touch_events.enabled');
 
+let systemAppOrigin = (function() {
+  let systemOrigin = "_";
+  try {
+    systemOrigin = Services.io.newURI(
+      Services.prefs.getCharPref('b2g.system_manifest_url'), null, null)
+      .prePath;
+  } catch(e) {}
+  return systemOrigin;
+})();
+
 let trackedWindows = new WeakMap();
 
 // =================== Touch ====================
@@ -37,7 +47,7 @@ function TouchEventHandler (window) {
 
   let TouchEventHandler = {
     enabled: false,
-    events: ['mousedown', 'mousemove', 'mouseup'],
+    events: ['mousedown', 'mousemove', 'mouseup', 'touchstart', 'touchend'],
     start: function teh_start() {
       if (this.enabled)
         return false;
@@ -61,17 +71,45 @@ function TouchEventHandler (window) {
       }).bind(this));
     },
     handleEvent: function teh_handleEvent(evt) {
+      // The gaia system window use an hybrid system even on the device which is
+      // a mix of mouse/touch events. So let's not cancel *all* mouse events
+      // if it is the current target.
+      let content = this.getContent(evt.target);
+      if (!content) {
+        return;
+      }
+      let isSystemWindow = content.location.toString().startsWith(systemAppOrigin);
+
+      // App touchstart & touchend should also be dispatched on the system app
+      // to match on-device behavior.
+      if (evt.type.startsWith('touch') && !isSystemWindow) {
+        let sysFrame = content.realFrameElement;
+        let sysDocument = sysFrame.ownerDocument;
+        let sysWindow = sysDocument.defaultView;
+
+        let touchEvent = sysDocument.createEvent('touchevent');
+        let touch = evt.touches[0] || evt.changedTouches[0];
+        let point = sysDocument.createTouch(sysWindow, sysFrame, 0,
+                                            touch.pageX, touch.pageY,
+                                            touch.screenX, touch.screenY,
+                                            touch.clientX, touch.clientY,
+                                            1, 1, 0, 0);
+
+        let touches = sysDocument.createTouchList(point);
+        let targetTouches = touches;
+        let changedTouches = touches;
+        touchEvent.initTouchEvent(evt.type, true, true, sysWindow, 0,
+                                  false, false, false, false,
+                                  touches, targetTouches, changedTouches);
+        sysFrame.dispatchEvent(touchEvent);
+        return;
+      }
+
       // Ignore all but real mouse event coming from physical mouse
       // (especially ignore mouse event being dispatched from a touch event)
       if (evt.button || evt.mozInputSource != Ci.nsIDOMMouseEvent.MOZ_SOURCE_MOUSE || evt.isSynthesized) {
         return;
       }
-
-      // The gaia system window use an hybrid system even on the device which is
-      // a mix of mouse/touch events. So let's not cancel *all* mouse events
-      // if it is the current target.
-      let content = this.getContent(evt.target);
-      let isSystemWindow = content.location.toString().indexOf("system.gaiamobile.org") != -1;
 
       let eventTarget = this.target;
       let type = '';
@@ -194,16 +232,23 @@ function TouchEventHandler (window) {
             this.cancelClick = true;
           }
         }
+        function clone(obj) {
+          return Cu.cloneInto(obj, target);
+        }
         let unwraped = XPCNativeWrapper.unwrap(target);
-        unwraped.sendTouchEvent(name, [0],                    // event type, id
-                                [evt.clientX], [evt.clientY], // x, y
-                                [1], [1],                     // rx, ry
-                                [0], [0],                     // rotation, force
-                                1);                           // count
+        unwraped.sendTouchEvent(name, clone([0]),       // event type, id
+                                clone([evt.clientX]),   // x
+                                clone([evt.clientY]),   // y
+                                clone([1]), clone([1]), // rx, ry
+                                clone([0]), clone([0]), // rotation, force
+                                1);                     // count
         return;
       }
       let document = target.ownerDocument;
       let content = this.getContent(target);
+      if (!content) {
+        return null;
+      }
 
       let touchEvent = document.createEvent('touchevent');
       let point = document.createTouch(content, target, 0,
@@ -221,7 +266,9 @@ function TouchEventHandler (window) {
       return touchEvent;
     },
     getContent: function teh_getContent(target) {
-      let win = target.ownerDocument.defaultView;
+      let win = (target && target.ownerDocument)
+        ? target.ownerDocument.defaultView
+        : null;
       return win;
     }
   };

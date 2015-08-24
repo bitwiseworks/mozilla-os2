@@ -13,7 +13,9 @@ function run_test() {
   setupTestCommon();
   gTestFiles = gTestFilesCompleteSuccess;
   gTestDirs = gTestDirsCompleteSuccess;
-  setupUpdaterTest(FILE_COMPLETE_MAR, false, false);
+  setupUpdaterTest(FILE_COMPLETE_MAR);
+
+  createUpdaterINI();
 
   // For Mac OS X set the last modified time for the root directory to a date in
   // the past to test that the last modified time is updated on a successful
@@ -32,7 +34,24 @@ function setupAppFilesFinished() {
   runUpdateUsingService(STATE_PENDING_SVC, STATE_SUCCEEDED);
 }
 
+/**
+ * Checks if the post update binary was properly launched for the platforms that
+ * support launching post update process.
+ */
 function checkUpdateFinished() {
+  if (IS_WIN || IS_MACOSX) {
+    gCheckFunc = finishCheckUpdateFinished;
+    checkPostUpdateAppLog();
+  } else {
+    finishCheckUpdateFinished();
+  }
+}
+
+/**
+ * Checks if the update has finished and if it has finished performs checks for
+ * the test.
+ */
+function finishCheckUpdateFinished() {
   if (IS_MACOSX) {
     logTestInfo("testing last modified time on the apply to directory has " +
                 "changed after a successful update (bug 600098)");
@@ -42,11 +61,7 @@ function checkUpdateFinished() {
     do_check_true(timeDiff < MAC_MAX_TIME_DIFFERENCE);
   }
 
-  checkFilesAfterUpdateSuccess();
-  // Sorting on Linux is different so skip this check for now.
-  if (!IS_UNIX) {
-    checkUpdateLogContents(LOG_COMPLETE_SUCCESS);
-  }
-
+  checkFilesAfterUpdateSuccess(getApplyDirFile, false, false);
+  checkUpdateLogContents(LOG_COMPLETE_SUCCESS);
   checkCallbackServiceLog();
 }

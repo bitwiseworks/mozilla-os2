@@ -35,18 +35,18 @@ class FilePickerParent : public PFilePickerParent
                         const bool& aAddToRecentDocs,
                         const nsString& aDefaultFile,
                         const nsString& aDefaultExtension,
-                        const InfallibleTArray<nsString>& aFilters,
-                        const InfallibleTArray<nsString>& aFilterNames) MOZ_OVERRIDE;
+                        InfallibleTArray<nsString>&& aFilters,
+                        InfallibleTArray<nsString>&& aFilterNames,
+                        const nsString& aDisplayDirectory) override;
 
-  virtual void ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
+  virtual void ActorDestroy(ActorDestroyReason aWhy) override;
 
   class FilePickerShownCallback : public nsIFilePickerShownCallback
   {
   public:
-    FilePickerShownCallback(FilePickerParent* aFilePickerParent)
+    explicit FilePickerShownCallback(FilePickerParent* aFilePickerParent)
       : mFilePickerParent(aFilePickerParent)
     { }
-    virtual ~FilePickerShownCallback() {}
 
     NS_DECL_ISUPPORTS
     NS_DECL_NSIFILEPICKERSHOWNCALLBACK
@@ -54,6 +54,7 @@ class FilePickerParent : public PFilePickerParent
     void Destroy();
 
   private:
+    virtual ~FilePickerShownCallback() {}
     FilePickerParent* mFilePickerParent;
   };
 

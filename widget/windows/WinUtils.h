@@ -11,6 +11,14 @@
 #include <shobjidl.h>
 #include <uxtheme.h>
 #include <dwmapi.h>
+
+// Undo the windows.h damage
+#undef GetMessage
+#undef CreateEvent
+#undef GetClassName
+#undef GetBinaryType
+#undef RemoveDirectory
+
 #include "nsAutoPtr.h"
 #include "nsString.h"
 #include "nsRegion.h"
@@ -23,17 +31,61 @@
 #include "nsIDownloader.h"
 #include "nsIURI.h"
 #include "nsIWidget.h"
+#include "nsIThread.h"
 
 #include "mozilla/Attributes.h"
+
+/**
+ * NS_INLINE_DECL_IUNKNOWN_REFCOUNTING should be used for defining and
+ * implementing AddRef() and Release() of IUnknown interface.
+ * This depends on xpcom/glue/nsISupportsImpl.h.
+ */
+
+#define NS_INLINE_DECL_IUNKNOWN_REFCOUNTING(_class)                           \
+public:                                                                       \
+  STDMETHODIMP_(ULONG) AddRef()                                               \
+  {                                                                           \
+    MOZ_ASSERT_TYPE_OK_FOR_REFCOUNTING(_class)                                \
+    MOZ_ASSERT(int32_t(mRefCnt) >= 0, "illegal refcnt");                      \
+    NS_ASSERT_OWNINGTHREAD(_class);                                           \
+    ++mRefCnt;                                                                \
+    NS_LOG_ADDREF(this, mRefCnt, #_class, sizeof(*this));                     \
+    return static_cast<ULONG>(mRefCnt.get());                                 \
+  }                                                                           \
+  STDMETHODIMP_(ULONG) Release()                                              \
+  {                                                                           \
+    MOZ_ASSERT(int32_t(mRefCnt) > 0,                                          \
+      "Release called on object that has already been released!");            \
+    NS_ASSERT_OWNINGTHREAD(_class);                                           \
+    --mRefCnt;                                                                \
+    NS_LOG_RELEASE(this, mRefCnt, #_class);                                   \
+    if (mRefCnt == 0) {                                                       \
+      NS_ASSERT_OWNINGTHREAD(_class);                                         \
+      mRefCnt = 1; /* stabilize */                                            \
+      delete this;                                                            \
+      return 0;                                                               \
+    }                                                                         \
+    return static_cast<ULONG>(mRefCnt.get());                                 \
+  }                                                                           \
+protected:                                                                    \
+  nsAutoRefCnt mRefCnt;                                                       \
+  NS_DECL_OWNINGTHREAD                                                        \
+public:
 
 class nsWindow;
 class nsWindowBase;
 struct KeyPair;
 struct nsIntRect;
-class nsIThread;
 
 namespace mozilla {
 namespace widget {
+
+// Windows message debugging data
+typedef struct {
+  const char * mStr;
+  UINT         mId;
+} EventMsgInfo;
+extern EventMsgInfo gAllEvents[];
 
 // More complete QS definitions for MsgWaitForMultipleObjects() and
 // GetQueueStatus() that include newer win8 specific defines.
@@ -60,12 +112,16 @@ namespace widget {
 #define LogException(e) mozilla::widget::WinUtils::Log("%s Exception:%s", __FUNCTION__, e->ToString()->Data())
 #define LogHRESULT(hr) mozilla::widget::WinUtils::Log("%s hr=%X", __FUNCTION__, hr)
 
-class myDownloadObserver MOZ_FINAL : public nsIDownloadObserver
+#ifdef MOZ_PLACES
+class myDownloadObserver final : public nsIDownloadObserver
 {
+  ~myDownloadObserver() {}
+
 public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIDOWNLOADOBSERVER
 };
+#endif
 
 class WinUtils {
 public:
@@ -95,6 +151,20 @@ public:
                           UINT aLastMessage, UINT aOption);
   static bool GetMessage(LPMSG aMsg, HWND aWnd, UINT aFirstMessage,
                          UINT aLastMessage);
+
+  /**
+   * Wait until a message is ready to be processed.
+   * Prefer using this method to directly calling ::WaitMessage since
+   * ::WaitMessage will wait if there is an unread message in the queue.
+   * That can cause freezes until another message enters the queue if the
+   * message is marked read by a call to PeekMessage which the caller is
+   * not aware of (e.g., from a different thread).
+   * Note that this method may cause sync dispatch of sent (as opposed to
+   * posted) messages.
+   * @param aTimeoutMs Timeout for waiting in ms, defaults to INFINITE
+   */
+  static void WaitForMessage(DWORD aTimeoutMs = INFINITE);
+
   /**
    * Gets the value of a string-typed registry value.
    *
@@ -282,6 +352,12 @@ public:
   static nsIntRect ToIntRect(const RECT& aRect);
 
   /**
+   * Helper used in invalidating flash plugin windows owned
+   * by low rights flash containers.
+   */
+  static void InvalidatePluginAsWorkaround(nsIWidget *aWidget, const nsIntRect &aRect);
+
+  /**
    * Returns true if the context or IME state is enabled.  Otherwise, false.
    */
   static bool IsIMEEnabled(const InputContext& aInputContext);
@@ -304,6 +380,7 @@ public:
   typedef HRESULT (WINAPI*DwmInvalidateIconicBitmapsProc)(HWND hWnd);
   typedef HRESULT (WINAPI*DwmDefWindowProcProc)(HWND hWnd, UINT msg, LPARAM lParam, WPARAM wParam, LRESULT *aRetValue);
   typedef HRESULT (WINAPI*DwmGetCompositionTimingInfoProc)(HWND hWnd, DWM_TIMING_INFO *info);
+  typedef HRESULT (WINAPI*DwmFlushProc)(void);
 
   static DwmExtendFrameIntoClientAreaProc dwmExtendFrameIntoClientAreaPtr;
   static DwmIsCompositionEnabledProc dwmIsCompositionEnabledPtr;
@@ -314,6 +391,7 @@ public:
   static DwmInvalidateIconicBitmapsProc dwmInvalidateIconicBitmapsPtr;
   static DwmDefWindowProcProc dwmDwmDefWindowProcPtr;
   static DwmGetCompositionTimingInfoProc dwmGetCompositionTimingInfoPtr;
+  static DwmFlushProc dwmFlushProcPtr;
 
   static void Initialize();
 
@@ -333,7 +411,7 @@ private:
 };
 
 #ifdef MOZ_PLACES
-class AsyncFaviconDataReady MOZ_FINAL : public nsIFaviconDataCallback
+class AsyncFaviconDataReady final : public nsIFaviconDataCallback
 {
 public:
   NS_DECL_ISUPPORTS
@@ -344,6 +422,8 @@ public:
                         const bool aURLShortcut);
   nsresult OnFaviconDataNotAvailable(void);
 private:
+  ~AsyncFaviconDataReady() {}
+
   nsCOMPtr<nsIURI> mNewURI;
   nsCOMPtr<nsIThread> mIOThread;
   const bool mURLShortcut;
@@ -365,11 +445,11 @@ public:
                           uint8_t *aData, uint32_t aDataLen, uint32_t aStride,
                           uint32_t aWidth, uint32_t aHeight,
                           const bool aURLShortcut);
-  virtual ~AsyncEncodeAndWriteIcon();
 
 private:
+  virtual ~AsyncEncodeAndWriteIcon();
+
   nsAutoString mIconPath;
-  nsAutoCString mMimeTypeOfInputData;
   nsAutoArrayPtr<uint8_t> mBuffer;
   HMODULE sDwmDLL;
   uint32_t mBufferLength;
@@ -386,9 +466,10 @@ public:
   NS_DECL_NSIRUNNABLE
 
   AsyncDeleteIconFromDisk(const nsAString &aIconPath);
-  virtual ~AsyncDeleteIconFromDisk();
 
 private:
+  virtual ~AsyncDeleteIconFromDisk();
+
   nsAutoString mIconPath;
 };
 
@@ -398,8 +479,13 @@ public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIRUNNABLE
 
-  AsyncDeleteAllFaviconsFromDisk();
+  AsyncDeleteAllFaviconsFromDisk(bool aIgnoreRecent = false);
+
+private:
   virtual ~AsyncDeleteAllFaviconsFromDisk();
+
+  int32_t mIcoNoDeleteSeconds;
+  bool mIgnoreRecent;
 };
 
 class FaviconHelper

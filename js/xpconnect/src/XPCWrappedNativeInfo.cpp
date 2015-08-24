@@ -8,7 +8,6 @@
 
 #include "xpcprivate.h"
 #include "jswrapper.h"
-#include "nsCxPusher.h"
 
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/XPTInterfaceInfoManager.h"
@@ -30,8 +29,8 @@ XPCNativeMember::GetCallInfo(JSObject* funobj,
     jsval ifaceVal = js::GetFunctionNativeReserved(funobj, 0);
     jsval memberVal = js::GetFunctionNativeReserved(funobj, 1);
 
-    *pInterface = (XPCNativeInterface*) JSVAL_TO_PRIVATE(ifaceVal);
-    *pMember = (XPCNativeMember*) JSVAL_TO_PRIVATE(memberVal);
+    *pInterface = (XPCNativeInterface*) ifaceVal.toPrivate();
+    *pMember = (XPCNativeMember*) memberVal.toPrivate();
 
     return true;
 }
@@ -51,21 +50,10 @@ XPCNativeMember::Resolve(XPCCallContext& ccx, XPCNativeInterface* iface,
                          HandleObject parent, jsval* vp)
 {
     if (IsConstant()) {
-        const nsXPTConstant* constant;
-        if (NS_FAILED(iface->GetInterfaceInfo()->GetConstant(mIndex, &constant)))
-            return false;
-
-        const nsXPTCMiniVariant& mv = *constant->GetValue();
-
-        // XXX Big Hack!
-        nsXPTCVariant v;
-        v.flags = 0;
-        v.type = constant->GetType();
-        memcpy(&v.val, &mv.val, sizeof(mv.val));
-
         RootedValue resultVal(ccx);
-
-        if (!XPCConvert::NativeData2JS(&resultVal, &v.val, v.type, nullptr, nullptr))
+        nsXPIDLCString name;
+        if (NS_FAILED(iface->GetInterfaceInfo()->GetConstant(mIndex, &resultVal,
+                                                             getter_Copies(name))))
             return false;
 
         *vp = resultVal;
@@ -310,13 +298,14 @@ XPCNativeInterface::NewInstance(nsIInterfaceInfo* aInfo)
 
     if (!failed) {
         for (i = 0; i < constCount; i++) {
-            const nsXPTConstant* constant;
-            if (NS_FAILED(aInfo->GetConstant(i, &constant))) {
+            RootedValue constant(cx);
+            nsXPIDLCString namestr;
+            if (NS_FAILED(aInfo->GetConstant(i, &constant, getter_Copies(namestr)))) {
                 failed = true;
                 break;
             }
 
-            str = JS_InternString(cx, constant->GetName());
+            str = JS_InternString(cx, namestr);
             if (!str) {
                 NS_ERROR("bad constant name");
                 failed = true;

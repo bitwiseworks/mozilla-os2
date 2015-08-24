@@ -22,7 +22,6 @@
 #include "base/logging.h"
 #include "base/platform_thread.h"
 #include "base/process_util.h"
-#include "base/scoped_ptr.h"
 #include "base/sys_info.h"
 #include "base/time.h"
 #include "base/waitable_event.h"
@@ -31,6 +30,8 @@
 #if defined(OS_OS2)
 #include "base/os2_pipe.h"
 #endif
+
+#include "mozilla/UniquePtr.h"
 
 const int kMicrosecondsPerSecond = 1000000;
 
@@ -74,16 +75,21 @@ bool KillProcess(ProcessHandle process_id, int exit_code, bool wait) {
 
   if (result && wait) {
     int tries = 60;
+    bool exited = false;
     // The process may not end immediately due to pending I/O
     while (tries-- > 0) {
       int pid = HANDLE_EINTR(waitpid(process_id, NULL, WNOHANG));
-      if (pid == process_id)
+      if (pid == process_id) {
+        exited = true;
         break;
+      }
 
       sleep(1);
     }
 
-    result = kill(process_id, SIGKILL) == 0;
+    if (!exited) {
+      result = kill(process_id, SIGKILL) == 0;
+    }
   }
 
   if (!result)
@@ -105,7 +111,7 @@ class ScopedDIRClose {
     }
   }
 };
-typedef scoped_ptr_malloc<DIR, ScopedDIRClose> ScopedDIR;
+typedef mozilla::UniquePtr<DIR, ScopedDIRClose> ScopedDIR;
 
 
 #if !defined(OS_OS2)

@@ -5,36 +5,46 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 XPIDL_SOURCES += [
-    'nsITelephonyProvider.idl',
+    'nsITelephonyCallInfo.idl',
+    'nsITelephonyService.idl',
 ]
 
 XPIDL_MODULE = 'dom_telephony'
 
 EXPORTS.mozilla.dom += [
-    'CallEvent.h',
     'CallsList.h',
+    'MMICall.h',
     'Telephony.h',
     'TelephonyCall.h',
     'TelephonyCallGroup.h',
+    'TelephonyCallId.h',
+    'USSDSession.h'
 ]
 
 EXPORTS.mozilla.dom.telephony += [
     'ipc/TelephonyChild.h',
+    'ipc/TelephonyIPCSerializer.h',
     'ipc/TelephonyParent.h',
+    'TelephonyCallback.h',
+    'TelephonyCallInfo.h',
     'TelephonyCommon.h',
-    'TelephonyFactory.h',
+    'TelephonyDialCallback.h',
 ]
 
 UNIFIED_SOURCES += [
-    'CallEvent.cpp',
     'CallsList.cpp',
     'ipc/TelephonyChild.cpp',
-    'ipc/TelephonyIPCProvider.cpp',
+    'ipc/TelephonyIPCService.cpp',
     'ipc/TelephonyParent.cpp',
+    'MMICall.cpp',
     'Telephony.cpp',
     'TelephonyCall.cpp',
+    'TelephonyCallback.cpp',
     'TelephonyCallGroup.cpp',
-    'TelephonyFactory.cpp',
+    'TelephonyCallId.cpp',
+    'TelephonyCallInfo.cpp',
+    'TelephonyDialCallback.cpp',
+    'USSDSession.cpp',
 ]
 
 IPDL_SOURCES += [
@@ -44,15 +54,23 @@ IPDL_SOURCES += [
 ]
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk' and CONFIG['MOZ_B2G_RIL']:
+    XPCSHELL_TESTS_MANIFESTS += ['test/xpcshell/xpcshell.ini']
     XPIDL_SOURCES += [
-        'nsIGonkTelephonyProvider.idl',
+        'nsIGonkTelephonyService.idl',
+        'nsITelephonyAudioService.idl',
+        'nsITelephonyMessenger.idl',
     ]
     EXTRA_COMPONENTS += [
-        'gonk/TelephonyProvider.js',
-        'gonk/TelephonyProvider.manifest',
+        'gonk/TelephonyAudioService.js',
+        'gonk/TelephonyAudioService.manifest',
+        'gonk/TelephonyService.js',
+        'gonk/TelephonyService.manifest',
+    ]
+    EXTRA_JS_MODULES += [
+        'gonk/DialNumberUtils.jsm'
     ]
 
 FAIL_ON_WARNINGS = True
 include('/ipc/chromium/chromium-config.mozbuild')
 
-FINAL_LIBRARY = 'gklayout'
+FINAL_LIBRARY = 'xul'

@@ -19,8 +19,8 @@
 #include "webrtc/engine_configurations.h"
 #include "webrtc/modules/audio_coding/codecs/opus/interface/opus_interface.h"
 #include "webrtc/modules/audio_coding/main/interface/audio_coding_module_typedefs.h"
-#include "webrtc/modules/audio_coding/main/source/acm_codec_database.h"
-#include "webrtc/modules/audio_coding/main/source/acm_opus.h"
+#include "webrtc/modules/audio_coding/main/acm2/acm_codec_database.h"
+#include "webrtc/modules/audio_coding/main/acm2/acm_opus.h"
 #include "webrtc/modules/audio_coding/main/test/TestStereo.h"
 #include "webrtc/modules/audio_coding/main/test/utility.h"
 #include "webrtc/system_wrappers/interface/trace.h"
@@ -33,8 +33,7 @@ OpusTest::OpusTest()
       channel_a2b_(NULL),
       counter_(0),
       payload_type_(255),
-      rtp_timestamp_(0) {
-}
+      rtp_timestamp_(0) {}
 
 OpusTest::~OpusTest() {
   if (channel_a2b_ != NULL) {
@@ -212,12 +211,16 @@ void OpusTest::Run(TestPackStereo* channel, int channels, int bitrate,
                    int frame_length, int percent_loss) {
   AudioFrame audio_frame;
   int32_t out_freq_hz_b = out_file_.SamplingFrequency();
-  int16_t audio[480 * 12 * 2];  // Can hold 120 ms stereo audio.
-  int16_t out_audio[480 * 12 * 2];  // Can hold 120 ms stereo audio.
+  const int kBufferSizeSamples = 480 * 12 * 2;  // Can hold 120 ms stereo audio.
+  int16_t audio[kBufferSizeSamples];
+  int16_t out_audio[kBufferSizeSamples];
   int16_t audio_type;
   int written_samples = 0;
   int read_samples = 0;
   int decoded_samples = 0;
+  bool first_packet = true;
+  uint32_t start_time_stamp = 0;
+
   channel->reset_payload_size();
   counter_ = 0;
 
@@ -225,7 +228,17 @@ void OpusTest::Run(TestPackStereo* channel, int channels, int bitrate,
   EXPECT_EQ(0, WebRtcOpus_SetBitRate(opus_mono_encoder_, bitrate));
   EXPECT_EQ(0, WebRtcOpus_SetBitRate(opus_stereo_encoder_, bitrate));
 
-  while (1) {
+#if defined(WEBRTC_ANDROID) || defined(WEBRTC_IOS) || defined(WEBRTC_ARCH_ARM)
+  // If we are on Android, iOS and/or ARM, use a lower complexity setting as
+  // default.
+  const int kOpusComplexity5 = 5;
+  EXPECT_EQ(0, WebRtcOpus_SetComplexity(opus_mono_encoder_, kOpusComplexity5));
+  EXPECT_EQ(0, WebRtcOpus_SetComplexity(opus_stereo_encoder_,
+                                        kOpusComplexity5));
+#endif
+
+  // Make sure the runtime is less than 60 seconds to pass Android test.
+  for (size_t audio_length = 0; audio_length < 10000; audio_length += 10) {
     bool lost_packet = false;
 
     // Get 10 msec of audio.
@@ -242,11 +255,13 @@ void OpusTest::Run(TestPackStereo* channel, int channels, int bitrate,
     }
 
     // If input audio is sampled at 32 kHz, resampling to 48 kHz is required.
-    EXPECT_EQ(480, resampler_.Resample10Msec(audio_frame.data_,
-                                             audio_frame.sample_rate_hz_,
-                                             &audio[written_samples],
-                                             48000,
-                                             channels));
+    EXPECT_EQ(480,
+              resampler_.Resample10Msec(audio_frame.data_,
+                                        audio_frame.sample_rate_hz_,
+                                        48000,
+                                        channels,
+                                        kBufferSizeSamples - written_samples,
+                                        &audio[written_samples]));
     written_samples += 480 * channels;
 
     // Sometimes we need to loop over the audio vector to produce the right
@@ -311,6 +326,10 @@ void OpusTest::Run(TestPackStereo* channel, int channels, int bitrate,
         // Send data to the channel. "channel" will handle the loss simulation.
         channel->SendData(kAudioFrameSpeech, payload_type_, rtp_timestamp_,
                           bitstream, bitstream_len_byte, NULL);
+        if (first_packet) {
+          first_packet = false;
+          start_time_stamp = rtp_timestamp_;
+        }
         rtp_timestamp_ += frame_length;
         read_samples += frame_length * channels;
       }
@@ -321,7 +340,7 @@ void OpusTest::Run(TestPackStereo* channel, int channels, int bitrate,
     }
 
     // Run received side of ACM.
-    CHECK_ERROR(acm_receiver_->PlayoutData10Ms(out_freq_hz_b, &audio_frame));
+    ASSERT_EQ(0, acm_receiver_->PlayoutData10Ms(out_freq_hz_b, &audio_frame));
 
     // Write output speech to file.
     out_file_.Write10MsData(
@@ -330,6 +349,13 @@ void OpusTest::Run(TestPackStereo* channel, int channels, int bitrate,
 
     // Write stand-alone speech to file.
     out_file_standalone_.Write10MsData(out_audio, decoded_samples * channels);
+
+    if (audio_frame.timestamp_ > start_time_stamp) {
+      // Number of channels should be the same for both stand-alone and
+      // ACM-decoding.
+      EXPECT_EQ(audio_frame.num_channels_, channels);
+    }
+
     decoded_samples = 0;
   }
 
@@ -349,13 +375,13 @@ void OpusTest::OpenOutFile(int test_number) {
   file_stream << webrtc::test::OutputPath() << "opustest_out_"
       << test_number << ".pcm";
   file_name = file_stream.str();
-  out_file_.Open(file_name, 32000, "wb");
+  out_file_.Open(file_name, 48000, "wb");
   file_stream.str("");
   file_name = file_stream.str();
   file_stream << webrtc::test::OutputPath() << "opusstandalone_out_"
       << test_number << ".pcm";
   file_name = file_stream.str();
-  out_file_standalone_.Open(file_name, 32000, "wb");
+  out_file_standalone_.Open(file_name, 48000, "wb");
 }
 
 }  // namespace webrtc

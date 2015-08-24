@@ -1,9 +1,7 @@
 <!DOCTYPE HTML>
 <html>
 <head>
-  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css"/>
-  <script type="application/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
-  <script type="application/javascript" src="head.js"></script>
+  <script type="application/javascript" src="pc.js"></script>
 </head>
 <body>
 <pre id="test">
@@ -13,19 +11,20 @@
     title: "Don't offer m=application unless createDataChannel is called first"
   });
 
-  runTest(function () {
+  runNetworkTest(function () {
     var pc = new mozRTCPeerConnection();
 
     // necessary to circumvent bug 864109
-    var options = { mandatory: { OfferToReceiveAudio: true} };
+    var options = { offerToReceiveAudio: true };
 
-    pc.createOffer(function (offer) {
+    pc.createOffer(options).then(offer => {
       ok(!offer.sdp.contains("m=application"),
         "m=application is not contained in the SDP");
 
-      SimpleTest.finish();
-    }, generateErrorCallback(), options);
-  }, true);
+      networkTestFinished();
+    })
+    .catch(generateErrorCallback());
+  });
 
 </script>
 </pre>

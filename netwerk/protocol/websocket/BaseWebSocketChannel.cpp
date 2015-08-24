@@ -10,6 +10,7 @@
 #include "nsILoadGroup.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsAutoPtr.h"
+#include "nsProxyRelease.h"
 #include "nsStandardURL.h"
 
 #if defined(PR_LOGGING)
@@ -24,6 +25,7 @@ BaseWebSocketChannel::BaseWebSocketChannel()
   , mWasOpened(0)
   , mClientSetPingInterval(0)
   , mClientSetPingTimeout(0)
+  , mPingForced(0)
   , mPingInterval(0)
   , mPingResponseTimeout(10000)
 {
@@ -97,6 +99,20 @@ BaseWebSocketChannel::SetLoadGroup(nsILoadGroup *aLoadGroup)
 }
 
 NS_IMETHODIMP
+BaseWebSocketChannel::SetLoadInfo(nsILoadInfo* aLoadInfo)
+{
+  mLoadInfo = aLoadInfo;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+BaseWebSocketChannel::GetLoadInfo(nsILoadInfo** aLoadInfo)
+{
+  NS_IF_ADDREF(*aLoadInfo = mLoadInfo);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 BaseWebSocketChannel::GetExtensions(nsACString &aExtensions)
 {
   LOG(("BaseWebSocketChannel::GetExtensions() %p\n", this));
@@ -166,6 +182,19 @@ BaseWebSocketChannel::SetPingTimeout(uint32_t aSeconds)
   return NS_OK;
 }
 
+NS_IMETHODIMP
+BaseWebSocketChannel::InitLoadInfo(nsIDOMNode* aLoadingNode,
+                                   nsIPrincipal* aLoadingPrincipal,
+                                   nsIPrincipal* aTriggeringPrincipal,
+                                   uint32_t aSecurityFlags,
+                                   uint32_t aContentPolicyType)
+{
+  nsCOMPtr<nsINode> node = do_QueryInterface(aLoadingNode);
+  mLoadInfo = new LoadInfo(aLoadingPrincipal, aTriggeringPrincipal,
+                           node, aSecurityFlags, aContentPolicyType);
+  return NS_OK;
+}
+
 //-----------------------------------------------------------------------------
 // BaseWebSocketChannel::nsIProtocolHandler
 //-----------------------------------------------------------------------------
@@ -226,6 +255,15 @@ BaseWebSocketChannel::NewURI(const nsACString & aSpec, const char *aOriginCharse
 }
 
 NS_IMETHODIMP
+BaseWebSocketChannel::NewChannel2(nsIURI* aURI,
+                                  nsILoadInfo* aLoadInfo,
+                                  nsIChannel** outChannel)
+{
+  LOG(("BaseWebSocketChannel::NewChannel2() %p\n", this));
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
 BaseWebSocketChannel::NewChannel(nsIURI *aURI, nsIChannel **_retval)
 {
   LOG(("BaseWebSocketChannel::NewChannel() %p\n", this));
@@ -258,6 +296,27 @@ BaseWebSocketChannel::RetargetDeliveryTo(nsIEventTarget* aTargetThread)
   mTargetThread = do_QueryInterface(aTargetThread);
   MOZ_ASSERT(mTargetThread);
   return NS_OK;
+}
+
+BaseWebSocketChannel::ListenerAndContextContainer::ListenerAndContextContainer(
+                                               nsIWebSocketListener* aListener,
+                                               nsISupports* aContext)
+  : mListener(aListener)
+  , mContext(aContext)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(mListener);
+}
+
+BaseWebSocketChannel::ListenerAndContextContainer::~ListenerAndContextContainer()
+{
+  MOZ_ASSERT(mListener);
+
+  nsCOMPtr<nsIThread> mainThread;
+  NS_GetMainThread(getter_AddRefs(mainThread));
+
+  NS_ProxyRelease(mainThread, mListener, false);
+  NS_ProxyRelease(mainThread, mContext, false);
 }
 
 } // namespace net

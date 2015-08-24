@@ -33,20 +33,10 @@ Cu.import("resource://gre/modules/Promise.jsm");
  */
 let Accounts = Object.freeze({
   _accountsExist: function (kind) {
-    let deferred = Promise.defer();
-
-    sendMessageToJava({
+    return Messaging.sendRequestForResult({
       type: "Accounts:Exist",
       kind: kind,
-    }, (data, error) => {
-      if (error) {
-        deferred.reject(error);
-      } else {
-        deferred.resolve(data.exists);
-      }
-    });
-
-    return deferred.promise;
+    }).then(data => data.exists);
   },
 
   firefoxAccountsExist: function () {
@@ -65,12 +55,16 @@ let Accounts = Object.freeze({
    * Fire-and-forget: open the Firefox accounts activity, which
    * will be the Getting Started screen if FxA isn't yet set up.
    *
+   * Optional extras are passed, as a JSON string, to the Firefox
+   * Account Getting Started activity in the extras bundle of the
+   * activity launch intent, under the key "extras".
+   *
    * There is no return value from this method.
    */
-  launchSetup: function () {
-    sendMessageToJava({
+  launchSetup: function (extras) {
+    Messaging.sendRequest({
       type: "Accounts:Create",
+      extras: extras,
     });
   },
 });
-

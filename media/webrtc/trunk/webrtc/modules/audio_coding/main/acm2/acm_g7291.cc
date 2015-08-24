@@ -21,6 +21,8 @@
 
 namespace webrtc {
 
+namespace acm2 {
+
 #ifndef WEBRTC_CODEC_G729_1
 
 ACMG729_1::ACMG729_1(int16_t /* codec_id */)
@@ -48,8 +50,6 @@ ACMGenericCodec* ACMG729_1::CreateInstance(void) { return NULL; }
 int16_t ACMG729_1::InternalCreateEncoder() { return -1; }
 
 void ACMG729_1::DestructEncoderSafe() { return; }
-
-void ACMG729_1::InternalDestructEncoderInst(void* /* ptr_inst */) { return; }
 
 int16_t ACMG729_1::SetBitRateSafe(const int32_t /*rate*/) { return -1; }
 
@@ -157,13 +157,6 @@ void ACMG729_1::DestructEncoderSafe() {
   }
 }
 
-void ACMG729_1::InternalDestructEncoderInst(void* ptr_inst) {
-  if (ptr_inst != NULL) {
-    // WebRtcG7291_Free((G729_1_inst_t*)ptrInst);
-  }
-  return;
-}
-
 int16_t ACMG729_1::SetBitRateSafe(const int32_t rate) {
   // allowed rates: { 8000, 12000, 14000, 16000, 18000, 20000,
   //                22000, 24000, 26000, 28000, 30000, 32000};
@@ -236,5 +229,7 @@ int16_t ACMG729_1::SetBitRateSafe(const int32_t rate) {
 }
 
 #endif
+
+}  // namespace acm2
 
 }  // namespace webrtc

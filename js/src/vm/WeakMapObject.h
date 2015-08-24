@@ -12,9 +12,16 @@
 
 namespace js {
 
-typedef WeakMap<EncapsulatedPtrObject, RelocatableValue> ObjectValueMap;
+class ObjectValueMap : public WeakMap<PreBarrieredObject, RelocatableValue>
+{
+  public:
+    ObjectValueMap(JSContext* cx, JSObject* obj)
+      : WeakMap<PreBarrieredObject, RelocatableValue>(cx, obj) {}
 
-class WeakMapObject : public JSObject
+    virtual bool findZoneEdges();
+};
+
+class WeakMapObject : public NativeObject
 {
   public:
     static const Class class_;

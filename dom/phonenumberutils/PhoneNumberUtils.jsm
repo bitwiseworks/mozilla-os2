@@ -1,4 +1,4 @@
-/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim: set shiftwidth=2 tabstop=2 autoindent cindent expandtab: */
 
 "use strict";
@@ -14,13 +14,15 @@ const Ci = Components.interfaces;
 
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import('resource://gre/modules/XPCOMUtils.jsm');
-Cu.import("resource://gre/modules/PhoneNumberNormalizer.jsm");
-Cu.import("resource://gre/modules/mcc_iso3166_table.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "PhoneNumberNormalizer",
+                                  "resource://gre/modules/PhoneNumberNormalizer.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "MCC_ISO3166_TABLE",
+                                  "resource://gre/modules/mcc_iso3166_table.jsm");
 
 #ifdef MOZ_B2G_RIL
 XPCOMUtils.defineLazyServiceGetter(this, "mobileConnection",
-                                   "@mozilla.org/ril/content-helper;1",
-                                   "nsIMobileConnectionProvider");
+                                   "@mozilla.org/mobileconnection/mobileconnectionservice;1",
+                                   "nsIMobileConnectionService");
 XPCOMUtils.defineLazyServiceGetter(this, "icc",
                                    "@mozilla.org/ril/content-helper;1",
                                    "nsIIccProvider");
@@ -52,7 +54,8 @@ this.PhoneNumberUtils = {
     let clientId = 0;
 
     // Get network mcc
-    let voice = mobileConnection.getVoiceConnectionInfo(clientId);
+    let connection = mobileConnection.getItemByServiceId(clientId);
+    let voice = connection && connection.voice;
     if (voice && voice.network && voice.network.mcc) {
       mcc = voice.network.mcc;
     }
@@ -196,7 +199,8 @@ this.PhoneNumberUtils = {
 let inParent = Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime)
                  .processType == Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT;
 if (inParent) {
-  Cu.import("resource://gre/modules/PhoneNumber.jsm");
+  XPCOMUtils.defineLazyModuleGetter(this, "PhoneNumber",
+                                    "resource://gre/modules/PhoneNumber.jsm");
   XPCOMUtils.defineLazyServiceGetter(this, "ppmm",
                                      "@mozilla.org/parentprocessmessagemanager;1",
                                      "nsIMessageListenerManager");

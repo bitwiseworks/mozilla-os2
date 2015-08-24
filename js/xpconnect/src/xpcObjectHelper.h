@@ -26,7 +26,7 @@
 class xpcObjectHelper
 {
 public:
-    xpcObjectHelper(nsISupports* aObject, nsWrapperCache* aCache = nullptr)
+    explicit xpcObjectHelper(nsISupports* aObject, nsWrapperCache* aCache = nullptr)
       : mCanonical(nullptr)
       , mObject(aObject)
       , mCache(aCache)
@@ -123,7 +123,7 @@ protected:
     nsISupports*             mCanonical;
 
 private:
-    xpcObjectHelper(xpcObjectHelper& aOther) MOZ_DELETE;
+    xpcObjectHelper(xpcObjectHelper& aOther) = delete;
 
     nsISupports*             mObject;
     nsWrapperCache*          mCache;

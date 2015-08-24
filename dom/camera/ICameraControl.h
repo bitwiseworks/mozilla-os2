@@ -9,6 +9,7 @@
 #include "nsString.h"
 #include "nsAutoPtr.h"
 #include "nsISupportsImpl.h"
+#include "base/basictypes.h"
 
 struct DeviceStorageFileDescriptor;
 
@@ -17,7 +18,6 @@ class nsIFile;
 namespace mozilla {
 
 class CameraControlListener;
-class RecorderProfileManager;
 
 // XXXmikeh - In some future patch this should move into the ICameraControl
 //  class as well, and the names updated to the 'k'-style;
@@ -33,6 +33,7 @@ enum {
   CAMERA_PARAM_PICTURE_ROTATION,
   CAMERA_PARAM_PICTURE_LOCATION,
   CAMERA_PARAM_PICTURE_DATETIME,
+  CAMERA_PARAM_PICTURE_QUALITY,
   CAMERA_PARAM_EFFECT,
   CAMERA_PARAM_WHITEBALANCE,
   CAMERA_PARAM_SCENEMODE,
@@ -52,6 +53,9 @@ enum {
   CAMERA_PARAM_ISOMODE,
   CAMERA_PARAM_LUMINANCE,
   CAMERA_PARAM_SCENEMODE_HDR_RETURNNORMALPICTURE,
+  CAMERA_PARAM_RECORDINGHINT,
+  CAMERA_PARAM_PREFERRED_PREVIEWSIZE_FOR_VIDEO,
+  CAMERA_PARAM_METERINGMODE,
 
   // supported features
   CAMERA_PARAM_SUPPORTED_PREVIEWSIZES,
@@ -72,7 +76,8 @@ enum {
   CAMERA_PARAM_SUPPORTED_ZOOMRATIOS,
   CAMERA_PARAM_SUPPORTED_MAXDETECTEDFACES,
   CAMERA_PARAM_SUPPORTED_JPEG_THUMBNAIL_SIZES,
-  CAMERA_PARAM_SUPPORTED_ISOMODES
+  CAMERA_PARAM_SUPPORTED_ISOMODES,
+  CAMERA_PARAM_SUPPORTED_METERINGMODES
 };
 
 class ICameraControl
@@ -80,8 +85,28 @@ class ICameraControl
 public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(ICameraControl)
 
+  // Returns the number of cameras supported by the system.
+  //
+  // Return values:
+  //  - NS_OK on success;
+  //  - NS_ERROR_FAILURE if the camera count cannot be retrieved.
   static nsresult GetNumberOfCameras(int32_t& aDeviceCount);
+
+  // Gets the (possibly-meaningful) name of a particular camera.
+  //
+  // Return values:
+  //  - NS_OK on success;
+  //  - NS_ERROR_INVALID_ARG if 'aDeviceNum' is not a valid camera number;
+  //  - NS_ERROR_NOT_AVAILABLE if 'aDeviceNum' is valid but the camera name
+  //      could still not be retrieved.
   static nsresult GetCameraName(uint32_t aDeviceNum, nsCString& aDeviceName);
+
+  // Returns a list of names of all cameras supported by the system.
+  //
+  // Return values:
+  //  - NS_OK on success, even if no camera names are returned (in which
+  //      case 'aList' will be empty);
+  //  - NS_ERROR_NOT_AVAILABLE if the list of cameras cannot be retrieved.
   static nsresult GetListOfCameras(nsTArray<nsString>& aList);
 
   enum Mode {
@@ -112,19 +137,19 @@ public:
 
   struct StartRecordingOptions {
     uint32_t  rotation;
-    uint32_t  maxFileSizeBytes;
-    uint32_t  maxVideoLengthMs;
+    uint64_t  maxFileSizeBytes;
+    uint64_t  maxVideoLengthMs;
     bool      autoEnableLowLightTorch;
   };
 
   struct Configuration {
     Mode      mMode;
     Size      mPreviewSize;
+    Size      mPictureSize;
     nsString  mRecorderProfile;
   };
 
-  struct Point
-  {
+  struct Point {
     int32_t   x;
     int32_t   y;
   };
@@ -141,27 +166,112 @@ public:
     Point     mouth;
   };
 
+  class RecorderProfile
+  {
+  public:
+    class Video
+    {
+    public:
+      Video() { }
+      virtual ~Video() { }
+
+      const nsString& GetCodec() const    { return mCodec; }
+      const Size& GetSize() const         { return mSize; }
+      uint32_t GetBitsPerSecond() const   { return mBitsPerSecond; }
+      uint32_t GetFramesPerSecond() const { return mFramesPerSecond; }
+
+    protected:
+      nsString  mCodec;
+      Size      mSize;
+      uint32_t  mBitsPerSecond;
+      uint32_t  mFramesPerSecond;
+
+    private:
+      DISALLOW_EVIL_CONSTRUCTORS(Video);
+    };
+
+    class Audio
+    {
+    public:
+      Audio() { }
+      virtual ~Audio() { }
+
+      const nsString& GetCodec() const    { return mCodec; }
+
+      uint32_t GetChannels() const        { return mChannels; }
+      uint32_t GetBitsPerSecond() const   { return mBitsPerSecond; }
+      uint32_t GetSamplesPerSecond() const { return mSamplesPerSecond; }
+
+    protected:
+      nsString  mCodec;
+      uint32_t  mChannels;
+      uint32_t  mBitsPerSecond;
+      uint32_t  mSamplesPerSecond;
+
+    private:
+      DISALLOW_EVIL_CONSTRUCTORS(Audio);
+    };
+
+    NS_INLINE_DECL_THREADSAFE_REFCOUNTING(RecorderProfile)
+
+    RecorderProfile()
+    { }
+
+    const nsString& GetName() const       { return mName; }
+    const nsString& GetContainer() const  { return mContainer; }
+    const nsString& GetMimeType() const   { return mMimeType; }
+
+    virtual const Video& GetVideo() const = 0;
+    virtual const Audio& GetAudio() const = 0;
+
+  protected:
+    virtual ~RecorderProfile() { }
+
+    nsString    mName;
+    nsString    mContainer;
+    nsString    mMimeType;
+
+  private:
+    DISALLOW_EVIL_CONSTRUCTORS(RecorderProfile);
+  };
+
   static already_AddRefed<ICameraControl> Create(uint32_t aCameraId);
-
-  virtual nsresult Start(const Configuration* aInitialConfig = nullptr) = 0;
-  virtual nsresult Stop() = 0;
-
-  virtual nsresult SetConfiguration(const Configuration& aConfig) = 0;
 
   virtual void AddListener(CameraControlListener* aListener) = 0;
   virtual void RemoveListener(CameraControlListener* aListener) = 0;
 
+  // Camera control methods.
+  //
+  // Return values:
+  //  - NS_OK on success (if the method requires an asynchronous process,
+  //      this value indicates that the process has begun successfully);
+  //  - NS_ERROR_INVALID_ARG if one or more arguments is invalid;
+  //  - NS_ERROR_FAILURE if an asynchronous method could not be dispatched.
+  virtual nsresult Start(const Configuration* aInitialConfig = nullptr) = 0;
+  virtual nsresult Stop() = 0;
+  virtual nsresult SetConfiguration(const Configuration& aConfig) = 0;
   virtual nsresult StartPreview() = 0;
   virtual nsresult StopPreview() = 0;
   virtual nsresult AutoFocus() = 0;
   virtual nsresult TakePicture() = 0;
-  virtual nsresult StartRecording(DeviceStorageFileDescriptor *aFileDescriptor,
+  virtual nsresult StartRecording(DeviceStorageFileDescriptor* aFileDescriptor,
                                   const StartRecordingOptions* aOptions = nullptr) = 0;
   virtual nsresult StopRecording() = 0;
   virtual nsresult StartFaceDetection() = 0;
   virtual nsresult StopFaceDetection() = 0;
   virtual nsresult ResumeContinuousFocus() = 0;
 
+  // Camera parameter getters and setters. 'aKey' must be one of the
+  // CAMERA_PARAM_* values enumerated above.
+  //
+  // Return values:
+  //  - NS_OK on success;
+  //  - NS_ERROR_INVALID_ARG if 'aValue' contains an invalid value;
+  //  - NS_ERROR_NOT_IMPLEMENTED if 'aKey' is invalid;
+  //  - NS_ERROR_NOT_AVAILABLE if the getter fails to retrieve a valid value,
+  //      or if a setter fails because it requires one or more values that
+  //      could not be retrieved;
+  //  - NS_ERROR_FAILURE on unexpected internal failures.
   virtual nsresult Set(uint32_t aKey, const nsAString& aValue) = 0;
   virtual nsresult Get(uint32_t aKey, nsAString& aValue) = 0;
   virtual nsresult Set(uint32_t aKey, double aValue) = 0;
@@ -170,6 +280,8 @@ public:
   virtual nsresult Get(uint32_t aKey, int32_t& aValue) = 0;
   virtual nsresult Set(uint32_t aKey, int64_t aValue) = 0;
   virtual nsresult Get(uint32_t aKey, int64_t& aValue) = 0;
+  virtual nsresult Set(uint32_t aKey, bool aValue) = 0;
+  virtual nsresult Get(uint32_t aKey, bool& aValue) = 0;
   virtual nsresult Set(uint32_t aKey, const Size& aValue) = 0;
   virtual nsresult Get(uint32_t aKey, Size& aValue) = 0;
   virtual nsresult Set(uint32_t aKey, const nsTArray<Region>& aRegions) = 0;
@@ -181,10 +293,8 @@ public:
   virtual nsresult Get(uint32_t aKey, nsTArray<nsString>& aValues) = 0;
   virtual nsresult Get(uint32_t aKey, nsTArray<double>& aValues) = 0;
 
-  virtual already_AddRefed<RecorderProfileManager> GetRecorderProfileManager() = 0;
-  virtual uint32_t GetCameraId() = 0;
-
-  virtual void Shutdown() = 0;
+  virtual nsresult GetRecorderProfiles(nsTArray<nsString>& aProfiles) = 0;
+  virtual RecorderProfile* GetProfileInfo(const nsAString& aProfile) = 0;
 
 protected:
   virtual ~ICameraControl() { }
@@ -201,7 +311,7 @@ protected:
 class ICameraControlParameterSetAutoEnter
 {
 public:
-  ICameraControlParameterSetAutoEnter(ICameraControl* aCameraControl)
+  explicit ICameraControlParameterSetAutoEnter(ICameraControl* aCameraControl)
     : mCameraControl(aCameraControl)
   {
     mCameraControl->BeginBatchParameterSet();

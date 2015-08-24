@@ -16,13 +16,8 @@
 using namespace mozilla;
 using namespace mozilla::layout;
 
-static void
-DestroyFontInflationData(void *aPropertyValue)
-{
-  delete static_cast<nsFontInflationData*>(aPropertyValue);
-}
-
-NS_DECLARE_FRAME_PROPERTY(FontInflationDataProperty, DestroyFontInflationData)
+NS_DECLARE_FRAME_PROPERTY(FontInflationDataProperty,
+                          DeleteValue<nsFontInflationData>)
 
 /* static */ nsFontInflationData*
 nsFontInflationData::FindFontInflationDataFor(const nsIFrame *aFrame)
@@ -155,17 +150,19 @@ ComputeDescendantWidth(const nsHTMLReflowState& aAncestorReflowState,
   for (uint32_t i = 0; i < len; ++i) {
     const nsHTMLReflowState &parentReflowState =
       (i == 0) ? aAncestorReflowState : reflowStates[i - 1];
-    nsSize availSize(parentReflowState.ComputedWidth(), NS_UNCONSTRAINEDSIZE);
     nsIFrame *frame = frames[len - i - 1];
-    NS_ABORT_IF_FALSE(frame->GetParent()->FirstInFlow() ==
-                        parentReflowState.frame->FirstInFlow(),
-                      "bad logic in this function");
+    WritingMode wm = frame->GetWritingMode();
+    LogicalSize availSize = parentReflowState.ComputedSize(wm);
+    availSize.BSize(wm) = NS_UNCONSTRAINEDSIZE;
+    MOZ_ASSERT(frame->GetParent()->FirstInFlow() ==
+                 parentReflowState.frame->FirstInFlow(),
+               "bad logic in this function");
     new (reflowStates + i) nsHTMLReflowState(presContext, parentReflowState,
                                              frame, availSize);
   }
 
-  NS_ABORT_IF_FALSE(reflowStates[len - 1].frame == aDescendantFrame,
-                    "bad logic in this function");
+  MOZ_ASSERT(reflowStates[len - 1].frame == aDescendantFrame,
+             "bad logic in this function");
   nscoord result = reflowStates[len - 1].ComputedWidth();
 
   for (uint32_t i = len; i-- != 0; ) {
@@ -194,9 +191,9 @@ nsFontInflationData::UpdateWidth(const nsHTMLReflowState &aReflowState)
   }
   nsIFrame *lastInflatableDescendant =
              FindEdgeInflatableFrameIn(bfc, eFromEnd);
-  NS_ABORT_IF_FALSE(!firstInflatableDescendant == !lastInflatableDescendant,
-                    "null-ness should match; NearestCommonAncestorFirstInFlow"
-                    " will crash when passed null");
+  MOZ_ASSERT(!firstInflatableDescendant == !lastInflatableDescendant,
+             "null-ness should match; NearestCommonAncestorFirstInFlow"
+             " will crash when passed null");
 
   // Particularly when we're computing for the root BFC, the width of
   // nca might differ significantly for the width of bfc.

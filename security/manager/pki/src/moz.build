@@ -6,11 +6,14 @@
 
 UNIFIED_SOURCES += [
     'nsASN1Tree.cpp',
-    'nsFormSigningDialog.cpp',
     'nsNSSDialogHelper.cpp',
     'nsNSSDialogs.cpp',
     'nsPKIModule.cpp',
     'nsPKIParamBlock.cpp',
+]
+
+GENERATED_INCLUDES += [
+    '/dist/public/nss',
 ]
 
 FAIL_ON_WARNINGS = True

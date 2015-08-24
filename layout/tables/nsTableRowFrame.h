@@ -33,37 +33,38 @@ public:
 
   virtual ~nsTableRowFrame();
 
-  virtual void Init(nsIContent*      aContent,
-                    nsIFrame*        aParent,
-                    nsIFrame*        aPrevInFlow) MOZ_OVERRIDE;
+  virtual void Init(nsIContent*       aContent,
+                    nsContainerFrame* aParent,
+                    nsIFrame*         aPrevInFlow) override;
 
-  virtual void DestroyFrom(nsIFrame* aDestructRoot) MOZ_OVERRIDE;
+  virtual void DestroyFrom(nsIFrame* aDestructRoot) override;
 
   /** @see nsIFrame::DidSetStyleContext */
-  virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext) MOZ_OVERRIDE;
+  virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext) override;
   
-  virtual nsresult AppendFrames(ChildListID     aListID,
-                                nsFrameList&    aFrameList) MOZ_OVERRIDE;
-  virtual nsresult InsertFrames(ChildListID     aListID,
-                                nsIFrame*       aPrevFrame,
-                                nsFrameList&    aFrameList) MOZ_OVERRIDE;
-  virtual nsresult RemoveFrame(ChildListID     aListID,
-                               nsIFrame*       aOldFrame) MOZ_OVERRIDE;
+  virtual void AppendFrames(ChildListID     aListID,
+                            nsFrameList&    aFrameList) override;
+  virtual void InsertFrames(ChildListID     aListID,
+                            nsIFrame*       aPrevFrame,
+                            nsFrameList&    aFrameList) override;
+  virtual void RemoveFrame(ChildListID     aListID,
+                           nsIFrame*       aOldFrame) override;
 
   /** instantiate a new instance of nsTableRowFrame.
     * @param aPresShell the pres shell for this frame
     *
     * @return           the frame that was created
     */
-  friend nsIFrame* NS_NewTableRowFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
+  friend nsTableRowFrame* NS_NewTableRowFrame(nsIPresShell* aPresShell,
+                                              nsStyleContext* aContext);
 
-  virtual nsMargin GetUsedMargin() const MOZ_OVERRIDE;
-  virtual nsMargin GetUsedBorder() const MOZ_OVERRIDE;
-  virtual nsMargin GetUsedPadding() const MOZ_OVERRIDE;
+  virtual nsMargin GetUsedMargin() const override;
+  virtual nsMargin GetUsedBorder() const override;
+  virtual nsMargin GetUsedPadding() const override;
 
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                 const nsRect&           aDirtyRect,
-                                const nsDisplayListSet& aLists) MOZ_OVERRIDE;
+                                const nsDisplayListSet& aLists) override;
 
   nsTableCellFrame* GetFirstCell() ;
 
@@ -80,10 +81,10 @@ public:
     * @see nsTableFrame::BalanceColumnWidths
     * @see nsTableFrame::ShrinkWrapChildren
     */
-  virtual nsresult Reflow(nsPresContext*          aPresContext,
-                          nsHTMLReflowMetrics&     aDesiredSize,
-                          const nsHTMLReflowState& aReflowState,
-                          nsReflowStatus&          aStatus) MOZ_OVERRIDE;
+  virtual void Reflow(nsPresContext*           aPresContext,
+                      nsHTMLReflowMetrics&     aDesiredSize,
+                      const nsHTMLReflowState& aReflowState,
+                      nsReflowStatus&          aStatus) override;
 
   void DidResize();
 
@@ -92,10 +93,10 @@ public:
    *
    * @see nsGkAtoms::tableRowFrame
    */
-  virtual nsIAtom* GetType() const MOZ_OVERRIDE;
+  virtual nsIAtom* GetType() const override;
 
 #ifdef DEBUG_FRAME_DUMP
-  virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
+  virtual nsresult GetFrameName(nsAString& aResult) const override;
 #endif
  
   void UpdateHeight(nscoord           aHeight,
@@ -121,7 +122,7 @@ public:
 
   /* return the row ascent
    */
-  nscoord GetRowBaseline();
+  nscoord GetRowBaseline(mozilla::WritingMode aWritingMode);
  
   /** returns the ordinal position of this row in its table */
   virtual int32_t GetRowIndex() const;
@@ -218,17 +219,17 @@ public:
   void SetContinuousBCBorderWidth(uint8_t     aForSide,
                                   BCPixelSize aPixelValue);
 
-  virtual bool IsFrameOfType(uint32_t aFlags) const MOZ_OVERRIDE
+  virtual bool IsFrameOfType(uint32_t aFlags) const override
   {
     return nsContainerFrame::IsFrameOfType(aFlags & ~(nsIFrame::eTablePart));
   }
 
-  virtual void InvalidateFrame(uint32_t aDisplayItemKey = 0) MOZ_OVERRIDE;
-  virtual void InvalidateFrameWithRect(const nsRect& aRect, uint32_t aDisplayItemKey = 0) MOZ_OVERRIDE;
-  virtual void InvalidateFrameForRemoval() MOZ_OVERRIDE { InvalidateFrameSubtree(); }
+  virtual void InvalidateFrame(uint32_t aDisplayItemKey = 0) override;
+  virtual void InvalidateFrameWithRect(const nsRect& aRect, uint32_t aDisplayItemKey = 0) override;
+  virtual void InvalidateFrameForRemoval() override { InvalidateFrameSubtree(); }
 
 #ifdef ACCESSIBILITY
-  virtual mozilla::a11y::AccType AccessibleType() MOZ_OVERRIDE;
+  virtual mozilla::a11y::AccType AccessibleType() override;
 #endif
 
 protected:
@@ -236,14 +237,14 @@ protected:
   /** protected constructor.
     * @see NewFrame
     */
-  nsTableRowFrame(nsStyleContext *aContext);
+  explicit nsTableRowFrame(nsStyleContext *aContext);
 
   void InitChildReflowState(nsPresContext&         aPresContext,
                             const nsSize&           aAvailSize,
                             bool                    aBorderCollapse,
                             nsTableCellReflowState& aReflowState);
   
-  virtual int GetLogicalSkipSides(const nsHTMLReflowState* aReflowState = nullptr) const MOZ_OVERRIDE;
+  virtual LogicalSides GetLogicalSkipSides(const nsHTMLReflowState* aReflowState = nullptr) const override;
 
   // row-specific methods
 
@@ -254,11 +255,11 @@ protected:
    * Called for incremental/dirty and resize reflows. If aDirtyOnly is true then
    * only reflow dirty cells.
    */
-  nsresult ReflowChildren(nsPresContext*           aPresContext,
-                          nsHTMLReflowMetrics&     aDesiredSize,
-                          const nsHTMLReflowState& aReflowState,
-                          nsTableFrame&            aTableFrame,
-                          nsReflowStatus&          aStatus);
+  void ReflowChildren(nsPresContext*           aPresContext,
+                      nsHTMLReflowMetrics&     aDesiredSize,
+                      const nsHTMLReflowState& aReflowState,
+                      nsTableFrame&            aTableFrame,
+                      nsReflowStatus&          aStatus);
 
 private:
   struct RowBits {

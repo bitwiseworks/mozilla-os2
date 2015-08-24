@@ -71,9 +71,9 @@ public:
       return;
     }
 
-    nsRefPtr<gl::GLContext> gl = gl::GLContextProvider::CreateOffscreen(
-      gfxIntSize(16, 16),
-      gfx::SurfaceCaps::ForRGB());
+    nsRefPtr<gl::GLContext> gl;
+    bool requireCompatProfile = true;
+    gl = gl::GLContextProvider::CreateHeadless(requireCompatProfile);
 
     if (!gl) {
       // Setting mReady to true here means that we won't retry. Everything will
@@ -112,6 +112,10 @@ NS_IMPL_ISUPPORTS_INHERITED(GfxInfo, GfxInfoBase, nsIGfxInfoDebug)
 GfxInfo::GfxInfo()
   : mInitialized(false)
   , mGLStrings(new GLStrings)
+{
+}
+
+GfxInfo::~GfxInfo()
 {
 }
 
@@ -223,7 +227,7 @@ NS_IMETHODIMP
 GfxInfo::GetAdapterRAM(nsAString & aAdapterRAM)
 {
   EnsureInitialized();
-  aAdapterRAM.AssignLiteral("");
+  aAdapterRAM.Truncate();
   return NS_OK;
 }
 
@@ -240,7 +244,7 @@ NS_IMETHODIMP
 GfxInfo::GetAdapterDriver(nsAString & aAdapterDriver)
 {
   EnsureInitialized();
-  aAdapterDriver.AssignLiteral("");
+  aAdapterDriver.Truncate();
   return NS_OK;
 }
 
@@ -274,7 +278,7 @@ NS_IMETHODIMP
 GfxInfo::GetAdapterDriverDate(nsAString & aAdapterDriverDate)
 {
   EnsureInitialized();
-  aAdapterDriverDate.AssignLiteral("");
+  aAdapterDriverDate.Truncate();
   return NS_OK;
 }
 
@@ -320,6 +324,22 @@ GfxInfo::GetAdapterDeviceID2(nsAString & aAdapterDeviceID)
   return NS_ERROR_FAILURE;
 }
 
+/* readonly attribute DOMString adapterSubsysID; */
+NS_IMETHODIMP
+GfxInfo::GetAdapterSubsysID(nsAString & aAdapterSubsysID)
+{
+  EnsureInitialized();
+  return NS_ERROR_FAILURE;
+}
+
+/* readonly attribute DOMString adapterSubsysID2; */
+NS_IMETHODIMP
+GfxInfo::GetAdapterSubsysID2(nsAString & aAdapterSubsysID)
+{
+  EnsureInitialized();
+  return NS_ERROR_FAILURE;
+}
+
 /* readonly attribute boolean isGPU2Active; */
 NS_IMETHODIMP
 GfxInfo::GetIsGPU2Active(bool* aIsGPU2Active)
@@ -336,6 +356,8 @@ GfxInfo::AddCrashReportAnnotations()
                                      mGLStrings->Vendor());
   CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("AdapterDeviceID"),
                                      mGLStrings->Renderer());
+  CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("AdapterDriverVersion"),
+                                     mGLStrings->Version());
 
   /* Add an App Note for now so that we get the data immediately. These
    * can go away after we store the above in the socorro db */
@@ -352,7 +374,7 @@ GfxInfo::GetGfxDriverInfo()
   if (mDriverInfo->IsEmpty()) {
     APPEND_TO_DRIVER_BLOCKLIST2( DRIVER_OS_ALL,
       (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorAll), GfxDriverInfo::allDevices,
-      nsIGfxInfo::FEATURE_OPENGL_LAYERS, nsIGfxInfo::FEATURE_NO_INFO,
+      nsIGfxInfo::FEATURE_OPENGL_LAYERS, nsIGfxInfo::FEATURE_STATUS_OK,
       DRIVER_COMPARISON_IGNORED, GfxDriverInfo::allDriverVersions );
   }
 
@@ -377,7 +399,7 @@ GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
   // This early return is so we avoid potentially slow
   // GLStrings initialization on startup when we initialize GL layers.
   if (aFeature == nsIGfxInfo::FEATURE_OPENGL_LAYERS) {
-    *aStatus = nsIGfxInfo::FEATURE_NO_INFO;
+    *aStatus = nsIGfxInfo::FEATURE_STATUS_OK;
     return NS_OK;
   }
 
@@ -398,7 +420,7 @@ GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
         return NS_OK;
       }
 
-      if (mHardware.Equals(NS_LITERAL_STRING("ville"))) {
+      if (mHardware.EqualsLiteral("ville")) {
         *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DEVICE;
         return NS_OK;
       }
@@ -409,12 +431,12 @@ GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
       NS_LossyConvertUTF16toASCII cModel(mModel);
       NS_LossyConvertUTF16toASCII cHardware(mHardware);
 
-      if (cHardware.Equals("antares") ||
-          cHardware.Equals("harmony") ||
-          cHardware.Equals("picasso") ||
-          cHardware.Equals("picasso_e") ||
-          cHardware.Equals("ventana") ||
-          cHardware.Equals("rk30board"))
+      if (cHardware.EqualsLiteral("antares") ||
+          cHardware.EqualsLiteral("harmony") ||
+          cHardware.EqualsLiteral("picasso") ||
+          cHardware.EqualsLiteral("picasso_e") ||
+          cHardware.EqualsLiteral("ventana") ||
+          cHardware.EqualsLiteral("rk30board"))
       {
         *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DEVICE;
         return NS_OK;
@@ -555,11 +577,11 @@ GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
       NS_LossyConvertUTF16toASCII cModel(mModel);
       NS_LossyConvertUTF16toASCII cHardware(mHardware);
 
-      if (cHardware.Equals("hammerhead") &&
+      if (cHardware.EqualsLiteral("hammerhead") &&
           CompareVersions(mOSVersion.get(), "4.4.2") >= 0 &&
           cManufacturer.Equals("lge", nsCaseInsensitiveCStringComparator()) &&
           cModel.Equals("nexus 5", nsCaseInsensitiveCStringComparator())) {
-        *aStatus = nsIGfxInfo::FEATURE_NO_INFO;
+        *aStatus = nsIGfxInfo::FEATURE_STATUS_OK;
         return NS_OK;
       } else {
         // Blocklist all other devices except Nexus 5 which VP8 hardware acceleration is supported

@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -31,8 +32,9 @@
 {0x7b4eeb20, 0xd781, 0x11d4, \
    {0x8A, 0x83, 0x00, 0x10, 0xa4, 0xe0, 0xc9, 0xca}}
 
-class nsProcess MOZ_FINAL : public nsIProcess,
-                            public nsIObserver
+class nsProcess final
+  : public nsIProcess
+  , public nsIObserver
 {
 public:
 
@@ -44,17 +46,17 @@ public:
 
 private:
   ~nsProcess();
-  static void Monitor(void *arg);
+  static void Monitor(void* aArg);
   void ProcessComplete();
-  nsresult CopyArgsAndRunProcess(bool blocking, const char** args,
-                                 uint32_t count, nsIObserver* observer,
-                                 bool holdWeak);
-  nsresult CopyArgsAndRunProcessw(bool blocking, const char16_t** args,
-                                  uint32_t count, nsIObserver* observer,
-                                  bool holdWeak);
+  nsresult CopyArgsAndRunProcess(bool aBlocking, const char** aArgs,
+                                 uint32_t aCount, nsIObserver* aObserver,
+                                 bool aHoldWeak);
+  nsresult CopyArgsAndRunProcessw(bool aBlocking, const char16_t** aArgs,
+                                  uint32_t aCount, nsIObserver* aObserver,
+                                  bool aHoldWeak);
   // The 'args' array is null-terminated.
-  nsresult RunProcess(bool blocking, char **args, nsIObserver* observer,
-                      bool holdWeak, bool argsUTF8);
+  nsresult RunProcess(bool aBlocking, char** aArgs, nsIObserver* aObserver,
+                      bool aHoldWeak, bool aArgsUTF8);
 
   PRThread* mThread;
   mozilla::Mutex mLock;
@@ -73,7 +75,7 @@ private:
 #if defined(PROCESSMODEL_WINAPI)
   HANDLE mProcess;
 #elif !defined(XP_MACOSX)
-  PRProcess *mProcess;
+  PRProcess* mProcess;
 #endif
 };
 

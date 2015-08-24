@@ -33,14 +33,20 @@
 /** Audio recording preset values */
 /**   preset "none" cannot be set, it is used to indicate the current settings
  *     do not match any of the presets. */
-#define SL_ANDROID_RECORDING_PRESET_NONE              ((SLuint32) 0x00000000)
+#define SL_ANDROID_RECORDING_PRESET_NONE                ((SLuint32) 0x00000000)
 /**   generic recording configuration on the platform */
-#define SL_ANDROID_RECORDING_PRESET_GENERIC           ((SLuint32) 0x00000001)
+#define SL_ANDROID_RECORDING_PRESET_GENERIC             ((SLuint32) 0x00000001)
 /**   uses the microphone audio source with the same orientation as the camera
  *     if available, the main device microphone otherwise */
-#define SL_ANDROID_RECORDING_PRESET_CAMCORDER         ((SLuint32) 0x00000002)
+#define SL_ANDROID_RECORDING_PRESET_CAMCORDER           ((SLuint32) 0x00000002)
 /**   uses the main microphone tuned for voice recognition */
-#define SL_ANDROID_RECORDING_PRESET_VOICE_RECOGNITION ((SLuint32) 0x00000003)
+#define SL_ANDROID_RECORDING_PRESET_VOICE_RECOGNITION   ((SLuint32) 0x00000003)
+/**   uses the main microphone tuned for audio communications */
+#define SL_ANDROID_RECORDING_PRESET_VOICE_COMMUNICATION ((SLuint32) 0x00000004)
+
+/** Audio recording get session ID (read only) */
+/** Audio recording get session ID key */
+#define SL_ANDROID_KEY_RECORDING_SESSION_ID ((const SLchar*) "androidRecordingSessionId")
 
 /*---------------------------------------------------------------------------*/
 /* Android AudioPlayer configuration                                         */
@@ -63,5 +69,9 @@
 #define SL_ANDROID_STREAM_ALARM        ((SLint32) 0x00000004)
 /*      same as android.media.AudioManager.STREAM_NOTIFICATION */
 #define SL_ANDROID_STREAM_NOTIFICATION ((SLint32) 0x00000005)
+/*      same as android.media.AudioManager.STREAM_BLUETOOTH_SCO */
+#define SL_ANDROID_STREAM_BLUETOOTH_SCO ((SLint32) 0x00000006)
+/*      same as android.media.AudioManager.STREAM_SYSTEM_ENFORCED */
+#define SL_ANDROID_STREAM_SYSTEM_ENFORCED ((SLint32) 0x00000007)
 
 #endif /* OPENSL_ES_ANDROIDCONFIGURATION_H_ */

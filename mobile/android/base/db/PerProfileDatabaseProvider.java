@@ -4,6 +4,7 @@
 
 package org.mozilla.gecko.db;
 
+import org.mozilla.gecko.AppConstants.Versions;
 import org.mozilla.gecko.db.PerProfileDatabases.DatabaseHelperFactory;
 
 import android.content.Context;
@@ -40,7 +41,11 @@ public abstract class PerProfileDatabaseProvider<T extends SQLiteOpenHelper> ext
                 getContext(), getDatabaseName(), new DatabaseHelperFactory<T>() {
                     @Override
                     public T makeDatabaseHelper(Context context, String databasePath) {
-                        return createDatabaseHelper(context, databasePath);
+                        final T helper = createDatabaseHelper(context, databasePath);
+                        if (Versions.feature16Plus) {
+                            helper.setWriteAheadLoggingEnabled(true);
+                        }
+                        return helper;
                     }
                 });
         }

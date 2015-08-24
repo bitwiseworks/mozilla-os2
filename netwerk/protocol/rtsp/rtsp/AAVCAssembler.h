@@ -18,6 +18,7 @@
 
 #define A_AVC_ASSEMBLER_H_
 
+#include "mozilla/Types.h"
 #include "ARTPAssembler.h"
 
 #include <utils/List.h>
@@ -25,8 +26,8 @@
 
 namespace android {
 
-struct ABuffer;
-struct AMessage;
+struct MOZ_EXPORT ABuffer;
+struct MOZ_EXPORT AMessage;
 
 struct AAVCAssembler : public ARTPAssembler {
     AAVCAssembler(const sp<AMessage> &notify);
@@ -48,11 +49,11 @@ private:
     List<sp<ABuffer> > mNALUnits;
 
     AssemblyStatus addNALUnit(const sp<ARTPSource> &source);
-    void addSingleNALUnit(const sp<ABuffer> &buffer);
+    bool addSingleNALUnit(const sp<ABuffer> &buffer);
     AssemblyStatus addFragmentedNALUnit(List<sp<ABuffer> > *queue);
     bool addSingleTimeAggregationPacket(const sp<ABuffer> &buffer);
 
-    void submitAccessUnit();
+    bool submitAccessUnit();
 
     DISALLOW_EVIL_CONSTRUCTORS(AAVCAssembler);
 };

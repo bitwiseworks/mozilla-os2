@@ -31,15 +31,23 @@
 
 #ifdef JS_ARM_SIMULATOR
 
+#include "jslock.h"
+
 #include "jit/arm/Architecture-arm.h"
 #include "jit/IonTypes.h"
 
 namespace js {
 namespace jit {
 
-class SimulatorRuntime;
-SimulatorRuntime* CreateSimulatorRuntime();
-void DestroySimulatorRuntime(SimulatorRuntime* srt);
+class Simulator;
+class Redirection;
+class CachePage;
+class AutoLockSimulator;
+
+// When the SingleStepCallback is called, the simulator is about to execute
+// sim->get_pc() and the current machine state represents the completed
+// execution of the previous pc.
+typedef void (*SingleStepCallback)(void* arg, Simulator* sim, void* pc);
 
 // VFP rounding modes. See ARM DDI 0406B Page A2-29.
 enum VFPRoundingMode {
@@ -63,6 +71,7 @@ class SimInstruction;
 class Simulator
 {
     friend class Redirection;
+    friend class AutoLockSimulatorCache;
 
   public:
     friend class ArmDebugger;
@@ -89,7 +98,13 @@ class Simulator
         num_q_registers = 16
     };
 
-    explicit Simulator(SimulatorRuntime* srt);
+    // Returns nullptr on OOM.
+    static Simulator* Create();
+
+    static void Destroy(Simulator* simulator);
+
+    // Constructor/destructor are for internal use only; use the static methods above.
+    Simulator();
     ~Simulator();
 
     // The currently executing Simulator instance. Potentially there can be one
@@ -99,6 +114,8 @@ class Simulator
     static inline uintptr_t StackLimit() {
         return Simulator::Current()->stackLimit();
     }
+
+    uintptr_t* addressOfStackLimit();
 
     // Accessors for register state. Reading the pc value adheres to the ARM
     // architecture specification and is off by a 8 from the currently executing
@@ -148,6 +165,9 @@ class Simulator
         resume_pc_ = value;
     }
 
+    void enable_single_stepping(SingleStepCallback cb, void* arg);
+    void disable_single_stepping();
+
     uintptr_t stackLimit() const;
     bool overRecursed(uintptr_t newsp = 0) const;
     bool overRecursedWithExtra(uint32_t extra) const;
@@ -172,12 +192,14 @@ class Simulator
         // Known bad pc value to ensure that the simulator does not execute
         // without being properly setup.
         bad_lr = -1,
-        // A pc value used to signal the simulator to stop execution.  Generally
+        // A pc value used to signal the simulator to stop execution. Generally
         // the lr is set to this value on transition from native C code to
         // simulated execution, so that the simulator can "return" to the native
         // C code.
         end_sim_pc = -2
     };
+
+    bool init();
 
     // Checks if the current instruction should be executed based on its
     // condition bits.
@@ -255,6 +277,9 @@ class Simulator
     void decodeVCVTBetweenFloatingPointAndInteger(SimInstruction* instr);
     void decodeVCVTBetweenFloatingPointAndIntegerFrac(SimInstruction* instr);
 
+    // Support for some system functions.
+    void decodeType7CoprocessorIns(SimInstruction* instr);
+
     // Executes one instruction.
     void instructionDecode(SimInstruction* instr);
 
@@ -264,12 +289,20 @@ class Simulator
 
     static int64_t StopSimAt;
 
+    // For testing the MoveResolver code, a MoveResolver is set up, and
+    // the VFP registers are loaded with pre-determined values,
+    // then the sequence of code is simulated.  In order to test this with the
+    // simulator, the callee-saved registers can't be trashed. This flag
+    // disables that feature.
+    bool skipCalleeSavedRegsCheck;
+
     // Runtime call support.
     static void* RedirectNativeFunction(void* nativeFunction, ABIFunctionType type);
 
   private:
     // Handle arguments and return value for runtime FP functions.
     void getFpArgs(double* x, double* y, int32_t* z);
+    void getFpFromStack(int32_t* stack, double* x1);
     void setCallResultDouble(double result);
     void setCallResultFloat(float result);
     void setCallResult(int64_t res);
@@ -313,6 +346,7 @@ class Simulator
 
     // Simulator support.
     char* stack_;
+    uintptr_t stackLimit_;
     bool pc_modified_;
     int64_t icount_;
 
@@ -325,7 +359,10 @@ class Simulator
     SimInstruction* break_pc_;
     Instr break_instr_;
 
-    SimulatorRuntime* srt_;
+    // Single-stepping support
+    bool single_stepping_;
+    SingleStepCallback single_step_callback_;
+    void* single_step_callback_arg_;
 
     // A stop is watched if its code is less than kNumOfWatchedStops.
     // Only watched stops support enabling/disabling and the counter feature.
@@ -349,11 +386,53 @@ class Simulator
         return icount_;
     }
 
+  private:
+    // ICache checking.
+    struct ICacheHasher {
+        typedef void* Key;
+        typedef void* Lookup;
+        static HashNumber hash(const Lookup& l);
+        static bool match(const Key& k, const Lookup& l);
+    };
+
+  public:
+    typedef HashMap<void*, CachePage*, ICacheHasher, SystemAllocPolicy> ICacheMap;
+
+  private:
+    // This lock creates a critical section around 'redirection_' and
+    // 'icache_', which are referenced both by the execution engine
+    // and by the off-thread compiler (see Redirection::Get in the cpp file).
+    PRLock* cacheLock_;
+#ifdef DEBUG
+    PRThread* cacheLockHolder_;
+#endif
+
+    Redirection* redirection_;
+    ICacheMap icache_;
+
+  public:
+    ICacheMap& icache() {
+        // Technically we need the lock to access the innards of the
+        // icache, not to take its address, but the latter condition
+        // serves as a useful complement to the former.
+        MOZ_ASSERT(cacheLockHolder_);
+        return icache_;
+    }
+
+    Redirection* redirection() const {
+        MOZ_ASSERT(cacheLockHolder_);
+        return redirection_;
+    }
+
+    void setRedirection(js::jit::Redirection* redirection) {
+        MOZ_ASSERT(cacheLockHolder_);
+        redirection_ = redirection;
+    }
 };
 
 #define JS_CHECK_SIMULATOR_RECURSION_WITH_EXTRA(cx, extra, onerror)             \
     JS_BEGIN_MACRO                                                              \
-        if (cx->mainThread().simulator()->overRecursedWithExtra(extra)) {       \
+        if (cx->runtime()->simulator()->overRecursedWithExtra(extra)) {         \
             js_ReportOverRecursed(cx);                                          \
             onerror;                                                            \
         }                                                                       \

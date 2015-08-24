@@ -25,22 +25,22 @@ struct DataType
 template<>
 struct DataType<JSObject*>
 {
-    typedef EncapsulatedPtrObject Encapsulated;
+    typedef PreBarrieredObject PreBarriered;
     static JSObject* NullValue() { return nullptr; }
 };
 
 template<>
 struct DataType<JS::Value>
 {
-    typedef EncapsulatedValue Encapsulated;
+    typedef PreBarrieredValue PreBarriered;
     static JS::Value NullValue() { return JS::UndefinedValue(); }
 };
 
 template <typename K, typename V>
 struct Utils
 {
-    typedef typename DataType<K>::Encapsulated KeyType;
-    typedef typename DataType<V>::Encapsulated ValueType;
+    typedef typename DataType<K>::PreBarriered KeyType;
+    typedef typename DataType<V>::PreBarriered ValueType;
     typedef WeakMap<KeyType, ValueType> Type;
     typedef Type* PtrType;
     static PtrType cast(void* ptr) { return static_cast<PtrType>(ptr); }
@@ -58,7 +58,6 @@ JS::WeakMapPtr<K, V>::destroy()
     // of known live weakmaps. If we are, remove ourselves before deleting.
     if (map->isInList())
         WeakMapBase::removeWeakMapFromList(map);
-    map->check();
     js_delete(map);
     ptr = nullptr;
 }
@@ -100,7 +99,7 @@ JS::WeakMapPtr<K, V>::keyMarkCallback(JSTracer* trc, K key, void* data)
 {
     auto map = static_cast< JS::WeakMapPtr<K, V>* >(data);
     K prior = key;
-    JS_CallObjectTracer(trc, &key, "WeakMapPtr key");
+    JS_CallUnbarrieredObjectTracer(trc, &key, "WeakMapPtr key");
     return Utils<K, V>::cast(map->ptr)->rekeyIfMoved(prior, key);
 }
 
@@ -121,9 +120,9 @@ JS::WeakMapPtr<K, V>::put(JSContext* cx, const K& key, const V& value)
 // Supported specializations of JS::WeakMap:
 //
 
-template class JS::WeakMapPtr<JSObject*, JSObject*>;
+template class JS_PUBLIC_API(JS::WeakMapPtr)<JSObject*, JSObject*>;
 
 #ifdef DEBUG
 // Nobody's using this at the moment, but we want to make sure it compiles.
-template class JS::WeakMapPtr<JSObject*, JS::Value>;
+template class JS_PUBLIC_API(JS::WeakMapPtr)<JSObject*, JS::Value>;
 #endif

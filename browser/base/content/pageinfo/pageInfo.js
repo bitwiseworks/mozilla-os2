@@ -237,12 +237,14 @@ const nsICertificateDialogs = Components.interfaces.nsICertificateDialogs;
 const CERTIFICATEDIALOGS_CONTRACTID = "@mozilla.org/nsCertificateDialogs;1"
 
 // clipboard helper
-try {
-  const gClipboardHelper = Components.classes["@mozilla.org/widget/clipboardhelper;1"].getService(Components.interfaces.nsIClipboardHelper);
+function getClipboardHelper() {
+    try {
+        return Components.classes["@mozilla.org/widget/clipboardhelper;1"].getService(Components.interfaces.nsIClipboardHelper);
+    } catch(e) {
+        // do nothing, later code will handle the error
+    }
 }
-catch(e) {
-  // do nothing, later code will handle the error
-}
+const gClipboardHelper = getClipboardHelper();
 
 // Interface for image loading content
 const nsIImageLoadingContent = Components.interfaces.nsIImageLoadingContent;
@@ -323,7 +325,7 @@ function onLoadPageInfo()
              window.arguments[0];
 
   if (!args || !args.doc) {
-    gWindow = window.opener.content;
+    gWindow = window.opener.gBrowser.selectedBrowser.contentWindowAsCPOW;
     gDocument = gWindow.document;
   }
 
@@ -442,14 +444,6 @@ function loadTab(args)
   radioGroup.focus();
 }
 
-function onClickMore()
-{
-  var radioGrp = document.getElementById("viewGroup");
-  var radioElt = document.getElementById("securityTab");
-  radioGrp.selectedItem = radioElt;
-  showTab('security');
-}
-
 function toggleGroupbox(id)
 {
   var elt = document.getElementById(id);
@@ -516,7 +510,7 @@ function makeGeneralTab()
     else
       metaTagsCaption.label = gBundle.getFormattedString("generalMetaTags", [length]);
     var metaTree = document.getElementById("metatree");
-    metaTree.treeBoxObject.view = gMetaView;
+    metaTree.view = gMetaView;
 
     for (var i = 0; i < length; i++)
       gMetaView.addRow([metaNodes[i].name || metaNodes[i].httpEquiv, metaNodes[i].content]);

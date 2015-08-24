@@ -10,13 +10,16 @@
   locale/@AB_CD@/browser/aboutAddons.dtd          (%chrome/aboutAddons.dtd)
   locale/@AB_CD@/browser/aboutAddons.properties   (%chrome/aboutAddons.properties)
   locale/@AB_CD@/browser/aboutApps.dtd            (%chrome/aboutApps.dtd)
+#ifdef MOZ_DEVICES
+  locale/@AB_CD@/browser/aboutDevices.dtd         (%chrome/aboutDevices.dtd)
+#endif
   locale/@AB_CD@/browser/aboutCertError.dtd       (%chrome/aboutCertError.dtd)
   locale/@AB_CD@/browser/aboutDownloads.dtd       (%chrome/aboutDownloads.dtd)
   locale/@AB_CD@/browser/aboutDownloads.properties (%chrome/aboutDownloads.properties)
   locale/@AB_CD@/browser/aboutFeedback.dtd        (%chrome/aboutFeedback.dtd)
   locale/@AB_CD@/browser/aboutHome.dtd            (%chrome/aboutHome.dtd)
+  locale/@AB_CD@/browser/aboutHome.properties     (%chrome/aboutHome.properties)
   locale/@AB_CD@/browser/aboutPrivateBrowsing.dtd (%chrome/aboutPrivateBrowsing.dtd)
-  locale/@AB_CD@/browser/aboutReader.properties   (%chrome/aboutReader.properties)
 #ifdef MOZ_SERVICES_HEALTHREPORT
   locale/@AB_CD@/browser/aboutHealthReport.dtd    (%chrome/aboutHealthReport.dtd)
 #endif
@@ -34,8 +37,11 @@
   locale/@AB_CD@/browser/phishing.dtd             (%chrome/phishing.dtd)
   locale/@AB_CD@/browser/payments.properties      (%chrome/payments.properties)
   locale/@AB_CD@/browser/handling.properties      (%chrome/handling.properties)
-#ifdef MOZ_ANDROID_SYNTHAPKS
   locale/@AB_CD@/browser/webapp.properties        (%chrome/webapp.properties)
+#ifdef NIGHTLY_BUILD
+  locale/@AB_CD@/browser/aboutPasswords.dtd       (%chrome/aboutPasswords.dtd)
+  locale/@AB_CD@/browser/aboutPasswords.properties (%chrome/aboutPasswords.properties)
+  locale/@AB_CD@/browser/webcompatReporter.properties (%chrome/webcompatReporter.properties)
 #endif
 
 # overrides for toolkit l10n, also for en-US
@@ -52,7 +58,6 @@ relativesrcdir toolkit/locales:
   locale/@AB_CD@/browser/overrides/update/updates.properties       (%chrome/mozapps/update/updates.properties)
 # plugins
   locale/@AB_CD@/browser/overrides/plugins/plugins.dtd             (%chrome/mozapps/plugins/plugins.dtd)
-  locale/@AB_CD@/browser/overrides/plugins/plugins.properties      (%chrome/mozapps/plugins/plugins.properties)
 # about:support
   locale/@AB_CD@/browser/overrides/global/aboutSupport.dtd         (%chrome/global/aboutSupport.dtd)
   locale/@AB_CD@/browser/overrides/global/aboutSupport.properties  (%chrome/global/aboutSupport.properties)
@@ -77,7 +82,6 @@ relativesrcdir toolkit/locales:
 % override chrome://global/locale/search/search.properties chrome://browser/locale/overrides/search/search.properties
 % override chrome://mozapps/locale/update/updates.properties chrome://browser/locale/overrides/update/updates.properties
 % override chrome://mozapps/locale/plugins/plugins.dtd chrome://browser/locale/overrides/plugins/plugins.dtd
-% override chrome://mozapps/locale/plugins/plugins.properties chrome://browser/locale/overrides/plugins/plugins.properties
 % override chrome://global/locale/aboutSupport.dtd chrome://browser/locale/overrides/global/aboutSupport.dtd
 % override chrome://global/locale/aboutSupport.properties chrome://browser/locale/overrides/global/aboutSupport.properties
 % override chrome://global/locale/crashes.dtd chrome://browser/locale/overrides/crashreporter/crashes.dtd

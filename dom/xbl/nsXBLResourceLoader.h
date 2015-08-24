@@ -29,8 +29,9 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS(nsXBLResourceLoader)
 
   // nsICSSLoaderObserver
-  NS_IMETHOD StyleSheetLoaded(nsCSSStyleSheet* aSheet, bool aWasAlternate,
-                              nsresult aStatus) MOZ_OVERRIDE;
+  NS_IMETHOD StyleSheetLoaded(mozilla::CSSStyleSheet* aSheet,
+                              bool aWasAlternate,
+                              nsresult aStatus) override;
 
   void LoadResources(bool* aResult);
   void AddResource(nsIAtom* aResourceType, const nsAString& aSrc);
@@ -38,7 +39,6 @@ public:
 
   nsXBLResourceLoader(nsXBLPrototypeBinding* aBinding,
                       nsXBLPrototypeResources* aResources);
-  virtual ~nsXBLResourceLoader();
 
   void NotifyBoundElements();
 
@@ -62,6 +62,9 @@ public:
 
   // Bound elements that are waiting on the stylesheets and scripts.
   nsCOMArray<nsIContent> mBoundElements;
+
+protected:
+  virtual ~nsXBLResourceLoader();
 };
 
 #endif

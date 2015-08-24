@@ -1,4 +1,4 @@
-/* -*- Mode: javascript; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2; js-indent-level: 2; -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2; js-indent-level: 2 -*- */
 /* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /*
 # This Source Code Form is subject to the terms of the Mozilla Public
@@ -6,7 +6,8 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 
-Components.utils.import("resource://gre/modules/Services.jsm");
+const {utils: Cu, interfaces: Ci, classes: Cc, results: Cr} = Components;
+Cu.import("resource://gre/modules/Services.jsm");
 
 ///////////////////////////////////////////////////////////////////////////////
 //// Helper Functions
@@ -111,6 +112,7 @@ function nsUnknownContentTypeDialog() {
   // Initialize data properties.
   this.mLauncher = null;
   this.mContext  = null;
+  this.mReason   = null;
   this.chosenApp = null;
   this.givenDefaultApp = false;
   this.updateSelf = true;
@@ -139,6 +141,15 @@ nsUnknownContentTypeDialog.prototype = {
   show: function(aLauncher, aContext, aReason)  {
     this.mLauncher = aLauncher;
     this.mContext  = aContext;
+    this.mReason   = aReason;
+
+    // Cache some information in case this context goes away:
+    try {
+      let parent = aContext.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindow);
+      this._mDownloadDir = new downloadModule.DownloadLastDir(parent);
+    } catch (ex) {
+      Cu.reportError("Missing window information when showing nsIHelperAppLauncherDialog: " + ex);
+    }
 
     const nsITimer = Components.interfaces.nsITimer;
     this._showTimer = Components.classes["@mozilla.org/timer;1"]
@@ -193,22 +204,6 @@ nsUnknownContentTypeDialog.prototype = {
                    bundle.GetStringFromName("badPermissions"));
   },
 
-  // promptForSaveToFile:  Display file picker dialog and return selected file.
-  //                       This is called by the External Helper App Service
-  //                       after the ucth dialog calls |saveToDisk| with a null
-  //                       target filename (no target, therefore user must pick).
-  //
-  //                       Alternatively, if the user has selected to have all
-  //                       files download to a specific location, return that
-  //                       location and don't ask via the dialog.
-  //
-  // Note - this function is called without a dialog, so it cannot access any part
-  // of the dialog XUL as other functions on this object do.
-
-  promptForSaveToFile: function(aLauncher, aContext, aDefaultFile, aSuggestedFileExtension, aForcePrompt) {
-    throw new Components.Exception("Async version must be used", Components.results.NS_ERROR_NOT_AVAILABLE);
-  },
-
   promptForSaveToFileAsync: function(aLauncher, aContext, aDefaultFile, aSuggestedFileExtension, aForcePrompt) {
     var result = null;
 
@@ -219,6 +214,22 @@ nsUnknownContentTypeDialog.prototype = {
     let bundle =
       Services.strings
               .createBundle("chrome://mozapps/locale/downloads/unknownContentType.properties");
+
+    let parent;
+    let gDownloadLastDir;
+    try {
+      parent = aContext.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindow);
+    } catch (ex) {}
+
+    if (parent) {
+      gDownloadLastDir = new downloadModule.DownloadLastDir(parent);
+    } else {
+      // Use the cached download info, but pick an arbitrary parent window
+      // because the original one is definitely gone (and nsIFilePicker doesn't like
+      // a null parent):
+      gDownloadLastDir = this._mDownloadDir;
+      parent = Services.wm.getMostRecentWindow("");
+    }
 
     Task.spawn(function() {
       if (!aForcePrompt) {
@@ -255,11 +266,8 @@ nsUnknownContentTypeDialog.prototype = {
       var nsIFilePicker = Components.interfaces.nsIFilePicker;
       var picker = Components.classes["@mozilla.org/filepicker;1"].createInstance(nsIFilePicker);
       var windowTitle = bundle.GetStringFromName("saveDialogTitle");
-      var parent = aContext.QueryInterface(Components.interfaces.nsIInterfaceRequestor).getInterface(Components.interfaces.nsIDOMWindow);
       picker.init(parent, windowTitle, nsIFilePicker.modeSave);
       picker.defaultString = aDefaultFile;
-
-      let gDownloadLastDir = new downloadModule.DownloadLastDir(parent);
 
       if (aSuggestedFileExtension) {
         // aSuggestedFileExtension includes the period, so strip it
@@ -306,7 +314,8 @@ nsUnknownContentTypeDialog.prototype = {
             // Remove the file so that it's not there when we ensure non-existence later;
             // this is safe because for the file to exist, the user would have had to
             // confirm that he wanted the file overwritten.
-            if (result.exists())
+            // Only remove file if final name exists
+            if (result.exists() && this.getFinalLeafName(result.leafName) == result.leafName)
               result.remove(false);
           }
           catch (ex) {
@@ -340,6 +349,18 @@ nsUnknownContentTypeDialog.prototype = {
     }.bind(this)).then(null, Components.utils.reportError);
   },
 
+  getFinalLeafName: function (aLeafName, aFileExt)
+  {
+    // Remove any leading periods, since we don't want to save hidden files
+    // automatically.
+    aLeafName = aLeafName.replace(/^\.+/, "");
+
+    if (aLeafName == "")
+      aLeafName = "unnamed" + (aFileExt ? "." + aFileExt : "");
+
+    return aLeafName;
+  },
+
   /**
    * Ensures that a local folder/file combination does not already exist in
    * the file system (or finds such a combination with a reasonably similar
@@ -364,12 +385,8 @@ nsUnknownContentTypeDialog.prototype = {
       throw new Components.Exception("Destination directory non-existing or permission error",
                                      Components.results.NS_ERROR_FILE_ACCESS_DENIED);
     }
-    // Remove any leading periods, since we don't want to save hidden files
-    // automatically.
-    aLeafName = aLeafName.replace(/^\.+/, "");
 
-    if (aLeafName == "")
-      aLeafName = "unnamed" + (aFileExt ? "." + aFileExt : "");
+    aLeafName = this.getFinalLeafName(aLeafName, aFileExt);
     aLocalFolder.append(aLeafName);
 
     // The following assignment can throw an exception, but

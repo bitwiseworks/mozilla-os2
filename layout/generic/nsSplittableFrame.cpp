@@ -12,12 +12,14 @@
 #include "nsContainerFrame.h"
 #include "nsIFrameInlines.h"
 
+using namespace mozilla;
+
 NS_IMPL_FRAMEARENA_HELPERS(nsSplittableFrame)
 
 void
-nsSplittableFrame::Init(nsIContent*      aContent,
-                        nsIFrame*        aParent,
-                        nsIFrame*        aPrevInFlow)
+nsSplittableFrame::Init(nsIContent*       aContent,
+                        nsContainerFrame* aParent,
+                        nsIFrame*         aPrevInFlow)
 {
   nsFrame::Init(aContent, aParent, aPrevInFlow);
 
@@ -207,56 +209,49 @@ nsSplittableFrame::RemoveFromFlow(nsIFrame* aFrame)
 }
 
 nscoord
-nsSplittableFrame::GetConsumedHeight() const
+nsSplittableFrame::GetConsumedBSize() const
 {
   nscoord height = 0;
-
-  // Reduce the height by the computed height of prev-in-flows.
   for (nsIFrame* prev = GetPrevInFlow(); prev; prev = prev->GetPrevInFlow()) {
-    height += prev->GetRect().height;
+    height += prev->GetContentRectRelativeToSelf().height;
   }
-
   return height;
 }
 
 nscoord
-nsSplittableFrame::GetEffectiveComputedHeight(const nsHTMLReflowState& aReflowState,
-                                              nscoord aConsumedHeight) const
+nsSplittableFrame::GetEffectiveComputedBSize(const nsHTMLReflowState& aReflowState,
+                                              nscoord aConsumedBSize) const
 {
-  nscoord height = aReflowState.ComputedHeight();
-  if (height == NS_INTRINSICSIZE) {
+  nscoord bSize = aReflowState.ComputedBSize();
+  if (bSize == NS_INTRINSICSIZE) {
     return NS_INTRINSICSIZE;
   }
 
-  if (aConsumedHeight == NS_INTRINSICSIZE) {
-    aConsumedHeight = GetConsumedHeight();
+  if (aConsumedBSize == NS_INTRINSICSIZE) {
+    aConsumedBSize = GetConsumedBSize();
   }
 
-  height -= aConsumedHeight;
-
-  if (aConsumedHeight != 0 && aConsumedHeight != NS_INTRINSICSIZE) {
-    // We just subtracted our top-border padding, since it was included in the
-    // first frame's height. Add it back to get the content height.
-    height += aReflowState.ComputedPhysicalBorderPadding().top;
-  }
+  bSize -= aConsumedBSize;
 
   // We may have stretched the frame beyond its computed height. Oh well.
-  height = std::max(0, height);
-
-  return height;
+  return std::max(0, bSize);
 }
 
-int
+nsIFrame::LogicalSides
 nsSplittableFrame::GetLogicalSkipSides(const nsHTMLReflowState* aReflowState) const
 {
   if (IS_TRUE_OVERFLOW_CONTAINER(this)) {
-    return LOGICAL_SIDES_B_BOTH;
+    return LogicalSides(eLogicalSideBitsBBoth);
   }
 
-  int skip = 0;
+  if (MOZ_UNLIKELY(StyleBorder()->mBoxDecorationBreak ==
+                     NS_STYLE_BOX_DECORATION_BREAK_CLONE)) {
+    return LogicalSides();
+  }
 
+  LogicalSides skip;
   if (GetPrevInFlow()) {
-    skip |= LOGICAL_SIDE_B_START;
+    skip |= eLogicalSideBitsBStart;
   }
 
   if (aReflowState) {
@@ -265,18 +260,19 @@ nsSplittableFrame::GetLogicalSkipSides(const nsHTMLReflowState* aReflowState) co
     // height, though, then we're going to need a next-in-flow, it just hasn't
     // been created yet.
 
-    if (NS_UNCONSTRAINEDSIZE != aReflowState->AvailableHeight()) {
-      nscoord effectiveCH = this->GetEffectiveComputedHeight(*aReflowState);
-      if (effectiveCH > aReflowState->AvailableHeight()) {
+    if (NS_UNCONSTRAINEDSIZE != aReflowState->AvailableBSize()) {
+      nscoord effectiveCH = this->GetEffectiveComputedBSize(*aReflowState);
+      if (effectiveCH != NS_INTRINSICSIZE &&
+          effectiveCH > aReflowState->AvailableBSize()) {
         // Our content height is going to exceed our available height, so we're
         // going to need a next-in-flow.
-        skip |= LOGICAL_SIDE_B_END;
+        skip |= eLogicalSideBitsBEnd;
       }
     }
   } else {
     nsIFrame* nif = GetNextInFlow();
     if (nif && !IS_TRUE_OVERFLOW_CONTAINER(nif)) {
-      skip |= LOGICAL_SIDE_B_END;
+      skip |= eLogicalSideBitsBEnd;
     }
   }
 

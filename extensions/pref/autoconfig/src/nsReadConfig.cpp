@@ -3,10 +3,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifdef MOZ_LOGGING
-// sorry, this has to be before the pre-compiled header
-#define FORCE_PR_LOG /* Allow logging in the release build */
-#endif
 #include "nsReadConfig.h"
 #include "nsAppDirectoryServiceDefs.h"
 #include "nsIAppStartup.h"
@@ -28,6 +24,7 @@
 #include "nsCRT.h"
 #include "nspr.h"
 #include "nsXULAppAPI.h"
+#include "nsContentUtils.h"
 
 extern PRLogModuleInfo *MCD;
 
@@ -243,12 +240,12 @@ nsresult nsReadConfig::openAndEvaluateJSFile(const char *aFileName, int32_t obsc
     nsCOMPtr<nsIInputStream> inStr;
     if (isBinDir) {
         nsCOMPtr<nsIFile> jsFile;
-        rv = NS_GetSpecialDirectory(XRE_EXECUTABLE_FILE,
+        rv = NS_GetSpecialDirectory(NS_GRE_DIR,
                                     getter_AddRefs(jsFile));
         if (NS_FAILED(rv)) 
             return rv;
 
-        rv = jsFile->SetNativeLeafName(nsDependentCString(aFileName));
+        rv = jsFile->AppendNative(nsDependentCString(aFileName));
         if (NS_FAILED(rv)) 
             return rv;
 
@@ -257,26 +254,23 @@ nsresult nsReadConfig::openAndEvaluateJSFile(const char *aFileName, int32_t obsc
             return rv;
 
     } else {
-        nsCOMPtr<nsIIOService> ioService = do_GetIOService(&rv);
-        if (NS_FAILED(rv)) 
-            return rv;
-
         nsAutoCString location("resource://gre/defaults/autoconfig/");
         location += aFileName;
 
         nsCOMPtr<nsIURI> uri;
-        rv = ioService->NewURI(location, nullptr, nullptr, getter_AddRefs(uri));
-        if (NS_FAILED(rv))
-            return rv;
+        rv = NS_NewURI(getter_AddRefs(uri), location);
+        NS_ENSURE_SUCCESS(rv, rv);
 
         nsCOMPtr<nsIChannel> channel;
-        rv = ioService->NewChannelFromURI(uri, getter_AddRefs(channel));
-        if (NS_FAILED(rv))
-            return rv;
+        rv = NS_NewChannel(getter_AddRefs(channel),
+                           uri,
+                           nsContentUtils::GetSystemPrincipal(),
+                           nsILoadInfo::SEC_NORMAL,
+                           nsIContentPolicy::TYPE_OTHER);
+        NS_ENSURE_SUCCESS(rv, rv);
 
         rv = channel->Open(getter_AddRefs(inStr));
-        if (NS_FAILED(rv)) 
-            return rv;
+        NS_ENSURE_SUCCESS(rv, rv);
     }
 
     uint64_t fs64;

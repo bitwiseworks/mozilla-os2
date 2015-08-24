@@ -52,13 +52,21 @@ let SystemAppProxy = {
    *   window.addEventListener('foo', function (event) {
    *     event.details == 'bar'
    *   });
+   *
+   *   @param type      The custom event type.
+   *   @param details   The event details.
+   *   @param noPending Set to true to emit this event even before the system
+   *                    app is ready.
    */
-  _sendCustomEvent: function systemApp_sendCustomEvent(type, details) {
+  _sendCustomEvent: function systemApp_sendCustomEvent(type,
+                                                       details,
+                                                       noPending,
+                                                       target) {
     let content = this._frame ? this._frame.contentWindow : null;
 
     // If the system app isn't ready yet,
-    // queue events until someone calls setIsLoaded
-    if (!this._isReady || !content) {
+    // queue events until someone calls setIsReady
+    if (!content || (!this._isReady && !noPending)) {
       this._pendingEvents.push([type, details]);
       return null;
     }
@@ -75,14 +83,20 @@ let SystemAppProxy = {
     }
 
     event.initCustomEvent(type, true, false, payload);
-    content.dispatchEvent(event);
+    (target || content).dispatchEvent(event);
 
     return event;
   },
 
   // Now deprecated, use sendCustomEvent with a custom event name
-  dispatchEvent: function systemApp_sendChromeEvent(details) {
-    return this._sendCustomEvent('mozChromeEvent', details);
+  dispatchEvent: function systemApp_dispatchEvent(details, target) {
+    return this._sendCustomEvent('mozChromeEvent', details, false, target);
+  },
+
+  dispatchKeyboardEvent: function systemApp_dispatchKeyboardEvent(type, details) {
+    let content = this._frame ? this._frame.contentWindow : null;
+    let e = new content.KeyboardEvent(type, details);
+    content.dispatchEvent(e);
   },
 
   // Listen for dom events on the system app
@@ -102,13 +116,25 @@ let SystemAppProxy = {
     if (content) {
       content.removeEventListener.apply(content, arguments);
     } else {
-      let idx = this._pendingListeners.indexOf(listener);
-      if (idx != -1) {
-        this._pendingListeners.splice(idx, 1);
-      }
+      this._pendingListeners = this._pendingListeners.filter(
+        args => {
+          return args[0] != name || args[1] != listener;
+        });
     }
-  }
+  },
 
+  getFrames: function systemApp_getFrames() {
+    let systemAppFrame = this._frame;
+    if (!systemAppFrame) {
+      return [];
+    }
+    let list = [systemAppFrame];
+    let frames = systemAppFrame.contentDocument.querySelectorAll('iframe');
+    for (let i = 0; i < frames.length; i++) {
+      list.push(frames[i]);
+    }
+    return list;
+  }
 };
 this.SystemAppProxy = SystemAppProxy;
 

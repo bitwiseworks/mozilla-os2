@@ -9,9 +9,6 @@
 
 const BROWSER_SEARCH_PREF = "browser.search.";
 
-let runtime = Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime);
-// Custom search parameters
-const PC_PARAM_VALUE = runtime.isOfficialBranding ? "MOZI" : null;
 
 function test() {
   let engine = Services.search.getEngineByName("Bing");
@@ -19,11 +16,9 @@ function test() {
 
   let previouslySelectedEngine = Services.search.currentEngine;
   Services.search.currentEngine = engine;
-
-  let base = "http://www.bing.com/search?q=foo";
-  if (typeof(PC_PARAM_VALUE) == "string")
-    base += "&pc=" + PC_PARAM_VALUE;
-
+  engine.alias = "b";
+  
+  let base = "https://www.bing.com/search?q=foo&pc=MOZI";
   let url;
 
   // Test search URLs (including purposes).
@@ -48,6 +43,15 @@ function test() {
       searchURL: base + "&form=MOZLBR",
       run: function () {
         gURLBar.value = "? foo";
+        gURLBar.focus();
+        EventUtils.synthesizeKey("VK_RETURN", {});
+      }
+    },
+    {
+      name: "keyword search with alias",
+      searchURL: base + "&form=MOZLBR",
+      run: function () {
+        gURLBar.value = "b foo";
         gURLBar.focus();
         EventUtils.synthesizeKey("VK_RETURN", {});
       }
@@ -108,49 +112,10 @@ function test() {
           }
         }, true);
       }
-    },
-    {
-      name: "home page search",
-      searchURL: base + "&form=MOZSPG",
-      run: function () {
-        // Bug 992270: Ignore uncaught about:home exceptions (related to snippets from IndexedDB)
-        ignoreAllUncaughtExceptions(true);
-
-        // load about:home, but remove the listener first so it doesn't
-        // get in the way
-        gBrowser.removeProgressListener(listener);
-        gBrowser.loadURI("about:home");
-        info("Waiting for about:home load");
-        tab.linkedBrowser.addEventListener("load", function load(event) {
-          if (event.originalTarget != tab.linkedBrowser.contentDocument ||
-              event.target.location.href == "about:blank") {
-            info("skipping spurious load event");
-            return;
-          }
-          tab.linkedBrowser.removeEventListener("load", load, true);
-
-          // Observe page setup
-          let doc = gBrowser.contentDocument;
-          let mutationObserver = new MutationObserver(function (mutations) {
-            for (let mutation of mutations) {
-              if (mutation.attributeName == "searchEngineName") {
-                // Re-add the listener, and perform a search
-                gBrowser.addProgressListener(listener);
-                doc.getElementById("searchText").value = "foo";
-                doc.getElementById("searchSubmit").click();
-              }
-            }
-          });
-          mutationObserver.observe(doc.documentElement, { attributes: true });
-        }, true);
-      }
     }
   ];
 
   function nextTest() {
-    // Make sure we listen again for uncaught exceptions in the next test or cleanup.
-    ignoreAllUncaughtExceptions(false);
-
     if (gTests.length) {
       gCurrTest = gTests.shift();
       info("Running : " + gCurrTest.name);
@@ -184,6 +149,7 @@ function test() {
   }
 
   registerCleanupFunction(function () {
+    engine.alias = undefined;
     gBrowser.removeProgressListener(listener);
     gBrowser.removeTab(tab);
     Services.search.currentEngine = previouslySelectedEngine;

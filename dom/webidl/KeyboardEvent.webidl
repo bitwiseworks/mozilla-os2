@@ -4,8 +4,6 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
-interface WindowProxy;
-
 [Constructor(DOMString typeArg, optional KeyboardEventInit keyboardEventInitDict)]
 interface KeyboardEvent : UIEvent
 {
@@ -23,19 +21,20 @@ interface KeyboardEvent : UIEvent
   const unsigned long DOM_KEY_LOCATION_LEFT     = 0x01;
   const unsigned long DOM_KEY_LOCATION_RIGHT    = 0x02;
   const unsigned long DOM_KEY_LOCATION_NUMPAD   = 0x03;
-  const unsigned long DOM_KEY_LOCATION_MOBILE   = 0x04;
-  const unsigned long DOM_KEY_LOCATION_JOYSTICK = 0x05;
 
   readonly attribute unsigned long location;
   readonly attribute boolean       repeat;
   readonly attribute boolean       isComposing;
 
   readonly attribute DOMString key;
+  [Pref="dom.keyboardevent.code.enabled"]
+  readonly attribute DOMString code;
 };
 
 dictionary KeyboardEventInit : UIEventInit
 {
   DOMString      key           = "";
+  DOMString      code          = "";
   unsigned long  location      = 0;
   boolean        ctrlKey       = false;
   boolean        shiftKey      = false;

@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 package org.mozilla.gecko.tests;
 
 import java.io.BufferedReader;
@@ -76,11 +80,11 @@ class MotionEventReplayer {
     }
 
     private float scaleX(float value) {
-        return value * (float)mSurfaceWidth / (float)CAPTURE_WINDOW_WIDTH;
+        return value * mSurfaceWidth / CAPTURE_WINDOW_WIDTH;
     }
 
     private float scaleY(float value) {
-        return value * (float)mSurfaceHeight / (float)CAPTURE_WINDOW_HEIGHT;
+        return value * mSurfaceHeight / CAPTURE_WINDOW_HEIGHT;
     }
 
     public void replayEvents(InputStream eventDescriptions)

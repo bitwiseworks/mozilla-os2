@@ -1,4 +1,4 @@
-# -*- Mode: javascript; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+# -*- indent-tabs-mode: nil; js-indent-level: 2 -*-
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
@@ -32,13 +32,12 @@ const gXPInstallObserver = {
   {
     var brandBundle = document.getElementById("bundle_brand");
     var installInfo = aSubject.QueryInterface(Components.interfaces.amIWebInstallInfo);
-    var win = installInfo.originatingWindow;
-    var shell = win.QueryInterface(Components.interfaces.nsIInterfaceRequestor)
-                   .getInterface(Components.interfaces.nsIWebNavigation)
-                   .QueryInterface(Components.interfaces.nsIDocShell);
-    var browser = this._getBrowser(shell);
-    if (!browser)
+    var browser = installInfo.browser;
+
+    // Make sure the browser is still alive.
+    if (!browser || gBrowser.browsers.indexOf(browser) == -1)
       return;
+
     const anchorID = "addons-notification-icon";
     var messageString, action;
     var brandShortName = brandBundle.getString("brandShortName");
@@ -73,8 +72,16 @@ const gXPInstallObserver = {
                               action, null, options);
       break;
     case "addon-install-blocked":
+      let originatingHost;
+      try {
+        originatingHost = installInfo.originatingURI.host;
+      } catch (ex) {
+        // Need to deal with missing originatingURI and with about:/data: URIs more gracefully,
+        // see bug 1063418 - but for now, bail:
+        return;
+      }
       messageString = gNavigatorBundle.getFormattedString("xpinstallPromptWarning",
-                        [brandShortName, installInfo.originatingURI.host]);
+                        [brandShortName, originatingHost]);
 
       let secHistogram = Components.classes["@mozilla.org/base/telemetry;1"].getService(Ci.nsITelemetry).getHistogramById("SECURITY_UI");
       action = {
@@ -363,6 +370,10 @@ var LightWeightThemeWebInstaller = {
     var pm = Services.perms;
 
     var uri = node.ownerDocument.documentURIObject;
+
+    if (!uri.schemeIs("https"))
+      return false;
+
     return pm.testPermission(uri, "install") == pm.ALLOW_ACTION;
   },
 

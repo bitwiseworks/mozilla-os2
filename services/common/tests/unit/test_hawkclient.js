@@ -59,16 +59,14 @@ add_task(function test_authenticated_get_request() {
   let client = new HawkClient(server.baseURI);
 
   let response = yield client.request("/foo", method, TEST_CREDS);
-  let result = JSON.parse(response);
+  let result = JSON.parse(response.body);
 
   do_check_eq("Great Success!", result.msg);
 
   yield deferredStop(server);
 });
 
-add_task(function test_authenticated_post_request() {
-  let method = "POST";
-
+function check_authenticated_request(method) {
   let server = httpd_setup({"/foo": (request, response) => {
       do_check_true(request.hasHeader("Authorization"));
 
@@ -81,11 +79,23 @@ add_task(function test_authenticated_post_request() {
   let client = new HawkClient(server.baseURI);
 
   let response = yield client.request("/foo", method, TEST_CREDS, {foo: "bar"});
-  let result = JSON.parse(response);
+  let result = JSON.parse(response.body);
 
   do_check_eq("bar", result.foo);
 
   yield deferredStop(server);
+}
+
+add_task(function test_authenticated_post_request() {
+  check_authenticated_request("POST");
+});
+
+add_task(function test_authenticated_put_request() {
+  check_authenticated_request("PUT");
+});
+
+add_task(function test_authenticated_patch_request() {
+  check_authenticated_request("PATCH");
 });
 
 add_task(function test_credentials_optional() {
@@ -103,7 +113,7 @@ add_task(function test_credentials_optional() {
 
   let client = new HawkClient(server.baseURI);
   let result = yield client.request("/foo", method); // credentials undefined
-  do_check_eq(JSON.parse(result).msg, "you're in the friend zone");
+  do_check_eq(JSON.parse(result.body).msg, "you're in the friend zone");
 
   yield deferredStop(server);
 });
@@ -242,7 +252,7 @@ add_task(function test_2xx_success() {
   let response = yield client.request("/foo", method, credentials);
 
   // Shouldn't be any content in a 202
-  do_check_eq(response, "");
+  do_check_eq(response.body, "");
 
   yield deferredStop(server);
 });
@@ -297,7 +307,7 @@ add_task(function test_retry_request_on_fail() {
 
   // Request will have bad timestamp; client will retry once
   let response = yield client.request("/maybe", method, credentials);
-  do_check_eq(response, "i love you!!!");
+  do_check_eq(response.body, "i love you!!!");
 
   yield deferredStop(server);
 });

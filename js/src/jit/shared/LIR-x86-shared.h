@@ -97,7 +97,7 @@ class LDivOrModConstantI : public LInstructionHelper<1, 1, 1>
         return denominator_;
     }
     MBinaryArithInstruction* mir() const {
-        JS_ASSERT(mir_->isDiv() || mir_->isMod());
+        MOZ_ASSERT(mir_->isDiv() || mir_->isMod());
         return static_cast<MBinaryArithInstruction*>(mir_);
     }
     bool canBeNegativeDividend() const {
@@ -152,7 +152,7 @@ class LUDivOrMod : public LBinaryMath<1>
     }
 
     MBinaryArithInstruction* mir() const {
-        JS_ASSERT(mir_->isDiv() || mir_->isMod());
+        MOZ_ASSERT(mir_->isDiv() || mir_->isMod());
         return static_cast<MBinaryArithInstruction*>(mir_);
     }
 
@@ -192,7 +192,7 @@ class LPowHalfD : public LInstructionHelper<1, 1, 0>
 {
   public:
     LIR_HEADER(PowHalfD)
-    LPowHalfD(const LAllocation& input) {
+    explicit LPowHalfD(const LAllocation& input) {
         setOperand(0, input);
     }
 
@@ -274,7 +274,7 @@ class LGuardShape : public LInstructionHelper<0, 1, 0>
   public:
     LIR_HEADER(GuardShape)
 
-    LGuardShape(const LAllocation& in) {
+    explicit LGuardShape(const LAllocation& in) {
         setOperand(0, in);
     }
     const MGuardShape* mir() const {
@@ -282,23 +282,17 @@ class LGuardShape : public LInstructionHelper<0, 1, 0>
     }
 };
 
-class LGuardObjectType : public LInstructionHelper<0, 1, 0>
+class LGuardObjectGroup : public LInstructionHelper<0, 1, 0>
 {
   public:
-    LIR_HEADER(GuardObjectType)
+    LIR_HEADER(GuardObjectGroup)
 
-    LGuardObjectType(const LAllocation& in) {
+    explicit LGuardObjectGroup(const LAllocation& in) {
         setOperand(0, in);
     }
-    const MGuardObjectType* mir() const {
-        return mir_->toGuardObjectType();
+    const MGuardObjectGroup* mir() const {
+        return mir_->toGuardObjectGroup();
     }
-};
-
-class LInterruptCheck : public LInstructionHelper<0, 0, 0>
-{
-  public:
-    LIR_HEADER(InterruptCheck)
 };
 
 class LMulI : public LBinaryMath<0, 1>
@@ -323,6 +317,47 @@ class LMulI : public LBinaryMath<0, 1>
     }
     const LAllocation* lhsCopy() {
         return this->getOperand(2);
+    }
+};
+
+// Constructs an int32x4 SIMD value.
+class LSimdValueInt32x4 : public LInstructionHelper<1, 4, 0>
+{
+  public:
+    LIR_HEADER(SimdValueInt32x4)
+    LSimdValueInt32x4(const LAllocation& x, const LAllocation& y,
+                      const LAllocation& z, const LAllocation& w)
+    {
+        setOperand(0, x);
+        setOperand(1, y);
+        setOperand(2, z);
+        setOperand(3, w);
+    }
+
+    MSimdValueX4* mir() const {
+        return mir_->toSimdValueX4();
+    }
+};
+
+// Constructs a float32x4 SIMD value, optimized for x86 family
+class LSimdValueFloat32x4 : public LInstructionHelper<1, 4, 1>
+{
+  public:
+    LIR_HEADER(SimdValueFloat32x4)
+    LSimdValueFloat32x4(const LAllocation& x, const LAllocation& y,
+                        const LAllocation& z, const LAllocation& w,
+                        const LDefinition& copyY)
+    {
+        setOperand(0, x);
+        setOperand(1, y);
+        setOperand(2, z);
+        setOperand(3, w);
+
+        setTemp(0, copyY);
+    }
+
+    MSimdValueX4* mir() const {
+        return mir_->toSimdValueX4();
     }
 };
 

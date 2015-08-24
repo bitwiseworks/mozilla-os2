@@ -15,7 +15,7 @@ const PAGE_CONTENT = [
   '<div id="testElement">test element</div>'
 ].join("\n");
 
-let test = asyncTest(function*() {
+add_task(function*() {
   yield addTab("data:text/html;charset=utf-8,font family shorthand tooltip test");
 
   info("Creating the test document");
@@ -27,21 +27,17 @@ let test = asyncTest(function*() {
   info("Selecting the test node");
   yield selectNode("#testElement", inspector);
 
-  yield testRuleView(view);
-
-  info("Opening the computed view");
-  let {toolbox, inspector, view} = yield openComputedView();
-
-  yield testComputedView(view);
+  yield testRuleView(view, inspector.selection.nodeFront);
 });
 
-function* testRuleView(ruleView) {
+function* testRuleView(ruleView, nodeFront) {
   info("Testing font-family tooltips in the rule view");
 
-  let panel = ruleView.previewTooltip.panel;
+  let tooltip = ruleView.tooltips.previewTooltip;
+  let panel = tooltip.panel;
 
   // Check that the rule view has a tooltip and that a XUL panel has been created
-  ok(ruleView.previewTooltip, "Tooltip instance exists");
+  ok(tooltip, "Tooltip instance exists");
   ok(panel, "XUL panel exists");
 
   // Get the computed font family property inside the font rule view
@@ -53,20 +49,12 @@ function* testRuleView(ruleView) {
   let valueSpan = rule.querySelector(".ruleview-computed .ruleview-propertyvalue");
 
   // And verify that the tooltip gets shown on this property
-  yield assertHoverTooltipOn(ruleView.previewTooltip, valueSpan);
+  yield assertHoverTooltipOn(tooltip, valueSpan);
 
-  let description = panel.getElementsByTagName("description")[0];
-  is(description.style.fontFamily, "Arial", "Tooltips contains correct font-family style");
-}
+  let images = panel.getElementsByTagName("image");
+  is(images.length, 1, "Tooltip contains an image");
+  ok(images[0].getAttribute("src").startsWith("data:"), "Tooltip contains a data-uri image as expected");
 
-function* testComputedView(computedView) {
-  info("Testing font-family tooltips in the computed view");
-
-  let panel = computedView.tooltip.panel;
-  let {valueSpan} = getComputedViewProperty(computedView, "font-family");
-
-  yield assertHoverTooltipOn(computedView.tooltip, valueSpan);
-
-  let description = panel.getElementsByTagName("description")[0];
-  is(description.style.fontFamily, "Arial", "Tooltips contains correct font-family style");
+  let dataURL = yield getFontFamilyDataURL(valueSpan.textContent, nodeFront);
+  is(images[0].getAttribute("src"), dataURL, "Tooltip contains the correct data-uri image");
 }

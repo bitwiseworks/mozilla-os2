@@ -2,16 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef CacheLog__h__
-#define CacheLog__h__
-
-#if defined(MOZ_LOGGING)
-#define FORCE_PR_LOG
-#endif
-
-#if defined(PR_LOG)
-#error "If nsCache.h #included it must come before any files that #include prlog.h"
-#endif
+#ifndef Cache2Log__h__
+#define Cache2Log__h__
 
 #include "prlog.h"
 

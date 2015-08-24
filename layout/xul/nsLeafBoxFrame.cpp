@@ -25,6 +25,8 @@
 #include "nsDisplayList.h"
 #include <algorithm>
 
+using namespace mozilla;
+
 //
 // NS_NewLeafBoxFrame
 //
@@ -33,12 +35,12 @@
 nsIFrame*
 NS_NewLeafBoxFrame (nsIPresShell* aPresShell, nsStyleContext* aContext)
 {
-  return new (aPresShell) nsLeafBoxFrame(aPresShell, aContext);
+  return new (aPresShell) nsLeafBoxFrame(aContext);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsLeafBoxFrame)
 
-nsLeafBoxFrame::nsLeafBoxFrame(nsIPresShell* aShell, nsStyleContext* aContext)
+nsLeafBoxFrame::nsLeafBoxFrame(nsStyleContext* aContext)
     : nsLeafFrame(aContext)
 {
 }
@@ -56,10 +58,9 @@ nsLeafBoxFrame::GetBoxName(nsAutoString& aName)
  * Initialize us. This is a good time to get the alignment of the box
  */
 void
-nsLeafBoxFrame::Init(
-              nsIContent*      aContent,
-              nsIFrame*        aParent,
-              nsIFrame*        aPrevInFlow)
+nsLeafBoxFrame::Init(nsIContent*       aContent,
+                     nsContainerFrame* aParent,
+                     nsIFrame*         aPrevInFlow)
 {
   nsLeafFrame::Init(aContent, aParent, aPrevInFlow);
 
@@ -123,7 +124,7 @@ nsLeafBoxFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 }
 
 /* virtual */ nscoord
-nsLeafBoxFrame::GetMinWidth(nsRenderingContext *aRenderingContext)
+nsLeafBoxFrame::GetMinISize(nsRenderingContext *aRenderingContext)
 {
   nscoord result;
   DISPLAY_MIN_WIDTH(this, result);
@@ -143,7 +144,7 @@ nsLeafBoxFrame::GetMinWidth(nsRenderingContext *aRenderingContext)
 }
 
 /* virtual */ nscoord
-nsLeafBoxFrame::GetPrefWidth(nsRenderingContext *aRenderingContext)
+nsLeafBoxFrame::GetPrefISize(nsRenderingContext *aRenderingContext)
 {
   nscoord result;
   DISPLAY_PREF_WIDTH(this, result);
@@ -163,24 +164,29 @@ nsLeafBoxFrame::GetPrefWidth(nsRenderingContext *aRenderingContext)
 }
 
 nscoord
-nsLeafBoxFrame::GetIntrinsicWidth()
+nsLeafBoxFrame::GetIntrinsicISize()
 {
   // No intrinsic width
   return 0;
 }
 
-nsSize
+LogicalSize
 nsLeafBoxFrame::ComputeAutoSize(nsRenderingContext *aRenderingContext,
-                                nsSize aCBSize, nscoord aAvailableWidth,
-                                nsSize aMargin, nsSize aBorder,
-                                nsSize aPadding, bool aShrinkWrap)
+                                WritingMode aWM,
+                                const LogicalSize& aCBSize,
+                                nscoord aAvailableISize,
+                                const LogicalSize& aMargin,
+                                const LogicalSize& aBorder,
+                                const LogicalSize& aPadding,
+                                bool aShrinkWrap)
 {
   // Important: NOT calling our direct superclass here!
-  return nsFrame::ComputeAutoSize(aRenderingContext, aCBSize, aAvailableWidth,
+  return nsFrame::ComputeAutoSize(aRenderingContext, aWM,
+                                  aCBSize, aAvailableISize,
                                   aMargin, aBorder, aPadding, aShrinkWrap);
 }
 
-nsresult
+void
 nsLeafBoxFrame::Reflow(nsPresContext*   aPresContext,
                      nsHTMLReflowMetrics&     aDesiredSize,
                      const nsHTMLReflowState& aReflowState,
@@ -295,7 +301,7 @@ nsLeafBoxFrame::Reflow(nsPresContext*   aPresContext,
   // ok our child could have gotten bigger. So lets get its bounds
   aDesiredSize.Width() = mRect.width;
   aDesiredSize.Height() = mRect.height;
-  aDesiredSize.SetTopAscent(GetBoxAscent(state));
+  aDesiredSize.SetBlockStartAscent(GetBoxAscent(state));
 
   // the overflow rect is set in SetBounds() above
   aDesiredSize.mOverflowAreas = GetOverflowAreas();
@@ -312,8 +318,6 @@ nsLeafBoxFrame::Reflow(nsPresContext*   aPresContext,
 
   }
 #endif
-
-  return NS_OK;
 }
 
 #ifdef DEBUG_FRAME_DUMP
@@ -333,7 +337,7 @@ nsLeafBoxFrame::GetType() const
 nsresult
 nsLeafBoxFrame::CharacterDataChanged(CharacterDataChangeInfo* aInfo)
 {
-  MarkIntrinsicWidthsDirty();
+  MarkIntrinsicISizesDirty();
   return nsLeafFrame::CharacterDataChanged(aInfo);
 }
 
@@ -368,7 +372,7 @@ nsLeafBoxFrame::GetBoxAscent(nsBoxLayoutState& aState)
 }
 
 /* virtual */ void
-nsLeafBoxFrame::MarkIntrinsicWidthsDirty()
+nsLeafBoxFrame::MarkIntrinsicISizesDirty()
 {
   // Don't call base class method, since everything it does is within an
   // IsBoxWrapped check.

@@ -15,4 +15,14 @@ EXTRA_JS_MODULES += [
     'CrashManager.jsm',
 ]
 
+TESTING_JS_MODULES += [
+    'CrashManagerTest.jsm',
+]
+
 XPCSHELL_TESTS_MANIFESTS += ['tests/xpcshell/xpcshell.ini']
+
+XPIDL_MODULE = 'toolkit_crashservice'
+
+XPIDL_SOURCES += [
+    'nsICrashService.idl',
+]

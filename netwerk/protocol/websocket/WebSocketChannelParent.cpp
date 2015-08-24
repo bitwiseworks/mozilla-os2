@@ -9,7 +9,11 @@
 #include "nsIAuthPromptProvider.h"
 #include "mozilla/ipc/InputStreamUtils.h"
 #include "mozilla/ipc/URIUtils.h"
+#include "mozilla/ipc/BackgroundUtils.h"
 #include "SerializedLoadContext.h"
+#include "nsIOService.h"
+#include "mozilla/net/NeckoCommon.h"
+#include "mozilla/net/WebSocketChannel.h"
 
 using namespace mozilla::ipc;
 
@@ -33,8 +37,15 @@ WebSocketChannelParent::WebSocketChannelParent(nsIAuthPromptProvider* aAuthProvi
   if (!webSocketLog)
     webSocketLog = PR_NewLogModule("nsWebSocket");
 #endif
+  mObserver = new OfflineObserver(this);
 }
 
+WebSocketChannelParent::~WebSocketChannelParent()
+{
+  if (mObserver) {
+    mObserver->RemoveObserver();
+  }
+}
 //-----------------------------------------------------------------------------
 // WebSocketChannelParent::PWebSocketChannelParent
 //-----------------------------------------------------------------------------
@@ -56,12 +67,25 @@ WebSocketChannelParent::RecvAsyncOpen(const URIParams& aURI,
                                       const uint32_t& aPingInterval,
                                       const bool& aClientSetPingInterval,
                                       const uint32_t& aPingTimeout,
-                                      const bool& aClientSetPingTimeout)
+                                      const bool& aClientSetPingTimeout,
+                                      const WebSocketLoadInfoArgs& aLoadInfoArgs)
 {
   LOG(("WebSocketChannelParent::RecvAsyncOpen() %p\n", this));
 
   nsresult rv;
   nsCOMPtr<nsIURI> uri;
+  nsCOMPtr<nsIPrincipal> requestingPrincipal, triggeringPrincipal;
+  nsCOMPtr<nsILoadInfo> loadInfo;
+
+  bool appOffline = false;
+  uint32_t appId = GetAppId();
+  if (appId != NECKO_UNKNOWN_APP_ID &&
+      appId != NECKO_NO_APP_ID) {
+    gIOService->IsAppOffline(appId, &appOffline);
+    if (appOffline) {
+      goto fail;
+    }
+  }
 
   if (aSecure) {
     mChannel =
@@ -72,6 +96,28 @@ WebSocketChannelParent::RecvAsyncOpen(const URIParams& aURI,
   }
   if (NS_FAILED(rv))
     goto fail;
+
+  requestingPrincipal =
+    mozilla::ipc::PrincipalInfoToPrincipal(aLoadInfoArgs.requestingPrincipalInfo(), &rv);
+  if (NS_FAILED(rv)) {
+    goto fail;
+  }
+
+  triggeringPrincipal =
+    mozilla::ipc::PrincipalInfoToPrincipal(aLoadInfoArgs.triggeringPrincipalInfo(), &rv);
+  if (NS_FAILED(rv)) {
+    goto fail;
+  }
+
+  loadInfo = new LoadInfo(requestingPrincipal,
+                          triggeringPrincipal,
+                          aLoadInfoArgs.securityFlags(),
+                          aLoadInfoArgs.contentPolicyType(),
+                          aLoadInfoArgs.innerWindowID());
+  rv = mChannel->SetLoadInfo(loadInfo);
+  if (NS_FAILED(rv)) {
+    goto fail;
+  }
 
   rv = mChannel->SetNotificationCallbacks(this);
   if (NS_FAILED(rv))
@@ -117,6 +163,7 @@ WebSocketChannelParent::RecvClose(const uint16_t& code, const nsCString& reason)
     nsresult rv = mChannel->Close(code, reason);
     NS_ENSURE_SUCCESS(rv, true);
   }
+
   return true;
 }
 
@@ -168,11 +215,20 @@ WebSocketChannelParent::OnStart(nsISupports *aContext)
 {
   LOG(("WebSocketChannelParent::OnStart() %p\n", this));
   nsAutoCString protocol, extensions;
+  nsString effectiveURL;
+  bool encrypted = false;
   if (mChannel) {
     mChannel->GetProtocol(protocol);
     mChannel->GetExtensions(extensions);
+
+    nsRefPtr<WebSocketChannel> channel;
+    channel = static_cast<WebSocketChannel*>(mChannel.get());
+    MOZ_ASSERT(channel);
+
+    channel->GetEffectiveURL(effectiveURL);
+    encrypted = channel->IsEncrypted();
   }
-  if (!mIPCOpen || !SendOnStart(protocol, extensions)) {
+  if (!mIPCOpen || !SendOnStart(protocol, extensions, effectiveURL, encrypted)) {
     return NS_ERROR_FAILURE;
   }
   return NS_OK;
@@ -258,6 +314,24 @@ WebSocketChannelParent::GetInterface(const nsIID & iid, void **result)
   return QueryInterface(iid, result);
 }
 
+void
+WebSocketChannelParent::OfflineDisconnect()
+{
+  if (mChannel) {
+    mChannel->Close(nsIWebSocketChannel::CLOSE_GOING_AWAY,
+                    nsCString("App is offline"));
+  }
+}
+
+uint32_t
+WebSocketChannelParent::GetAppId()
+{
+  uint32_t appId = NECKO_UNKNOWN_APP_ID;
+  if (mLoadContext) {
+    mLoadContext->GetAppId(&appId);
+  }
+  return appId;
+}
 
 } // namespace net
 } // namespace mozilla

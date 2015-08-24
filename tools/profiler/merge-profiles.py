@@ -15,9 +15,14 @@ def MergeProfiles(files):
     symTable = dict()
     meta = None
     libs = None
+    videoUrl = None
     minStartTime = None
 
     for fname in files:
+        if fname.startswith("--video="):
+            videoUrl = fname[8:]
+            continue
+
         match = re.match('profile_([0-9]+)_(.+)\.sym', fname)
         if match is None:
             raise Exception("Filename '" + fname + "' doesn't match expected pattern")
@@ -66,6 +71,8 @@ def MergeProfiles(files):
         for sample in thread['samples']:
             if "time" in sample:
                 sample['time'] += delta
+        for marker in thread['markers']:
+            marker['time'] += delta
 
     result = dict()
     result['profileJSON'] = dict()
@@ -74,6 +81,8 @@ def MergeProfiles(files):
     result['profileJSON']['threads'] = threads
     result['symbolicationTable'] = symTable
     result['format'] = "profileJSONWithSymbolicationTable,1"
+    if videoUrl:
+        result['profileJSON']['meta']['videoCapture'] = {"src": videoUrl}
 
     json.dump(result, sys.stdout)
 

@@ -18,9 +18,11 @@
 
 #include "webrtc/common_types.h"
 #include "webrtc/modules/audio_coding/main/acm2/acm_generic_codec.h"
-#include "webrtc/modules/audio_coding/neteq4/interface/neteq.h"
+#include "webrtc/modules/audio_coding/neteq/interface/neteq.h"
 
 namespace webrtc {
+
+namespace acm2 {
 
 // TODO(tlegrand): replace class ACMCodecDB with a namespace.
 class ACMCodecDB {
@@ -349,6 +351,8 @@ class ACMCodecDB {
   static const CodecSettings codec_settings_[kMaxNumCodecs];
   static const NetEqDecoder neteq_decoders_[kMaxNumCodecs];
 };
+
+}  // namespace acm2
 
 }  // namespace webrtc
 

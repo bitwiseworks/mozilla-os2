@@ -13,6 +13,8 @@ const ERR_DESTROYED =
   "Couldn't find the worker to receive this message. " +
   "The script may not be initialized yet, or may already have been unloaded.";
 
+const Isolate = fn => "(" + fn + ")()";
+
 exports.testSimplePageCreation = function(assert, done) {
   let page = new Page({
     contentScript: "self.postMessage(window.location.href)",
@@ -34,9 +36,15 @@ exports.testWrappedDOM = function(assert, done) {
   let page = Page({
     allow: { script: true },
     contentURL: "data:text/html;charset=utf-8,<script>document.getElementById=3;window.scrollTo=3;</script>",
-    contentScript: "window.addEventListener('load', function () " +
-                   "self.postMessage([typeof(document.getElementById), " +
-                   "typeof(window.scrollTo)]), true)",
+    contentScript: 'new ' + function() {
+      function send() {
+        self.postMessage([typeof(document.getElementById), typeof(window.scrollTo)]);
+      }
+      if (document.readyState !== 'complete')
+        window.addEventListener('load', send, true)
+      else
+        send();
+    },
     onMessage: function (message) {
       assert.equal(message[0],
                        "function",
@@ -79,7 +87,7 @@ exports.testUnwrappedDOM = function(assert, done) {
 exports.testPageProperties = function(assert) {
   let page = new Page();
 
-  for each (let prop in ['contentURL', 'allow', 'contentScriptFile',
+  for (let prop of ['contentURL', 'allow', 'contentScriptFile',
                          'contentScript', 'contentScriptWhen', 'on',
                          'postMessage', 'removeListener']) {
     assert.ok(prop in page, prop + " property is defined on page.");
@@ -262,8 +270,32 @@ exports.testLoadContentPage = function(assert, done) {
         return done();
       assert[msg].apply(assert, message);
     },
-    contentURL: fixtures.url("test-page-worker.html"),
-    contentScriptFile: fixtures.url("test-page-worker.js"),
+    contentURL: fixtures.url("addon-sdk/data/test-page-worker.html"),
+    contentScriptFile: fixtures.url("addon-sdk/data/test-page-worker.js"),
+    contentScriptWhen: "ready"
+  });
+}
+
+exports.testLoadContentPageRelativePath = function(assert, done) {
+  const self = require("sdk/self");
+  const { merge } = require("sdk/util/object");
+
+  const options = merge({}, require('@loader/options'),
+      { prefixURI: require('./fixtures').url() });
+
+  let loader = Loader(module, null, options);
+
+  let page = loader.require("sdk/page-worker").Page({
+    onMessage: function(message) {
+      // The message is an array whose first item is the test method to call
+      // and the rest of whose items are arguments to pass it.
+      let msg = message.shift();
+      if (msg == "done")
+        return done();
+      assert[msg].apply(assert, message);
+    },
+    contentURL: "./test-page-worker.html",
+    contentScriptFile: "./test-page-worker.js",
     contentScriptWhen: "ready"
   });
 }
@@ -450,6 +482,38 @@ exports.testMessageQueue = function (assert, done) {
   });
 };
 
+exports.testWindowStopDontBreak = function (assert, done) {
+  const { Ci, Cc } = require('chrome');
+  const consoleService = Cc['@mozilla.org/consoleservice;1'].
+                            getService(Ci.nsIConsoleService);
+  const listener = {
+    observe: ({message}) => {
+      if (message.contains('contentWorker is null'))
+        assert.fail('contentWorker is null');
+    }
+  };
+  consoleService.registerListener(listener)
+
+  let page = new Page({
+    contentURL: 'data:text/html;charset=utf-8,testWindowStopDontBreak',
+    contentScriptWhen: 'ready',
+    contentScript: Isolate(() => {
+      window.stop();
+      self.port.on('ping', () => self.port.emit('pong'));
+    })
+  });
+
+  page.port.on('pong', () => {
+    assert.pass('page-worker works after window.stop');
+    page.destroy();
+    consoleService.unregisterListener(listener);
+    done();
+  });
+
+  page.port.emit("ping");
+};
+
+
 function isDestroyed(page) {
   try {
     page.postMessage("foo");
@@ -465,4 +529,4 @@ function isDestroyed(page) {
   return false;
 }
 
-require("test").run(exports);
+require("sdk/test").run(exports);

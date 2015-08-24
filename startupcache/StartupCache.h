@@ -26,7 +26,7 @@
  * arbitrary data, passed as a (char*, size) tuple. 
  *
  * Clients should use the GetSingleton() static method to access the cache. It 
- * will be available from the end of XPCOM init (NS_InitXPCOM3 in nsXPComInit.cpp), 
+ * will be available from the end of XPCOM init (NS_InitXPCOM3 in XPCOMInit.cpp), 
  * until XPCOM shutdown begins. The GetSingleton() method will return null if the cache
  * is unavailable. The cache is only provided for libxul builds --
  * it will fail to link in non-libxul builds. The XPCOM interface is provided
@@ -91,8 +91,9 @@ struct CacheEntry
 
 // We don't want to refcount StartupCache, and ObserverService wants to
 // refcount its listeners, so we'll let it refcount this instead.
-class StartupCacheListener MOZ_FINAL : public nsIObserver
+class StartupCacheListener final : public nsIObserver
 {
+  ~StartupCacheListener() {}
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIOBSERVER
 };
@@ -185,9 +186,11 @@ private:
 // references to the same object. We only support that if that object
 // is a singleton.
 #ifdef DEBUG
-class StartupCacheDebugOutputStream MOZ_FINAL
+class StartupCacheDebugOutputStream final
   : public nsIObjectOutputStream
-{  
+{
+  ~StartupCacheDebugOutputStream() {}
+
   NS_DECL_ISUPPORTS
   NS_DECL_NSIOBJECTOUTPUTSTREAM
 
@@ -211,9 +214,11 @@ class StartupCacheDebugOutputStream MOZ_FINAL
       {0xb5, 0x77, 0xf9, 0x23, 0x57, 0xed, 0xa8, 0x84}}
 // contract id: "@mozilla.org/startupcache/cache;1"
 
-class StartupCacheWrapper MOZ_FINAL
+class StartupCacheWrapper final
   : public nsIStartupCache
 {
+  ~StartupCacheWrapper() {}
+
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSISTARTUPCACHE
 

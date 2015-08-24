@@ -10,44 +10,19 @@
  */
 
 #include "nsDebug.h"
-#include "nsPluginNativeWindow.h"
+#include "nsPluginNativeWindowGtk.h"
 #include "nsNPAPIPlugin.h"
 #include "npapi.h"
 #include <gtk/gtk.h>
 #include <gdk/gdkx.h>
 #include <gdk/gdk.h>
 
+#if (GTK_MAJOR_VERSION == 3)
+#include <gtk/gtkx.h>
+#else
 #include "gtk2xtbin.h"
-#include "mozilla/X11Util.h"
-
-class nsPluginNativeWindowGtk : public nsPluginNativeWindow {
-public: 
-  nsPluginNativeWindowGtk();
-  virtual ~nsPluginNativeWindowGtk();
-
-  virtual nsresult CallSetWindow(nsRefPtr<nsNPAPIPluginInstance> &aPluginInstance);
-private:
-  void SetWindow(XID aWindow)
-  {
-    window = reinterpret_cast<void*>(static_cast<uintptr_t>(aWindow));
-  }
-  XID GetWindow() const
-  {
-    return static_cast<XID>(reinterpret_cast<uintptr_t>(window));
-  }
-
-  NPSetWindowCallbackStruct mWsInfo;
-  /**
-   * Either a GtkSocket or a special GtkXtBin widget (derived from GtkSocket)
-   * that encapsulates the Xt toolkit within a Gtk Application.
-   */
-  GtkWidget* mSocketWidget;
-  nsresult  CreateXEmbedWindow(bool aEnableXtFocus);
-#if (MOZ_WIDGET_GTK == 2)
-  nsresult  CreateXtWindow();
 #endif
-  void      SetAllocation();
-};
+#include "mozilla/X11Util.h"
 
 static gboolean plug_removed_cb   (GtkWidget *widget, gpointer data);
 static void socket_unrealize_cb   (GtkWidget *widget, gpointer data);
@@ -96,7 +71,13 @@ nsresult PLUG_DeletePluginNativeWindow(nsPluginNativeWindow * aPluginNativeWindo
 nsresult nsPluginNativeWindowGtk::CallSetWindow(nsRefPtr<nsNPAPIPluginInstance> &aPluginInstance)
 {
   if (aPluginInstance) {
-    if (type == NPWindowTypeWindow) {
+    if (type == NPWindowTypeWindow &&
+        XRE_GetProcessType() == GeckoProcessType_Content) {
+      // In this case, most of the initialization code here has already happened
+      // in the chrome process. The window we have in content is the XID of the
+      // socket widget we need to hand to plugins.
+      SetWindow((XID)window);
+	  } else if (type == NPWindowTypeWindow) {
       if (!mSocketWidget) {
         nsresult rv;
 
@@ -141,7 +122,7 @@ nsresult nsPluginNativeWindowGtk::CallSetWindow(nsRefPtr<nsNPAPIPluginInstance> 
 
       // Make sure to resize and re-place the window if required.
       SetAllocation();
-      // Need to reset "window" each time as nsObjectFrame::DidReflow sets it
+      // Need to reset "window" each time as nsPluginFrame::DidReflow sets it
       // to the ancestor window.
 #if (MOZ_WIDGET_GTK == 2)
       if (GTK_IS_XTBIN(mSocketWidget)) {
@@ -161,9 +142,9 @@ nsresult nsPluginNativeWindowGtk::CallSetWindow(nsRefPtr<nsNPAPIPluginInstance> 
 #endif
     } // NPWindowTypeWindow
     aPluginInstance->SetWindow(this);
-  }
-  else if (mPluginInstance)
+  } else if (mPluginInstance) {
     mPluginInstance->SetWindow(nullptr);
+  }
 
   SetPluginInstance(aPluginInstance);
   return NS_OK;
@@ -221,7 +202,7 @@ nsresult nsPluginNativeWindowGtk::CreateXEmbedWindow(bool aEnableXtFocus) {
   SetWindow(gtk_socket_get_id(GTK_SOCKET(mSocketWidget)));
 
   // Fill out the ws_info structure.
-  // (The windowless case is done in nsObjectFrame.cpp.)
+  // (The windowless case is done in nsPluginFrame.cpp.)
   GdkWindow *gdkWindow = gdk_x11_window_lookup_for_display(display, GetWindow());
   if(!gdkWindow)
     return NS_ERROR_FAILURE;
@@ -337,5 +318,9 @@ socket_unrealize_cb(GtkWidget *widget, gpointer data)
   if (children) XFree(children);
 
   mozilla::FinishX(display);
+#if (MOZ_WIDGET_GTK == 3)
+  gdk_error_trap_pop_ignored();
+#else
   gdk_error_trap_pop();
+#endif
 }

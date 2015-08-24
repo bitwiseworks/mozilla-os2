@@ -23,6 +23,7 @@
  */
 
 #include "mozilla/ModuleUtils.h"
+#include "mozilla/WidgetUtils.h"
 #include "nsIModule.h"
 #include "nsCOMPtr.h"
 #include "nsWidgetsCID.h"
@@ -105,7 +106,8 @@ static const mozilla::Module::CIDEntry kWidgetCIDs[] = {
     { &kNS_WINDOW_CID, false, nullptr, nsWindowConstructor },
     { &kNS_TRANSFERABLE_CID, false, nullptr, nsTransferableConstructor },
     { &kNS_HTMLFORMATCONVERTER_CID, false, nullptr, nsHTMLFormatConverterConstructor },
-    { &kNS_SCREENMANAGER_CID, false, nullptr, nsScreenManagerOS2Constructor },
+    { &kNS_SCREENMANAGER_CID, false, nullptr, nsScreenManagerOS2Constructor,
+      Module::MAIN_PROCESS_ONLY },
     { &kNS_DEVICE_CONTEXT_SPEC_CID, false, nullptr, nsDeviceContextSpecOS2Constructor },
     { &kNS_PRINTSETTINGSSERVICE_CID, false, nullptr, nsPrintOptionsOS2Constructor },
     { &kNS_PRINTSESSION_CID, false, nullptr, nsPrintSessionConstructor },
@@ -127,7 +129,7 @@ static const mozilla::Module::ContractIDEntry kWidgetContracts[] = {
   { "@mozilla.org/widget/window/os2;1", &kNS_WINDOW_CID },
   { "@mozilla.org/widget/transferable;1", &kNS_TRANSFERABLE_CID },
   { "@mozilla.org/widget/htmlformatconverter;1", &kNS_HTMLFORMATCONVERTER_CID },
-  { "@mozilla.org/gfx/screenmanager;1", &kNS_SCREENMANAGER_CID },
+  { "@mozilla.org/gfx/screenmanager;1", &kNS_SCREENMANAGER_CID, Module::MAIN_PROCESS_ONLY },
   { "@mozilla.org/gfx/devicecontextspec;1", &kNS_DEVICE_CONTEXT_SPEC_CID },
   { "@mozilla.org/gfx/printsettings-service;1", &kNS_PRINTSETTINGSSERVICE_CID },
   { "@mozilla.org/gfx/printsession;1", &kNS_PRINTSESSION_CID },

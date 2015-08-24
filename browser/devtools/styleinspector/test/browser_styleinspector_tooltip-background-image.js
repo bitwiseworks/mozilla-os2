@@ -25,8 +25,8 @@ const PAGE_CONTENT = [
   '<div class="test-element">test element</div>'
 ].join("\n");
 
-let test = asyncTest(function*() {
-  yield addTab("data:text/html,rule view tooltip test");
+add_task(function*() {
+  yield addTab("data:text/html;charset=utf-8,rule view tooltip test");
   content.document.body.innerHTML = PAGE_CONTENT;
   let {toolbox, inspector, view} = yield openRuleView();
 
@@ -42,7 +42,9 @@ let test = asyncTest(function*() {
   yield testTooltipAppearsEvenInEditMode(view);
 
   info("Switching over to the computed-view");
-  let {view} = yield openComputedView();
+  let onComputedViewReady = inspector.once("computed-view-refreshed");
+  ({view} = yield openComputedView());
+  yield onComputedViewReady;
 
   info("Testing that the background-image computed style has a tooltip too");
   yield testComputedView(view);
@@ -50,17 +52,17 @@ let test = asyncTest(function*() {
 
 function* testBodyRuleView(view) {
   info("Testing tooltips in the rule view");
-  let panel = view.previewTooltip.panel;
+  let panel = view.tooltips.previewTooltip.panel;
 
   // Check that the rule view has a tooltip and that a XUL panel has been created
-  ok(view.previewTooltip, "Tooltip instance exists");
+  ok(view.tooltips.previewTooltip, "Tooltip instance exists");
   ok(panel, "XUL panel exists");
 
   // Get the background-image property inside the rule view
   let {valueSpan} = getRuleViewProperty(view, "body", "background-image");
   let uriSpan = valueSpan.querySelector(".theme-link");
 
-  yield assertHoverTooltipOn(view.previewTooltip, uriSpan);
+  yield assertHoverTooltipOn(view.tooltips.previewTooltip, uriSpan);
 
   let images = panel.getElementsByTagName("image");
   is(images.length, 1, "Tooltip contains an image");
@@ -69,13 +71,13 @@ function* testBodyRuleView(view) {
 }
 
 function* testDivRuleView(view) {
-  let panel = view.previewTooltip.panel;
+  let panel = view.tooltips.previewTooltip.panel;
 
   // Get the background property inside the rule view
   let {valueSpan} = getRuleViewProperty(view, ".test-element", "background");
   let uriSpan = valueSpan.querySelector(".theme-link");
 
-  yield assertHoverTooltipOn(view.previewTooltip, uriSpan);
+  yield assertHoverTooltipOn(view.tooltips.previewTooltip, uriSpan);
 
   let images = panel.getElementsByTagName("image");
   is(images.length, 1, "Tooltip contains an image");
@@ -83,7 +85,7 @@ function* testDivRuleView(view) {
 }
 
 function* testTooltipAppearsEvenInEditMode(view) {
-  let panel = view.previewTooltip.panel;
+  let panel = view.tooltips.previewTooltip.panel;
 
   info("Switching to edit mode in the rule view");
   let editor = yield turnToEditMode(view);
@@ -91,7 +93,7 @@ function* testTooltipAppearsEvenInEditMode(view) {
   info("Now trying to show the preview tooltip");
   let {valueSpan} = getRuleViewProperty(view, ".test-element", "background");
   let uriSpan = valueSpan.querySelector(".theme-link");
-  yield assertHoverTooltipOn(view.previewTooltip, uriSpan);
+  yield assertHoverTooltipOn(view.tooltips.previewTooltip, uriSpan);
 
   is(view.doc.activeElement, editor.input,
     "Tooltip was shown in edit mode, and inplace-editor still focused");
@@ -103,7 +105,7 @@ function turnToEditMode(ruleView) {
 }
 
 function* testComputedView(view) {
-  let tooltip = view.tooltip;
+  let tooltip = view.tooltips.previewTooltip;
   ok(tooltip, "The computed-view has a tooltip defined");
 
   let panel = tooltip.panel;
@@ -112,7 +114,7 @@ function* testComputedView(view) {
   let {valueSpan} = getComputedViewProperty(view, "background-image");
   let uriSpan = valueSpan.querySelector(".theme-link");
 
-  yield assertHoverTooltipOn(view.tooltip, uriSpan);
+  yield assertHoverTooltipOn(view.tooltips.previewTooltip, uriSpan);
 
   let images = panel.getElementsByTagName("image");
   is(images.length, 1, "Tooltip contains an image");

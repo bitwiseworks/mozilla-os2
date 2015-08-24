@@ -7,6 +7,8 @@
 #ifndef jsapi_tests_tests_h
 #define jsapi_tests_tests_h
 
+#include "mozilla/TypeTraits.h"
+
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,7 +25,7 @@ class JSAPITestString {
     js::Vector<char, 0, js::SystemAllocPolicy> chars;
   public:
     JSAPITestString() {}
-    JSAPITestString(const char* s) { *this += s; }
+    explicit JSAPITestString(const char* s) { *this += s; }
     JSAPITestString(const JSAPITestString& s) { *this += s; }
 
     const char* begin() const { return chars.begin(); }
@@ -54,39 +56,24 @@ class JSAPITest
 
     JSRuntime* rt;
     JSContext* cx;
-    JS::Heap<JSObject*> global;
+    JS::PersistentRootedObject global;
     bool knownFail;
     JSAPITestString msgs;
     JSCompartment* oldCompartment;
 
-    JSAPITest() : rt(nullptr), cx(nullptr), global(nullptr),
-                  knownFail(false), oldCompartment(nullptr) {
+    JSAPITest() : rt(nullptr), cx(nullptr), knownFail(false), oldCompartment(nullptr) {
         next = list;
         list = this;
     }
 
-    virtual ~JSAPITest() { uninit(); }
+    virtual ~JSAPITest() {
+        MOZ_RELEASE_ASSERT(!rt);
+        MOZ_RELEASE_ASSERT(!cx);
+        MOZ_RELEASE_ASSERT(!global);
+    }
 
     virtual bool init();
-
-    virtual void uninit() {
-        if (oldCompartment) {
-            JS_LeaveCompartment(cx, oldCompartment);
-            oldCompartment = nullptr;
-        }
-        global = nullptr;
-        if (cx) {
-            JS::RemoveObjectRoot(cx, &global);
-            JS_LeaveCompartment(cx, nullptr);
-            JS_EndRequest(cx);
-            JS_DestroyContext(cx);
-            cx = nullptr;
-        }
-        if (rt) {
-            destroyRuntime();
-            rt = nullptr;
-        }
-    }
+    virtual void uninit();
 
     virtual const char * name() = 0;
     virtual bool run(JS::HandleObject global) = 0;
@@ -155,31 +142,42 @@ class JSAPITest
         return JSAPITestString(JS_VersionToString(v));
     }
 
-    template<typename T>
-    bool checkEqual(const T& actual, const T& expected,
+    // Note that in some still-supported GCC versions (we think anything before
+    // GCC 4.6), this template does not work when the second argument is
+    // nullptr. It infers type U = long int. Use CHECK_NULL instead.
+    template <typename T, typename U>
+    bool checkEqual(const T& actual, const U& expected,
                     const char* actualExpr, const char* expectedExpr,
-                    const char* filename, int lineno) {
+                    const char* filename, int lineno)
+    {
+        static_assert(mozilla::IsSigned<T>::value == mozilla::IsSigned<U>::value,
+                      "using CHECK_EQUAL with different-signed inputs triggers compiler warnings");
+        static_assert(mozilla::IsUnsigned<T>::value == mozilla::IsUnsigned<U>::value,
+                      "using CHECK_EQUAL with different-signed inputs triggers compiler warnings");
         return (actual == expected) ||
             fail(JSAPITestString("CHECK_EQUAL failed: expected (") +
                  expectedExpr + ") = " + toSource(expected) +
                  ", got (" + actualExpr + ") = " + toSource(actual), filename, lineno);
     }
 
-    // There are many cases where the static types of 'actual' and 'expected'
-    // are not identical, and C++ is understandably cautious about automatic
-    // coercions. So catch those cases and forcibly coerce, then use the
-    // identical-type specialization. This may do bad things if the types are
-    // actually *not* compatible.
-    template<typename T, typename U>
-    bool checkEqual(const T& actual, const U& expected,
-                   const char* actualExpr, const char* expectedExpr,
-                   const char* filename, int lineno) {
-        return checkEqual(U(actual), expected, actualExpr, expectedExpr, filename, lineno);
-    }
-
 #define CHECK_EQUAL(actual, expected) \
     do { \
         if (!checkEqual(actual, expected, #actual, #expected, __FILE__, __LINE__)) \
+            return false; \
+    } while (false)
+
+    template <typename T>
+    bool checkNull(const T* actual, const char* actualExpr,
+                   const char* filename, int lineno) {
+        return (actual == nullptr) ||
+            fail(JSAPITestString("CHECK_NULL failed: expected nullptr, got (") +
+                 actualExpr + ") = " + toSource(actual),
+                 filename, lineno);
+    }
+
+#define CHECK_NULL(actual) \
+    do { \
+        if (!checkNull(actual, #actual, __FILE__, __LINE__)) \
             return false; \
     } while (false)
 
@@ -203,7 +201,7 @@ class JSAPITest
 #define CHECK(expr) \
     do { \
         if (!(expr)) \
-            return fail("CHECK failed: " #expr, __FILE__, __LINE__); \
+            return fail(JSAPITestString("CHECK failed: " #expr), __FILE__, __LINE__); \
     } while (false)
 
     bool fail(JSAPITestString msg = JSAPITestString(), const char* filename = "-", int lineno = 0) {
@@ -229,8 +227,8 @@ class JSAPITest
     static const JSClass * basicGlobalClass() {
         static const JSClass c = {
             "global", JSCLASS_GLOBAL_FLAGS,
-            JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
-            JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub, nullptr,
+            nullptr, nullptr, nullptr, nullptr,
+            nullptr, nullptr, nullptr, nullptr,
             nullptr, nullptr, nullptr,
             JS_GlobalObjectTraceHook
         };
@@ -281,17 +279,20 @@ class JSAPITest
     }
 
     virtual JSRuntime * createRuntime() {
-        JSRuntime* rt = JS_NewRuntime(8L * 1024 * 1024, JS_USE_HELPER_THREADS);
+        JSRuntime* rt = JS_NewRuntime(8L * 1024 * 1024);
         if (!rt)
             return nullptr;
+        JS_SetErrorReporter(rt, &reportError);
         setNativeStackQuota(rt);
+        JS::RuntimeOptionsRef(rt).setVarObjFix(true);
         return rt;
     }
 
     virtual void destroyRuntime() {
-        JS_ASSERT(!cx);
-        JS_ASSERT(rt);
+        MOZ_RELEASE_ASSERT(!cx);
+        MOZ_RELEASE_ASSERT(rt);
         JS_DestroyRuntime(rt);
+        rt = nullptr;
     }
 
     static void reportError(JSContext* cx, const char* message, JSErrorReport* report) {
@@ -302,12 +303,7 @@ class JSAPITest
     }
 
     virtual JSContext * createContext() {
-        JSContext* cx = JS_NewContext(rt, 8192);
-        if (!cx)
-            return nullptr;
-        JS::ContextOptionsRef(cx).setVarObjFix(true);
-        JS_SetErrorReporter(cx, &reportError);
-        return cx;
+        return JS_NewContext(rt, 8192);
     }
 
     virtual const JSClass * getGlobalClass() {
@@ -320,8 +316,8 @@ class JSAPITest
 #define BEGIN_TEST(testname)                                            \
     class cls_##testname : public JSAPITest {                           \
       public:                                                           \
-        virtual const char * name() { return #testname; }               \
-        virtual bool run(JS::HandleObject global)
+        virtual const char * name() override { return #testname; }  \
+        virtual bool run(JS::HandleObject global) override
 
 #define END_TEST(testname)                                              \
     };                                                                  \
@@ -338,8 +334,8 @@ class JSAPITest
 #define BEGIN_FIXTURE_TEST(fixture, testname)                           \
     class cls_##testname : public fixture {                             \
       public:                                                           \
-        virtual const char * name() { return #testname; }               \
-        virtual bool run(JS::HandleObject global)
+        virtual const char * name() override { return #testname; }  \
+        virtual bool run(JS::HandleObject global) override
 
 #define END_FIXTURE_TEST(fixture, testname)                             \
     };                                                                  \
@@ -408,11 +404,36 @@ class TempFile {
 class TestJSPrincipals : public JSPrincipals
 {
   public:
-    TestJSPrincipals(int rc = 0)
+    explicit TestJSPrincipals(int rc = 0)
       : JSPrincipals()
     {
         refcount = rc;
     }
 };
+
+#ifdef JS_GC_ZEAL
+/*
+ * Temporarily disable the GC zeal setting. This is only useful in tests that
+ * need very explicit GC behavior and should not be used elsewhere.
+ */
+class AutoLeaveZeal
+{
+    JSContext* cx_;
+    uint8_t zeal_;
+    uint32_t frequency_;
+
+  public:
+    explicit AutoLeaveZeal(JSContext* cx) : cx_(cx) {
+        uint32_t dummy;
+        JS_GetGCZeal(cx_, &zeal_, &frequency_, &dummy);
+        JS_SetGCZeal(cx_, 0, 0);
+        JS::PrepareForFullGC(JS_GetRuntime(cx_));
+        JS::GCForReason(JS_GetRuntime(cx_), GC_SHRINK, JS::gcreason::DEBUG_GC);
+    }
+    ~AutoLeaveZeal() {
+        JS_SetGCZeal(cx_, zeal_, frequency_);
+    }
+};
+#endif /* JS_GC_ZEAL */
 
 #endif /* jsapi_tests_tests_h */

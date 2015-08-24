@@ -21,16 +21,17 @@
   {0xb8, 0x5f, 0x13, 0xce, 0xd8, 0x89, 0xee, 0xec} \
 }
 
-class nsStructuredCloneContainer MOZ_FINAL : public nsIStructuredCloneContainer
+class nsStructuredCloneContainer final : public nsIStructuredCloneContainer
 {
   public:
     nsStructuredCloneContainer();
-    ~nsStructuredCloneContainer();
 
     NS_DECL_ISUPPORTS
     NS_DECL_NSISTRUCTUREDCLONECONTAINER
 
   private:
+    ~nsStructuredCloneContainer();
+
     uint64_t* mData;
 
     // This needs to be size_t rather than a PR-type so it matches the JS API.

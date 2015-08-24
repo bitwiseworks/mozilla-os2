@@ -6,7 +6,7 @@
 #include "nsAndroidHandlerApp.h"
 #include "AndroidBridge.h"
 
-using namespace mozilla::widget::android;
+using namespace mozilla;
 
 
 NS_IMPL_ISUPPORTS(nsAndroidHandlerApp, nsIHandlerApp, nsISharingHandlerApp)
@@ -55,6 +55,13 @@ nsAndroidHandlerApp::SetDetailedDescription(const nsAString & aDescription)
   return NS_OK;
 }
 
+// XXX Workaround for bug 986975 to maintain the existing broken semantics
+template<>
+struct nsISharingHandlerApp::COMTypeInfo<nsAndroidHandlerApp, void> {
+  static const nsIID kIID;
+};
+const nsIID nsISharingHandlerApp::COMTypeInfo<nsAndroidHandlerApp, void>::kIID = NS_IHANDLERAPP_IID;
+
 NS_IMETHODIMP
 nsAndroidHandlerApp::Equals(nsIHandlerApp *aHandlerApp, bool *aRetval)
 {
@@ -69,15 +76,16 @@ nsAndroidHandlerApp::LaunchWithURI(nsIURI *aURI, nsIInterfaceRequestor *aWindowC
 {
   nsCString uriSpec;
   aURI->GetSpec(uriSpec);
-  return mozilla::widget::android::GeckoAppShell::OpenUriExternal
-    (NS_ConvertUTF8toUTF16(uriSpec), NS_ConvertUTF8toUTF16(mMimeType), mPackageName, mClassName, mAction) ?
-    NS_OK : NS_ERROR_FAILURE;
+  return widget::GeckoAppShell::OpenUriExternal(
+          uriSpec, mMimeType, mPackageName, mClassName,
+          mAction, EmptyString()) ? NS_OK : NS_ERROR_FAILURE;
 }
 
 NS_IMETHODIMP
 nsAndroidHandlerApp::Share(const nsAString & data, const nsAString & title)
 {
-  return mozilla::widget::android::GeckoAppShell::OpenUriExternal(data, NS_ConvertUTF8toUTF16(mMimeType),
-                    mPackageName, mClassName, mAction) ? NS_OK : NS_ERROR_FAILURE;
+  return widget::GeckoAppShell::OpenUriExternal(
+          data, mMimeType, mPackageName, mClassName,
+          mAction, EmptyString()) ? NS_OK : NS_ERROR_FAILURE;
 }
 

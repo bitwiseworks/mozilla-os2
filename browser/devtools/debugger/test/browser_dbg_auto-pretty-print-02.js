@@ -68,12 +68,14 @@ function testSourceIsUgly() {
 }
 
 function testFirstSourceLabel(){
-  ok(gSources.containsValue(EXAMPLE_URL + gFirstSourceLabel),
+  let source = gSources.selectedItem.attachment.source;
+  ok(source.url === EXAMPLE_URL + gFirstSourceLabel,
     "First source url is correct.");
 }
 
 function testSecondSourceLabel(){
-  ok(gSources.containsValue(EXAMPLE_URL + gSecondSourceLabel),
+  let source = gSources.selectedItem.attachment.source;
+  ok(source.url === EXAMPLE_URL + gSecondSourceLabel,
     "Second source url is correct.");
 }
 
@@ -93,6 +95,9 @@ function disableAutoPrettyPrint(){
   gOptions._autoPrettyPrint.setAttribute("checked", "false");
   gOptions._toggleAutoPrettyPrint();
   gOptions._onPopupHidden();
+  info("Disabled auto pretty printing.");
+  // Wait for the pref update to be communicated to the server.
+  return waitForDebuggerEvents(gPanel, gDebugger.EVENTS.SOURCE_SHOWN);
 }
 
 function testSourceIsPretty() {

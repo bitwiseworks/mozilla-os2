@@ -1,4 +1,4 @@
-/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim:set ts=2 sw=2 sts=2 et: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -39,17 +39,16 @@ function test() {
     // Close Library window.
     organizer.close();
     // Clean up history.
-    waitForClearHistory(finish);
+    PlacesTestUtils.clearHistory().then(finish);
   }
 
   waitForExplicitFinish();
   // Add an history entry.
   ok(PlacesUtils, "checking PlacesUtils, running in chrome context?");
-  addVisits(
+  PlacesTestUtils.addVisits(
     {uri: PlacesUtils._uri(TEST_URI), visitDate: Date.now() * 1000,
-      transition: PlacesUtils.history.TRANSITION_TYPED},
-    window,
-    function() {
+      transition: PlacesUtils.history.TRANSITION_TYPED}
+    ).then(() => {
       openLibrary(onLibraryReady);
     });
 }

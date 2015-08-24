@@ -6,6 +6,7 @@
 #define nsMenuBarListener_h__
 
 #include "mozilla/Attributes.h"
+#include "mozilla/EventForwards.h"
 #include "nsIDOMEventListener.h"
 
 // X.h defines KeyPress
@@ -18,19 +19,16 @@ class nsIDOMKeyEvent;
 
 /** editor Implementation of the DragListener interface
  */
-class nsMenuBarListener : public nsIDOMEventListener
+class nsMenuBarListener final : public nsIDOMEventListener
 {
 public:
   /** default constructor
    */
-  nsMenuBarListener(nsMenuBarFrame* aMenuBar);
-  /** default destructor
-   */
-  virtual ~nsMenuBarListener();
+  explicit nsMenuBarListener(nsMenuBarFrame* aMenuBar);
 
   static void InitializeStatics();
    
-  NS_IMETHOD HandleEvent(nsIDOMEvent* aEvent) MOZ_OVERRIDE;
+  NS_IMETHOD HandleEvent(nsIDOMEvent* aEvent) override;
   
   nsresult KeyUp(nsIDOMEvent* aMouseEvent);
   nsresult KeyDown(nsIDOMEvent* aMouseEvent);
@@ -45,9 +43,13 @@ public:
   static bool IsAccessKeyPressed(nsIDOMKeyEvent* event);
 
 protected:
+  /** default destructor
+   */
+  virtual ~nsMenuBarListener();
+
   static void InitAccessKey();
 
-  static uint32_t GetModifiers(nsIDOMKeyEvent* event);
+  static mozilla::Modifiers GetModifiersForAccessKey(nsIDOMKeyEvent* event);
 
   // This should only be called by the nsMenuBarListener during event dispatch,
   // thus ensuring that this doesn't get destroyed during the process.
@@ -60,7 +62,7 @@ protected:
   bool mAccessKeyDownCanceled;
   static bool mAccessKeyFocuses; // Does the access key by itself focus the menubar?
   static int32_t mAccessKey;     // See nsIDOMKeyEvent.h for sample values
-  static uint32_t mAccessKeyMask;// Modifier mask for the access key
+  static mozilla::Modifiers mAccessKeyMask;// Modifier mask for the access key
 };
 
 

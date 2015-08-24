@@ -8,7 +8,6 @@
 include LayersSurfaces;
 include protocol PCompositable;
 include protocol PCompositor;
-include protocol PGrallocBuffer;
 include protocol PLayer;
 include protocol PRenderFrame;
 include protocol PTexture;
@@ -19,9 +18,8 @@ include "ImageLayers.h";
 
 using mozilla::GraphicsFilterType from "mozilla/GfxMessageUtils.h";
 using struct gfxRGBA from "gfxColor.h";
-using struct gfxPoint3D from "gfxPoint3D.h";
+using struct mozilla::gfx::Point3D from "mozilla/gfx/Point.h";
 using class mozilla::gfx::Matrix4x4 from "mozilla/gfx/Matrix.h";
-using class gfx3DMatrix from "gfx3DMatrix.h";
 using nscoord from "nsCoord.h";
 using struct nsIntPoint from "nsPoint.h";
 using struct nsRect from "nsRect.h";
@@ -37,10 +35,14 @@ using mozilla::LayerPoint from "Units.h";
 using mozilla::LayerRect from "Units.h";
 using mozilla::layers::ScaleMode from "mozilla/layers/LayersTypes.h";
 using mozilla::layers::EventRegions from "mozilla/layers/LayersTypes.h";
+using mozilla::layers::EventRegionsOverride from "mozilla/layers/LayersTypes.h";
 using mozilla::layers::DiagnosticTypes from "mozilla/layers/CompositorTypes.h";
 using struct mozilla::layers::FrameMetrics from "FrameMetrics.h";
 using mozilla::layers::FrameMetrics::ViewID from "FrameMetrics.h";
 using struct mozilla::layers::FenceHandle from "mozilla/layers/FenceUtils.h";
+using struct mozilla::layers::FenceHandleFromChild from "mozilla/layers/FenceUtils.h";
+using mozilla::layers::TextureIdentifier from "mozilla/layers/CompositorTypes.h";
+using std::string from "string";
 
 namespace mozilla {
 namespace layers {
@@ -48,13 +50,12 @@ namespace layers {
 struct TargetConfig {
   nsIntRect naturalBounds;
   ScreenRotation rotation;
-  nsIntRect clientBounds;
   ScreenOrientation orientation;
   nsIntRegion clearRegion;
 };
 
 // Create a shadow layer for |layer|
-struct OpCreateThebesLayer     { PLayer layer; };
+struct OpCreatePaintedLayer     { PLayer layer; };
 struct OpCreateContainerLayer  { PLayer layer; };
 struct OpCreateImageLayer      { PLayer layer; };
 struct OpCreateColorLayer      { PLayer layer; };
@@ -150,14 +151,14 @@ struct AnimationSegment {
 };
 
 // Transforms need extra information to correctly convert the list of transform
-// functions to a gfx3DMatrix that can be applied directly to the layer.
+// functions to a Matrix4x4 that can be applied directly to the layer.
 struct TransformData {
   // the origin of the frame being transformed in app units
   nsPoint origin;
   // the transform-origin property for the transform in css pixels
-  gfxPoint3D transformOrigin;
+  Point3D transformOrigin;
   // the perspective-origin property for the transform in css pixels
-  gfxPoint3D perspectiveOrigin;
+  Point3D perspectiveOrigin;
   nsRect bounds;
   nscoord perspective;
   int32_t appUnitsPerDevPixel;
@@ -173,13 +174,20 @@ struct Animation {
   // delay.  If the delay is changed dynamically, the layer's data will
   // be updated.
   TimeStamp startTime;
+  // The value of the animation's current time at the moment it was created.
+  // For animations that are waiting to start, their startTime will be null.
+  // Once the animation is ready to start, we calculate an appropriate value
+  // of startTime such that we begin playback from initialCurrentTime.
+  TimeDuration initialCurrentTime;
   TimeDuration duration;
   // For each frame, the interpolation point is computed based on the
   // startTime, the direction, the duration, and the current time.
   // The segments must uniquely cover the portion from 0.0 to 1.0
   AnimationSegment[] segments;
-  // How many times to repeat the animation.  -1 means "forever".
-  float numIterations;
+  // Number of times to repeat the animation, including positive infinity.
+  // Values <= 0 mean the animation will not play (although events are still
+  // dispatched on the main thread).
+  float iterationCount;
   // This uses the NS_STYLE_ANIMATION_DIRECTION_* constants.
   int32_t direction;
   nsCSSProperty property;
@@ -188,6 +196,7 @@ struct Animation {
 
 // Change a layer's attributes
 struct CommonLayerAttributes {
+  nsIntRect layerBounds;
   nsIntRegion visibleRegion;
   EventRegions eventRegions;
   TransformMatrix transform;
@@ -206,31 +215,45 @@ struct CommonLayerAttributes {
   LayerRect stickyScrollRangeInner;
   uint64_t scrollbarTargetContainerId;
   uint32_t scrollbarDirection;
+  int8_t mixBlendMode;
+  bool forceIsolatedGroup;
   nullable PLayer maskLayer;
   // Animated colors will only honored for ColorLayers.
   Animation[] animations;
   nsIntRegion invalidRegion;
+  FrameMetrics[] metrics;
+  string contentDescription;
 };
 
-struct ThebesLayerAttributes {
+struct PaintedLayerAttributes {
   nsIntRegion validRegion;
 };
 struct ContainerLayerAttributes {
-  FrameMetrics metrics;
-  ViewID scrollParentId;
   float preXScale;
   float preYScale;
   float inheritedXScale;
   float inheritedYScale;
+  float presShellResolution;
+  bool scaleToResolution;
+  EventRegionsOverride eventRegionsOverride;
+  // This is a bare pointer; LayerTransactionParent::RecvUpdate prevents this
+  // from being used when !IsSameProcess(), but we should make this truly
+  // cross process at some point by passing the HMDConfig
+  uint64_t hmdInfo;
 };
 struct ColorLayerAttributes     { LayerColor color; nsIntRect bounds; };
 struct CanvasLayerAttributes    { GraphicsFilterType filter; nsIntRect bounds; };
-struct RefLayerAttributes       { int64_t id; };
+struct RefLayerAttributes {
+  int64_t id;
+  // TODO: Once bug 1132895 is fixed we shouldn't need to propagate the override
+  // explicitly here.
+  EventRegionsOverride eventRegionsOverride;
+};
 struct ImageLayerAttributes     { GraphicsFilterType filter; IntSize scaleToSize; ScaleMode scaleMode; };
 
 union SpecificLayerAttributes {
   null_t;
-  ThebesLayerAttributes;
+  PaintedLayerAttributes;
   ContainerLayerAttributes;
   ColorLayerAttributes;
   CanvasLayerAttributes;
@@ -241,6 +264,14 @@ union SpecificLayerAttributes {
 struct LayerAttributes {
   CommonLayerAttributes common;
   SpecificLayerAttributes specific;
+};
+
+// See nsIWidget Configurations
+struct PluginWindowData {
+  uintptr_t windowId;
+  nsIntRect[] clip;
+  nsIntRect bounds;
+  bool visible;
 };
 
 struct OpSetLayerAttributes {
@@ -269,8 +300,14 @@ union TileLock {
   uintptr_t;
 };
 
+union MaybeTexture {
+  PTexture;
+  null_t;
+};
+
 struct TexturedTileDescriptor {
   PTexture texture;
+  MaybeTexture textureOnWhite;
   TileLock sharedLock;
 };
 
@@ -297,6 +334,11 @@ struct OpUseTiledLayerBuffer {
   SurfaceDescriptorTiles tileLayerDescriptor;
 };
 
+struct OpUseOverlaySource {
+  PCompositable compositable;
+  OverlaySource overlay;
+};
+
 struct OpCreatedIncrementalTexture {
   PCompositable compositable;
   TextureInfo textureInfo;
@@ -311,7 +353,7 @@ struct OpPaintTextureRegion {
 
 struct OpPaintTextureIncremental {
   PCompositable compositable;
-  uint32_t textureId;
+  TextureIdentifier textureId;
   SurfaceDescriptor image;
   nsIntRegion updatedRegion;
   nsIntRect bufferRect;
@@ -329,6 +371,19 @@ struct OpUpdatePictureRect {
 struct OpRemoveTexture {
   PCompositable compositable;
   PTexture texture;
+};
+
+struct OpRemoveTextureAsync {
+  uint64_t holderId;
+  uint64_t transactionId;
+  PCompositable compositable;
+  PTexture texture;
+};
+
+struct OpReplyRemoveTexture {
+  bool isMain;
+  uint64_t holderId;
+  uint64_t transactionId;
 };
 
 /**
@@ -357,6 +412,29 @@ struct OpUpdateTexture {
   MaybeRegion region;
 };
 
+struct OpDeliverFence {
+  uint64_t transactionId;
+  PTexture texture;
+  FenceHandle fence;
+};
+
+struct OpDeliverFenceToTracker {
+  uint64_t transactionId;
+  uint64_t destHolderId;
+  uint64_t destTransactionId;
+  FenceHandle fence;
+};
+
+struct OpDeliverFenceFromChild {
+  uint64_t transactionId;
+  PTexture texture;
+  FenceHandleFromChild fence;
+};
+
+struct OpReplyDeliverFence {
+  uint64_t transactionId;
+};
+
 union CompositableOperation {
   OpUpdatePictureRect;
 
@@ -368,15 +446,17 @@ union CompositableOperation {
   OpUseTiledLayerBuffer;
 
   OpRemoveTexture;
+  OpRemoveTextureAsync;
 
   OpUpdateTexture;
   OpUseTexture;
   OpUseComponentAlphaTextures;
+  OpUseOverlaySource;
 };
 
 // A unit of a changeset; a set of these comprise a changeset
 union Edit {
-  OpCreateThebesLayer;
+  OpCreatePaintedLayer;
   OpCreateContainerLayer;
   OpCreateImageLayer;
   OpCreateColorLayer;
@@ -409,7 +489,7 @@ struct OpContentBufferSwap {
 
 struct OpTextureSwap {
   PCompositable compositable;
-  uint32_t textureId;
+  TextureIdentifier textureId;
   SurfaceDescriptor image;
 };
 
@@ -426,6 +506,19 @@ union EditReply {
   OpTextureSwap;
 
   ReturnReleaseFence;
+};
+
+union AsyncParentMessageData {
+  OpDeliverFence;
+  OpDeliverFenceToTracker;
+  OpReplyDeliverFence;
+  OpReplyRemoveTexture;
+};
+
+union AsyncChildMessageData {
+  OpDeliverFenceFromChild;
+  OpReplyDeliverFence;
+  OpRemoveTextureAsync;
 };
 
 } // namespace

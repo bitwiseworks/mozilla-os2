@@ -208,18 +208,20 @@ class LModPowTwoI : public LInstructionHelper<1, 1, 0>
     }
 };
 
-class LModMaskI : public LInstructionHelper<1, 1, 1>
+class LModMaskI : public LInstructionHelper<1, 1, 2>
 {
     const int32_t shift_;
 
   public:
     LIR_HEADER(ModMaskI);
 
-    LModMaskI(const LAllocation& lhs, const LDefinition& temp1, int32_t shift)
+    LModMaskI(const LAllocation& lhs, const LDefinition& temp0, const LDefinition& temp1,
+              int32_t shift)
       : shift_(shift)
     {
         setOperand(0, lhs);
-        setTemp(0, temp1);
+        setTemp(0, temp0);
+        setTemp(1, temp1);
     }
 
     int32_t shift() const {
@@ -326,27 +328,21 @@ class LGuardShape : public LInstructionHelper<0, 1, 1>
     }
 };
 
-class LGuardObjectType : public LInstructionHelper<0, 1, 1>
+class LGuardObjectGroup : public LInstructionHelper<0, 1, 1>
 {
   public:
-    LIR_HEADER(GuardObjectType);
+    LIR_HEADER(GuardObjectGroup);
 
-    LGuardObjectType(const LAllocation& in, const LDefinition& temp) {
+    LGuardObjectGroup(const LAllocation& in, const LDefinition& temp) {
         setOperand(0, in);
         setTemp(0, temp);
     }
-    const MGuardObjectType* mir() const {
-        return mir_->toGuardObjectType();
+    const MGuardObjectGroup* mir() const {
+        return mir_->toGuardObjectGroup();
     }
     const LDefinition* tempInt() {
         return getTemp(0);
     }
-};
-
-class LInterruptCheck : public LInstructionHelper<0, 0, 0>
-{
-  public:
-    LIR_HEADER(InterruptCheck);
 };
 
 class LMulI : public LBinaryMath<0>
@@ -379,22 +375,18 @@ class LUMod : public LBinaryMath<0>
     }
 };
 
-class LAsmJSLoadFuncPtr : public LInstructionHelper<1, 1, 1>
+class LAsmJSLoadFuncPtr : public LInstructionHelper<1, 1, 0>
 {
   public:
     LIR_HEADER(AsmJSLoadFuncPtr);
-    LAsmJSLoadFuncPtr(const LAllocation& index, const LDefinition& temp) {
+    LAsmJSLoadFuncPtr(const LAllocation& index) {
         setOperand(0, index);
-        setTemp(0, temp);
     }
     const MAsmJSLoadFuncPtr* mir() const {
         return mir_->toAsmJSLoadFuncPtr();
     }
     const LAllocation* index() {
         return getOperand(0);
-    }
-    const LDefinition* temp() {
-        return getTemp(0);
     }
 };
 

@@ -56,7 +56,6 @@ function test(str, f) {
     assertEq(threw, true);
 }
 
-test("new Array(1,2,3)", function(a) Array.prototype.toSource.call(a));
 test("new Boolean(true)", function(b) Boolean.prototype.toSource.call(b));
 test("new Boolean(true)", function(b) Boolean.prototype.toString.call(b));
 test("new Boolean(true)", function(b) Boolean.prototype.valueOf.call(b));
@@ -84,13 +83,13 @@ test("new RegExp('1')", function(r) assertEq(String(/x/.compile(r)), String(r)))
 test("new WeakMap()", function(w) WeakMap.prototype.has.call(w, {}));
 test("new WeakMap()", function(w) WeakMap.prototype.get.call(w, {}));
 test("new WeakMap()", function(w) WeakMap.prototype.delete.call(w, {}));
-test("new WeakMap()", function(w) WeakMap.prototype.set.call(w, {}));
+test("new WeakMap()", function(w) WeakMap.prototype.set.call(w, {}).toString());
 test("new Map()", function(w) Map.prototype.has.call(w, {}));
 test("new Map()", function(w) Map.prototype.get.call(w, {}));
 test("new Map()", function(w) Map.prototype.delete.call(w, {}));
-test("new Map()", function(w) Map.prototype.set.call(w, {}));
+test("new Map()", function(w) Map.prototype.set.call(w, {}).toString());
 test("new Set()", function(w) Set.prototype.has.call(w, {}));
-test("new Set()", function(w) Set.prototype.add.call(w, {}));
+test("new Set()", function(w) Set.prototype.add.call(w, {}).toString());
 test("new Set()", function(w) Set.prototype.delete.call(w, {}));
 
 test("new Int8Array(1)", function(a) Int8Array.prototype.subarray.call(a).toString());
@@ -102,16 +101,6 @@ test("new Uint32Array(1)", function(a) Uint32Array.prototype.subarray.call(a).to
 test("new Float32Array(1)", function(a) Float32Array.prototype.subarray.call(a).toString());
 test("new Float64Array(1)", function(a) Float64Array.prototype.subarray.call(a).toString());
 test("new Uint8ClampedArray(1)", function(a) Uint8ClampedArray.prototype.subarray.call(a).toString());
-
-test("new Int8Array(1)", function(a) Int8Array.subarray(a).toString());
-test("new Uint8Array(1)", function(a) Uint8Array.subarray(a).toString());
-test("new Int16Array(1)", function(a) Int16Array.subarray(a).toString());
-test("new Uint16Array(1)", function(a) Uint16Array.subarray(a).toString());
-test("new Int32Array(1)", function(a) Int32Array.subarray(a).toString());
-test("new Uint32Array(1)", function(a) Uint32Array.subarray(a).toString());
-test("new Float32Array(1)", function(a) Float32Array.subarray(a).toString());
-test("new Float64Array(1)", function(a) Float64Array.subarray(a).toString());
-test("new Uint8ClampedArray(1)", function(a) Uint8ClampedArray.subarray(a).toString());
 
 test("new Int8Array(1)", function(a) Int8Array.prototype.set.call(a, []));
 test("new Uint8Array(1)", function(a) Uint8Array.prototype.set.call(a, []));

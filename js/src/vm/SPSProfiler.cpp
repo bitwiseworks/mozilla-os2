@@ -12,7 +12,10 @@
 #include "jsprf.h"
 #include "jsscript.h"
 
+#include "jit/BaselineFrame.h"
 #include "jit/BaselineJIT.h"
+#include "jit/JitFrameIterator.h"
+#include "jit/JitFrames.h"
 #include "vm/StringBuffer.h"
 
 using namespace js;
@@ -29,17 +32,16 @@ SPSProfiler::SPSProfiler(JSRuntime* rt)
     lock_(nullptr),
     eventMarker_(nullptr)
 {
-    JS_ASSERT(rt != nullptr);
+    MOZ_ASSERT(rt != nullptr);
 }
 
 bool
 SPSProfiler::init()
 {
-#ifdef JS_THREADSAFE
     lock_ = PR_NewLock();
     if (lock_ == nullptr)
         return false;
-#endif
+
     return true;
 }
 
@@ -49,17 +51,15 @@ SPSProfiler::~SPSProfiler()
         for (ProfileStringMap::Enum e(strings); !e.empty(); e.popFront())
             js_free(const_cast<char*>(e.front().value()));
     }
-#ifdef JS_THREADSAFE
     if (lock_)
         PR_DestroyLock(lock_);
-#endif
 }
 
 void
 SPSProfiler::setProfilingStack(ProfileEntry* stack, uint32_t* size, uint32_t max)
 {
     AutoSPSLock lock(lock_);
-    JS_ASSERT_IF(size_ && *size_ != 0, !enabled());
+    MOZ_ASSERT_IF(size_ && *size_ != 0, !enabled());
     if (!strings.initialized())
         strings.init();
     stack_ = stack;
@@ -76,7 +76,7 @@ SPSProfiler::setEventMarker(void (*fn)(const char*))
 void
 SPSProfiler::enable(bool enabled)
 {
-    JS_ASSERT(installed());
+    MOZ_ASSERT(installed());
 
     if (enabled_ == enabled)
         return;
@@ -87,16 +87,28 @@ SPSProfiler::enable(bool enabled)
      */
     ReleaseAllJITCode(rt->defaultFreeOp());
 
+    // Ensure that lastProfilingFrame is null before 'enabled' becomes true.
+    if (rt->jitActivation) {
+        rt->jitActivation->setLastProfilingFrame(nullptr);
+        rt->jitActivation->setLastProfilingCallSite(nullptr);
+    }
+
     enabled_ = enabled;
 
-#ifdef JS_ION
     /* Toggle SPS-related jumps on baseline jitcode.
      * The call to |ReleaseAllJITCode| above will release most baseline jitcode, but not
      * jitcode for scripts with active frames on the stack.  These scripts need to have
      * their profiler state toggled so they behave properly.
      */
-    jit::ToggleBaselineSPS(rt, enabled);
-#endif
+    jit::ToggleBaselineProfiling(rt, enabled);
+
+    /* Update lastProfilingFrame to point to the top-most JS jit-frame currently on
+     * stack.
+     */
+    if (rt->jitActivation) {
+        void* lastProfilingFrame = GetTopProfilingJitFrame(rt->jitTop);
+        rt->jitActivation->setLastProfilingFrame(lastProfilingFrame);
+    }
 }
 
 /* Lookup the string for the function/script, creating one if necessary */
@@ -104,7 +116,7 @@ const char*
 SPSProfiler::profileString(JSScript* script, JSFunction* maybeFun)
 {
     AutoSPSLock lock(lock_);
-    JS_ASSERT(strings.initialized());
+    MOZ_ASSERT(strings.initialized());
     ProfileStringMap::AddPtr s = strings.lookupForAdd(script);
     if (s)
         return s->value();
@@ -141,9 +153,9 @@ SPSProfiler::onScriptFinalized(JSScript* script)
 void
 SPSProfiler::markEvent(const char* event)
 {
-    JS_ASSERT(enabled());
+    MOZ_ASSERT(enabled());
     if (eventMarker_) {
-        JS::AutoAssertNoGC nogc;
+        JS::AutoSuppressGCAnalysis nogc;
         eventMarker_(event);
     }
 }
@@ -162,11 +174,11 @@ SPSProfiler::enter(JSScript* script, JSFunction* maybeFun)
     if (*size_ > 0 && *size_ - 1 < max_) {
         size_t start = (*size_ > 4) ? *size_ - 4 : 0;
         for (size_t i = start; i < *size_ - 1; i++)
-            MOZ_ASSERT_IF(stack_[i].js(), stack_[i].pc() != nullptr);
+            MOZ_ASSERT_IF(stack_[i].isJs(), stack_[i].pc() != nullptr);
     }
 #endif
 
-    push(str, nullptr, script, script->code());
+    push(str, nullptr, script, script->code(), /* copy = */ true);
     return true;
 }
 
@@ -180,23 +192,23 @@ SPSProfiler::exit(JSScript* script, JSFunction* maybeFun)
     if (*size_ < max_) {
         const char* str = profileString(script, maybeFun);
         /* Can't fail lookup because we should already be in the set */
-        JS_ASSERT(str != nullptr);
+        MOZ_ASSERT(str != nullptr);
 
         // Bug 822041
-        if (!stack_[*size_].js()) {
+        if (!stack_[*size_].isJs()) {
             fprintf(stderr, "--- ABOUT TO FAIL ASSERTION ---\n");
             fprintf(stderr, " stack=%p size=%d/%d\n", (void*) stack_, *size_, max_);
             for (int32_t i = *size_; i >= 0; i--) {
-                if (stack_[i].js())
+                if (stack_[i].isJs())
                     fprintf(stderr, "  [%d] JS %s\n", i, stack_[i].label());
                 else
                     fprintf(stderr, "  [%d] C line %d %s\n", i, stack_[i].line(), stack_[i].label());
             }
         }
 
-        JS_ASSERT(stack_[*size_].js());
-        JS_ASSERT(stack_[*size_].script() == script);
-        JS_ASSERT(strcmp((const char*) stack_[*size_].label(), str) == 0);
+        MOZ_ASSERT(stack_[*size_].isJs());
+        MOZ_ASSERT(stack_[*size_].script() == script);
+        MOZ_ASSERT(strcmp((const char*) stack_[*size_].label(), str) == 0);
         stack_[*size_].setLabel(nullptr);
         stack_[*size_].setPC(nullptr);
     }
@@ -204,37 +216,52 @@ SPSProfiler::exit(JSScript* script, JSFunction* maybeFun)
 }
 
 void
-SPSProfiler::enterNative(const char* string, void* sp)
+SPSProfiler::beginPseudoJS(const char* string, void* sp)
 {
     /* these operations cannot be re-ordered, so volatile-ize operations */
     volatile ProfileEntry* stack = stack_;
     volatile uint32_t* size = size_;
     uint32_t current = *size;
 
-    JS_ASSERT(enabled());
+    MOZ_ASSERT(installed());
     if (current < max_) {
         stack[current].setLabel(string);
-        stack[current].setStackAddress(sp);
-        stack[current].setScript(nullptr);
-        stack[current].setLine(0);
+        stack[current].setCppFrame(sp, 0);
+        stack[current].setFlag(ProfileEntry::BEGIN_PSEUDO_JS);
     }
     *size = current + 1;
 }
 
 void
-SPSProfiler::push(const char* string, void* sp, JSScript* script, jsbytecode* pc)
+SPSProfiler::push(const char* string, void* sp, JSScript* script, jsbytecode* pc, bool copy)
 {
+    MOZ_ASSERT_IF(sp != nullptr, script == nullptr && pc == nullptr);
+    MOZ_ASSERT_IF(sp == nullptr, script != nullptr && pc != nullptr);
+
     /* these operations cannot be re-ordered, so volatile-ize operations */
     volatile ProfileEntry* stack = stack_;
     volatile uint32_t* size = size_;
     uint32_t current = *size;
 
-    JS_ASSERT(installed());
+    MOZ_ASSERT(installed());
     if (current < max_) {
-        stack[current].setLabel(string);
-        stack[current].setStackAddress(sp);
-        stack[current].setScript(script);
-        stack[current].setPC(pc);
+        volatile ProfileEntry& entry = stack[current];
+        entry.setLabel(string);
+
+        if (sp != nullptr) {
+            entry.setCppFrame(sp, 0);
+            MOZ_ASSERT(entry.flags() == js::ProfileEntry::IS_CPP_ENTRY);
+        }
+        else {
+            entry.setJsFrame(script, pc);
+            MOZ_ASSERT(entry.flags() == 0);
+        }
+
+        // Track if mLabel needs a copy.
+        if (copy)
+            entry.setFlag(js::ProfileEntry::FRAME_LABEL_COPY);
+        else
+            entry.unsetFlag(js::ProfileEntry::FRAME_LABEL_COPY);
     }
     *size = current + 1;
 }
@@ -242,9 +269,9 @@ SPSProfiler::push(const char* string, void* sp, JSScript* script, jsbytecode* pc
 void
 SPSProfiler::pop()
 {
-    JS_ASSERT(installed());
+    MOZ_ASSERT(installed());
     (*size_)--;
-    JS_ASSERT(*(int*)size_ >= 0);
+    MOZ_ASSERT(*(int*)size_ >= 0);
 }
 
 /*
@@ -259,16 +286,8 @@ SPSProfiler::allocProfileString(JSScript* script, JSFunction* maybeFun)
     // Note: this profiler string is regexp-matched by
     // browser/devtools/profiler/cleopatra/js/parserWorker.js.
 
-    // Determine if the function (if any) has an explicit or guessed name.
-    bool hasAtom = maybeFun && maybeFun->displayAtom();
-
-    // Get the function name, if any, and its length.
-    const jschar* atom = nullptr;
-    size_t lenAtom = 0;
-    if (hasAtom) {
-        atom = maybeFun->displayAtom()->charsZ();
-        lenAtom = maybeFun->displayAtom()->length();
-    }
+    // Get the function name, if any.
+    JSAtom* atom = maybeFun ? maybeFun->displayAtom() : nullptr;
 
     // Get the script filename, if any, and its length.
     const char* filename = script->filename();
@@ -283,8 +302,8 @@ SPSProfiler::allocProfileString(JSScript* script, JSFunction* maybeFun)
 
     // Determine the required buffer size.
     size_t len = lenFilename + lenLineno + 1; // +1 for the ":" separating them.
-    if (hasAtom)
-        len += lenAtom + 3; // +3 for the " (" and ")" it adds.
+    if (atom)
+        len += atom->length() + 3; // +3 for the " (" and ")" it adds.
 
     // Allocate the buffer.
     char* cstr = js_pod_malloc<char>(len + 1);
@@ -293,17 +312,23 @@ SPSProfiler::allocProfileString(JSScript* script, JSFunction* maybeFun)
 
     // Construct the descriptive string.
     DebugOnly<size_t> ret;
-    if (hasAtom)
-        ret = JS_snprintf(cstr, len + 1, "%hs (%s:%llu)", atom, filename, lineno);
-    else
+    if (atom) {
+        JS::AutoCheckCannotGC nogc;
+        if (atom->hasLatin1Chars())
+            ret = JS_snprintf(cstr, len + 1, "%s (%s:%llu)", atom->latin1Chars(nogc), filename, lineno);
+        else
+            ret = JS_snprintf(cstr, len + 1, "%hs (%s:%llu)", atom->twoByteChars(nogc), filename, lineno);
+    } else {
         ret = JS_snprintf(cstr, len + 1, "%s:%llu", filename, lineno);
+    }
 
     MOZ_ASSERT(ret == len, "Computed length should match actual length!");
 
     return cstr;
 }
 
-SPSEntryMarker::SPSEntryMarker(JSRuntime* rt
+SPSEntryMarker::SPSEntryMarker(JSRuntime* rt,
+                               JSScript* script
                                MOZ_GUARD_OBJECT_NOTIFIER_PARAM_IN_IMPL)
     : profiler(&rt->spsProfiler)
 {
@@ -313,27 +338,68 @@ SPSEntryMarker::SPSEntryMarker(JSRuntime* rt
         return;
     }
     size_before = *profiler->size_;
-    profiler->pushNoCopy("js::RunScript", this, nullptr, nullptr);
+    // We want to push a CPP frame so the profiler can correctly order JS and native stacks.
+    profiler->beginPseudoJS("js::RunScript", this);
+    profiler->push("js::RunScript", nullptr, script, script->code(), /* copy = */ false);
 }
 
 SPSEntryMarker::~SPSEntryMarker()
 {
-    if (profiler != nullptr) {
-        profiler->pop();
-        JS_ASSERT(size_before == *profiler->size_);
+    if (profiler == nullptr)
+        return;
+
+    profiler->pop();
+    profiler->endPseudoJS();
+    MOZ_ASSERT(size_before == *profiler->size_);
+}
+
+SPSBaselineOSRMarker::SPSBaselineOSRMarker(JSRuntime* rt, bool hasSPSFrame
+                                           MOZ_GUARD_OBJECT_NOTIFIER_PARAM_IN_IMPL)
+    : profiler(&rt->spsProfiler)
+{
+    MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+    if (!hasSPSFrame || !profiler->enabled() ||
+        profiler->size() >= profiler->maxSize())
+    {
+        profiler = nullptr;
+        return;
     }
+
+    size_before = profiler->size();
+    if (profiler->size() == 0)
+        return;
+
+    ProfileEntry& entry = profiler->stack()[profiler->size() - 1];
+    MOZ_ASSERT(entry.isJs());
+    entry.setOSR();
+}
+
+SPSBaselineOSRMarker::~SPSBaselineOSRMarker()
+{
+    if (profiler == nullptr)
+        return;
+
+    MOZ_ASSERT(size_before == *profiler->size_);
+    if (profiler->size() == 0)
+        return;
+
+    ProfileEntry& entry = profiler->stack()[profiler->size() - 1];
+    MOZ_ASSERT(entry.isJs());
+    entry.unsetOSR();
 }
 
 JS_FRIEND_API(jsbytecode*)
 ProfileEntry::pc() const volatile
 {
-    return idx == NullPCIndex ? nullptr : script()->offsetToPC(idx);
+    MOZ_ASSERT(isJs());
+    return lineOrPc == NullPCOffset ? nullptr : script()->offsetToPC(lineOrPc);
 }
 
 JS_FRIEND_API(void)
 ProfileEntry::setPC(jsbytecode* pc) volatile
 {
-    idx = pc == nullptr ? NullPCIndex : script()->pcToOffset(pc);
+    MOZ_ASSERT(isJs());
+    lineOrPc = pc == nullptr ? NullPCOffset : script()->pcToOffset(pc);
 }
 
 JS_FRIEND_API(void)
@@ -351,7 +417,7 @@ js::EnableRuntimeProfilingStack(JSRuntime* rt, bool enabled)
 JS_FRIEND_API(void)
 js::RegisterRuntimeProfilingEventMarker(JSRuntime* rt, void (*fn)(const char*))
 {
-    JS_ASSERT(rt->spsProfiler.enabled());
+    MOZ_ASSERT(rt->spsProfiler.enabled());
     rt->spsProfiler.setEventMarker(fn);
 }
 
@@ -359,4 +425,42 @@ JS_FRIEND_API(jsbytecode*)
 js::ProfilingGetPC(JSRuntime* rt, JSScript* script, void* ip)
 {
     return rt->spsProfiler.ipToPC(script, size_t(ip));
+}
+
+AutoSuppressProfilerSampling::AutoSuppressProfilerSampling(JSContext* cx
+                                                           MOZ_GUARD_OBJECT_NOTIFIER_PARAM_IN_IMPL)
+  : rt_(cx->runtime()),
+    previouslyEnabled_(rt_->isProfilerSamplingEnabled())
+{
+    MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+    if (previouslyEnabled_)
+        rt_->disableProfilerSampling();
+}
+
+AutoSuppressProfilerSampling::AutoSuppressProfilerSampling(JSRuntime* rt
+                                                           MOZ_GUARD_OBJECT_NOTIFIER_PARAM_IN_IMPL)
+  : rt_(rt),
+    previouslyEnabled_(rt_->isProfilerSamplingEnabled())
+{
+    MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+    if (previouslyEnabled_)
+        rt_->disableProfilerSampling();
+}
+
+AutoSuppressProfilerSampling::~AutoSuppressProfilerSampling()
+{
+        if (previouslyEnabled_)
+            rt_->enableProfilerSampling();
+}
+
+void*
+js::GetTopProfilingJitFrame(uint8_t* exitFramePtr)
+{
+    // For null exitFrame, there is no previous exit frame, just return.
+    if (!exitFramePtr)
+        return nullptr;
+
+    jit::JitProfilingFrameIterator iter(exitFramePtr);
+    MOZ_ASSERT(!iter.done());
+    return iter.fp();
 }

@@ -7,6 +7,7 @@
 #include "base/basictypes.h"
 #include "BluetoothReplyRunnable.h"
 #include "DOMRequest.h"
+#include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/bluetooth/BluetoothTypes.h"
 #include "nsServiceManagerUtils.h"
 
@@ -63,7 +64,7 @@ BluetoothReplyRunnable::Run()
   nsresult rv;
 
   AutoSafeJSContext cx;
-  JS::Rooted<JS::Value> v(cx, JSVAL_VOID);
+  JS::Rooted<JS::Value> v(cx, JS::UndefinedValue());
 
   if (mReply->type() != BluetoothReply::TBluetoothReplySuccess) {
     rv = FireReply(v);

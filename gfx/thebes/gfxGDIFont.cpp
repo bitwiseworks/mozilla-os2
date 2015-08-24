@@ -8,16 +8,13 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/WindowsVersion.h"
 
-#include "gfxGDIShaper.h"
-#include "gfxUniscribeShaper.h"
-#include "gfxHarfBuzzShaper.h"
 #include <algorithm>
-#include "gfxGraphiteShaper.h"
 #include "gfxWindowsPlatform.h"
 #include "gfxContext.h"
 #include "mozilla/Preferences.h"
 #include "nsUnicodeProperties.h"
 #include "gfxFontConstants.h"
+#include "gfxTextRun.h"
 
 #include "cairo-win32.h"
 
@@ -51,14 +48,9 @@ gfxGDIFont::gfxGDIFont(GDIFontEntry *aFontEntry,
       mFontFace(nullptr),
       mMetrics(nullptr),
       mSpaceGlyph(0),
-      mNeedsBold(aNeedsBold)
+      mNeedsBold(aNeedsBold),
+      mScriptCache(nullptr)
 {
-    if (FontCanSupportGraphite()) {
-        mGraphiteShaper = new gfxGraphiteShaper(this);
-    }
-    if (FontCanSupportHarfBuzz()) {
-        mHarfBuzzShaper = new gfxHarfBuzzShaper(this);
-    }
 }
 
 gfxGDIFont::~gfxGDIFont()
@@ -72,13 +64,10 @@ gfxGDIFont::~gfxGDIFont()
     if (mFont) {
         ::DeleteObject(mFont);
     }
+    if (mScriptCache) {
+        ScriptFreeCache(&mScriptCache);
+    }
     delete mMetrics;
-}
-
-void
-gfxGDIFont::CreatePlatformShaper()
-{
-    mPlatformShaper = new gfxGDIShaper(this);
 }
 
 gfxFont*
@@ -88,37 +77,14 @@ gfxGDIFont::CopyWithAntialiasOption(AntialiasOption anAAOption)
                           &mStyle, mNeedsBold, anAAOption);
 }
 
-static bool
-UseUniscribe(gfxShapedText *aShapedText,
-             char16ptr_t aText,
-             uint32_t aLength)
-{
-    uint32_t flags = aShapedText->Flags();
-    bool useGDI;
-
-    bool isXP = !IsVistaOrLater();
-
-    // bug 561304 - Uniscribe bug produces bad positioning at certain
-    // font sizes on XP, so default to GDI on XP using logic of 3.6
-
-    useGDI = isXP &&
-             (flags &
-               (gfxTextRunFactory::TEXT_OPTIMIZE_SPEED | 
-                gfxTextRunFactory::TEXT_IS_RTL)
-             ) == gfxTextRunFactory::TEXT_OPTIMIZE_SPEED;
-
-    return !useGDI ||
-        ScriptIsComplex(aText, aLength, SIC_COMPLEX) == S_OK;
-}
-
 bool
-gfxGDIFont::ShapeText(gfxContext      *aContext,
+gfxGDIFont::ShapeText(gfxContext     *aContext,
                       const char16_t *aText,
-                      uint32_t         aOffset,
-                      uint32_t         aLength,
-                      int32_t          aScript,
-                      gfxShapedText   *aShapedText,
-                      bool             aPreferPlatformShaping)
+                      uint32_t        aOffset,
+                      uint32_t        aLength,
+                      int32_t         aScript,
+                      bool            aVertical,
+                      gfxShapedText  *aShapedText)
 {
     if (!mMetrics) {
         Initialize();
@@ -128,8 +94,6 @@ gfxGDIFont::ShapeText(gfxContext      *aContext,
         return false;
     }
 
-    bool ok = false;
-
     // Ensure the cairo font is set up, so there's no risk it'll fall back to
     // creating a "toy" font internally (see bug 544617).
     // We must check that this succeeded, otherwise we risk cairo creating the
@@ -138,87 +102,12 @@ gfxGDIFont::ShapeText(gfxContext      *aContext,
         return false;
     }
 
-    if (mGraphiteShaper && gfxPlatform::GetPlatform()->UseGraphiteShaping()) {
-        ok = mGraphiteShaper->ShapeText(aContext, aText,
-                                        aOffset, aLength,
-                                        aScript, aShapedText);
-    }
-
-    if (!ok && mHarfBuzzShaper) {
-        if (gfxPlatform::GetPlatform()->UseHarfBuzzForScript(aScript) ||
-            (!IsVistaOrLater() &&
-             ScriptShapingType(aScript) == SHAPING_INDIC &&
-             !Preferences::GetBool("gfx.font_rendering.winxp-indic-uniscribe",
-                                   false))) {
-            ok = mHarfBuzzShaper->ShapeText(aContext, aText, aOffset, aLength,
-                                            aScript, aShapedText);
-        }
-    }
-
-    if (!ok) {
-        GDIFontEntry *fe = static_cast<GDIFontEntry*>(GetFontEntry());
-        bool preferUniscribe =
-            (!fe->IsTrueType() || fe->IsSymbolFont()) && !fe->mForceGDI;
-
-        if (preferUniscribe || UseUniscribe(aShapedText, aText, aLength)) {
-            // first try Uniscribe
-            if (!mUniscribeShaper) {
-                mUniscribeShaper = new gfxUniscribeShaper(this);
-            }
-
-            ok = mUniscribeShaper->ShapeText(aContext, aText, aOffset, aLength,
-                                             aScript, aShapedText);
-            if (!ok) {
-                // fallback to GDI shaping
-                if (!mPlatformShaper) {
-                    CreatePlatformShaper();
-                }
-
-                ok = mPlatformShaper->ShapeText(aContext, aText, aOffset,
-                                                aLength, aScript, aShapedText);
-            }
-        } else {
-            // first use GDI
-            if (!mPlatformShaper) {
-                CreatePlatformShaper();
-            }
-
-            ok = mPlatformShaper->ShapeText(aContext, aText, aOffset, aLength,
-                                            aScript, aShapedText);
-            if (!ok) {
-                // try Uniscribe if GDI failed
-                if (!mUniscribeShaper) {
-                    mUniscribeShaper = new gfxUniscribeShaper(this);
-                }
-
-                // use Uniscribe shaping
-                ok = mUniscribeShaper->ShapeText(aContext, aText,
-                                                 aOffset, aLength,
-                                                 aScript, aShapedText);
-            }
-        }
-
-#if DEBUG
-        if (!ok) {
-            NS_ConvertUTF16toUTF8 name(GetName());
-            char msg[256];
-
-            sprintf(msg, 
-                    "text shaping with both uniscribe and GDI failed for"
-                    " font: %s",
-                    name.get());
-            NS_WARNING(msg);
-        }
-#endif
-    }
-
-    PostShapingFixup(aContext, aText, aOffset, aLength, aShapedText);
-
-    return ok;
+    return gfxFont::ShapeText(aContext, aText, aOffset, aLength, aScript,
+                              aVertical, aShapedText);
 }
 
 const gfxFont::Metrics&
-gfxGDIFont::GetMetrics()
+gfxGDIFont::GetHorizontalMetrics()
 {
     if (!mMetrics) {
         Initialize();
@@ -256,11 +145,13 @@ gfxGDIFont::Measure(gfxTextRun *aTextRun,
                     uint32_t aStart, uint32_t aEnd,
                     BoundingBoxType aBoundingBoxType,
                     gfxContext *aRefContext,
-                    Spacing *aSpacing)
+                    Spacing *aSpacing,
+                    uint16_t aOrientation)
 {
     gfxFont::RunMetrics metrics =
         gfxFont::Measure(aTextRun, aStart, aEnd,
-                         aBoundingBoxType, aRefContext, aSpacing);
+                         aBoundingBoxType, aRefContext, aSpacing,
+                         aOrientation);
 
     // if aBoundingBoxType is LOOSE_INK_EXTENTS
     // and the underlying cairo font may be antialiased,
@@ -277,8 +168,6 @@ gfxGDIFont::Measure(gfxTextRun *aTextRun,
     return metrics;
 }
 
-#define OBLIQUE_SKEW_FACTOR 0.3
-
 void
 gfxGDIFont::Initialize()
 {
@@ -290,7 +179,7 @@ gfxGDIFont::Initialize()
     GDIFontEntry* fe = static_cast<GDIFontEntry*>(GetFontEntry());
     bool wantFakeItalic =
         (mStyle.style & (NS_FONT_STYLE_ITALIC | NS_FONT_STYLE_OBLIQUE)) &&
-        !fe->IsItalic();
+        !fe->IsItalic() && mStyle.allowSyntheticStyle;
 
     // If the font's family has an actual italic face (but font matching
     // didn't choose it), we have to use a cairo transform instead of asking
@@ -353,9 +242,6 @@ gfxGDIFont::Initialize()
         TEXTMETRIC& metrics = oMetrics.otmTextMetrics;
 
         if (0 < GetOutlineTextMetrics(dc.GetDC(), sizeof(oMetrics), &oMetrics)) {
-            mMetrics->superscriptOffset = (double)oMetrics.otmptSuperscriptOffset.y;
-            // Some fonts have wrong sign on their subscript offset, bug 410917.
-            mMetrics->subscriptOffset = fabs((double)oMetrics.otmptSubscriptOffset.y);
             mMetrics->strikeoutSize = (double)oMetrics.otmsStrikeoutSize;
             mMetrics->strikeoutOffset = (double)oMetrics.otmsStrikeoutPosition;
             mMetrics->underlineSize = (double)oMetrics.otmsUnderscoreSize;
@@ -394,8 +280,6 @@ gfxGDIFont::Initialize()
 
             mMetrics->xHeight =
                 ROUND((float)metrics.tmAscent * DEFAULT_XHEIGHT_FACTOR);
-            mMetrics->superscriptOffset = mMetrics->xHeight;
-            mMetrics->subscriptOffset = mMetrics->xHeight;
             mMetrics->strikeoutSize = 1;
             mMetrics->strikeoutOffset = ROUND(mMetrics->xHeight * 0.5f); // 50% of xHeight
             mMetrics->underlineSize = 1;
@@ -500,9 +384,8 @@ gfxGDIFont::Initialize()
     printf("    maxAscent: %f maxDescent: %f maxAdvance: %f\n", mMetrics->maxAscent, mMetrics->maxDescent, mMetrics->maxAdvance);
     printf("    internalLeading: %f externalLeading: %f\n", mMetrics->internalLeading, mMetrics->externalLeading);
     printf("    spaceWidth: %f aveCharWidth: %f xHeight: %f\n", mMetrics->spaceWidth, mMetrics->aveCharWidth, mMetrics->xHeight);
-    printf("    uOff: %f uSize: %f stOff: %f stSize: %f supOff: %f subOff: %f\n",
-           mMetrics->underlineOffset, mMetrics->underlineSize, mMetrics->strikeoutOffset, mMetrics->strikeoutSize,
-           mMetrics->superscriptOffset, mMetrics->subscriptOffset);
+    printf("    uOff: %f uSize: %f stOff: %f stSize: %f\n",
+           mMetrics->underlineOffset, mMetrics->underlineSize, mMetrics->strikeoutOffset, mMetrics->strikeoutSize);
 #endif
 }
 
@@ -537,11 +420,48 @@ gfxGDIFont::FillLogFont(LOGFONTW& aLogFont, gfxFloat aSize,
     }
 }
 
+uint32_t
+gfxGDIFont::GetGlyph(uint32_t aUnicode, uint32_t aVarSelector)
+{
+    // Callback used only for fonts that lack a 'cmap' table.
+
+    // We don't support variation selector sequences or non-BMP characters
+    // in the legacy bitmap, vector or postscript fonts that might use
+    // this code path.
+    if (aUnicode > 0xffff || aVarSelector) {
+        return 0;
+    }
+
+    if (!mGlyphIDs) {
+        mGlyphIDs = new nsDataHashtable<nsUint32HashKey,uint32_t>(64);
+    }
+
+    uint32_t gid;
+    if (mGlyphIDs->Get(aUnicode, &gid)) {
+        return gid;
+    }
+
+    wchar_t ch = aUnicode;
+    WORD glyph;
+    DWORD ret = ScriptGetCMap(nullptr, &mScriptCache, &ch, 1, 0, &glyph);
+    if (ret == E_PENDING) {
+        AutoDC dc;
+        AutoSelectFont fs(dc.GetDC(), GetHFONT());
+        ret = ScriptGetCMap(dc.GetDC(), &mScriptCache, &ch, 1, 0, &glyph);
+    }
+    if (ret != S_OK) {
+        glyph = 0;
+    }
+
+    mGlyphIDs->Put(aUnicode, glyph);
+    return glyph;
+}
+
 int32_t
-gfxGDIFont::GetGlyphWidth(gfxContext *aCtx, uint16_t aGID)
+gfxGDIFont::GetGlyphWidth(DrawTarget& aDrawTarget, uint16_t aGID)
 {
     if (!mGlyphWidths) {
-        mGlyphWidths = new nsDataHashtable<nsUint32HashKey,int32_t>(200);
+        mGlyphWidths = new nsDataHashtable<nsUint32HashKey,int32_t>(128);
     }
 
     int32_t width;
@@ -549,13 +469,14 @@ gfxGDIFont::GetGlyphWidth(gfxContext *aCtx, uint16_t aGID)
         return width;
     }
 
-    DCFromContext dc(aCtx);
+    DCFromDrawTarget dc(aDrawTarget);
     AutoSelectFont fs(dc, GetHFONT());
 
     int devWidth;
     if (GetCharWidthI(dc, aGID, 1, nullptr, &devWidth)) {
-        // ensure width is positive, 16.16 fixed-point value
-        width = (devWidth & 0x7fff) << 16;
+        // clamp value to range [0..0x7fff], and convert to 16.16 fixed-point
+        devWidth = std::min(std::max(0, devWidth), 0x7fff);
+        width = devWidth << 16;
         mGlyphWidths->Put(aGID, width);
         return width;
     }
@@ -571,7 +492,7 @@ gfxGDIFont::AddSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,
     aSizes->mFontInstances += aMallocSizeOf(mMetrics);
     if (mGlyphWidths) {
         aSizes->mFontInstances +=
-            mGlyphWidths->SizeOfExcludingThis(nullptr, aMallocSizeOf);
+            mGlyphWidths->SizeOfIncludingThis(nullptr, aMallocSizeOf);
     }
 }
 

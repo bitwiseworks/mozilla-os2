@@ -10,13 +10,27 @@ const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/devtools/event-emitter.js");
 Cu.import("resource://gre/modules/devtools/Loader.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "promise", "resource://gre/modules/Promise.jsm", "Promise");
 
+XPCOMUtils.defineLazyModuleGetter(this, "promise",
+                                  "resource://gre/modules/Promise.jsm", "Promise");
+
+XPCOMUtils.defineLazyModuleGetter(this, "console",
+                                  "resource://gre/modules/devtools/Console.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "CustomizableUI",
+                                  "resource:///modules/CustomizableUI.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "DebuggerServer",
+                                  "resource://gre/modules/devtools/dbg-server.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "DebuggerClient",
+                                  "resource://gre/modules/devtools/dbg-client.jsm");
+
+const EventEmitter = devtools.require("devtools/toolkit/event-emitter");
 const FORBIDDEN_IDS = new Set(["toolbox", ""]);
 const MAX_ORDINAL = 99;
 
+const bundle = Services.strings.createBundle("chrome://browser/locale/devtools/toolbox.properties");
 
 /**
  * DevTools is a class that represents a set of developer tools, it holds a
@@ -24,6 +38,7 @@ const MAX_ORDINAL = 99;
  */
 this.DevTools = function DevTools() {
   this._tools = new Map();     // Map<toolId, tool>
+  this._themes = new Map();    // Map<themeId, theme>
   this._toolboxes = new Map(); // Map<target, toolbox>
 
   // destroy() is an observer's handler so we need to preserve context.
@@ -36,7 +51,7 @@ this.DevTools = function DevTools() {
 
   Services.obs.addObserver(this._teardown, "devtools-unloaded", false);
   Services.obs.addObserver(this.destroy, "quit-application", false);
-}
+};
 
 DevTools.prototype = {
   /**
@@ -57,8 +72,6 @@ DevTools.prototype = {
       // testing/profiles/prefs_general.js so lets set it to the same as it is
       // in a default browser profile for the duration of the test.
       Services.prefs.setBoolPref("dom.send_after_paint_to_content", false);
-    } else {
-      Services.prefs.setBoolPref("dom.send_after_paint_to_content", true);
     }
   },
 
@@ -227,6 +240,136 @@ DevTools.prototype = {
   },
 
   /**
+   * Register a new theme for developer tools toolbox.
+   *
+   * A definition is a light object that holds various information about a
+   * theme.
+   *
+   * Each themeDefinition has the following properties:
+   * - id: Unique identifier for this theme (string|required)
+   * - label: Localized name for the theme to be displayed to the user
+   *          (string|required)
+   * - stylesheets: Array of URLs pointing to a CSS document(s) containing
+   *                the theme style rules (array|required)
+   * - classList: Array of class names identifying the theme within a document.
+   *              These names are set to document element when applying
+   *              the theme (array|required)
+   * - onApply: Function that is executed by the framework when the theme
+   *            is applied. The function takes the current iframe window
+   *            and the previous theme id as arguments (function)
+   * - onUnapply: Function that is executed by the framework when the theme
+   *            is unapplied. The function takes the current iframe window
+   *            and the new theme id as arguments (function)
+   */
+  registerTheme: function DT_registerTheme(themeDefinition) {
+    let themeId = themeDefinition.id;
+
+    if (!themeId) {
+      throw new Error("Invalid theme id");
+    }
+
+    if (this._themes.get(themeId)) {
+      throw new Error("Theme with the same id is already registered");
+    }
+
+    this._themes.set(themeId, themeDefinition);
+
+    this.emit("theme-registered", themeId);
+  },
+
+  /**
+   * Removes an existing theme from the list of registered themes.
+   * Needed so that add-ons can remove themselves when they are deactivated
+   *
+   * @param {string|object} theme
+   *        Definition or the id of the theme to unregister.
+   */
+  unregisterTheme: function DT_unregisterTheme(theme) {
+    let themeId = null;
+    if (typeof theme == "string") {
+      themeId = theme;
+      theme = this._themes.get(theme);
+    }
+    else {
+      themeId = theme.id;
+    }
+
+    let currTheme = Services.prefs.getCharPref("devtools.theme");
+
+    // Change the current theme if it's being dynamically removed together
+    // with the owner (bootstrapped) extension.
+    // But, do not change it if the application is just shutting down.
+    if (!Services.startup.shuttingDown && theme.id == currTheme) {
+      Services.prefs.setCharPref("devtools.theme", "light");
+
+      let data = {
+        pref: "devtools.theme",
+        newValue: "light",
+        oldValue: currTheme
+      };
+
+      gDevTools.emit("pref-changed", data);
+
+      this.emit("theme-unregistered", theme);
+    }
+
+    this._themes.delete(themeId);
+  },
+
+  /**
+   * Get a theme definition if it exists.
+   *
+   * @param {string} themeId
+   *        The id of the theme
+   *
+   * @return {ThemeDefinition|null} theme
+   *         The ThemeDefinition for the id or null.
+   */
+  getThemeDefinition: function DT_getThemeDefinition(themeId) {
+    let theme = this._themes.get(themeId);
+    if (!theme) {
+      return null;
+    }
+    return theme;
+  },
+
+  /**
+   * Get map of registered themes.
+   *
+   * @return {Map} themes
+   *         A map of the the theme definitions registered in this instance
+   */
+  getThemeDefinitionMap: function DT_getThemeDefinitionMap() {
+    let themes = new Map();
+
+    for (let [id, definition] of this._themes) {
+      if (this.getThemeDefinition(id)) {
+        themes.set(id, definition);
+      }
+    }
+
+    return themes;
+  },
+
+  /**
+   * Get registered themes definitions sorted by ordinal value.
+   *
+   * @return {Array} themes
+   *         A sorted array of the theme definitions registered in this instance
+   */
+  getThemeDefinitionArray: function DT_getThemeDefinitionArray() {
+    let definitions = [];
+
+    for (let [id, definition] of this._themes) {
+      if (this.getThemeDefinition(id)) {
+        definitions.push(definition);
+      }
+    }
+
+    return definitions.sort(this.ordinalSort);
+  },
+
+  /**
    * Show a Toolbox for a target (either by creating a new one, or if a toolbox
    * already exists for the target, by bring to the front the existing one)
    * If |toolId| is specified then the displayed toolbox will have the
@@ -271,28 +414,25 @@ DevTools.prototype = {
       // No toolbox for target, create one
       toolbox = new devtools.Toolbox(target, toolId, hostType, hostOptions);
 
+      this.emit("toolbox-created", toolbox);
+
       this._toolboxes.set(target, toolbox);
 
-      toolbox.once("destroyed", function() {
+      toolbox.once("destroy", () => {
+        this.emit("toolbox-destroy", target);
+      });
+
+      toolbox.once("destroyed", () => {
         this._toolboxes.delete(target);
         this.emit("toolbox-destroyed", target);
-      }.bind(this));
+      });
 
-      // If we were asked for a specific tool then we need to wait for the
-      // tool to be ready, otherwise we can just wait for toolbox open
-      if (toolId != null) {
-        toolbox.once(toolId + "-ready", function(event, panel) {
-          this.emit("toolbox-ready", toolbox);
-          deferred.resolve(toolbox);
-        }.bind(this));
-        toolbox.open();
-      }
-      else {
-        toolbox.open().then(function() {
-          deferred.resolve(toolbox);
-          this.emit("toolbox-ready", toolbox);
-        }.bind(this));
-      }
+      // If toolId was passed in, it will already be selected before the
+      // open promise resolves.
+      toolbox.open().then(() => {
+        deferred.resolve(toolbox);
+        this.emit("toolbox-ready", toolbox);
+      });
     }
 
     return deferred.promise;
@@ -305,7 +445,7 @@ DevTools.prototype = {
    *         Target value e.g. the target that owns this toolbox
    *
    * @return {Toolbox} toolbox
-   *         The toobox that is debugging the given target
+   *         The toolbox that is debugging the given target
    */
   getToolbox: function DT_getToolbox(target) {
     return this._toolboxes.get(target);
@@ -316,7 +456,7 @@ DevTools.prototype = {
    *
    * @return promise
    *         This promise will resolve to false if no toolbox was found
-   *         associated to the target. true, if the toolbox was successfuly
+   *         associated to the target. true, if the toolbox was successfully
    *         closed.
    */
   closeToolbox: function DT_closeToolbox(target) {
@@ -355,7 +495,7 @@ DevTools.prototype = {
   /**
    * Iterator that yields each of the toolboxes.
    */
-  '@@iterator': function*() {
+  *[Symbol.iterator]() {
     for (let toolbox of this._toolboxes) {
       yield toolbox;
     }
@@ -431,12 +571,23 @@ let gDevToolsBrowser = {
       focusEl.setAttribute("disabled", "true");
     }
     if (devToolbarEnabled && Services.prefs.getBoolPref("devtools.toolbar.visible")) {
-      win.DeveloperToolbar.show(false);
+      win.DeveloperToolbar.show(false).catch(console.error);
+    }
+
+    // Enable WebIDE?
+    let webIDEEnabled = Services.prefs.getBoolPref("devtools.webide.enabled");
+    toggleCmd("Tools:WebIDE", webIDEEnabled);
+
+    let showWebIDEWidget = Services.prefs.getBoolPref("devtools.webide.widget.enabled");
+    if (webIDEEnabled && showWebIDEWidget) {
+      gDevToolsBrowser.installWebIDEWidget();
+    } else {
+      gDevToolsBrowser.uninstallWebIDEWidget();
     }
 
     // Enable App Manager?
     let appMgrEnabled = Services.prefs.getBoolPref("devtools.appmanager.enabled");
-    toggleCmd("Tools:DevAppMgr", appMgrEnabled);
+    toggleCmd("Tools:DevAppMgr", !webIDEEnabled && appMgrEnabled);
 
     // Enable Browser Toolbox?
     let chromeEnabled = Services.prefs.getBoolPref("devtools.chrome.enabled");
@@ -444,6 +595,7 @@ let gDevToolsBrowser = {
     let remoteEnabled = chromeEnabled && devtoolsRemoteEnabled &&
                         Services.prefs.getBoolPref("devtools.debugger.chrome-enabled");
     toggleCmd("Tools:BrowserToolbox", remoteEnabled);
+    toggleCmd("Tools:BrowserContentToolbox", remoteEnabled && win.gMultiProcessBrowser);
 
     // Enable Error Console?
     let consoleEnabled = Services.prefs.getBoolPref("devtools.errorconsole.enabled");
@@ -478,11 +630,11 @@ let gDevToolsBrowser = {
    * selectToolCommand's behavior:
    * - if the toolbox is closed,
    *   we open the toolbox and select the tool
-   * - if the toolbox is open, and the targetted tool is not selected,
+   * - if the toolbox is open, and the targeted tool is not selected,
    *   we select it
-   * - if the toolbox is open, and the targetted tool is selected,
+   * - if the toolbox is open, and the targeted tool is selected,
    *   and the host is NOT a window, we close the toolbox
-   * - if the toolbox is open, and the targetted tool is selected,
+   * - if the toolbox is open, and the targeted tool is selected,
    *   and the host is a window, we raise the toolbox window
    */
   selectToolCommand: function(gBrowser, toolId) {
@@ -501,12 +653,14 @@ let gDevToolsBrowser = {
       } else {
         toolbox.destroy();
       }
+      gDevTools.emit("select-tool-command", toolId);
     } else {
       gDevTools.showToolbox(target, toolId).then(() => {
         let target = devtools.TargetFactory.forTab(gBrowser.selectedTab);
         let toolbox = gDevTools.getToolbox(target);
 
         toolbox.fireCustomKey(toolId);
+        gDevTools.emit("select-tool-command", toolId);
       });
     }
   },
@@ -523,6 +677,122 @@ let gDevToolsBrowser = {
    */
   openAppManager: function(gBrowser) {
     gBrowser.selectedTab = gBrowser.addTab("about:app-manager");
+  },
+
+  /**
+   * Open WebIDE
+   */
+  openWebIDE: function() {
+    let win = Services.wm.getMostRecentWindow("devtools:webide");
+    if (win) {
+      win.focus();
+    } else {
+      Services.ww.openWindow(null, "chrome://webide/content/", "webide", "chrome,centerscreen,resizable", null);
+    }
+  },
+
+  _getContentProcessTarget: function () {
+    // Create a DebuggerServer in order to connect locally to it
+    if (!DebuggerServer.initialized) {
+      DebuggerServer.init();
+      DebuggerServer.addBrowserActors();
+    }
+
+    let transport = DebuggerServer.connectPipe();
+    let client = new DebuggerClient(transport);
+
+    let deferred = promise.defer();
+    client.connect(() => {
+      client.mainRoot.listProcesses(response => {
+        // Do nothing if there is only one process, the parent process.
+        let contentProcesses = response.processes.filter(p => (!p.parent));
+        if (contentProcesses.length < 1) {
+          let msg = bundle.GetStringFromName("toolbox.noContentProcess.message");
+          Services.prompt.alert(null, "", msg);
+          deferred.reject("No content processes available.");
+          return;
+        }
+        // Otherwise, arbitrary connect to the unique content process.
+        client.attachProcess(contentProcesses[0].id)
+              .then(response => {
+                let options = {
+                  form: response.form,
+                  client: client,
+                  chrome: true
+                };
+                return devtools.TargetFactory.forRemoteTab(options);
+              })
+              .then(target => {
+                // Ensure closing the connection in order to cleanup
+                // the debugger client and also the server created in the
+                // content process
+                target.on("close", () => {
+                  client.close();
+                });
+                deferred.resolve(target);
+              });
+      });
+    });
+
+    return deferred.promise;
+  },
+
+  openContentProcessToolbox: function () {
+    this._getContentProcessTarget()
+        .then(target => {
+          // Display a new toolbox, in a new window, with debugger by default
+          return gDevTools.showToolbox(target, "jsdebugger",
+                                       devtools.Toolbox.HostType.WINDOW);
+        });
+  },
+
+  /**
+   * Install WebIDE widget
+   */
+  installWebIDEWidget: function() {
+    if (this.isWebIDEWidgetInstalled()) {
+      return;
+    }
+
+    let defaultArea;
+    if (Services.prefs.getBoolPref("devtools.webide.widget.inNavbarByDefault")) {
+      defaultArea = CustomizableUI.AREA_NAVBAR;
+    } else {
+      defaultArea = CustomizableUI.AREA_PANEL;
+    }
+
+    CustomizableUI.createWidget({
+      id: "webide-button",
+      shortcutId: "key_webide",
+      label: "devtools-webide-button2.label",
+      tooltiptext: "devtools-webide-button2.tooltiptext",
+      defaultArea: defaultArea,
+      onCommand: function(aEvent) {
+        gDevToolsBrowser.openWebIDE();
+      }
+    });
+  },
+
+  isWebIDEWidgetInstalled: function() {
+    let widgetWrapper = CustomizableUI.getWidget("webide-button");
+    return !!(widgetWrapper && widgetWrapper.provider == CustomizableUI.PROVIDER_API);
+  },
+
+  /**
+   * Uninstall WebIDE widget
+   */
+  uninstallWebIDEWidget: function() {
+    if (this.isWebIDEWidgetInstalled()) {
+      CustomizableUI.removeWidgetFromArea("webide-button");
+    }
+    CustomizableUI.destroyWidget("webide-button");
+  },
+
+  /**
+   * Move WebIDE widget to the navbar
+   */
+  moveWebIDEWidgetInNavbar: function() {
+    CustomizableUI.addWidgetToArea("webide-button", CustomizableUI.AREA_NAVBAR);
   },
 
   /**
@@ -570,6 +840,97 @@ let gDevToolsBrowser = {
     mainKeyset.parentNode.insertBefore(devtoolsKeyset, mainKeyset);
   },
 
+  /**
+   * Hook the JS debugger tool to the "Debug Script" button of the slow script
+   * dialog.
+   */
+  setSlowScriptDebugHandler: function DT_setSlowScriptDebugHandler() {
+    let debugService = Cc["@mozilla.org/dom/slow-script-debug;1"]
+                         .getService(Ci.nsISlowScriptDebug);
+    let tm = Cc["@mozilla.org/thread-manager;1"].getService(Ci.nsIThreadManager);
+
+    function slowScriptDebugHandler(aTab, aCallback) {
+      let target = devtools.TargetFactory.forTab(aTab);
+
+      gDevTools.showToolbox(target, "jsdebugger").then(toolbox => {
+        let threadClient = toolbox.getCurrentPanel().panelWin.gThreadClient;
+
+        // Break in place, which means resuming the debuggee thread and pausing
+        // right before the next step happens.
+        switch (threadClient.state) {
+          case "paused":
+            // When the debugger is already paused.
+            threadClient.breakOnNext();
+            aCallback();
+            break;
+          case "attached":
+            // When the debugger is already open.
+            threadClient.interrupt(() => {
+              threadClient.breakOnNext();
+              aCallback();
+            });
+            break;
+          case "resuming":
+            // The debugger is newly opened.
+            threadClient.addOneTimeListener("resumed", () => {
+              threadClient.interrupt(() => {
+                threadClient.breakOnNext();
+                aCallback();
+              });
+            });
+            break;
+          default:
+            throw Error("invalid thread client state in slow script debug handler: " +
+                        threadClient.state);
+          }
+      });
+    }
+
+    debugService.activationHandler = function(aWindow) {
+      let chromeWindow = aWindow.QueryInterface(Ci.nsIInterfaceRequestor)
+                                .getInterface(Ci.nsIWebNavigation)
+                                .QueryInterface(Ci.nsIDocShellTreeItem)
+                                .rootTreeItem
+                                .QueryInterface(Ci.nsIInterfaceRequestor)
+                                .getInterface(Ci.nsIDOMWindow)
+                                .QueryInterface(Ci.nsIDOMChromeWindow);
+
+      let setupFinished = false;
+      slowScriptDebugHandler(chromeWindow.gBrowser.selectedTab,
+                             () => { setupFinished = true; });
+
+      // Don't return from the interrupt handler until the debugger is brought
+      // up; no reason to continue executing the slow script.
+      let utils = aWindow.QueryInterface(Ci.nsIInterfaceRequestor)
+                         .getInterface(Ci.nsIDOMWindowUtils);
+      utils.enterModalState();
+      while (!setupFinished) {
+        tm.currentThread.processNextEvent(true);
+      }
+      utils.leaveModalState();
+    };
+
+    debugService.remoteActivationHandler = function(aBrowser, aCallback) {
+      let chromeWindow = aBrowser.ownerDocument.defaultView;
+      let tab = chromeWindow.gBrowser.getTabForBrowser(aBrowser);
+      chromeWindow.gBrowser.selected = tab;
+
+      function callback() {
+        aCallback.finishDebuggerStartup();
+      }
+
+      slowScriptDebugHandler(tab, callback);
+    };
+  },
+
+  /**
+   * Unset the slow script debug handler.
+   */
+  unsetSlowScriptDebugHandler: function DT_unsetSlowScriptDebugHandler() {
+    let debugService = Cc["@mozilla.org/dom/slow-script-debug;1"]
+                         .getService(Ci.nsISlowScriptDebug);
+    debugService.activationHandler = undefined;
+  },
 
   /**
    * Detect the presence of a Firebug.
@@ -658,6 +1019,10 @@ let gDevToolsBrowser = {
           mp.insertBefore(elements.menuitem, ref);
         }
       }
+    }
+
+    if (toolDefinition.id === "jsdebugger") {
+      gDevToolsBrowser.setSlowScriptDebugHandler();
     }
   },
 
@@ -804,24 +1169,13 @@ let gDevToolsBrowser = {
   },
 
   /**
-   * Connects to the SPS profiler when the developer tools are open.
+   * Connects to the SPS profiler when the developer tools are open. This is
+   * necessary because of the WebConsole's `profile` and `profileEnd` methods.
    */
-  _connectToProfiler: function DT_connectToProfiler() {
-    let ProfilerController = devtools.require("devtools/profiler/controller");
-
-    for (let win of gDevToolsBrowser._trackedBrowserWindows) {
-      if (devtools.TargetFactory.isKnownTab(win.gBrowser.selectedTab)) {
-        let target = devtools.TargetFactory.forTab(win.gBrowser.selectedTab);
-        if (gDevTools._toolboxes.has(target)) {
-          target.makeRemote().then(() => {
-            let profiler = new ProfilerController(target);
-            profiler.connect();
-          }).then(null, Cu.reportError);
-
-          return;
-        }
-      }
-    }
+  _connectToProfiler: function DT_connectToProfiler(event, toolbox) {
+    let SharedProfilerUtils = devtools.require("devtools/profiler/shared");
+    let connection = SharedProfilerUtils.getProfilerConnection(toolbox);
+    connection.open();
   },
 
   /**
@@ -833,6 +1187,10 @@ let gDevToolsBrowser = {
   _removeToolFromWindows: function DT_removeToolFromWindows(toolId) {
     for (let win of gDevToolsBrowser._trackedBrowserWindows) {
       gDevToolsBrowser._removeToolFromMenu(toolId, win.document);
+    }
+
+    if (toolId === "jsdebugger") {
+      gDevToolsBrowser.unsetSlowScriptDebugHandler();
     }
   },
 

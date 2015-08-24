@@ -1,21 +1,35 @@
-/* -*- Mode: Java; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 4 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 var gContentPane = {
-
-  /**
-   * Initializes the fonts dropdowns displayed in this pane.
-   */
   init: function ()
   {
+    // Initializes the fonts dropdowns displayed in this pane.
     this._rebuildFonts();
     var menulist = document.getElementById("defaultFont");
     if (menulist.selectedIndex == -1) {
       menulist.insertItemAt(0, "", "", "");
       menulist.selectedIndex = 0;
     }
+
+    // Show translation preferences if we may:
+    const prefName = "browser.translation.ui.show";
+    if (Services.prefs.getBoolPref(prefName)) {
+      let row = document.getElementById("translationBox");
+      row.removeAttribute("hidden");
+    }
+
+    let drmInfoURL =
+      Services.urlFormatter.formatURLPref("app.support.baseURL") + "drm-content";
+    document.getElementById("playDRMContentLink").setAttribute("href", drmInfoURL);
+    let emeUIEnabled = Services.prefs.getBoolPref("browser.eme.ui.enabled");
+    // Force-disable/hide on WinXP:
+    if (navigator.platform.toLowerCase().startsWith("win")) {
+      emeUIEnabled = emeUIEnabled && parseFloat(Services.sysinfo.get("version")) >= 6;
+    }
+    document.getElementById("playDRMContentRow").hidden = !emeUIEnabled;
   },
 
   // UTILITY FUNCTIONS
@@ -55,7 +69,7 @@ var gContentPane = {
     params.introText = bundlePreferences.getString("popuppermissionstext");
     document.documentElement.openWindow("Browser:Permissions",
                                         "chrome://browser/content/preferences/permissions.xul",
-                                        "", params);
+                                        "resizable", params);
   },
 
 
@@ -170,5 +184,22 @@ var gContentPane = {
   {
     document.documentElement.openSubDialog("chrome://browser/content/preferences/languages.xul",
                                            "", null);
+  },
+
+  /**
+   * Displays the translation exceptions dialog where specific site and language
+   * translation preferences can be set.
+   */
+  showTranslationExceptions: function ()
+  {
+    document.documentElement.openWindow("Browser:TranslationExceptions",
+                                        "chrome://browser/content/preferences/translation.xul",
+                                        "resizable", null);
+  },
+
+  openTranslationProviderAttribution: function ()
+  {
+    Components.utils.import("resource:///modules/translation/Translation.jsm");
+    Translation.openProviderAttribution();
   }
 };

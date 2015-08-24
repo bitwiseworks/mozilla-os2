@@ -14,18 +14,18 @@ const { getAttachEventType, WorkerHost } = require('./content/utils');
 const { Class } = require('./core/heritage');
 const { Disposable } = require('./core/disposable');
 const { WeakReference } = require('./core/reference');
-const { Worker } = require('./content/worker');
+const { Worker } = require('./deprecated/sync-worker');
 const { EventTarget } = require('./event/target');
 const { on, emit, once, setListeners } = require('./event/core');
 const { on: domOn, removeListener: domOff } = require('./dom/events');
 const { pipe } = require('./event/utils');
-const { isRegExp } = require('./lang/type');
+const { isRegExp, isUndefined } = require('./lang/type');
 const { merge } = require('./util/object');
 const { windowIterator } = require('./deprecated/window-utils');
 const { isBrowser, getFrames } = require('./window/utils');
 const { getTabs, getTabContentWindow, getTabForContentWindow,
         getURI: getTabURI } = require('./tabs/utils');
-const { ignoreWindow } = require('sdk/private-browsing/utils');
+const { ignoreWindow } = require('./private-browsing/utils');
 const { Style } = require("./stylesheet/style");
 const { attach, detach } = require("./content/mod");
 const { has, hasAny } = require("./util/array");
@@ -48,7 +48,9 @@ let styleFor = (mod) => styles.get(mod);
 observers.on('document-element-inserted', onContentWindow);
 unload(() => observers.off('document-element-inserted', onContentWindow));
 
+// Helper functions
 let isRegExpOrString = (v) => isRegExp(v) || typeof v === 'string';
+let modMatchesURI = (mod, uri) => mod.include.matchesAny(uri) && !mod.exclude.matchesAny(uri);
 
 // Validation Contracts
 const modOptions = {
@@ -70,6 +72,19 @@ const modOptions = {
       return false;
     },
     msg: 'The `include` option must always contain atleast one rule as a string, regular expression, or an array of strings and regular expressions.'
+  },
+  exclude: {
+    is: ['string', 'array', 'regexp', 'undefined'],
+    ok: (rule) => {
+      if (isRegExpOrString(rule) || isUndefined(rule))
+        return true;
+      if (Array.isArray(rule) && rule.length > 0)
+        return rule.every(isRegExpOrString);
+      return false;
+    },
+    msg: 'If set, the `exclude` option must always contain at least one ' +
+      'rule as a string, regular expression, or an array of strings and ' +
+      'regular expressions.'
   },
   attachTo: {
     is: ['string', 'array', 'undefined'],
@@ -115,6 +130,10 @@ const PageMod = Class({
     model.include = Rules();
     model.include.add.apply(model.include, [].concat(include));
 
+    let exclude = isUndefined(model.exclude) ? [] : model.exclude;
+    model.exclude = Rules();
+    model.exclude.add.apply(model.exclude, [].concat(exclude));
+
     if (model.contentStyle || model.contentStyleFile) {
       styles.set(mod, Style({
         uri: model.contentStyleFile,
@@ -123,6 +142,7 @@ const PageMod = Class({
     }
 
     pagemods.add(this);
+    model.seenDocuments = new WeakMap();
 
     // `applyOnExistingDocuments` has to be called after `pagemods.add()`
     // otherwise its calls to `onContent` method won't do anything.
@@ -162,36 +182,22 @@ function onContentWindow({ subject: document }) {
     return;
 
   for (let pagemod of pagemods) {
-    if (pagemod.include.matchesAny(document.URL))
+    if (modMatchesURI(pagemod, document.URL))
       onContent(pagemod, window);
   }
 }
 
-// Returns all tabs on all currently opened windows
-function getAllTabs() {
-  let tabs = [];
-  // Iterate over all chrome windows
-  for (let window in windowIterator()) {
-    if (!isBrowser(window))
-      continue;
-    tabs = tabs.concat(getTabs(window));
-  }
-  return tabs;
-}
-
 function applyOnExistingDocuments (mod) {
-  let tabs = getAllTabs();
-
-  tabs.forEach(function (tab) {
+  getTabs().forEach(tab => {
     // Fake a newly created document
     let window = getTabContentWindow(tab);
-    if (has(mod.attachTo, "top") && mod.include.matchesAny(getTabURI(tab)))
+    let uri = getTabURI(tab);
+    if (has(mod.attachTo, "top") && modMatchesURI(mod, uri))
       onContent(mod, window);
-    if (has(mod.attachTo, "frame")) {
+    if (has(mod.attachTo, "frame"))
       getFrames(window).
-        filter((iframe) => mod.include.matchesAny(iframe.location.href)).
-        forEach((frame) => onContent(mod, frame));
-    }
+        filter(iframe => modMatchesURI(mod, iframe.location.href)).
+        forEach(frame => onContent(mod, frame));
   });
 }
 
@@ -226,6 +232,12 @@ function onContent (mod, window) {
   // Is a frame document and `frame` is not set, ignore
   if (!isTopDocument && !has(mod.attachTo, "frame"))
     return;
+
+  // ensure we attach only once per document
+  let seen = modelFor(mod).seenDocuments;
+  if (seen.has(window.document))
+    return;
+  seen.set(window.document, true);
 
   let style = styleFor(mod);
   if (style)

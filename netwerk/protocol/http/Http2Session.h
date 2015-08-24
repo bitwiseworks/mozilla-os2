@@ -25,34 +25,37 @@ namespace net {
 
 class Http2PushedStream;
 class Http2Stream;
+class nsHttpTransaction;
 
-class Http2Session MOZ_FINAL : public ASpdySession
+class Http2Session final : public ASpdySession
   , public nsAHttpConnection
   , public nsAHttpSegmentReader
   , public nsAHttpSegmentWriter
 {
-public:
-  NS_DECL_ISUPPORTS
-    NS_DECL_NSAHTTPTRANSACTION
-    NS_DECL_NSAHTTPCONNECTION(mConnection)
-    NS_DECL_NSAHTTPSEGMENTREADER
-    NS_DECL_NSAHTTPSEGMENTWRITER
-
-   Http2Session(nsAHttpTransaction *, nsISocketTransport *, int32_t);
   ~Http2Session();
 
-  bool AddStream(nsAHttpTransaction *, int32_t);
-  bool CanReuse() { return !mShouldGoAway && !mClosed; }
-  bool RoomForMoreStreams();
+public:
+  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_NSAHTTPTRANSACTION
+  NS_DECL_NSAHTTPCONNECTION(mConnection)
+  NS_DECL_NSAHTTPSEGMENTREADER
+  NS_DECL_NSAHTTPSEGMENTWRITER
+
+ Http2Session(nsISocketTransport *, uint32_t version);
+
+  bool AddStream(nsAHttpTransaction *, int32_t,
+                 bool, nsIInterfaceRequestor *) override;
+  bool CanReuse() override { return !mShouldGoAway && !mClosed; }
+  bool RoomForMoreStreams() override;
 
   // When the connection is active this is called up to once every 1 second
   // return the interval (in seconds) that the connection next wants to
   // have this invoked. It might happen sooner depending on the needs of
   // other connections.
-  uint32_t  ReadTimeoutTick(PRIntervalTime now);
+  uint32_t  ReadTimeoutTick(PRIntervalTime now) override;
 
   // Idle time represents time since "goodput".. e.g. a data or header frame
-  PRIntervalTime IdleTime();
+  PRIntervalTime IdleTime() override;
 
   // Registering with a newID of 0 means pick the next available odd ID
   uint32_t RegisterStreamID(Http2Stream *, uint32_t aNewID = 0);
@@ -72,17 +75,18 @@ public:
 */
 
   enum frameType {
-    FRAME_TYPE_DATA = 0,
-    FRAME_TYPE_HEADERS = 1,
-    FRAME_TYPE_PRIORITY = 2,
-    FRAME_TYPE_RST_STREAM = 3,
-    FRAME_TYPE_SETTINGS = 4,
-    FRAME_TYPE_PUSH_PROMISE = 5,
-    FRAME_TYPE_PING = 6,
-    FRAME_TYPE_GOAWAY = 7,
-    FRAME_TYPE_WINDOW_UPDATE = 8,
-    FRAME_TYPE_CONTINUATION = 9,
-    FRAME_TYPE_LAST = 10
+    FRAME_TYPE_DATA          = 0x0,
+    FRAME_TYPE_HEADERS       = 0x1,
+    FRAME_TYPE_PRIORITY      = 0x2,
+    FRAME_TYPE_RST_STREAM    = 0x3,
+    FRAME_TYPE_SETTINGS      = 0x4,
+    FRAME_TYPE_PUSH_PROMISE  = 0x5,
+    FRAME_TYPE_PING          = 0x6,
+    FRAME_TYPE_GOAWAY        = 0x7,
+    FRAME_TYPE_WINDOW_UPDATE = 0x8,
+    FRAME_TYPE_CONTINUATION  = 0x9,
+    FRAME_TYPE_ALTSVC        = 0xA,
+    FRAME_TYPE_LAST          = 0xB
   };
 
   // NO_ERROR is a macro defined on windows, so we'll name the HTTP2 goaway
@@ -100,25 +104,25 @@ public:
     COMPRESSION_ERROR = 9,
     CONNECT_ERROR = 10,
     ENHANCE_YOUR_CALM = 11,
-    INADEQUATE_SECURITY = 12
+    INADEQUATE_SECURITY = 12,
+    HTTP_1_1_REQUIRED = 13
   };
 
   // These are frame flags. If they, or other undefined flags, are
   // used on frames other than the comments indicate they MUST be ignored.
   const static uint8_t kFlag_END_STREAM = 0x01; // data, headers
   const static uint8_t kFlag_END_HEADERS = 0x04; // headers, continuation
-  const static uint8_t kFlag_PRIORITY = 0x08; //headers
   const static uint8_t kFlag_END_PUSH_PROMISE = 0x04; // push promise
   const static uint8_t kFlag_ACK = 0x01; // ping and settings
-  const static uint8_t kFlag_END_SEGMENT = 0x02; // data
-  const static uint8_t kFlag_PAD_LOW = 0x10; // data, headers, continuation
-  const static uint8_t kFlag_PAD_HIGH = 0x20; // data, headers, continuation
+  const static uint8_t kFlag_PADDED = 0x08; // data, headers, push promise, continuation
+  const static uint8_t kFlag_PRIORITY = 0x20; // headers
 
   enum {
     SETTINGS_TYPE_HEADER_TABLE_SIZE = 1, // compression table size
     SETTINGS_TYPE_ENABLE_PUSH = 2,     // can be used to disable push
     SETTINGS_TYPE_MAX_CONCURRENT = 3,  // streams recvr allowed to initiate
-    SETTINGS_TYPE_INITIAL_WINDOW = 4  // bytes for flow control default
+    SETTINGS_TYPE_INITIAL_WINDOW = 4,  // bytes for flow control default
+    SETTINGS_TYPE_MAX_FRAME_SIZE = 5   // max frame size settings sender allows receipt of
   };
 
   // This should be big enough to hold all of your control packets,
@@ -131,7 +135,6 @@ public:
   const static uint32_t kQueueTailRoom    =  4096;
   const static uint32_t kQueueReserved    =  1024;
 
-  const static uint32_t kDefaultMaxConcurrent = 100;
   const static uint32_t kMaxStreamID = 0x7800000;
 
   // This is a sentinel for a deleted stream. It is not a valid
@@ -146,9 +149,24 @@ public:
   // The default rwin is 64KB - 1 unless updated by a settings frame
   const static uint32_t kDefaultRwin = 65535;
 
-  // Frames with HTTP semantics are limited to 2^14 - 1 bytes of length in
-  // order to preserve responsiveness
-  const static uint32_t kMaxFrameData = 16383;
+  // We limit frames to 2^14 bytes of length in order to preserve responsiveness
+  // This is the smallest allowed value for SETTINGS_MAX_FRAME_SIZE
+  const static uint32_t kMaxFrameData = 0x4000;
+
+  const static uint8_t kFrameLengthBytes = 3;
+  const static uint8_t kFrameStreamIDBytes = 4;
+  const static uint8_t kFrameFlagBytes = 1;
+  const static uint8_t kFrameTypeBytes = 1;
+  const static uint8_t kFrameHeaderBytes = kFrameLengthBytes + kFrameFlagBytes +
+    kFrameTypeBytes + kFrameStreamIDBytes;
+
+  enum {
+    kLeaderGroupID =     0x3,
+    kOtherGroupID =       0x5,
+    kBackgroundGroupID =  0x7,
+    kSpeculativeGroupID = 0x9,
+    kFollowerGroupID =    0xB
+  };
 
   static nsresult RecvHeaders(Http2Session *);
   static nsresult RecvPriority(Http2Session *);
@@ -159,10 +177,8 @@ public:
   static nsresult RecvGoAway(Http2Session *);
   static nsresult RecvWindowUpdate(Http2Session *);
   static nsresult RecvContinuation(Http2Session *);
+  static nsresult RecvAltSvc(Http2Session *);
 
-  template<typename T>
-  static void EnsureBuffer(nsAutoArrayPtr<T> &,
-                           uint32_t, uint32_t, uint32_t &);
   char       *EnsureOutputBuffer(uint32_t needed);
 
   template<typename charType>
@@ -175,27 +191,28 @@ public:
                     const char *, uint32_t);
 
   // an overload of nsAHttpConnection
-  void TransactionHasDataToWrite(nsAHttpTransaction *);
+  void TransactionHasDataToWrite(nsAHttpTransaction *) override;
 
   // a similar version for Http2Stream
   void TransactionHasDataToWrite(Http2Stream *);
 
   // an overload of nsAHttpSegementReader
-  virtual nsresult CommitToSegmentSize(uint32_t size, bool forceCommitment);
+  virtual nsresult CommitToSegmentSize(uint32_t size, bool forceCommitment) override;
   nsresult BufferOutput(const char *, uint32_t, uint32_t *);
   void     FlushOutputQueue();
   uint32_t AmountOfOutputBuffered() { return mOutputQueueUsed - mOutputQueueSent; }
 
   uint32_t GetServerInitialStreamWindow() { return mServerInitialStreamWindow; }
 
+  bool TryToActivate(Http2Stream *stream);
   void ConnectPushedStream(Http2Stream *stream);
-  void MaybeDecrementConcurrent(Http2Stream *stream);
 
   nsresult ConfirmTLSProfile();
+  static bool ALPNCallback(nsISupports *securityInfo);
 
   uint64_t Serial() { return mSerial; }
 
-  void PrintDiagnostics (nsCString &log);
+  void PrintDiagnostics (nsCString &log) override;
 
   // Streams need access to these
   uint32_t SendingChunkSize() { return mSendingChunkSize; }
@@ -204,6 +221,11 @@ public:
   nsISocketTransport *SocketTransport() { return mSocketTransport; }
   int64_t ServerSessionWindow() { return mServerSessionWindow; }
   void DecrementServerSessionWindow (uint32_t bytes) { mServerSessionWindow -= bytes; }
+  void GetNegotiatedToken(nsACString &s) { s.Assign(mNegotiatedToken); }
+
+  void SendPing() override;
+  bool MaybeReTunnel(nsAHttpTransaction *) override;
+  bool UseH2Deps() { return mUseH2Deps; }
 
 private:
 
@@ -230,10 +252,11 @@ private:
   nsresult    UncompressAndDiscard();
   void        GeneratePing(bool);
   void        GenerateSettingsAck();
-  void        GeneratePriority(uint32_t, uint32_t);
+  void        GeneratePriority(uint32_t, uint8_t);
   void        GenerateRstStream(uint32_t, uint32_t);
   void        GenerateGoAway(uint32_t);
   void        CleanupStream(Http2Stream *, nsresult, errorType);
+  void        CleanupStream(uint32_t, nsresult, errorType);
   void        CloseStream(Http2Stream *, nsresult);
   void        SendHello();
   void        RemoveStreamFromQueues(Http2Stream *);
@@ -242,16 +265,20 @@ private:
   void        SetWriteCallbacks();
   void        RealignOutputQueue();
 
-  bool        RoomForMoreConcurrent();
-  void        ActivateStream(Http2Stream *);
   void        ProcessPending();
   nsresult    SetInputFrameDataStream(uint32_t);
+  void        CreatePriorityNode(uint32_t, uint32_t, uint8_t, const char *);
   bool        VerifyStream(Http2Stream *, uint32_t);
   void        SetNeedsCleanup();
 
   void        UpdateLocalRwin(Http2Stream *stream, uint32_t bytes);
   void        UpdateLocalStreamWindow(Http2Stream *stream, uint32_t bytes);
   void        UpdateLocalSessionWindow(uint32_t bytes);
+
+  void        MaybeDecrementConcurrent(Http2Stream *stream);
+  bool        RoomForMoreConcurrent();
+  void        IncrementConcurrent(Http2Stream *stream);
+  void        QueueStream(Http2Stream *stream);
 
   // a wrapper for all calls to the nshttpconnection level segment writer. Used
   // to track network I/O for timeout purposes
@@ -434,6 +461,9 @@ private:
   PRIntervalTime       mLastDataReadEpoch; // used for IdleTime()
   PRIntervalTime       mPingSentEpoch;
 
+  PRIntervalTime       mPreviousPingThreshold; // backup for the former value
+  bool                 mPreviousUsed;          // true when backup is used
+
   // used as a temporary buffer while enumerating the stream hash during GoAway
   nsDeque  mGoAwayStreamsToRestart;
 
@@ -441,6 +471,28 @@ private:
   // by the load group and the serial number can be used as part of the cache key
   // to make sure streams aren't shared across sessions.
   uint64_t        mSerial;
+
+  // If push is disabled, we want to be able to send PROTOCOL_ERRORs if we
+  // receive a PUSH_PROMISE, but we have to wait for the SETTINGS ACK before
+  // we can actually tell the other end to go away. These help us keep track
+  // of that state so we can behave appropriately.
+  bool mWaitingForSettingsAck;
+  bool mGoAwayOnPush;
+
+  // For caching whether we negotiated "h2" or "h2-<draft>"
+  nsCString mNegotiatedToken;
+
+  bool mUseH2Deps;
+  uint32_t mVersion; // HTTP2_VERSION_ from nsHttp.h remove when draft support removed
+
+private:
+/// connect tunnels
+  void DispatchOnTunnel(nsAHttpTransaction *, nsIInterfaceRequestor *);
+  void CreateTunnel(nsHttpTransaction *, nsHttpConnectionInfo *, nsIInterfaceRequestor *);
+  void RegisterTunnel(Http2Stream *);
+  void UnRegisterTunnel(Http2Stream *);
+  uint32_t FindTunnelCount(nsHttpConnectionInfo *);
+  nsDataHashtable<nsCStringHashKey, uint32_t> mTunnelHash;
 };
 
 } // namespace mozilla::net

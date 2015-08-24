@@ -20,22 +20,14 @@ var messageId;
 function addMessage() {
   messageId = Home.banner.add({
     text: TEXT,
-    onclick: function() {
-      sendMessageToJava({ type: "TestHomeBanner:MessageClicked" });
-    },
     onshown: function() {
-      sendMessageToJava({ type: "TestHomeBanner:MessageShown" });
+      Messaging.sendRequest({ type: "TestHomeBanner:MessageShown" });
     },
     ondismiss: function() {
-      sendMessageToJava({ type: "TestHomeBanner:MessageDismissed" });
+      Messaging.sendRequest({ type: "TestHomeBanner:MessageDismissed" });
     }
   });
-  sendMessageToJava({ type: "TestHomeBanner:MessageAdded" });
-}
-
-function removeMessage() {
-  Home.banner.remove(messageId);
-  sendMessageToJava({ type: "TestHomeBanner:MessageRemoved" });
+  Messaging.sendRequest({ type: "TestHomeBanner:MessageAdded" });
 }
 
     </script>

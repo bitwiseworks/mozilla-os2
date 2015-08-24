@@ -2,46 +2,26 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/** this should only contain XUL dialog and document window widget defaults. Defaults for widgets of
-    a particular application should be in that application's style sheet.
-	For example style definitions for navigator can be found in navigator.css
-
-   THIS FILE IS LOCKED DOWN.  YOU ARE NOT ALLOWED TO MODIFY IT WITHOUT FIRST HAVING YOUR
-   CHANGES REVIEWED BY enndeakin@sympatico.ca
-**/
+/**
+ * A minimal set of rules for the XUL elements that may be implicitly created
+ * as part of HTML/SVG documents (e.g. scrollbars) can be found over in
+ * minimal-xul.css.  Rules for everything else related to XUL can be found in
+ * this file.  Make sure you choose the correct style sheet when adding new
+ * rules.  (This split of the XUL rules is to minimize memory use and improve
+ * performance in HTML/SVG documents.)
+ *
+ * This file should also not contain any app specific styling.  Defaults for
+ * widgets of a particular application should be in that application's style
+ * sheet.  For example, style definitions for navigator can be found in
+ * navigator.css.
+ *
+ * THIS FILE IS LOCKED DOWN.  YOU ARE NOT ALLOWED TO MODIFY IT WITHOUT FIRST
+ * HAVING YOUR CHANGES REVIEWED BY enndeakin@gmail.com
+ */
 
 @namespace url("http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"); /* set default namespace to XUL */
 @namespace html url("http://www.w3.org/1999/xhtml"); /* namespace for HTML elements */
 @namespace xbl url("http://www.mozilla.org/xbl"); /* namespace for XBL elements */
-
-* {
-  -moz-user-focus: ignore;
-  -moz-user-select: none;
-  display: -moz-box;
-  box-sizing: border-box;
-}
-
-:root {
-  text-rendering: optimizeLegibility;
-  -moz-binding: url("chrome://global/content/bindings/general.xml#root-element");
-  -moz-control-character-visibility: visible;
-}
-
-:root:-moz-locale-dir(rtl) {
-  direction: rtl;
-}
-
-/* hide the content and destroy the frame */
-[hidden="true"] {
-  display: none;
-}
-
-/* hide the content, but don't destroy the frames */
-[collapsed="true"],
-[moz-collapsed="true"] {
-  visibility: collapse;
-}
-
 
 /* ::::::::::
    :: Rules for 'hiding' portions of the chrome for special
@@ -158,6 +138,14 @@ toolbarbutton[type="menu-button"] {
   -moz-binding: url("chrome://global/content/bindings/toolbarbutton.xml#menu-button");
 }
 
+toolbarbutton.badged-button {
+  -moz-binding: url("chrome://global/content/bindings/toolbarbutton.xml#toolbarbutton-badged");
+}
+
+toolbarbutton.badged-button .toolbarbutton-badge[badge]:not([badge=""])::after {
+  content: attr(badge);
+}
+
 toolbar[mode="icons"] .toolbarbutton-text,
 toolbar[mode="icons"] .toolbarbutton-multiline-text,
 toolbar[mode="text"] .toolbarbutton-icon {
@@ -253,6 +241,28 @@ caption {
   -moz-box-align: inherit;
   -moz-box-orient: vertical;
 }
+
+/******** draggable elements *********/
+
+%ifdef XP_MACOSX
+titlebar,
+toolbar:not([nowindowdrag="true"]):not([customizing="true"]),
+statusbar:not([nowindowdrag="true"]),
+windowdragbox {
+  -moz-window-dragging: drag;
+}
+
+/* The list below is non-comprehensive and will probably need some tweaking. */
+toolbarbutton,
+button,
+textbox,
+searchbar,
+tab,
+radio,
+splitter {
+  -moz-window-dragging: no-drag;
+}
+%endif
 
 /******* toolbar *******/
 
@@ -425,6 +435,67 @@ tooltip {
 panel[type="arrow"] {
   -moz-binding: url("chrome://global/content/bindings/popup.xml#arrowpanel");
 }
+
+%ifndef MOZ_WIDGET_GTK
+
+panel[type="arrow"]:not([animate="false"]) {
+  transform: scale(.4);
+  opacity: 0;
+  transition-property: transform, opacity;
+  transition-duration: 0.15s;
+  transition-timing-function: ease-out;
+}
+
+panel[type="arrow"][animate="open"] {
+  transform: none;
+  opacity: 1.0;
+}
+
+panel[type="arrow"][animate="cancel"] {
+  transform: none;
+}
+
+panel[arrowposition="after_start"]:-moz-locale-dir(ltr),
+panel[arrowposition="after_end"]:-moz-locale-dir(rtl) {
+  transform-origin: 20px top;
+}
+
+panel[arrowposition="after_end"]:-moz-locale-dir(ltr),
+panel[arrowposition="after_start"]:-moz-locale-dir(rtl) {
+  transform-origin: calc(100% - 20px) top;
+}
+
+panel[arrowposition="before_start"]:-moz-locale-dir(ltr),
+panel[arrowposition="before_end"]:-moz-locale-dir(rtl) {
+  transform-origin: 20px bottom;
+}
+
+panel[arrowposition="before_end"]:-moz-locale-dir(ltr),
+panel[arrowposition="before_start"]:-moz-locale-dir(rtl) {
+  transform-origin: calc(100% - 20px) bottom;
+}
+
+panel[arrowposition="start_before"]:-moz-locale-dir(ltr),
+panel[arrowposition="end_before"]:-moz-locale-dir(rtl) {
+  transform-origin: right 20px;
+}
+
+panel[arrowposition="start_after"]:-moz-locale-dir(ltr),
+panel[arrowposition="end_after"]:-moz-locale-dir(rtl) {
+  transform-origin: right calc(100% - 20px);
+}
+
+panel[arrowposition="end_before"]:-moz-locale-dir(ltr),
+panel[arrowposition="start_before"]:-moz-locale-dir(rtl) {
+  transform-origin: left 20px;
+}
+
+panel[arrowposition="end_after"]:-moz-locale-dir(ltr),
+panel[arrowposition="start_after"]:-moz-locale-dir(rtl) {
+  transform-origin: left calc(100% - 20px);
+}
+
+%endif
 
 %ifdef XP_MACOSX
 .statusbar-resizerpanel {
@@ -686,29 +757,6 @@ progressmeter {
   -moz-box-direction: inherit;
 }
 
-/********** label **********/
-
-description {
-  -moz-binding: url("chrome://global/content/bindings/text.xml#text-base");
-}
-
-label {
-  -moz-binding: url("chrome://global/content/bindings/text.xml#text-label");
-}
-
-label.text-link, label[onclick] {
-  -moz-binding: url("chrome://global/content/bindings/text.xml#text-link");
-  -moz-user-focus: normal;
-}
-
-label[control], label.radio-label, label.checkbox-label, label.toolbarbutton-multiline-text {
-  -moz-binding: url("chrome://global/content/bindings/text.xml#label-control");
-}
-
-html|span.accesskey {
-  text-decoration: underline;
-}
-
 /********** textbox **********/
 
 textbox {
@@ -755,12 +803,8 @@ textbox[type="number"] {
 
 /********** autocomplete textbox **********/
 
-/* SeaMonkey don't use the new toolkit's autocomplete widget yet.... */
+/* SeaMonkey does not use the new toolkit's autocomplete widget */
 %ifdef MOZ_SUITE
-%define AUTOCOMPLETE_OLD_STYLE
-%endif
-
-%ifdef AUTOCOMPLETE_OLD_STYLE
 
 textbox[type="autocomplete"] {
   -moz-binding: url("chrome://global/content/autocomplete.xml#autocomplete");
@@ -886,6 +930,14 @@ menulist {
   -moz-binding: url("chrome://global/content/bindings/menulist.xml#menulist");
 }
 
+menulist[popuponly="true"] {
+  -moz-binding: url("chrome://global/content/bindings/menulist.xml#menulist-popuponly");
+  -moz-appearance: none !important;
+  margin: 0 !important;
+  height: 0 !important;
+  border: 0 !important;
+}
+
 menulist[editable="true"] {
   -moz-binding: url("chrome://global/content/bindings/menulist.xml#menulist-editable");
 }
@@ -900,14 +952,6 @@ menulist > menupopup > menuitem {
 
 dropmarker {
   -moz-binding: url("chrome://global/content/bindings/general.xml#dropmarker");
-}
-
-/********** resizer **********/
-
-resizer {
-  -moz-binding: url("chrome://global/content/bindings/resizer.xml#resizer");
-  position: relative;
-  z-index: 2147483647;
 }
 
 /********** splitter **********/
@@ -926,58 +970,6 @@ grippy {
   min-width: 0% ! important;
   min-height: 0% ! important;
   -moz-box-ordinal-group: 2147483646;
-}
-
-/********** scrollbar **********/
-
-/* Scrollbars are never flipped even if BiDI kicks in. */
-scrollbar[orient="horizontal"] {
-  direction: ltr;
-}
-
-thumb {
-  -moz-binding: url(chrome://global/content/bindings/scrollbar.xml#thumb);
-  display: -moz-box !important;
-}
-
-.scale-thumb {
-  -moz-binding: url(chrome://global/content/bindings/scale.xml#scalethumb);
-}
-
-scrollbar, scrollbarbutton, scrollcorner, slider, thumb, scale {
-  -moz-user-select: none;
-}
-
-scrollcorner {
-  display: -moz-box !important;
-}
-
-scrollcorner[hidden="true"] {
-  display: none !important;
-}
-
-scrollbar[value="hidden"] {
-  visibility: hidden;
-}
-
-scale {
-  -moz-binding: url(chrome://global/content/bindings/scale.xml#scale);
-}
-
-.scale-slider {
-  -moz-binding: url(chrome://global/content/bindings/scale.xml#scaleslider);
-  -moz-user-focus: normal;
-}
-
-scrollbarbutton[sbattr="scrollbar-up-top"]:not(:-moz-system-metric(scrollbar-start-backward)),
-scrollbarbutton[sbattr="scrollbar-down-top"]:not(:-moz-system-metric(scrollbar-start-forward)),
-scrollbarbutton[sbattr="scrollbar-up-bottom"]:not(:-moz-system-metric(scrollbar-end-backward)),
-scrollbarbutton[sbattr="scrollbar-down-bottom"]:not(:-moz-system-metric(scrollbar-end-forward)) {
-  display: none;
-}
-
-thumb[sbattr="scrollbar-thumb"]:-moz-system-metric(scrollbar-thumb-proportional) {
-  -moz-box-flex: 1;
 }
 
 /******** scrollbox ********/

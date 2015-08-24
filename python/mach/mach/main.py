@@ -78,9 +78,13 @@ Run |mach help| to show a list of commands.
 
 UNKNOWN_COMMAND_ERROR = r'''
 It looks like you are trying to %s an unknown mach command: %s
-
+%s
 Run |mach help| to show a list of commands.
 '''.lstrip()
+
+SUGGESTED_COMMANDS_MESSAGE = r'''
+Did you want to %s any of these commands instead: %s?
+'''
 
 UNRECOGNIZED_ARGUMENT_ERROR = r'''
 It looks like you passed an unrecognized argument into mach.
@@ -388,7 +392,8 @@ To see more help for a specific command, run:
             print(NO_COMMAND_ERROR)
             return 1
         except UnknownCommandError as e:
-            print(UNKNOWN_COMMAND_ERROR % (e.verb, e.command))
+            suggestion_message = SUGGESTED_COMMANDS_MESSAGE % (e.verb, ', '.join(e.suggested_commands)) if e.suggested_commands else ''
+            print(UNKNOWN_COMMAND_ERROR % (e.verb, e.command, suggestion_message))
             return 1
         except UnrecognizedArgumentError as e:
             print(UNRECOGNIZED_ARGUMENT_ERROR % (e.command,
@@ -441,7 +446,11 @@ To see more help for a specific command, run:
         fn = getattr(instance, handler.method)
 
         try:
-            result = fn(**vars(args.command_args))
+            if args.debug_command:
+                import pdb
+                result = pdb.runcall(fn, **vars(args.command_args))
+            else:
+                result = fn(**vars(args.command_args))
 
             if not result:
                 result = 0
@@ -595,6 +604,11 @@ To see more help for a specific command, run:
             action='store_true', default=False,
             help='Do not prefix log lines with times. By default, mach will '
                 'prefix each output line with the time since command start.')
+        global_group.add_argument('-h', '--help', dest='help',
+            action='store_true', default=False,
+            help='Show this help message.')
+        global_group.add_argument('--debug-command', action='store_true',
+            help='Start a Python debugger when command is dispatched.')
 
         for args, kwargs in self.global_arguments:
             global_group.add_argument(*args, **kwargs)

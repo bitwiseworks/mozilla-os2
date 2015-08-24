@@ -26,12 +26,12 @@ StaticRefPtr<SpeakerManagerService> gSpeakerManagerService;
 
 // static
 SpeakerManagerService*
-SpeakerManagerService::GetSpeakerManagerService()
+SpeakerManagerService::GetOrCreateSpeakerManagerService()
 {
   MOZ_ASSERT(NS_IsMainThread());
 
   if (XRE_GetProcessType() != GeckoProcessType_Default) {
-    return SpeakerManagerServiceChild::GetSpeakerManagerService();
+    return SpeakerManagerServiceChild::GetOrCreateSpeakerManagerService();
   }
 
   // If we already exist, exit early
@@ -41,9 +41,21 @@ SpeakerManagerService::GetSpeakerManagerService()
 
   // Create new instance, register, return
   nsRefPtr<SpeakerManagerService> service = new SpeakerManagerService();
-  NS_ENSURE_TRUE(service, nullptr);
 
   gSpeakerManagerService = service;
+
+  return gSpeakerManagerService;
+}
+
+SpeakerManagerService*
+SpeakerManagerService::GetSpeakerManagerService()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (XRE_GetProcessType() != GeckoProcessType_Default) {
+    return SpeakerManagerServiceChild::GetSpeakerManagerService();
+  }
+
   return gSpeakerManagerService;
 }
 
@@ -87,15 +99,10 @@ SpeakerManagerService::TuruOnSpeaker(bool aOn)
 {
   nsCOMPtr<nsIAudioManager> audioManager = do_GetService(NS_AUDIOMANAGER_CONTRACTID);
   NS_ENSURE_TRUE_VOID(audioManager);
-  int32_t phoneState;
-  audioManager->GetPhoneState(&phoneState);
-  int32_t forceuse = (phoneState == nsIAudioManager::PHONE_STATE_IN_CALL ||
-    phoneState == nsIAudioManager::PHONE_STATE_IN_COMMUNICATION)
-    ? nsIAudioManager::USE_COMMUNICATION : nsIAudioManager::USE_MEDIA;
   if (aOn) {
-    audioManager->SetForceForUse(forceuse, nsIAudioManager::FORCE_SPEAKER);
+    audioManager->SetForceForUse(nsIAudioManager::USE_MEDIA, nsIAudioManager::FORCE_SPEAKER);
   } else {
-    audioManager->SetForceForUse(forceuse, nsIAudioManager::FORCE_NONE);
+    audioManager->SetForceForUse(nsIAudioManager::USE_MEDIA, nsIAudioManager::FORCE_NONE);
   }
 }
 
@@ -182,7 +189,7 @@ SpeakerManagerService::SpeakerManagerService()
     }
   }
   AudioChannelService* audioChannelService =
-    AudioChannelService::GetAudioChannelService();
+    AudioChannelService::GetOrCreateAudioChannelService();
   if (audioChannelService) {
     audioChannelService->RegisterSpeakerManager(this);
   }
@@ -192,7 +199,7 @@ SpeakerManagerService::~SpeakerManagerService()
 {
   MOZ_COUNT_DTOR(SpeakerManagerService);
   AudioChannelService* audioChannelService =
-    AudioChannelService::GetAudioChannelService();
+    AudioChannelService::GetOrCreateAudioChannelService();
   if (audioChannelService)
     audioChannelService->UnregisterSpeakerManager(this);
 }

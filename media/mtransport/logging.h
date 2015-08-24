@@ -9,15 +9,6 @@
 #ifndef logging_h__
 #define logging_h__
 
-#if defined(PR_LOG)
-#error "Must #include logging.h before any IPDL-generated files or other files that #include prlog.h."
-#endif
-
-// Enforce logging under production builds for MOZ_MTLOG friends.
-#ifndef PR_LOGGING
-#define FORCE_PR_LOG 1
-#endif
-
 #include <sstream>
 #include <prlog.h>
 
@@ -49,7 +40,6 @@
 // PR_LOGGING is off --> make no-op MTLOG macros
 #define MOZ_MTLOG_MODULE(n)
 #define MOZ_MTLOG(level, b)
-
 #endif // defined(PR_LOGGING)
 
 #endif // logging_h__

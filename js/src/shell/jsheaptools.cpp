@@ -66,7 +66,7 @@ class HeapReverser : public JSTracer, public JS::CustomAutoRooter
     class Node {
       public:
         Node() { }
-        Node(JSGCTraceKind kind)
+        explicit Node(JSGCTraceKind kind)
           : kind(kind), incoming(), marked(false) { }
 
         /*
@@ -102,8 +102,8 @@ class HeapReverser : public JSTracer, public JS::CustomAutoRooter
         bool marked;
 
       private:
-        Node(const Node&) MOZ_DELETE;
-        Node& operator=(const Node&) MOZ_DELETE;
+        Node(const Node&) = delete;
+        Node& operator=(const Node&) = delete;
     };
 
     /* Metadata for a heap edge we have traversed. */
@@ -153,10 +153,11 @@ class HeapReverser : public JSTracer, public JS::CustomAutoRooter
     Map map;
 
     /* Construct a HeapReverser for |context|'s heap. */
-    HeapReverser(JSContext* cx)
+    explicit HeapReverser(JSContext* cx)
       : JSTracer(cx->runtime(), traverseEdgeWithThis),
         JS::CustomAutoRooter(cx),
         noggc(JS_GetRuntime(cx)),
+        nocgc(JS_GetRuntime(cx)),
         runtime(JS_GetRuntime(cx)),
         parent(nullptr)
     {
@@ -169,6 +170,7 @@ class HeapReverser : public JSTracer, public JS::CustomAutoRooter
 
   private:
     JS::AutoDisableGenerationalGC noggc;
+    js::AutoDisableCompactingGC nocgc;
 
     /* A runtime pointer for use by the destructor. */
     JSRuntime* runtime;
@@ -241,7 +243,7 @@ class HeapReverser : public JSTracer, public JS::CustomAutoRooter
     }
 
     /* Keep all tracked objects live across GC. */
-    virtual void trace(JSTracer* trc) MOZ_OVERRIDE {
+    virtual void trace(JSTracer* trc) override {
         if (!map.initialized())
             return;
         for (Map::Enum e(map); !e.empty(); e.popFront()) {
@@ -371,7 +373,7 @@ class ReferenceFinder {
     };
 
     struct AutoNodeMarker {
-        AutoNodeMarker(HeapReverser::Node* node) : node(node) { node->marked = true; }
+        explicit AutoNodeMarker(HeapReverser::Node* node) : node(node) { node->marked = true; }
         ~AutoNodeMarker() { node->marked = false; }
       private:
         HeapReverser::Node* node;
@@ -426,13 +428,13 @@ ReferenceFinder::visit(void* cell, Path* path)
         return addReferrer(JSVAL_NULL, path);
 
     HeapReverser::Map::Ptr p = reverser.map.lookup(cell);
-    JS_ASSERT(p);
+    MOZ_ASSERT(p);
     HeapReverser::Node* node = &p->value();
 
     /* Is |cell| a representable cell, reached via a non-empty path? */
     if (path != nullptr) {
         jsval representation = representable(cell, node->kind);
-        if (!JSVAL_IS_VOID(representation))
+        if (!representation.isUndefined())
             return addReferrer(representation, path);
     }
 
@@ -485,7 +487,7 @@ ReferenceFinder::Path::computeName(JSContext* cx)
             next += 2;
         }
     }
-    JS_ASSERT(next + 1 == path + size);
+    MOZ_ASSERT(next + 1 == path + size);
 
     return path;
 }
@@ -509,7 +511,7 @@ ReferenceFinder::addReferrer(jsval referrerArg, Path* path)
         return false;
     if (v.isUndefined()) {
         /* Create an array to accumulate referents under this path. */
-        JSObject* array = JS_NewArrayObject(context, referrer);
+        JSObject* array = JS_NewArrayObject(context, HandleValueArray(referrer));
         if (!array)
             return false;
         v.setObject(*array);
@@ -518,7 +520,7 @@ ReferenceFinder::addReferrer(jsval referrerArg, Path* path)
 
     /* The property's value had better be an array. */
     RootedObject array(context, &v.toObject());
-    JS_ASSERT(JS_IsArrayObject(context, array));
+    MOZ_ASSERT(JS_IsArrayObject(context, array));
 
     /* Append our referrer to this array. */
     uint32_t length;
@@ -529,7 +531,7 @@ ReferenceFinder::addReferrer(jsval referrerArg, Path* path)
 JSObject*
 ReferenceFinder::findReferences(HandleObject target)
 {
-    result = JS_NewObject(context, nullptr, JS::NullPtr(), JS::NullPtr());
+    result = JS_NewPlainObject(context);
     if (!result)
         return nullptr;
     if (!visit(target, nullptr))

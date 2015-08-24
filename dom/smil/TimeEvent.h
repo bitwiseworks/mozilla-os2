@@ -13,13 +13,13 @@
 namespace mozilla {
 namespace dom {
 
-class TimeEvent MOZ_FINAL : public Event,
+class TimeEvent final : public Event,
                             public nsIDOMTimeEvent
 {
 public:
   TimeEvent(EventTarget* aOwner,
             nsPresContext* aPresContext,
-            WidgetEvent* aEvent);
+            InternalSMILTimeEvent* aEvent);
 
   // nsISupports interface:
   NS_DECL_ISUPPORTS_INHERITED
@@ -31,7 +31,7 @@ public:
   // Forward to base class
   NS_FORWARD_TO_EVENT
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE
+  virtual JSObject* WrapObjectInternal(JSContext* aCx) override
   {
     return TimeEventBinding::Wrap(aCx, this);
   }
@@ -53,6 +53,8 @@ public:
   }
 
 private:
+  ~TimeEvent() {}
+
   nsCOMPtr<nsIDOMWindow> mView;
   int32_t mDetail;
 };

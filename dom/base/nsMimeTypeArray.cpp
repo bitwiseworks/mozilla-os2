@@ -25,15 +25,14 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsMimeTypeArray)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_3(nsMimeTypeArray,
-                                        mWindow,
-                                        mMimeTypes,
-                                        mHiddenMimeTypes)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(nsMimeTypeArray,
+                                      mWindow,
+                                      mMimeTypes,
+                                      mHiddenMimeTypes)
 
 nsMimeTypeArray::nsMimeTypeArray(nsPIDOMWindow* aWindow)
   : mWindow(aWindow)
 {
-  SetIsDOMBinding();
 }
 
 nsMimeTypeArray::~nsMimeTypeArray()
@@ -224,7 +223,7 @@ nsMimeTypeArray::EnsurePluginMimeTypes()
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(nsMimeType, AddRef)
 NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(nsMimeType, Release)
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_2(nsMimeType, mWindow, mPluginElement)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(nsMimeType, mWindow, mPluginElement)
 
 nsMimeType::nsMimeType(nsPIDOMWindow* aWindow, nsPluginElement* aPluginElement,
                        uint32_t aPluginTagMimeIndex, const nsAString& aType)
@@ -233,7 +232,6 @@ nsMimeType::nsMimeType(nsPIDOMWindow* aWindow, nsPluginElement* aPluginElement,
     mPluginTagMimeIndex(aPluginTagMimeIndex),
     mType(aType)
 {
-  SetIsDOMBinding();
 }
 
 nsMimeType::nsMimeType(nsPIDOMWindow* aWindow, const nsAString& aType)
@@ -242,7 +240,6 @@ nsMimeType::nsMimeType(nsPIDOMWindow* aWindow, const nsAString& aType)
     mPluginTagMimeIndex(0),
     mType(aType)
 {
-  SetIsDOMBinding();
 }
 
 nsMimeType::~nsMimeType()

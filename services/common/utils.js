@@ -166,8 +166,7 @@ this.CommonUtils = {
     }
 
     // Create a special timer that we can add extra properties
-    let timer = {};
-    timer.__proto__ = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
+    let timer = Object.create(Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer));
 
     // Provide an easy way to clear out the timer
     timer.clear = function() {
@@ -399,9 +398,8 @@ this.CommonUtils = {
    * @return a promise, as produced by OS.File.writeAtomic.
    */
   writeJSON: function(contents, path) {
-    let encoder = new TextEncoder();
-    let array = encoder.encode(JSON.stringify(contents));
-    return OS.File.writeAtomic(path, array, {tmpPath: path + ".tmp"});
+    let data = JSON.stringify(contents);
+    return OS.File.writeAtomic(path, data, {encoding: "utf-8", tmpPath: path + ".tmp"});
   },
 
 

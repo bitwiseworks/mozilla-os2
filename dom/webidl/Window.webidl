@@ -24,14 +24,14 @@ interface nsIDOMCrypto;
 typedef any Transferable;
 
 // http://www.whatwg.org/specs/web-apps/current-work/
-[Global, NeedNewResolve]
+[PrimaryGlobal, NeedResolve]
 /*sealed*/ interface Window : EventTarget {
   // the current browsing context
-  [Unforgeable, Throws,
-   CrossOriginReadable] readonly attribute WindowProxy window;
+  [Unforgeable, Constant, StoreInSlot,
+   CrossOriginReadable] readonly attribute Window window;
   [Replaceable, Throws,
    CrossOriginReadable] readonly attribute WindowProxy self;
-  [Unforgeable, StoreInSlot, Pure, Func="nsGlobalWindow::WindowOnWebIDL"] readonly attribute Document? document;
+  [Unforgeable, StoreInSlot, Pure] readonly attribute Document? document;
   [Throws] attribute DOMString name; 
   [PutForwards=href, Unforgeable, Throws,
    CrossOriginReadable, CrossOriginWritable] readonly attribute Location? location;
@@ -43,26 +43,27 @@ typedef any Transferable;
   [Replaceable, Throws] readonly attribute BarProp statusbar;
   [Replaceable, Throws] readonly attribute BarProp toolbar;
   [Throws] attribute DOMString status;
-  [Throws, CrossOriginCallable] void close();
+  [Throws, CrossOriginCallable, UnsafeInPrerendering] void close();
   [Throws, CrossOriginReadable] readonly attribute boolean closed;
   [Throws] void stop();
-  [Throws, CrossOriginCallable] void focus();
+  [Throws, CrossOriginCallable, UnsafeInPrerendering] void focus();
   [Throws, CrossOriginCallable] void blur();
 
   // other browsing contexts
   [Replaceable, Throws, CrossOriginReadable] readonly attribute WindowProxy frames;
   [Replaceable, CrossOriginReadable] readonly attribute unsigned long length;
-  [Unforgeable, Throws, CrossOriginReadable] readonly attribute WindowProxy top;
+  //[Unforgeable, Throws, CrossOriginReadable] readonly attribute WindowProxy top;
+  [Unforgeable, Throws, CrossOriginReadable] readonly attribute WindowProxy? top;
   [Throws, CrossOriginReadable] attribute any opener;
   //[Throws] readonly attribute WindowProxy parent;
   [Replaceable, Throws, CrossOriginReadable] readonly attribute WindowProxy? parent;
   [Throws] readonly attribute Element? frameElement;
   //[Throws] WindowProxy open(optional DOMString url = "about:blank", optional DOMString target = "_blank", [TreatNullAs=EmptyString] optional DOMString features = "", optional boolean replace = false);
-  [Throws] WindowProxy? open(optional DOMString url = "", optional DOMString target = "", [TreatNullAs=EmptyString] optional DOMString features = "");
+  [Throws, UnsafeInPrerendering] WindowProxy? open(optional DOMString url = "", optional DOMString target = "", [TreatNullAs=EmptyString] optional DOMString features = "");
   // We think the indexed getter is a bug in the spec, it actually needs to live
   // on the WindowProxy
   //getter WindowProxy (unsigned long index);
-  //getter object (DOMString name);
+  getter object (DOMString name);
 
   // the user agent
   [Throws] readonly attribute Navigator navigator; 
@@ -72,12 +73,14 @@ typedef any Transferable;
   [Throws] readonly attribute ApplicationCache applicationCache;
 
   // user prompts
-  [Throws] void alert(optional DOMString message = "");
-  [Throws] boolean confirm(optional DOMString message = "");
-  [Throws] DOMString? prompt(optional DOMString message = "", optional DOMString default = "");
-  [Throws] void print();
+  [Throws, UnsafeInPrerendering] void alert();
+  [Throws, UnsafeInPrerendering] void alert(DOMString message);
+  [Throws, UnsafeInPrerendering] boolean confirm(optional DOMString message = "");
+  [Throws, UnsafeInPrerendering] DOMString? prompt(optional DOMString message = "", optional DOMString default = "");
+  [Throws, UnsafeInPrerendering] void print();
   //[Throws] any showModalDialog(DOMString url, optional any argument);
-  [Throws] any showModalDialog(DOMString url, optional any argument, optional DOMString options = "");
+  [Throws, Func="nsGlobalWindow::IsShowModalDialogEnabled", UnsafeInPrerendering]
+  any showModalDialog(DOMString url, optional any argument, optional DOMString options = "");
 
   [Throws, CrossOriginCallable] void postMessage(any message, DOMString targetOrigin, optional sequence<Transferable> transfer);
 
@@ -87,7 +90,7 @@ Window implements GlobalEventHandlers;
 Window implements WindowEventHandlers;
 
 // http://www.whatwg.org/specs/web-apps/current-work/
-[NoInterfaceObject]
+[NoInterfaceObject, Exposed=(Window,Worker)]
 interface WindowTimers {
   [Throws] long setTimeout(Function handler, optional long timeout = 0, any... arguments);
   [Throws] long setTimeout(DOMString handler, optional long timeout = 0, any... unused);
@@ -99,7 +102,7 @@ interface WindowTimers {
 Window implements WindowTimers;
 
 // http://www.whatwg.org/specs/web-apps/current-work/
-[NoInterfaceObject]
+[NoInterfaceObject, Exposed=(Window,Worker)]
 interface WindowBase64 {
   [Throws] DOMString btoa(DOMString btoa);
   [Throws] DOMString atob(DOMString atob);
@@ -149,6 +152,11 @@ dictionary ScrollOptions {
   ScrollBehavior behavior = "auto";
 };
 
+dictionary ScrollToOptions : ScrollOptions {
+  unrestricted double left;
+  unrestricted double top;
+};
+
 partial interface Window {
   //[Throws,NewObject] MediaQueryList matchMedia(DOMString query);
   [Throws,NewObject] MediaQueryList? matchMedia(DOMString query);
@@ -160,10 +168,10 @@ partial interface Window {
   //[Throws] void moveBy(double x, double y);
   //[Throws] void resizeTo(double x, double y);
   //[Throws] void resizeBy(double x, double y);
-  [Throws] void moveTo(long x, long y);
-  [Throws] void moveBy(long x, long y);
-  [Throws] void resizeTo(long x, long y);
-  [Throws] void resizeBy(long x, long y);
+  [Throws, UnsafeInPrerendering] void moveTo(long x, long y);
+  [Throws, UnsafeInPrerendering] void moveBy(long x, long y);
+  [Throws, UnsafeInPrerendering] void resizeTo(long x, long y);
+  [Throws, UnsafeInPrerendering] void resizeBy(long x, long y);
 
   // viewport
   //[Throws] readonly attribute double innerWidth;
@@ -176,16 +184,16 @@ partial interface Window {
   //[Throws] readonly attribute double pageXOffset;
   //[Throws] readonly attribute double scrollY;
   //[Throws] readonly attribute double pageYOffset;
-  //void scroll(double x, double y, optional ScrollOptions options);
-  //void scrollTo(double x, double y, optional ScrollOptions options);
-  //void scrollBy(double x, double y, optional ScrollOptions options);
+  void scroll(unrestricted double x, unrestricted double y);
+  void scroll(optional ScrollToOptions options);
+  void scrollTo(unrestricted double x, unrestricted double y);
+  void scrollTo(optional ScrollToOptions options);
+  void scrollBy(unrestricted double x, unrestricted double y);
+  void scrollBy(optional ScrollToOptions options);
   [Replaceable, Throws] readonly attribute long scrollX;
   [Throws] readonly attribute long pageXOffset;
   [Replaceable, Throws] readonly attribute long scrollY;
   [Throws] readonly attribute long pageYOffset;
-  void scroll(long x, long y);
-  void scrollTo(long x, long y);
-  void scrollBy(long x, long y);
 
   // client
   //[Throws] readonly attribute double screenX;
@@ -198,6 +206,17 @@ partial interface Window {
   [Throws] attribute long outerHeight;
 };
 
+/**
+ * Special function that gets the fill ratio from the compositor used for testing
+ * and is an indicator that we're layerizing correctly.
+ * This function will call the given callback current fill ratio for a
+ * composited frame. We don't guarantee which frame fill ratios will be returned.
+ */
+partial interface Window {
+  [ChromeOnly, Throws] void mozRequestOverfill(OverfillCallback callback);
+};
+callback OverfillCallback = void (unsigned long overfill);
+
 // https://dvcs.w3.org/hg/webperf/raw-file/tip/specs/RequestAnimationFrame/Overview.html
 partial interface Window {
   [Throws] long requestAnimationFrame(FrameRequestCallback callback);
@@ -207,14 +226,11 @@ callback FrameRequestCallback = void (DOMHighResTimeStamp time);
 
 // https://dvcs.w3.org/hg/webperf/raw-file/tip/specs/NavigationTiming/Overview.html
 partial interface Window {
-  [Replaceable, Throws] readonly attribute Performance? performance;
+  [Replaceable, Pure, StoreInSlot] readonly attribute Performance? performance;
 };
 
 // https://dvcs.w3.org/hg/webcrypto-api/raw-file/tip/spec/Overview.html
-partial interface Window {
-  //[Throws] readonly attribute Crypto crypto;
-  [Throws] readonly attribute nsIDOMCrypto crypto;
-};
+Window implements GlobalCrypto;
 
 #ifdef MOZ_WEBSPEECH
 // http://dvcs.w3.org/hg/speech-api/raw-file/tip/speechapi.html
@@ -257,20 +273,22 @@ partial interface Window {
   /**
    * Method for scrolling this window by a number of lines.
    */
-  void                      scrollByLines(long numLines);
+  void                      scrollByLines(long numLines, optional ScrollOptions options);
 
   /**
    * Method for scrolling this window by a number of pages.
    */
-  void                      scrollByPages(long numPages);
+  void                      scrollByPages(long numPages, optional ScrollOptions options);
 
   /**
    * Method for sizing this window to the content in the window.
    */
-  [Throws] void             sizeToContent();
+  [Throws, UnsafeInPrerendering] void             sizeToContent();
 
   // XXX Shouldn't this be in nsIDOMChromeWindow?
   [ChromeOnly, Replaceable, Throws] readonly attribute MozControllers controllers;
+
+  [ChromeOnly, Throws] readonly attribute Element? realFrameElement;
 
   [Throws] readonly attribute float               mozInnerScreenX;
   [Throws] readonly attribute float               mozInnerScreenY;
@@ -281,14 +299,16 @@ partial interface Window {
   [Replaceable, Throws] readonly attribute long   scrollMaxX;
   [Replaceable, Throws] readonly attribute long   scrollMaxY;
 
-  [Throws] attribute boolean                            fullScreen;
+  [Throws, UnsafeInPrerendering] attribute boolean            fullScreen;
 
-  [Throws, ChromeOnly] void             back();
-  [Throws, ChromeOnly] void             forward();
-  [Throws, ChromeOnly] void             home();
+  [Throws, ChromeOnly, UnsafeInPrerendering] void             back();
+  [Throws, ChromeOnly, UnsafeInPrerendering] void             forward();
+  [Throws, ChromeOnly, UnsafeInPrerendering] void             home();
 
   // XXX Should this be in nsIDOMChromeWindow?
-  void                      updateCommands(DOMString action);
+  void                      updateCommands(DOMString action,
+                                           optional Selection? sel = null,
+                                           optional short reason = 0);
 
   /* Find in page.
    * @param str: the search pattern
@@ -299,19 +319,27 @@ partial interface Window {
    * @param searchInFrames: should we search through all frames
    * @param showDialog: should we show the Find dialog
    */
-  [Throws] boolean          find(optional DOMString str = "",
-                                 optional boolean caseSensitive = false,
-                                 optional boolean backwards = false,
-                                 optional boolean wrapAround = false,
-                                 optional boolean wholeWord = false,
-                                 optional boolean searchInFrames = false,
-                                 optional boolean showDialog = false);
+  [Throws, UnsafeInPrerendering] boolean    find(optional DOMString str = "",
+                                                 optional boolean caseSensitive = false,
+                                                 optional boolean backwards = false,
+                                                 optional boolean wrapAround = false,
+                                                 optional boolean wholeWord = false,
+                                                 optional boolean searchInFrames = false,
+                                                 optional boolean showDialog = false);
 
   /**
    * Returns the number of times this document for this window has
    * been painted to the screen.
    */
   [Throws] readonly attribute unsigned long long mozPaintCount;
+
+  /**
+   * This property exists because static attributes don't yet work for
+   * JS-implemented WebIDL (see bugs 1058606 and 863952). With this hack, we
+   * can use `MozSelfSupport.something(...)`, which will continue to work
+   * after we ditch this property and switch to static attributes. See 
+   */
+  [ChromeOnly, Throws] readonly attribute MozSelfSupport MozSelfSupport;
 
   [Pure]
            attribute EventHandler onwheel;
@@ -342,10 +370,10 @@ partial interface Window {
    * arguments, plus any additional arguments are passed on as
    * arguments on the dialog's window object (window.arguments).
    */
-  [Throws, ChromeOnly] WindowProxy? openDialog(optional DOMString url = "",
-                                               optional DOMString name = "",
-                                               optional DOMString options = "",
-                                               any... extraArguments);
+  [Throws, ChromeOnly, UnsafeInPrerendering] WindowProxy? openDialog(optional DOMString url = "",
+                                                                   optional DOMString name = "",
+                                                                   optional DOMString options = "",
+                                                                   any... extraArguments);
 
   [Replaceable, Throws] readonly attribute object? content;
 
@@ -374,16 +402,16 @@ partial interface Window {
 
 [Func="IsChromeOrXBL"]
 interface ChromeWindow {
-  [Func="nsGlobalWindow::IsChromeWindow"]
+  [Func="nsGlobalWindow::IsPrivilegedChromeWindow"]
   const unsigned short STATE_MAXIMIZED = 1;
-  [Func="nsGlobalWindow::IsChromeWindow"]
+  [Func="nsGlobalWindow::IsPrivilegedChromeWindow"]
   const unsigned short STATE_MINIMIZED = 2;
-  [Func="nsGlobalWindow::IsChromeWindow"]
+  [Func="nsGlobalWindow::IsPrivilegedChromeWindow"]
   const unsigned short STATE_NORMAL = 3;
-  [Func="nsGlobalWindow::IsChromeWindow"]
+  [Func="nsGlobalWindow::IsPrivilegedChromeWindow"]
   const unsigned short STATE_FULLSCREEN = 4;
 
-  [Func="nsGlobalWindow::IsChromeWindow"]
+  [Func="nsGlobalWindow::IsPrivilegedChromeWindow"]
   readonly attribute unsigned short windowState;
 
   /**
@@ -391,34 +419,41 @@ interface ChromeWindow {
    * utility functions implemented by chrome script. It will be null
    * for DOMWindows not corresponding to browsers.
    */
-  [Throws, Func="nsGlobalWindow::IsChromeWindow"]
+  [Throws, Func="nsGlobalWindow::IsPrivilegedChromeWindow"]
            attribute nsIBrowserDOMWindow? browserDOMWindow;
 
-  [Throws, Func="nsGlobalWindow::IsChromeWindow"]
+  [Throws, Func="nsGlobalWindow::IsPrivilegedChromeWindow"]
   void                      getAttention();
 
-  [Throws, Func="nsGlobalWindow::IsChromeWindow"]
+  [Throws, Func="nsGlobalWindow::IsPrivilegedChromeWindow"]
   void                      getAttentionWithCycleCount(long aCycleCount);
 
-  [Throws, Func="nsGlobalWindow::IsChromeWindow"]
+  [Throws, Func="nsGlobalWindow::IsPrivilegedChromeWindow"]
   void                      setCursor(DOMString cursor);
 
-  [Throws, Func="nsGlobalWindow::IsChromeWindow"]
+  [Throws, Func="nsGlobalWindow::IsPrivilegedChromeWindow", UnsafeInPrerendering]
   void                      maximize();
-  [Throws, Func="nsGlobalWindow::IsChromeWindow"]
+  [Throws, Func="nsGlobalWindow::IsPrivilegedChromeWindow", UnsafeInPrerendering]
   void                      minimize();
-  [Throws, Func="nsGlobalWindow::IsChromeWindow"]
+  [Throws, Func="nsGlobalWindow::IsPrivilegedChromeWindow", UnsafeInPrerendering]
   void                      restore();
 
   /**
    * Notify a default button is loaded on a dialog or a wizard.
    * defaultButton is the default button.
    */
-  [Throws, Func="nsGlobalWindow::IsChromeWindow"]
+  [Throws, Func="nsGlobalWindow::IsPrivilegedChromeWindow"]
   void notifyDefaultButtonLoaded(Element defaultButton);
 
-  [Throws, Func="nsGlobalWindow::IsChromeWindow"]
+  [Throws, Func="nsGlobalWindow::IsPrivilegedChromeWindow"]
   readonly attribute nsIMessageBroadcaster messageManager;
+
+  /**
+   * Returns the message manager identified by the given group name that
+   * manages all frame loaders belonging to that group.
+   */
+  [Throws, Func="nsGlobalWindow::IsPrivilegedChromeWindow"]
+  nsIMessageBroadcaster getGroupMessageManager(DOMString aGroup);
 
   /**
    * On some operating systems, we must allow the window manager to
@@ -430,8 +465,9 @@ interface ChromeWindow {
    *
    * Throws NS_ERROR_NOT_IMPLEMENTED if the OS doesn't support this.
    */
-  [Throws, Func="nsGlobalWindow::IsChromeWindow"]
+  [Throws, Func="nsGlobalWindow::IsPrivilegedChromeWindow"]
   void beginWindowMove(Event mouseDownEvent, optional Element? panel = null);
 };
 
 Window implements ChromeWindow;
+Window implements GlobalFetch;

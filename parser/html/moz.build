@@ -33,7 +33,6 @@ EXPORTS += [
     'nsHtml5OplessBuilder.h',
     'nsHtml5OwningUTF16Buffer.h',
     'nsHtml5Parser.h',
-    'nsHtml5PendingNotification.h',
     'nsHtml5PlainTextUtils.h',
     'nsHtml5RefPtr.h',
     'nsHtml5Speculation.h',
@@ -93,11 +92,12 @@ UNIFIED_SOURCES += [
 
 MSVC_ENABLE_PGO = True
 
-FINAL_LIBRARY = 'gklayout'
+FINAL_LIBRARY = 'xul'
 
 # DEFINES['ENABLE_VOID_MENUITEM'] = True
 
 LOCAL_INCLUDES += [
-    '../../content/base/src',
+    '/dom/base',
 ]
 
+FAIL_ON_WARNINGS = True

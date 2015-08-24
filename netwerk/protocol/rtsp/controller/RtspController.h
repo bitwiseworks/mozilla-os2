@@ -16,8 +16,8 @@
 namespace mozilla {
 namespace net {
 
-class RtspController : public nsIStreamingProtocolController
-                     , public nsIStreamingProtocolListener
+class RtspController final : public nsIStreamingProtocolController
+                               , public nsIStreamingProtocolListener
 {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
@@ -40,6 +40,8 @@ private:
   nsCOMPtr<nsIStreamingProtocolListener> mListener;
   // ASCII encoded URL spec.
   nsCString mSpec;
+  // UserAgent string.
+  nsCString mUserAgent;
   // Indicate the connection state between the
   // media streaming server and the Rtsp client.
   State mState;

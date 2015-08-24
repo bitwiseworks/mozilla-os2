@@ -1,8 +1,9 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
- 
+
 #ifndef nsAppDirectoryServiceDefs_h___
 #define nsAppDirectoryServiceDefs_h___
 
@@ -57,7 +58,7 @@
 // key with NS_SHARED returns a location that is shared by
 // other users of the profile. Without this prefix, the consumer
 // has exclusive access to this location.
- 
+
 #define NS_SHARED                               "SHARED"
 
 #define NS_APP_PREFS_50_DIR                     "PrefD"         // Directory which contains user prefs       
@@ -66,13 +67,13 @@
 #define NS_APP_PREFS_DEFAULTS_DIR_LIST          "PrefDL"
 #define NS_EXT_PREFS_DEFAULTS_DIR_LIST          "ExtPrefDL"
 #define NS_APP_PREFS_OVERRIDE_DIR               "PrefDOverride" // Directory for per-profile defaults
-        
+
 #define NS_APP_USER_PROFILE_50_DIR              "ProfD"
 #define NS_APP_USER_PROFILE_LOCAL_50_DIR        "ProfLD"
-        
+
 #define NS_APP_USER_CHROME_DIR                  "UChrm"
 #define NS_APP_USER_SEARCH_DIR                  "UsrSrchPlugns"
-         
+
 #define NS_APP_LOCALSTORE_50_FILE               "LclSt"
 #define NS_APP_USER_PANELS_50_FILE              "UPnls"
 #define NS_APP_USER_MIMETYPES_50_FILE           "UMimTyp"
@@ -81,9 +82,9 @@
 #define NS_APP_BOOKMARKS_50_FILE                "BMarks"
 
 #define NS_APP_DOWNLOADS_50_FILE                "DLoads"
-         
+
 #define NS_APP_SEARCH_50_FILE                   "SrchF"
-         
+
 #define NS_APP_INSTALL_CLEANUP_DIR              "XPIClnupD"  //location of xpicleanup.dat xpicleanup.exe 
 
 #define NS_APP_INDEXEDDB_PARENT_DIR             "indexedDBPDir"

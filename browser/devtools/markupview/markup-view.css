@@ -36,6 +36,9 @@
 .html-editor-inner {
   border: solid .1px;
   flex: 1 1 auto;
+
+  /* Keep the editor away from the markup view floating scrollbars */
+  -moz-margin-end: 12px;
 }
 
 .html-editor iframe {
@@ -128,40 +131,11 @@
   transition: background .5s;
 }
 
-/* Preview */
-
-#previewbar {
-  position: fixed;
-  top: 0;
-  right: 0;
-  width: 90px;
-  background: black;
-  border-left: 1px solid #333;
-  border-bottom: 1px solid #333;
-  overflow: hidden;
+.tag-line {
+  cursor: default;
 }
 
-#preview {
-  position: absolute;
-  top: 0;
-  right: 5px;
-  width: 80px;
-  height: 100%;
-  background-image: -moz-element(#root);
-  background-repeat: no-repeat;
-}
-
-#previewbar.hide,
-#previewbar.disabled {
+.markupview-events {
   display: none;
-}
-
-#viewbox {
-  position: absolute;
-  top: 0;
-  right: 5px;
-  width: 80px;
-  border: 1px dashed #888;
-  background: rgba(205,205,255,0.2);
-  outline: 1px solid transparent;
+  cursor: pointer;
 }

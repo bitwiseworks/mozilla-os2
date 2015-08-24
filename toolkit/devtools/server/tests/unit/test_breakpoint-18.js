@@ -9,13 +9,23 @@
 var gDebuggee;
 var gClient;
 var gThreadClient;
+var gCallback;
 
 function run_test()
 {
-  initTestDebuggerServer();
-  gDebuggee = addTestGlobal("test-breakpoints");
+  run_test_with_server(DebuggerServer, function () {
+    run_test_with_server(WorkerDebuggerServer, do_test_finished);
+  });
+  do_test_pending();
+};
+
+function run_test_with_server(aServer, aCallback)
+{
+  gCallback = aCallback;
+  initTestDebuggerServer(aServer);
+  gDebuggee = addTestGlobal("test-breakpoints", aServer);
   gDebuggee.console = { log: x => void x };
-  gClient = new DebuggerClient(DebuggerServer.connectPipe());
+  gClient = new DebuggerClient(aServer.connectPipe());
   gClient.connect(function () {
     attachTestTabAndResume(gClient,
                            "test-breakpoints",
@@ -24,31 +34,30 @@ function run_test()
       setUpCode();
     });
   });
-  do_test_pending();
 }
 
-const URL = "test.js";
-
 function setUpCode() {
-  gClient.addOneTimeListener("newSource", setBreakpoint);
+  gClient.addOneTimeListener("paused", setBreakpoint);
   Cu.evalInSandbox(
-    "" + function test() {
+    "debugger;\n" +
+    function test() {
       console.log("foo bar");
       debugger;
     },
     gDebuggee,
     "1.8",
-    URL
+    "http://example.com/",
+    1
   );
 }
 
-function setBreakpoint() {
+function setBreakpoint(aEvent, aPacket) {
+  let source = gThreadClient.source(aPacket.frame.where.source);
   gClient.addOneTimeListener("resumed", runCode);
-  gThreadClient.setBreakpoint({
-    url: URL,
-    line: 1
-  }, ({ error }) => {
+
+  source.setBreakpoint({ line: 2 }, ({ error }) => {
     do_check_true(!error);
+    gThreadClient.resume();
   });
 }
 
@@ -69,5 +78,5 @@ function testDbgStatement(event, { why }) {
   // Not break on another offset from the same line (that isn't an entry point
   // to the line)
   do_check_neq(why.type, "breakpoint");
-  finishClient(gClient);
+  gClient.close(gCallback);
 }

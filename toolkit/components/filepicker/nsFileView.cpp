@@ -34,7 +34,7 @@ class nsIDOMDataTransfer;
                             { 0x91, 0x10, 0x81, 0x46, 0x61, 0x4c, 0xa7, 0xf0 } }
 #define NS_FILECOMPLETE_CONTRACTID "@mozilla.org/autocomplete/search;1?name=file"
 
-class nsFileResult MOZ_FINAL : public nsIAutoCompleteResult
+class nsFileResult final : public nsIAutoCompleteResult
 {
 public:
   // aSearchString is the text typed into the autocomplete widget
@@ -47,6 +47,8 @@ public:
   nsTArray<nsString> mValues;
   nsAutoString mSearchString;
   uint16_t mSearchResult;
+private:
+  ~nsFileResult() {}
 };
 
 NS_IMPL_ISUPPORTS(nsFileResult, nsIAutoCompleteResult)
@@ -183,8 +185,9 @@ NS_IMETHODIMP nsFileResult::RemoveValueAt(int32_t rowIndex, bool removeFromDb)
   return NS_OK;
 }
 
-class nsFileComplete MOZ_FINAL : public nsIAutoCompleteSearch
+class nsFileComplete final : public nsIAutoCompleteSearch
 {
+  ~nsFileComplete() {}
 public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIAUTOCOMPLETESEARCH

@@ -19,7 +19,9 @@ function run_test() {
   gTestFiles[gTestFiles.length - 2].compareContents = "FromPartial\n";
   gTestFiles[gTestFiles.length - 2].comparePerms = 0o644;
   gTestDirs = gTestDirsPartialSuccess;
-  setupUpdaterTest(FILE_PARTIAL_MAR, false, false);
+  setupUpdaterTest(FILE_PARTIAL_MAR);
+
+  createUpdaterINI(true);
 
   // For Mac OS X set the last modified time for the root directory to a date in
   // the past to test that the last modified time is updated on all updates since
@@ -38,7 +40,24 @@ function setupAppFilesFinished() {
   runUpdateUsingService(STATE_PENDING_SVC, STATE_SUCCEEDED);
 }
 
+/**
+ * Checks if the post update binary was properly launched for the platforms that
+ * support launching post update process.
+ */
 function checkUpdateFinished() {
+  if (IS_WIN || IS_MACOSX) {
+    gCheckFunc = finishCheckUpdateFinished;
+    checkPostUpdateAppLog();
+  } else {
+    finishCheckUpdateFinished();
+  }
+}
+
+/**
+ * Checks if the update has finished and if it has finished performs checks for
+ * the test.
+ */
+function finishCheckUpdateFinished() {
   if (IS_MACOSX) {
     logTestInfo("testing last modified time on the apply to directory has " +
                 "changed after a successful update (bug 600098)");
@@ -48,11 +67,7 @@ function checkUpdateFinished() {
     do_check_true(timeDiff < MAC_MAX_TIME_DIFFERENCE);
   }
 
-  checkFilesAfterUpdateSuccess();
-  // Sorting on Linux is different so skip this check for now.
-  if (!IS_UNIX) {
-    checkUpdateLogContents(LOG_PARTIAL_SUCCESS);
-  }
-
+  checkFilesAfterUpdateSuccess(getApplyDirFile, false, false);
+  checkUpdateLogContents(LOG_PARTIAL_SUCCESS);
   checkCallbackServiceLog();
 }

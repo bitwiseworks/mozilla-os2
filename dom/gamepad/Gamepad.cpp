@@ -4,6 +4,7 @@
 
 #include "Gamepad.h"
 #include "nsAutoPtr.h"
+#include "nsPIDOMWindow.h"
 #include "nsTArray.h"
 #include "nsVariant.h"
 #include "mozilla/dom/GamepadBinding.h"
@@ -19,7 +20,19 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Gamepad)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_2(Gamepad, mParent, mButtons)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(Gamepad, mParent, mButtons)
+
+void
+Gamepad::UpdateTimestamp()
+{
+  nsCOMPtr<nsPIDOMWindow> newWindow(do_QueryInterface(mParent));
+  if(newWindow) {
+    nsPerformance* perf = newWindow->GetPerformance();
+    if (perf) {
+      mTimestamp =  perf->GetDOMTiming()->TimeStampToDOMHighRes(TimeStamp::Now());
+    }
+  }
+}
 
 Gamepad::Gamepad(nsISupports* aParent,
                  const nsAString& aID, uint32_t aIndex,
@@ -33,11 +46,11 @@ Gamepad::Gamepad(nsISupports* aParent,
     mButtons(aNumButtons),
     mAxes(aNumAxes)
 {
-  SetIsDOMBinding();
   for (unsigned i = 0; i < aNumButtons; i++) {
     mButtons.InsertElementAt(i, new GamepadButton(mParent));
   }
   mAxes.InsertElementsAt(0, aNumAxes, 0.0f);
+  UpdateTimestamp();
 }
 
 void
@@ -58,6 +71,7 @@ Gamepad::SetButton(uint32_t aButton, bool aPressed, double aValue)
   MOZ_ASSERT(aButton < mButtons.Length());
   mButtons[aButton]->SetPressed(aPressed);
   mButtons[aButton]->SetValue(aValue);
+  UpdateTimestamp();
 }
 
 void
@@ -68,6 +82,7 @@ Gamepad::SetAxis(uint32_t aAxis, double aValue)
     mAxes[aAxis] = aValue;
     GamepadBinding::ClearCachedAxesValue(this);
   }
+  UpdateTimestamp();
 }
 
 void
@@ -91,6 +106,7 @@ Gamepad::SyncState(Gamepad* aOther)
   if (changed) {
     GamepadBinding::ClearCachedAxesValue(this);
   }
+  UpdateTimestamp();
 }
 
 already_AddRefed<Gamepad>

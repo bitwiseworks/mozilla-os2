@@ -40,9 +40,9 @@ public:
     virtual ~AudioConferenceMixer() {}
 
     // Module functions
-    virtual int32_t ChangeUniqueId(const int32_t id) = 0;
-    virtual int32_t TimeUntilNextProcess() = 0 ;
-    virtual int32_t Process() = 0;
+    virtual int32_t ChangeUniqueId(const int32_t id) OVERRIDE = 0;
+    virtual int32_t TimeUntilNextProcess() OVERRIDE = 0;
+    virtual int32_t Process() OVERRIDE = 0;
 
     // Register/unregister a callback class for receiving the mixed audio.
     virtual int32_t RegisterMixedStreamCallback(
@@ -57,7 +57,7 @@ public:
 
     // Add/remove participants as candidates for mixing.
     virtual int32_t SetMixabilityStatus(MixerParticipant& participant,
-                                        const bool mixable) = 0;
+                                        bool mixable) = 0;
     // mixable is set to true if a participant is a candidate for mixing.
     virtual int32_t MixabilityStatus(MixerParticipant& participant,
                                      bool& mixable) = 0;

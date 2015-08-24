@@ -21,6 +21,7 @@
 #include "mozilla/ipc/Transport.h"
 #include "mozilla/ipc/MessageLink.h"
 #include "mozilla/LinkedList.h"
+#include "MainThreadUtils.h"
 
 #if defined(ANDROID) && defined(DEBUG)
 #include <android/log.h>
@@ -183,10 +184,11 @@ public:
 class IToplevelProtocol : public LinkedListElement<IToplevelProtocol>
 {
 protected:
-    IToplevelProtocol(ProtocolId aProtoId)
+    explicit IToplevelProtocol(ProtocolId aProtoId)
         : mProtocolId(aProtoId)
         , mTrans(nullptr)
     {
+        MOZ_ASSERT(NS_IsMainThread() || AllowNonMainThreadUse());
     }
 
     ~IToplevelProtocol();
@@ -212,10 +214,12 @@ public:
      */
     IToplevelProtocol* GetFirstOpenedActors()
     {
+        MOZ_ASSERT(NS_IsMainThread() || AllowNonMainThreadUse());
         return mOpenActors.getFirst();
     }
     const IToplevelProtocol* GetFirstOpenedActors() const
     {
+        MOZ_ASSERT(NS_IsMainThread() || AllowNonMainThreadUse());
         return mOpenActors.getFirst();
     }
 
@@ -229,11 +233,27 @@ public:
                               base::ProcessHandle aPeerProcess,
                               ProtocolCloneContext* aCtx);
 
+#ifdef MOZ_IPDL_TESTS
+    static void SetAllowNonMainThreadUse();
+#endif
+
+    static bool AllowNonMainThreadUse() {
+#ifdef MOZ_IPDL_TESTS
+        return sAllowNonMainThreadUse;
+#else
+        return false;
+#endif
+    }
+
 private:
     LinkedList<IToplevelProtocol> mOpenActors; // All protocol actors opened by this.
 
     ProtocolId mProtocolId;
     Transport* mTrans;
+
+#ifdef MOZ_IPDL_TESTS
+    static bool sAllowNonMainThreadUse;
+#endif
 };
 
 
@@ -242,6 +262,20 @@ LoggingEnabled()
 {
 #if defined(DEBUG)
     return !!PR_GetEnv("MOZ_IPC_MESSAGE_LOG");
+#else
+    return false;
+#endif
+}
+
+inline bool
+LoggingEnabledFor(const char *aTopLevelProtocol)
+{
+#if defined(DEBUG)
+    const char *filter = PR_GetEnv("MOZ_IPC_MESSAGE_LOG");
+    if (!filter) {
+        return false;
+    }
+    return strcmp(filter, "1") == 0 || strcmp(filter, aTopLevelProtocol) == 0;
 #else
     return false;
 #endif

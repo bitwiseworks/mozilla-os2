@@ -1,4 +1,4 @@
-/* -*- Mode: Javascript; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -83,27 +83,29 @@ StyleEditorPanel.prototype = {
    *
    * @param  {string} event
    *         Type of event
-   * @param  {string} code
-   *         Error code of error to report
-   * @param  {string} message
-   *         Extra message to append to error message
+   * @param  {string} data
+   *         The parameters to customize the error message
    */
-  _showError: function(event, code, message) {
+  _showError: function(event, data) {
     if (!this._toolbox) {
       // could get an async error after we've been destroyed
       return;
     }
 
-    let errorMessage = _(code);
-    if (message) {
-      errorMessage += " " + message;
+    let errorMessage = _(data.key);
+    if (data.append) {
+      errorMessage += " " + data.append;
     }
 
     let notificationBox = this._toolbox.getNotificationBox();
     let notification = notificationBox.getNotificationWithValue("styleeditor-error");
+    let level = (data.level === "info") ?
+                notificationBox.PRIORITY_INFO_LOW :
+                notificationBox.PRIORITY_CRITICAL_LOW;
+
     if (!notification) {
-      notificationBox.appendNotification(errorMessage,
-        "styleeditor-error", "", notificationBox.PRIORITY_CRITICAL_LOW);
+      notificationBox.appendNotification(errorMessage, "styleeditor-error",
+                                         "", level);
     }
   },
 

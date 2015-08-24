@@ -14,7 +14,7 @@ interface nsIDOMElement;
  * can be queried for various information about where the load is
  * happening.
  */
-[scriptable, uuid(852ed1f0-8ec0-11e3-baa8-0800200c9a66)]
+[scriptable, uuid(6ec837fa-af93-4350-bbb8-0985d54c74ca)]
 interface nsILoadContext : nsISupports
 {
   /**
@@ -35,13 +35,24 @@ interface nsILoadContext : nsISupports
   readonly attribute nsIDOMWindow topWindow;
 
   /**
-   * topFrameElement is the <iframe> or <frame> element which contains the
-   * topWindow with which the load is associated.
+   * topFrameElement is the <iframe>, <frame>, or <browser> element which
+   * contains the topWindow with which the load is associated.
    *
    * Note that we may have a topFrameElement even when we don't have an
    * associatedWindow, if the topFrameElement's content lives out of process.
+   * topFrameElement is available in single-process and multiprocess contexts.
+   * Note that topFrameElement may be in chrome even when the nsILoadContext is
+   * associated with content.
    */
   readonly attribute nsIDOMElement topFrameElement;
+
+  /**
+   * If this LoadContext corresponds to a nested remote iframe, we don't have
+   * access to the topFrameElement.  Instead, we must use this id to send
+   * messages. A return value of 0 signifies that this load context is not for
+   * a nested frame.
+   */
+  readonly attribute unsigned long long nestedFrameId;
 
   /**
    * Check whether the load is happening in a particular type of application.

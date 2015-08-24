@@ -1,4 +1,4 @@
-/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim:set ts=2 sw=2 sts=2 et: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -156,6 +156,22 @@ function run_test() {
     } catch (ex) {
       do_check_eq(ex.name, "NS_ERROR_ILLEGAL_VALUE");
     }
+    
+    // Tag name length should be limited to nsITaggingService.MAX_TAG_LENGTH (bug407821)
+    try {
+    
+      // generate a long tag name. i.e. looooo...oong_tag
+      var n = Ci.nsITaggingService.MAX_TAG_LENGTH;
+      var someOos = new Array(n).join('o');
+      var longTagName = "l" + someOos + "ng_tag";
+      
+      tagssvc.tagURI(uri1, ["short_tag", longTagName]);
+      do_throw("Passing a bad tags array should throw");
+      
+    } catch (ex) {
+      do_check_eq(ex.name, "NS_ERROR_ILLEGAL_VALUE");
+    }
+    
   }
 
   // cleanup

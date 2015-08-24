@@ -2,6 +2,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 #include "nsImageFrame.h"
 #include "nsIFormControlFrame.h"
 #include "nsPresContext.h"
@@ -10,6 +11,7 @@
 #include "nsFormControlFrame.h"
 #include "nsLayoutUtils.h"
 #include "mozilla/MouseEvents.h"
+#include "nsIContent.h"
 
 using namespace mozilla;
 
@@ -18,44 +20,44 @@ class nsImageControlFrame : public nsImageControlFrameSuper,
                             public nsIFormControlFrame
 {
 public:
-  nsImageControlFrame(nsStyleContext* aContext);
+  explicit nsImageControlFrame(nsStyleContext* aContext);
   ~nsImageControlFrame();
 
-  virtual void DestroyFrom(nsIFrame* aDestructRoot) MOZ_OVERRIDE;
-  virtual void Init(nsIContent*      aContent,
-                    nsIFrame*        aParent,
-                    nsIFrame*        aPrevInFlow) MOZ_OVERRIDE;
+  virtual void DestroyFrom(nsIFrame* aDestructRoot) override;
+  virtual void Init(nsIContent*       aContent,
+                    nsContainerFrame* aParent,
+                    nsIFrame*         aPrevInFlow) override;
 
   NS_DECL_QUERYFRAME
   NS_DECL_FRAMEARENA_HELPERS
 
-  virtual nsresult Reflow(nsPresContext*           aPresContext,
+  virtual void Reflow(nsPresContext*           aPresContext,
                           nsHTMLReflowMetrics&     aDesiredSize,
                           const nsHTMLReflowState& aReflowState,
-                          nsReflowStatus&          aStatus) MOZ_OVERRIDE;
+                          nsReflowStatus&          aStatus) override;
 
   virtual nsresult HandleEvent(nsPresContext* aPresContext,
                                WidgetGUIEvent* aEvent,
-                               nsEventStatus* aEventStatus) MOZ_OVERRIDE;
+                               nsEventStatus* aEventStatus) override;
 
-  virtual nsIAtom* GetType() const MOZ_OVERRIDE;
+  virtual nsIAtom* GetType() const override;
 
 #ifdef ACCESSIBILITY
-  virtual mozilla::a11y::AccType AccessibleType() MOZ_OVERRIDE;
+  virtual mozilla::a11y::AccType AccessibleType() override;
 #endif
 
 #ifdef DEBUG_FRAME_DUMP
-  virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE {
+  virtual nsresult GetFrameName(nsAString& aResult) const override {
     return MakeFrameName(NS_LITERAL_STRING("ImageControl"), aResult);
   }
 #endif
 
   virtual nsresult GetCursor(const nsPoint&    aPoint,
-                             nsIFrame::Cursor& aCursor) MOZ_OVERRIDE;
+                             nsIFrame::Cursor& aCursor) override;
   // nsIFormContromFrame
-  virtual void SetFocus(bool aOn, bool aRepaint) MOZ_OVERRIDE;
+  virtual void SetFocus(bool aOn, bool aRepaint) override;
   virtual nsresult SetFormProperty(nsIAtom* aName, 
-                                   const nsAString& aValue) MOZ_OVERRIDE;
+                                   const nsAString& aValue) override;
 };
 
 
@@ -86,9 +88,9 @@ NS_NewImageControlFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 NS_IMPL_FRAMEARENA_HELPERS(nsImageControlFrame)
 
 void
-nsImageControlFrame::Init(nsIContent*      aContent,
-                          nsIFrame*        aParent,
-                          nsIFrame*        aPrevInFlow)
+nsImageControlFrame::Init(nsIContent*       aContent,
+                          nsContainerFrame* aParent,
+                          nsIFrame*         aPrevInFlow)
 {
   nsImageControlFrameSuper::Init(aContent, aParent, aPrevInFlow);
 
@@ -124,7 +126,7 @@ nsImageControlFrame::GetType() const
   return nsGkAtoms::imageControlFrame; 
 }
 
-nsresult
+void
 nsImageControlFrame::Reflow(nsPresContext*         aPresContext,
                            nsHTMLReflowMetrics&     aDesiredSize,
                            const nsHTMLReflowState& aReflowState,

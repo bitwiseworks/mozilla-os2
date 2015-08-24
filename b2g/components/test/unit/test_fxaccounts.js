@@ -11,8 +11,11 @@ Cu.import("resource://services-common/utils.js");
 Cu.import("resource://testing-common/httpd.js");
 
 XPCOMUtils.defineLazyModuleGetter(this, "FxAccountsMgmtService",
-                                  "resource://gre/modules/FxAccountsMgmtService.jsm",
-                                  "FxAccountsMgmtService");
+  "resource://gre/modules/FxAccountsMgmtService.jsm",
+  "FxAccountsMgmtService");
+
+XPCOMUtils.defineLazyModuleGetter(this, "FxAccountsManager",
+  "resource://gre/modules/FxAccountsManager.jsm");
 
 // At end of test, restore original state
 const ORIGINAL_AUTH_URI = Services.prefs.getCharPref("identity.fxaccounts.auth.uri");
@@ -128,7 +131,7 @@ add_test(function test_invalidEmailCase_signIn() {
       case "getAccounts":
         Services.obs.removeObserver(onMessage, "mozFxAccountsChromeEvent");
 
-        do_check_eq(message.data.accountId, canonicalEmail);
+        do_check_eq(message.data.email, canonicalEmail);
 
         do_test_finished();
         server.stop(run_next_test);
@@ -151,11 +154,27 @@ add_test(function test_invalidEmailCase_signIn() {
       id: "signIn",
       data: {
         method: "signIn",
-        accountId: clientEmail,
+        email: clientEmail,
         password: "123456",
       },
     },
   });
+});
+
+add_test(function testHandleGetAssertionError_defaultCase() {
+  do_test_pending();
+
+  FxAccountsManager.getAssertion(null).then(
+    success => {
+      // getAssertion should throw with invalid audience
+      ok(false);
+    },
+    reason => {
+      equal("INVALID_AUDIENCE", reason.error);
+      do_test_finished();
+      run_next_test();
+    }
+  )
 });
 
 // End of tests

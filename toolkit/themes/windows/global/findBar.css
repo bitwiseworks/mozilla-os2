@@ -111,13 +111,6 @@ findbar[hidden] {
   margin: 0;
 }
 
-.findbar-find-previous > .toolbarbutton-text,
-.findbar-find-next > .toolbarbutton-text {
-  margin: 0;
-  padding: 0;
-  width: 0;
-}
-
 .findbar-find-previous[disabled="true"] > .toolbarbutton-icon,
 .findbar-find-next[disabled="true"] > .toolbarbutton-icon {
   opacity: .5;
@@ -143,7 +136,8 @@ findbar[hidden] {
   display: none;
 }
 
-.findbar-find-status {
+.findbar-find-status,
+.found-matches {
   color: GrayText;
   margin: 0 !important;
   -moz-margin-start: 12px !important;

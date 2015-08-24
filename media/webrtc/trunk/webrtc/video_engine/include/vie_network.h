@@ -65,7 +65,8 @@ class WEBRTC_DLLEXPORT ViENetwork {
   // the RTP header and payload.
   virtual int ReceivedRTPPacket(const int video_channel,
                                 const void* data,
-                                const int length) = 0;
+                                const int length,
+                                const PacketTime& packet_time) = 0;
 
   // When using external transport for a channel, received RTCP packets should
   // be passed to VideoEngine using this function.
@@ -77,6 +78,20 @@ class WEBRTC_DLLEXPORT ViENetwork {
   // RTP packet will be packetized based on this MTU to optimize performance
   // over the network.
   virtual int SetMTU(int video_channel, unsigned int mtu) = 0;
+
+  // Forward (audio) packet to bandwidth estimator for the given video channel,
+  // for aggregated audio+video BWE.
+  virtual int ReceivedBWEPacket(const int video_channel,
+      int64_t arrival_time_ms, int payload_size, const RTPHeader& header) {
+    return 0;
+  }
+
+  // TODO(holmer): Remove the default implementation when this has been fixed
+  // in fakewebrtcvideoengine.cc.
+  virtual bool SetBandwidthEstimationConfig(int video_channel,
+                                            const webrtc::Config& config) {
+    return false;
+  }
 
  protected:
   ViENetwork() {}

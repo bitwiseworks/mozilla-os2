@@ -20,7 +20,7 @@ namespace dom {
 
 class EventTarget;
 
-class Touch MOZ_FINAL : public nsISupports
+class Touch final : public nsISupports
                       , public nsWrapperCache
                       , public WidgetPointerHelper
 {
@@ -40,12 +40,10 @@ public:
         float aRotationAngle,
         float aForce);
   Touch(int32_t aIdentifier,
-        nsIntPoint aPoint,
+        LayoutDeviceIntPoint aPoint,
         nsIntPoint aRadius,
         float aRotationAngle,
         float aForce);
-
-  ~Touch();
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(Touch)
@@ -56,13 +54,13 @@ public:
 
   bool Equals(Touch* aTouch);
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) override;
 
   EventTarget* GetParentObject();
 
   // WebIDL
   int32_t Identifier() const { return mIdentifier; }
-  EventTarget* Target() const;
+  EventTarget* GetTarget() const;
   int32_t ScreenX() const { return mScreenPoint.x; }
   int32_t ScreenY() const { return mScreenPoint.y; }
   int32_t ClientX() const { return mClientPoint.x; }
@@ -75,17 +73,19 @@ public:
   float Force() const { return mForce; }
 
   nsCOMPtr<EventTarget> mTarget;
-  nsIntPoint mRefPoint;
+  LayoutDeviceIntPoint mRefPoint;
   bool mChanged;
   uint32_t mMessage;
   int32_t mIdentifier;
   CSSIntPoint mPagePoint;
   CSSIntPoint mClientPoint;
-  nsIntPoint mScreenPoint;
+  LayoutDeviceIntPoint mScreenPoint;
   nsIntPoint mRadius;
   float mRotationAngle;
   float mForce;
 protected:
+  ~Touch();
+
   bool mPointsInitialized;
 };
 

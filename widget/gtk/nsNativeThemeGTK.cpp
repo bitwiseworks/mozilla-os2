@@ -34,6 +34,7 @@
 #include <algorithm>
 
 using namespace mozilla;
+using namespace mozilla::gfx;
 
 NS_IMPL_ISUPPORTS_INHERITED(nsNativeThemeGTK, nsNativeTheme, nsITheme,
                                                              nsIObserver)
@@ -232,6 +233,17 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
       aState->canDefault = FALSE; // XXX fix me
       aState->depressed = FALSE;
 
+      if (aWidgetType == NS_THEME_FOCUS_OUTLINE) {
+        aState->disabled = FALSE;
+        aState->active  = FALSE;
+        aState->inHover = FALSE;
+        aState->isDefault = FALSE;
+        aState->canDefault = FALSE;
+
+        aState->focused = TRUE;
+        aState->depressed = TRUE; // see moz_gtk_entry_paint()
+      }
+
       if (IsFrameContentNodeInNamespace(aFrame, kNameSpaceID_XUL)) {
         // For these widget types, some element (either a child or parent)
         // actually has element focus, so we check the focused attribute
@@ -258,6 +270,10 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
 
           aState->curpos = CheckIntAttr(tmpFrame, nsGkAtoms::curpos, 0);
           aState->maxpos = CheckIntAttr(tmpFrame, nsGkAtoms::maxpos, 100);
+
+          if (CheckBooleanAttr(aFrame, nsGkAtoms::active)) {
+            aState->active = TRUE;
+          }
         }
 
         if (aWidgetType == NS_THEME_SCROLLBAR_BUTTON_UP ||
@@ -356,6 +372,9 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
     if (aWidgetFlags)
       *aWidgetFlags = (aWidgetType == NS_THEME_BUTTON) ? GTK_RELIEF_NORMAL : GTK_RELIEF_NONE;
     aGtkWidgetType = MOZ_GTK_BUTTON;
+    break;
+  case NS_THEME_FOCUS_OUTLINE:
+    aGtkWidgetType = MOZ_GTK_ENTRY;
     break;
   case NS_THEME_CHECKBOX:
   case NS_THEME_RADIO:
@@ -729,6 +748,13 @@ nsNativeThemeGTK::GetExtraSizeForWidget(nsIFrame* aFrame, uint8_t aWidgetType,
         return true;
       }
     }
+  case NS_THEME_FOCUS_OUTLINE:
+    {
+      moz_gtk_get_focus_outline_size(&aExtra->left, &aExtra->top);
+      aExtra->right = aExtra->left;
+      aExtra->bottom = aExtra->top;
+      return true;
+    }
   case NS_THEME_TAB :
     {
       if (!IsSelectedTab(aFrame))
@@ -758,6 +784,10 @@ nsNativeThemeGTK::DrawWidgetBackground(nsRenderingContext* aContext,
                                        const nsRect& aRect,
                                        const nsRect& aDirtyRect)
 {
+#if (MOZ_WIDGET_GTK != 2)
+  DrawTarget& aDrawTarget = *aContext->GetDrawTarget();
+#endif
+
   GtkWidgetState state;
   GtkThemeWidgetType gtkWidgetType;
   GtkTextDirection direction = GetTextDirection(aFrame);
@@ -813,11 +843,12 @@ nsNativeThemeGTK::DrawWidgetBackground(nsRenderingContext* aContext,
 
   // translate everything so (0,0) is the top left of the drawingRect
   gfxContextAutoSaveRestore autoSR(ctx);
-  if (snapXY) {
-    // Rects are in device coords.
-    ctx->IdentityMatrix(); 
+  gfxMatrix tm;
+  if (!snapXY) { // else rects are in device coords
+    tm = ctx->CurrentMatrix();
   }
-  ctx->Translate(rect.TopLeft() + gfxPoint(drawingRect.x, drawingRect.y));
+  tm.Translate(rect.TopLeft() + gfxPoint(drawingRect.x, drawingRect.y));
+  ctx->SetMatrix(tm);
 
   NS_ASSERTION(!IsWidgetTypeDisabled(mDisabledWidgetTypes, aWidgetType),
                "Trying to render an unsafe widget!");
@@ -850,7 +881,10 @@ nsNativeThemeGTK::DrawWidgetBackground(nsRenderingContext* aContext,
 
   renderer.Draw(ctx, drawingRect.Size(), rendererFlags, colormap);
 #else 
-  moz_gtk_widget_paint(gtkWidgetType, ctx->GetCairo(), &gdk_rect, 
+  cairo_t *cairo_ctx =
+    (cairo_t*)aDrawTarget.GetNativeSurface(NativeSurfaceType::CAIRO_CONTEXT); 
+  MOZ_ASSERT(cairo_ctx);
+  moz_gtk_widget_paint(gtkWidgetType, cairo_ctx, &gdk_rect, 
                        &state, flags, direction);
 #endif
 
@@ -915,14 +949,18 @@ nsNativeThemeGTK::GetWidgetBorder(nsDeviceContext* aContext, nsIFrame* aFrame,
     // but don't reserve any space for it.
     break;
   case NS_THEME_TAB:
-    // Top tabs have no bottom border, bottom tabs have no top border
-    moz_gtk_get_widget_border(MOZ_GTK_TAB, &aResult->left, &aResult->top,
-                              &aResult->right, &aResult->bottom, direction,
-                              FALSE);
-    if (IsBottomTab(aFrame))
-        aResult->top = 0;
-    else
-        aResult->bottom = 0;
+    {
+      GtkThemeWidgetType gtkWidgetType;
+      gint flags;
+
+      if (!GetGtkWidgetAndState(aWidgetType, aFrame, gtkWidgetType, nullptr,
+                                &flags))
+        return NS_OK;
+
+      moz_gtk_get_tab_border(&aResult->left, &aResult->top,
+                             &aResult->right, &aResult->bottom, direction,
+                             (GtkTabFlags)flags);
+    }
     break;
   case NS_THEME_MENUITEM:
   case NS_THEME_CHECKMENUITEM:
@@ -1025,7 +1063,7 @@ nsNativeThemeGTK::GetWidgetOverflow(nsDeviceContext* aContext,
 }
 
 NS_IMETHODIMP
-nsNativeThemeGTK::GetMinimumWidgetSize(nsRenderingContext* aContext,
+nsNativeThemeGTK::GetMinimumWidgetSize(nsPresContext* aPresContext,
                                        nsIFrame* aFrame, uint8_t aWidgetType,
                                        nsIntSize* aResult, bool* aIsOverridable)
 {
@@ -1215,7 +1253,7 @@ nsNativeThemeGTK::GetMinimumWidgetSize(nsRenderingContext* aContext,
     {
       // Just include our border, and let the box code augment the size.
       nsIntMargin border;
-      nsNativeThemeGTK::GetWidgetBorder(aContext->DeviceContext(),
+      nsNativeThemeGTK::GetWidgetBorder(aFrame->PresContext()->DeviceContext(),
                                         aFrame, aWidgetType, &border);
       aResult->width = border.left + border.right;
       aResult->height = border.top + border.bottom;
@@ -1282,6 +1320,13 @@ nsNativeThemeGTK::WidgetStateChanged(nsIFrame* aFrame, uint8_t aWidgetType,
       aWidgetType == NS_THEME_WINDOW ||
       aWidgetType == NS_THEME_DIALOG) {
     *aShouldRepaint = false;
+    return NS_OK;
+  }
+
+  if ((aWidgetType == NS_THEME_SCROLLBAR_THUMB_VERTICAL ||
+       aWidgetType == NS_THEME_SCROLLBAR_THUMB_HORIZONTAL) &&
+       aAttribute == nsGkAtoms::active) {
+    *aShouldRepaint = true;
     return NS_OK;
   }
 
@@ -1427,6 +1472,8 @@ nsNativeThemeGTK::ThemeSupportsWidget(nsPresContext* aPresContext,
     return (!aFrame || IsFrameContentNodeInNamespace(aFrame, kNameSpaceID_XUL)) &&
            !IsWidgetStyled(aPresContext, aFrame, aWidgetType);
 
+  case NS_THEME_FOCUS_OUTLINE:
+    return true;
   }
 
   return false;

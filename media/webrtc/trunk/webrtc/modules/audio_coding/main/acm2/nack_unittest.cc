@@ -14,12 +14,14 @@
 
 #include <algorithm>
 
-#include "gtest/gtest.h"
+#include "testing/gtest/include/gtest/gtest.h"
 #include "webrtc/typedefs.h"
 #include "webrtc/modules/audio_coding/main/interface/audio_coding_module_typedefs.h"
 #include "webrtc/system_wrappers/interface/scoped_ptr.h"
 
 namespace webrtc {
+
+namespace acm2 {
 
 namespace {
 
@@ -396,7 +398,7 @@ TEST(NackTest, ChangeOfListSizeAppliedAndOldElementsRemoved) {
     // Packet lost more than NACK-list size limit.
     uint16_t num_lost_packets = kNackThreshold + kNackListSize + 5;
 
-    scoped_array<uint16_t> seq_num_lost(new uint16_t[num_lost_packets]);
+    scoped_ptr<uint16_t[]> seq_num_lost(new uint16_t[num_lost_packets]);
     for (int n = 0; n < num_lost_packets; ++n) {
       seq_num_lost[n] = ++seq_num;
     }
@@ -478,5 +480,7 @@ TEST(NackTest, RoudTripTimeIsApplied) {
   EXPECT_EQ(4, nack_list[0]);
   EXPECT_EQ(5, nack_list[1]);
 }
+
+}  // namespace acm2
 
 }  // namespace webrtc

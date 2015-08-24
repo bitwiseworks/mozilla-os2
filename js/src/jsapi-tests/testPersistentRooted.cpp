@@ -2,8 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#if defined(JSGC_USE_EXACT_ROOTING)
-
 #include "js/Class.h"
 #include "jsapi-tests/tests.h"
 
@@ -23,25 +21,32 @@ int BarkWhenTracedClass::finalizeCount;
 int BarkWhenTracedClass::traceCount;
 
 const JSClass BarkWhenTracedClass::class_ = {
-  "BarkWhenTracedClass", 0,
-  JS_PropertyStub,
-  JS_DeletePropertyStub,
-  JS_PropertyStub,
-  JS_StrictPropertyStub,
-  JS_EnumerateStub,
-  JS_ResolveStub,
-  JS_ConvertStub,
-  finalize,
-  nullptr,
-  nullptr,
-  nullptr,
-  trace
+    "BarkWhenTracedClass", JSCLASS_IMPLEMENTS_BARRIERS,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    finalize,
+    nullptr,
+    nullptr,
+    nullptr,
+    trace
 };
 
 struct Kennel {
     PersistentRootedObject obj;
-    Kennel(JSContext* cx) : obj(cx) { }
-    Kennel(JSContext* cx, const HandleObject& woof) : obj(cx, woof) { };
+    Kennel() { }
+    explicit Kennel(JSContext* cx) : obj(cx) { }
+    Kennel(JSContext* cx, const HandleObject& woof) : obj(cx, woof) { }
+    void init(JSContext* cx, const HandleObject& woof) {
+        obj.init(cx, woof);
+    }
+    void clear() {
+        obj = nullptr;
+    }
 };
 
 // A function for allocating a Kennel and a barker. Only allocating
@@ -50,7 +55,7 @@ struct Kennel {
 MOZ_NEVER_INLINE static Kennel*
 Allocate(JSContext* cx)
 {
-    RootedObject barker(cx, JS_NewObject(cx, &BarkWhenTracedClass::class_, JS::NullPtr(), JS::NullPtr()));
+    RootedObject barker(cx, JS_NewObject(cx, &BarkWhenTracedClass::class_));
     if (!barker)
         return nullptr;
 
@@ -181,4 +186,34 @@ BEGIN_TEST(test_PersistentRootedAssign)
 }
 END_TEST(test_PersistentRootedAssign)
 
-#endif // defined(JSGC_USE_EXACT_ROOTING)
+static PersistentRootedObject gGlobalRoot;
+
+// PersistentRooted instances can initialized in a separate step to allow for global PersistentRooteds.
+BEGIN_TEST(test_GlobalPersistentRooted)
+{
+    BarkWhenTracedClass::reset();
+
+    CHECK(!gGlobalRoot.initialized());
+
+    {
+        RootedObject barker(cx, JS_NewObject(cx, &BarkWhenTracedClass::class_));
+        CHECK(barker);
+
+        gGlobalRoot.init(cx, barker);
+    }
+
+    CHECK(gGlobalRoot.initialized());
+
+    // GC should be able to find our barker.
+    CHECK(GCFinalizesNBarkers(cx, 0));
+
+    gGlobalRoot.reset();
+    CHECK(!gGlobalRoot.initialized());
+
+    // Now GC should not be able to find the barker.
+    JS_GC(JS_GetRuntime(cx));
+    CHECK(BarkWhenTracedClass::finalizeCount == 1);
+
+    return true;
+}
+END_TEST(test_GlobalPersistentRooted)

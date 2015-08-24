@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -26,41 +28,41 @@ class nsIEventTarget;
  * aTarget parameter is non-null.
  */
 extern already_AddRefed<nsIInputStreamCallback>
-NS_NewInputStreamReadyEvent(nsIInputStreamCallback  *aNotify,
-                            nsIEventTarget          *aTarget);
+NS_NewInputStreamReadyEvent(nsIInputStreamCallback* aNotify,
+                            nsIEventTarget* aTarget);
 
 /**
  * A "one-shot" proxy of the OnOutputStreamReady callback.  The resulting
  * proxy object's OnOutputStreamReady function may only be called once!  The
  * proxy object ensures that the real notify object will be free'd on the
- * thread corresponding to the given event target regardless of what thread 
+ * thread corresponding to the given event target regardless of what thread
  * the proxy object is destroyed on.
  *
  * This function is designed to be used to implement AsyncWait when the
  * aTarget parameter is non-null.
  */
 extern already_AddRefed<nsIOutputStreamCallback>
-NS_NewOutputStreamReadyEvent(nsIOutputStreamCallback  *aNotify,
-                             nsIEventTarget           *aTarget);
+NS_NewOutputStreamReadyEvent(nsIOutputStreamCallback* aNotify,
+                             nsIEventTarget* aTarget);
 
 /* ------------------------------------------------------------------------- */
 
 enum nsAsyncCopyMode {
-    NS_ASYNCCOPY_VIA_READSEGMENTS,
-    NS_ASYNCCOPY_VIA_WRITESEGMENTS
+  NS_ASYNCCOPY_VIA_READSEGMENTS,
+  NS_ASYNCCOPY_VIA_WRITESEGMENTS
 };
 
 /**
  * This function is called when a new chunk of data has been copied.  The
  * reported count is the size of the current chunk.
  */
-typedef void (* nsAsyncCopyProgressFun)(void *closure, uint32_t count);
+typedef void (* nsAsyncCopyProgressFun)(void* closure, uint32_t count);
 
 /**
  * This function is called when the async copy process completes.  The reported
  * status is NS_OK on success and some error code on failure.
  */
-typedef void (* nsAsyncCopyCallbackFun)(void *closure, nsresult status);
+typedef void (* nsAsyncCopyCallbackFun)(void* closure, nsresult status);
 
 /**
  * This function asynchronously copies data from the source to the sink. All
@@ -79,17 +81,17 @@ typedef void (* nsAsyncCopyCallbackFun)(void *closure, nsresult status);
  * Caller can obtain aCopierCtx to be able to cancel copying.
  */
 extern nsresult
-NS_AsyncCopy(nsIInputStream         *aSource,
-             nsIOutputStream        *aSink,
-             nsIEventTarget         *aTarget,
-             nsAsyncCopyMode         aMode = NS_ASYNCCOPY_VIA_READSEGMENTS,
-             uint32_t                aChunkSize = 4096,
-             nsAsyncCopyCallbackFun  aCallbackFun = nullptr,
-             void                   *aCallbackClosure = nullptr,
-             bool                    aCloseSource = true,
-             bool                    aCloseSink = true,
-             nsISupports           **aCopierCtx = nullptr,
-             nsAsyncCopyProgressFun  aProgressCallbackFun = nullptr);
+NS_AsyncCopy(nsIInputStream* aSource,
+             nsIOutputStream* aSink,
+             nsIEventTarget* aTarget,
+             nsAsyncCopyMode aMode = NS_ASYNCCOPY_VIA_READSEGMENTS,
+             uint32_t aChunkSize = 4096,
+             nsAsyncCopyCallbackFun aCallbackFun = nullptr,
+             void* aCallbackClosure = nullptr,
+             bool aCloseSource = true,
+             bool aCloseSink = true,
+             nsISupports** aCopierCtx = nullptr,
+             nsAsyncCopyProgressFun aProgressCallbackFun = nullptr);
 
 /**
  * This function cancels copying started by function NS_AsyncCopy.
@@ -101,7 +103,7 @@ NS_AsyncCopy(nsIInputStream         *aSource,
  *        It is an error to pass a success code.
  */
 extern nsresult
-NS_CancelAsyncCopy(nsISupports *aCopierCtx, nsresult aReason);
+NS_CancelAsyncCopy(nsISupports* aCopierCtx, nsresult aReason);
 
 /**
  * This function copies all of the available data from the stream (up to at
@@ -127,8 +129,8 @@ NS_CancelAsyncCopy(nsISupports *aCopierCtx, nsresult aReason);
  *        contain non-ASCII values.
  */
 extern nsresult
-NS_ConsumeStream(nsIInputStream *aSource, uint32_t aMaxCount,
-                 nsACString &aBuffer);
+NS_ConsumeStream(nsIInputStream* aSource, uint32_t aMaxCount,
+                 nsACString& aBuffer);
 
 /**
  * This function tests whether or not the input stream is buffered. A buffered
@@ -149,7 +151,7 @@ NS_ConsumeStream(nsIInputStream *aSource, uint32_t aMaxCount,
  *        The input stream to test.
  */
 extern bool
-NS_InputStreamIsBuffered(nsIInputStream *aInputStream);
+NS_InputStreamIsBuffered(nsIInputStream* aInputStream);
 
 /**
  * This function tests whether or not the output stream is buffered.  A
@@ -171,7 +173,7 @@ NS_InputStreamIsBuffered(nsIInputStream *aInputStream);
  *        The output stream to test.
  */
 extern bool
-NS_OutputStreamIsBuffered(nsIOutputStream *aOutputStream);
+NS_OutputStreamIsBuffered(nsIOutputStream* aOutputStream);
 
 /**
  * This function is intended to be passed to nsIInputStream::ReadSegments to
@@ -181,9 +183,9 @@ NS_OutputStreamIsBuffered(nsIOutputStream *aOutputStream);
  * @see nsIInputStream.idl for a description of this function's parameters.
  */
 extern NS_METHOD
-NS_CopySegmentToStream(nsIInputStream *aInputStream, void *aClosure,
-                       const char *aFromSegment, uint32_t aToOffset,
-                       uint32_t aCount, uint32_t *aWriteCount);
+NS_CopySegmentToStream(nsIInputStream* aInputStream, void* aClosure,
+                       const char* aFromSegment, uint32_t aToOffset,
+                       uint32_t aCount, uint32_t* aWriteCount);
 
 /**
  * This function is intended to be passed to nsIInputStream::ReadSegments to
@@ -194,9 +196,9 @@ NS_CopySegmentToStream(nsIInputStream *aInputStream, void *aClosure,
  * @see nsIInputStream.idl for a description of this function's parameters.
  */
 extern NS_METHOD
-NS_CopySegmentToBuffer(nsIInputStream *aInputStream, void *aClosure,
-                       const char *aFromSegment, uint32_t aToOffset,
-                       uint32_t aCount, uint32_t *aWriteCount);
+NS_CopySegmentToBuffer(nsIInputStream* aInputStream, void* aClosure,
+                       const char* aFromSegment, uint32_t aToOffset,
+                       uint32_t aCount, uint32_t* aWriteCount);
 
 /**
  * This function is intended to be passed to nsIOutputStream::WriteSegments to
@@ -206,9 +208,9 @@ NS_CopySegmentToBuffer(nsIInputStream *aInputStream, void *aClosure,
  * @see nsIOutputStream.idl for a description of this function's parameters.
  */
 extern NS_METHOD
-NS_CopySegmentToBuffer(nsIOutputStream *aOutputStream, void *aClosure,
-                       char *aToSegment, uint32_t aFromOffset,
-                       uint32_t aCount, uint32_t *aReadCount);
+NS_CopySegmentToBuffer(nsIOutputStream* aOutputStream, void* aClosure,
+                       char* aToSegment, uint32_t aFromOffset,
+                       uint32_t aCount, uint32_t* aReadCount);
 
 /**
  * This function is intended to be passed to nsIInputStream::ReadSegments to
@@ -218,9 +220,9 @@ NS_CopySegmentToBuffer(nsIOutputStream *aOutputStream, void *aClosure,
  * @see nsIInputStream.idl for a description of this function's parameters.
  */
 extern NS_METHOD
-NS_DiscardSegment(nsIInputStream *aInputStream, void *aClosure,
-                  const char *aFromSegment, uint32_t aToOffset,
-                  uint32_t aCount, uint32_t *aWriteCount);
+NS_DiscardSegment(nsIInputStream* aInputStream, void* aClosure,
+                  const char* aFromSegment, uint32_t aToOffset,
+                  uint32_t aCount, uint32_t* aWriteCount);
 
 /**
  * This function is intended to be passed to nsIInputStream::ReadSegments to
@@ -234,14 +236,15 @@ NS_DiscardSegment(nsIInputStream *aInputStream, void *aClosure,
  * inner stream's ReadSegments.
  */
 extern NS_METHOD
-NS_WriteSegmentThunk(nsIInputStream *aInputStream, void *aClosure,
-                     const char *aFromSegment, uint32_t aToOffset,
-                     uint32_t aCount, uint32_t *aWriteCount);
+NS_WriteSegmentThunk(nsIInputStream* aInputStream, void* aClosure,
+                     const char* aFromSegment, uint32_t aToOffset,
+                     uint32_t aCount, uint32_t* aWriteCount);
 
-struct nsWriteSegmentThunk {
-  nsIInputStream    *mStream;
-  nsWriteSegmentFun  mFun;
-  void              *mClosure;
+struct MOZ_STACK_CLASS nsWriteSegmentThunk
+{
+  nsCOMPtr<nsIInputStream> mStream;
+  nsWriteSegmentFun mFun;
+  void* mClosure;
 };
 
 /**
@@ -258,7 +261,29 @@ struct nsWriteSegmentThunk {
  * @return the result from aInput->Read(...)
  */
 extern NS_METHOD
-NS_FillArray(FallibleTArray<char> &aDest, nsIInputStream *aInput,
-             uint32_t aKeep, uint32_t *aNewBytes);
+NS_FillArray(FallibleTArray<char>& aDest, nsIInputStream* aInput,
+             uint32_t aKeep, uint32_t* aNewBytes);
+
+/**
+ * Clone the provided source stream in the most efficient way possible.  This
+ * first attempts to QI to nsICloneableInputStream to use Clone().  If that is
+ * not supported or its cloneable attribute is false, then a fallback clone is
+ * provided by copying the source to a pipe.  In this case the caller must
+ * replace the source stream with the resulting replacement stream.  The clone
+ * and the replacement stream are then cloneable using nsICloneableInputStream
+ * without duplicating memory.  This fallback clone using the pipe is only
+ * performed if a replacement stream parameter is also passed in.
+ * @param aSource         The input stream to clone.
+ * @param aCloneOut       Required out parameter to hold resulting clone.
+ * @param aReplacementOut Optional out parameter to hold stream to replace
+ *                        original source stream after clone.  If not
+ *                        provided then the fallback clone process is not
+ *                        supported and a non-cloneable source will result
+ *                        in failure.  Replacement streams are non-blocking.
+ * @return NS_OK on successful clone.  Error otherwise.
+ */
+extern nsresult
+NS_CloneInputStream(nsIInputStream* aSource, nsIInputStream** aCloneOut,
+                    nsIInputStream** aReplacementOut = nullptr);
 
 #endif // !nsStreamUtils_h__

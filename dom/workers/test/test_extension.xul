@@ -16,13 +16,6 @@
   <script type="application/javascript">
   <![CDATA[
 
-    const Cc = Components.classes;
-    const Ci = Components.interfaces;
-    const Cu = Components.utils;
-
-    Cu.import("resource://gre/modules/Services.jsm");
-    Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-
     function test() {
       const message = "woohoo";
 
@@ -37,7 +30,7 @@
           SimpleTest.finish();
         },
         onerror: function(data) {
-          ok(false, "Worker had an error: " + data);
+          ok(false, "Worker had an error: " + data.message);
           workertest.callback = null;
           workertest = null;
           SimpleTest.finish();

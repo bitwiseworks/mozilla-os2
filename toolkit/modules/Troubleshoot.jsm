@@ -30,6 +30,22 @@ const PREFS_WHITELIST = [
   "accessibility.",
   "browser.cache.",
   "browser.display.",
+  "browser.download.folderList",
+  "browser.download.hide_plugins_without_extensions",
+  "browser.download.importedFromSqlite",
+  "browser.download.lastDir.savePerSite",
+  "browser.download.manager.addToRecentDocs",
+  "browser.download.manager.alertOnEXEOpen",
+  "browser.download.manager.closeWhenDone",
+  "browser.download.manager.displayedHistoryDays",
+  "browser.download.manager.quitBehavior",
+  "browser.download.manager.resumeOnWakeDelay",
+  "browser.download.manager.retention",
+  "browser.download.manager.scanWhenDone",
+  "browser.download.manager.showAlertOnComplete",
+  "browser.download.manager.showWhenStarting",
+  "browser.download.preferred.",
+  "browser.download.useDownloadDir",
   "browser.fixup.",
   "browser.history_expire_",
   "browser.link.open_newwindow",
@@ -83,6 +99,7 @@ const PREFS_WHITELIST = [
 const PREFS_BLACKLIST = [
   /^network[.]proxy[.]/,
   /[.]print_to_filename$/,
+  /^print[.]macosx[.]pagesetup/,
 ];
 
 this.Troubleshoot = {
@@ -130,10 +147,16 @@ let dataProviders = {
     let data = {
       name: Services.appinfo.name,
       version: Services.appinfo.version,
+      buildID: Services.appinfo.appBuildID,
       userAgent: Cc["@mozilla.org/network/protocol;1?name=http"].
                  getService(Ci.nsIHttpProtocolHandler).
                  userAgent,
     };
+
+#ifdef MOZ_UPDATER
+    data.updateChannel = Cu.import("resource://gre/modules/UpdateChannel.jsm", {}).UpdateChannel.get();
+#endif
+
     try {
       data.vendor = Services.prefs.getCharPref("app.support.vendor");
     }
@@ -144,6 +167,24 @@ let dataProviders = {
       data.supportURL = urlFormatter.formatURLPref("app.support.baseURL");
     }
     catch (e) {}
+
+    data.numTotalWindows = 0;
+    data.numRemoteWindows = 0;
+    let winEnumer = Services.ww.getWindowEnumerator("navigator:browser");
+    while (winEnumer.hasMoreElements()) {
+      data.numTotalWindows++;
+      let remote = winEnumer.getNext().
+                   QueryInterface(Ci.nsIInterfaceRequestor).
+                   getInterface(Ci.nsIWebNavigation).
+                   QueryInterface(Ci.nsILoadContext).
+                   useRemoteTabs;
+      if (remote) {
+        data.numRemoteWindows++;
+      }
+    }
+
+    data.remoteAutoStart = Services.appinfo.browserTabsRemoteAutostart;
+
     done(data);
   },
 
@@ -207,6 +248,27 @@ let dataProviders = {
     done(PREFS_WHITELIST.reduce(function (prefs, branch) {
       Services.prefs.getChildList(branch).forEach(function (name) {
         if (Services.prefs.prefHasUserValue(name) &&
+            !PREFS_BLACKLIST.some(function (re) re.test(name)))
+          prefs[name] = getPref(name);
+      });
+      return prefs;
+    }, {}));
+  },
+
+  lockedPreferences: function lockedPreferences(done) {
+    function getPref(name) {
+      let table = {};
+      table[Ci.nsIPrefBranch.PREF_STRING] = "getCharPref";
+      table[Ci.nsIPrefBranch.PREF_INT] = "getIntPref";
+      table[Ci.nsIPrefBranch.PREF_BOOL] = "getBoolPref";
+      let type = Services.prefs.getPrefType(name);
+      if (!(type in table))
+        throw new Error("Unknown preference type " + type + " for " + name);
+      return Services.prefs[table[type]](name);
+    }
+    done(PREFS_WHITELIST.reduce(function (prefs, branch) {
+      Services.prefs.getChildList(branch).forEach(function (name) {
+        if (Services.prefs.prefIsLocked(name) &&
             !PREFS_BLACKLIST.some(function (re) re.test(name)))
           prefs[name] = getPref(name);
       });
@@ -297,6 +359,7 @@ let dataProviders = {
       adapterDescription: null,
       adapterVendorID: null,
       adapterDeviceID: null,
+      adapterSubsysID: null,
       adapterRAM: null,
       adapterDriver: "adapterDrivers",
       adapterDriverVersion: "driverVersion",
@@ -305,6 +368,7 @@ let dataProviders = {
       adapterDescription2: null,
       adapterVendorID2: null,
       adapterDeviceID2: null,
+      adapterSubsysID2: null,
       adapterRAM2: null,
       adapterDriver2: "adapterDrivers2",
       adapterDriverVersion2: "driverVersion2",
@@ -355,9 +419,9 @@ let dataProviders = {
         // OpenGL feature, because that's what's going to get used.  In all
         // other cases we want to report on the ANGLE feature.
         gfxInfo.getFeatureStatus(Ci.nsIGfxInfo.FEATURE_WEBGL_ANGLE) !=
-          Ci.nsIGfxInfo.FEATURE_NO_INFO &&
+          Ci.nsIGfxInfo.FEATURE_STATUS_OK &&
         gfxInfo.getFeatureStatus(Ci.nsIGfxInfo.FEATURE_WEBGL_OPENGL) ==
-          Ci.nsIGfxInfo.FEATURE_NO_INFO ?
+          Ci.nsIGfxInfo.FEATURE_STATUS_OK ?
         Ci.nsIGfxInfo.FEATURE_WEBGL_OPENGL :
         Ci.nsIGfxInfo.FEATURE_WEBGL_ANGLE;
 #else
@@ -370,9 +434,16 @@ let dataProviders = {
     if (infoInfo)
       data.info = infoInfo;
 
-    let failures = gfxInfo.getFailures();
-    if (failures.length)
+    let failureCount = {};
+    let failureIndices = {};
+
+    let failures = gfxInfo.getFailures(failureCount, failureIndices);
+    if (failures.length) {
       data.failures = failures;
+      if (failureIndices.value.length == failures.length) {
+        data.indices = failureIndices.value;
+      }
+    }
 
     done(data);
   },
@@ -429,4 +500,20 @@ let dataProviders = {
       exists: userJSFile.exists() && userJSFile.fileSize > 0,
     });
   },
+
+#if defined(XP_LINUX) && defined (MOZ_SANDBOX)
+  sandbox: function sandbox(done) {
+    const keys = ["hasSeccompBPF", "canSandboxContent", "canSandboxMedia"];
+
+    let sysInfo = Cc["@mozilla.org/system-info;1"].
+                  getService(Ci.nsIPropertyBag2);
+    let data = {};
+    for (let key of keys) {
+      if (sysInfo.hasKey(key)) {
+        data[key] = sysInfo.getPropertyAsBool(key);
+      }
+    }
+    done(data);
+  }
+#endif
 };

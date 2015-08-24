@@ -21,11 +21,12 @@
 #include "nsPIDOMWindow.h"
 
 #include <algorithm>
+#include "BackgroundChild.h"
 #include "GeckoProfiler.h"
-#include "js/OldDebugAPI.h"
 #include "jsfriendapi.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/CycleCollectedJSRuntime.h"
+#include "mozilla/TimeStamp.h"
 #include "mozilla/dom/asmjscache/AsmJSCache.h"
 #include "mozilla/dom/AtomList.h"
 #include "mozilla/dom/BindingUtils.h"
@@ -33,17 +34,20 @@
 #include "mozilla/dom/EventTargetBinding.h"
 #include "mozilla/dom/MessageEventBinding.h"
 #include "mozilla/dom/WorkerBinding.h"
+#include "mozilla/dom/ScriptSettings.h"
+#include "mozilla/dom/indexedDB/IndexedDatabaseManager.h"
+#include "mozilla/ipc/BackgroundChild.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/dom/Navigator.h"
 #include "nsContentUtils.h"
 #include "nsCycleCollector.h"
 #include "nsDOMJSUtils.h"
+#include "nsIIPCBackgroundChildCreateCallback.h"
 #include "nsISupportsImpl.h"
 #include "nsLayoutStatics.h"
 #include "nsNetUtil.h"
 #include "nsServiceManagerUtils.h"
-#include "nsThread.h"
 #include "nsThreadUtils.h"
 #include "nsXPCOM.h"
 #include "nsXPCOMPrivate.h"
@@ -54,32 +58,38 @@
 #include "ipc/Nuwa.h"
 #endif
 
-#ifdef DEBUG
-#include "nsThreadManager.h"
-#endif
-
+#include "Principal.h"
+#include "ServiceWorker.h"
 #include "SharedWorker.h"
 #include "WorkerPrivate.h"
 #include "WorkerRunnable.h"
+#include "WorkerThread.h"
+
+#ifdef ENABLE_TESTS
+#include "BackgroundChildImpl.h"
+#include "mozilla/ipc/PBackgroundChild.h"
+#include "prrng.h"
+#endif
 
 using namespace mozilla;
 using namespace mozilla::dom;
+using namespace mozilla::ipc;
 
 USING_WORKERS_NAMESPACE
 
 using mozilla::MutexAutoLock;
 using mozilla::MutexAutoUnlock;
 using mozilla::Preferences;
+using mozilla::dom::indexedDB::IndexedDatabaseManager;
 
 // The size of the worker runtime heaps in bytes. May be changed via pref.
 #define WORKER_DEFAULT_RUNTIME_HEAPSIZE 32 * 1024 * 1024
 
+// The size of the generational GC nursery for workers, in bytes.
+#define WORKER_DEFAULT_NURSERY_SIZE 1 * 1024 * 1024
+
 // The size of the worker JS allocation threshold in MB. May be changed via pref.
 #define WORKER_DEFAULT_ALLOCATION_THRESHOLD 30
-
-// The C stack size. We use the same stack size on all platforms for
-// consistency.
-#define WORKER_STACK_SIZE 256 * sizeof(size_t) * 1024
 
 // Half the size of the actual C stack, to be safe.
 #define WORKER_CONTEXT_NATIVE_STACK_LIMIT 128 * sizeof(size_t) * 1024
@@ -109,6 +119,10 @@ static_assert(MAX_WORKERS_PER_DOMAIN >= 1,
 #define GC_REQUEST_OBSERVER_TOPIC "child-gc-request"
 #define CC_REQUEST_OBSERVER_TOPIC "child-cc-request"
 #define MEMORY_PRESSURE_OBSERVER_TOPIC "memory-pressure"
+
+#define PREF_GENERAL_APPNAME_OVERRIDE "general.appname.override"
+#define PREF_GENERAL_APPVERSION_OVERRIDE "general.appversion.override"
+#define PREF_GENERAL_PLATFORM_OVERRIDE "general.platform.override"
 
 #define BROADCAST_ALL_WORKERS(_func, ...)                                      \
   PR_BEGIN_MACRO                                                               \
@@ -141,50 +155,28 @@ static_assert(MAX_WORKERS_PER_DOMAIN >= 1,
 #define PREF_DOM_WINDOW_DUMP_ENABLED "browser.dom.window.dump.enabled"
 #endif
 
+#define PREF_DOM_FETCH_ENABLED         "dom.fetch.enabled"
 #define PREF_WORKERS_LATEST_JS_VERSION "dom.workers.latestJSVersion"
+#define PREF_INTL_ACCEPT_LANGUAGES     "intl.accept_languages"
 
 namespace {
 
 const uint32_t kNoIndex = uint32_t(-1);
 
 const JS::ContextOptions kRequiredContextOptions =
-  JS::ContextOptions().setDontReportUncaught(true)
-                      .setNoScriptRval(true);
+  JS::ContextOptions().setDontReportUncaught(true);
 
 uint32_t gMaxWorkersPerDomain = MAX_WORKERS_PER_DOMAIN;
 
 // Does not hold an owning reference.
 RuntimeService* gRuntimeService = nullptr;
 
-// Only non-null during the call to Init.
-RuntimeService* gRuntimeServiceDuringInit = nullptr;
+// Only true during the call to Init.
+bool gRuntimeServiceDuringInit = false;
 
-enum {
-  ID_Worker = 0,
-  ID_ChromeWorker,
-  ID_Event,
-  ID_MessageEvent,
-  ID_ErrorEvent,
-
-  ID_COUNT
-};
-
-// These are jsids for the main runtime. Only touched on the main thread.
-jsid gStringIDs[ID_COUNT] = { JSID_VOID };
-
-const char* gStringChars[] = {
-  "Worker",
-  "ChromeWorker",
-  "Event",
-  "MessageEvent",
-  "ErrorEvent"
-
-  // XXX Don't care about ProgressEvent since it should never leak to the main
-  // thread.
-};
-
-static_assert(MOZ_ARRAY_LENGTH(gStringChars) == ID_COUNT,
-              "gStringChars should have the right length.");
+#ifdef ENABLE_TESTS
+bool gTestPBackground = false;
+#endif // ENABLE_TESTS
 
 class LiteralRebindingCString : public nsDependentCString
 {
@@ -299,12 +291,12 @@ GenerateSharedWorkerKey(const nsACString& aScriptSpec, const nsACString& aName,
 }
 
 void
-LoadRuntimeAndContextOptions(const char* aPrefName, void* /* aClosure */)
+LoadRuntimeOptions(const char* aPrefName, void* /* aClosure */)
 {
   AssertIsOnMainThread();
 
   RuntimeService* rts = RuntimeService::GetService();
-  if (!rts && !gRuntimeServiceDuringInit) {
+  if (!rts) {
     // May be shutting down, just bail.
     return;
   }
@@ -340,33 +332,21 @@ LoadRuntimeAndContextOptions(const char* aPrefName, void* /* aClosure */)
   if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("ion"))) {
     runtimeOptions.setIon(true);
   }
-
-  // Common options.
-  JS::ContextOptions commonContextOptions = kRequiredContextOptions;
-  if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("strict"))) {
-    commonContextOptions.setExtraWarnings(true);
+  if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("native_regexp"))) {
+    runtimeOptions.setNativeRegExp(true);
   }
   if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("werror"))) {
-    commonContextOptions.setWerror(true);
+    runtimeOptions.setWerror(true);
   }
 
-  // Content options.
-  JS::ContextOptions contentContextOptions = commonContextOptions;
-
-  // Chrome options.
-  JS::ContextOptions chromeContextOptions = commonContextOptions;
-#ifdef DEBUG
-  if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("strict.debug"))) {
-    chromeContextOptions.setExtraWarnings(true);
+  if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("strict"))) {
+    runtimeOptions.setExtraWarnings(true);
   }
-#endif
 
-  RuntimeService::SetDefaultRuntimeAndContextOptions(runtimeOptions,
-                                                     contentContextOptions,
-                                                     chromeContextOptions);
+  RuntimeService::SetDefaultRuntimeOptions(runtimeOptions);
 
   if (rts) {
-    rts->UpdateAllWorkerRuntimeAndContextOptions();
+    rts->UpdateAllWorkerRuntimeOptions();
   }
 }
 
@@ -377,7 +357,7 @@ LoadGCZealOptions(const char* /* aPrefName */, void* /* aClosure */)
   AssertIsOnMainThread();
 
   RuntimeService* rts = RuntimeService::GetService();
-  if (!rts && !gRuntimeServiceDuringInit) {
+  if (!rts) {
     // May be shutting down, just bail.
     return;
   }
@@ -420,8 +400,8 @@ UpdateCommonJSGCMemoryOption(RuntimeService* aRuntimeService,
 }
 
 void
-UpdatOtherJSGCMemoryOption(RuntimeService* aRuntimeService,
-                           JSGCParamKey aKey, uint32_t aValue)
+UpdateOtherJSGCMemoryOption(RuntimeService* aRuntimeService,
+                            JSGCParamKey aKey, uint32_t aValue)
 {
   AssertIsOnMainThread();
 
@@ -440,7 +420,7 @@ LoadJSGCMemoryOptions(const char* aPrefName, void* /* aClosure */)
 
   RuntimeService* rts = RuntimeService::GetService();
 
-  if (!rts && !gRuntimeServiceDuringInit) {
+  if (!rts) {
     // May be shutting down, just bail.
     return;
   }
@@ -474,32 +454,33 @@ LoadJSGCMemoryOptions(const char* aPrefName, void* /* aClosure */)
 
   // If we're running in Init() then do this for every pref we care about.
   // Otherwise we just want to update the parameter that changed.
-  for (uint32_t index = rts ? JSSettings::kGCSettingsArraySize - 1 : 0;
+  for (uint32_t index = !gRuntimeServiceDuringInit
+                          ? JSSettings::kGCSettingsArraySize - 1 : 0;
        index < JSSettings::kGCSettingsArraySize;
        index++) {
     LiteralRebindingCString matchName;
 
     matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX "max");
-    if (memPrefName == matchName || (!rts && index == 0)) {
+    if (memPrefName == matchName || (gRuntimeServiceDuringInit && index == 0)) {
       int32_t prefValue = GetWorkerPref(matchName, -1);
       uint32_t value = (prefValue <= 0 || prefValue >= 0x1000) ?
                        uint32_t(-1) :
                        uint32_t(prefValue) * 1024 * 1024;
-      UpdatOtherJSGCMemoryOption(rts, JSGC_MAX_BYTES, value);
+      UpdateOtherJSGCMemoryOption(rts, JSGC_MAX_BYTES, value);
       continue;
     }
 
     matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX "high_water_mark");
-    if (memPrefName == matchName || (!rts && index == 1)) {
+    if (memPrefName == matchName || (gRuntimeServiceDuringInit && index == 1)) {
       int32_t prefValue = GetWorkerPref(matchName, 128);
-      UpdatOtherJSGCMemoryOption(rts, JSGC_MAX_MALLOC_BYTES,
+      UpdateOtherJSGCMemoryOption(rts, JSGC_MAX_MALLOC_BYTES,
                                  uint32_t(prefValue) * 1024 * 1024);
       continue;
     }
 
-    matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX 
+    matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX
                             "gc_high_frequency_time_limit_ms");
-    if (memPrefName == matchName || (!rts && index == 2)) {
+    if (memPrefName == matchName || (gRuntimeServiceDuringInit && index == 2)) {
       UpdateCommonJSGCMemoryOption(rts, matchName,
                                    JSGC_HIGH_FREQUENCY_TIME_LIMIT);
       continue;
@@ -507,7 +488,7 @@ LoadJSGCMemoryOptions(const char* aPrefName, void* /* aClosure */)
 
     matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX
                             "gc_low_frequency_heap_growth");
-    if (memPrefName == matchName || (!rts && index == 3)) {
+    if (memPrefName == matchName || (gRuntimeServiceDuringInit && index == 3)) {
       UpdateCommonJSGCMemoryOption(rts, matchName,
                                    JSGC_LOW_FREQUENCY_HEAP_GROWTH);
       continue;
@@ -515,7 +496,7 @@ LoadJSGCMemoryOptions(const char* aPrefName, void* /* aClosure */)
 
     matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX
                             "gc_high_frequency_heap_growth_min");
-    if (memPrefName == matchName || (!rts && index == 4)) {
+    if (memPrefName == matchName || (gRuntimeServiceDuringInit && index == 4)) {
       UpdateCommonJSGCMemoryOption(rts, matchName,
                                    JSGC_HIGH_FREQUENCY_HEAP_GROWTH_MIN);
       continue;
@@ -523,7 +504,7 @@ LoadJSGCMemoryOptions(const char* aPrefName, void* /* aClosure */)
 
     matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX
                             "gc_high_frequency_heap_growth_max");
-    if (memPrefName == matchName || (!rts && index == 5)) {
+    if (memPrefName == matchName || (gRuntimeServiceDuringInit && index == 5)) {
       UpdateCommonJSGCMemoryOption(rts, matchName,
                                    JSGC_HIGH_FREQUENCY_HEAP_GROWTH_MAX);
       continue;
@@ -531,7 +512,7 @@ LoadJSGCMemoryOptions(const char* aPrefName, void* /* aClosure */)
 
     matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX
                             "gc_high_frequency_low_limit_mb");
-    if (memPrefName == matchName || (!rts && index == 6)) {
+    if (memPrefName == matchName || (gRuntimeServiceDuringInit && index == 6)) {
       UpdateCommonJSGCMemoryOption(rts, matchName,
                                    JSGC_HIGH_FREQUENCY_LOW_LIMIT);
       continue;
@@ -539,7 +520,7 @@ LoadJSGCMemoryOptions(const char* aPrefName, void* /* aClosure */)
 
     matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX
                             "gc_high_frequency_high_limit_mb");
-    if (memPrefName == matchName || (!rts && index == 7)) {
+    if (memPrefName == matchName || (gRuntimeServiceDuringInit && index == 7)) {
       UpdateCommonJSGCMemoryOption(rts, matchName,
                                    JSGC_HIGH_FREQUENCY_HIGH_LIMIT);
       continue;
@@ -547,32 +528,57 @@ LoadJSGCMemoryOptions(const char* aPrefName, void* /* aClosure */)
 
     matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX
                             "gc_allocation_threshold_mb");
-    if (memPrefName == matchName || (!rts && index == 8)) {
+    if (memPrefName == matchName || (gRuntimeServiceDuringInit && index == 8)) {
       UpdateCommonJSGCMemoryOption(rts, matchName, JSGC_ALLOCATION_THRESHOLD);
       continue;
     }
 
     matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX "gc_incremental_slice_ms");
-    if (memPrefName == matchName || (!rts && index == 9)) {
+    if (memPrefName == matchName || (gRuntimeServiceDuringInit && index == 9)) {
       int32_t prefValue = GetWorkerPref(matchName, -1);
       uint32_t value =
         (prefValue <= 0 || prefValue >= 100000) ? 0 : uint32_t(prefValue);
-      UpdatOtherJSGCMemoryOption(rts, JSGC_SLICE_TIME_BUDGET, value);
+      UpdateOtherJSGCMemoryOption(rts, JSGC_SLICE_TIME_BUDGET, value);
       continue;
     }
 
     matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX "gc_dynamic_heap_growth");
-    if (memPrefName == matchName || (!rts && index == 10)) {
+    if (memPrefName == matchName ||
+        (gRuntimeServiceDuringInit && index == 10)) {
       bool prefValue = GetWorkerPref(matchName, false);
-      UpdatOtherJSGCMemoryOption(rts, JSGC_DYNAMIC_HEAP_GROWTH,
+      UpdateOtherJSGCMemoryOption(rts, JSGC_DYNAMIC_HEAP_GROWTH,
                                  prefValue ? 0 : 1);
       continue;
     }
 
     matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX "gc_dynamic_mark_slice");
-    if (memPrefName == matchName || (!rts && index == 11)) {
+    if (memPrefName == matchName ||
+        (gRuntimeServiceDuringInit && index == 11)) {
       bool prefValue = GetWorkerPref(matchName, false);
-      UpdatOtherJSGCMemoryOption(rts, JSGC_DYNAMIC_MARK_SLICE,
+      UpdateOtherJSGCMemoryOption(rts, JSGC_DYNAMIC_MARK_SLICE,
+                                 prefValue ? 0 : 1);
+      continue;
+    }
+
+    matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX "gc_min_empty_chunk_count");
+    if (memPrefName == matchName ||
+        (gRuntimeServiceDuringInit && index == 12)) {
+      UpdateCommonJSGCMemoryOption(rts, matchName, JSGC_MIN_EMPTY_CHUNK_COUNT);
+      continue;
+    }
+
+    matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX "gc_max_empty_chunk_count");
+    if (memPrefName == matchName ||
+        (gRuntimeServiceDuringInit && index == 13)) {
+      UpdateCommonJSGCMemoryOption(rts, matchName, JSGC_MAX_EMPTY_CHUNK_COUNT);
+      continue;
+    }
+
+    matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX "gc_compacting");
+    if (memPrefName == matchName ||
+        (gRuntimeServiceDuringInit && index == 14)) {
+      bool prefValue = GetWorkerPref(matchName, false);
+      UpdateOtherJSGCMemoryOption(rts, JSGC_COMPACTING_ENABLED,
                                  prefValue ? 0 : 1);
       continue;
     }
@@ -607,7 +613,7 @@ InterruptCallback(JSContext* aCx)
   return worker->InterruptCallback(aCx);
 }
 
-class LogViolationDetailsRunnable MOZ_FINAL : public nsRunnable
+class LogViolationDetailsRunnable final : public nsRunnable
 {
   WorkerPrivate* mWorkerPrivate;
   nsCOMPtr<nsIEventTarget> mSyncLoopTarget;
@@ -633,7 +639,7 @@ public:
     mSyncLoopTarget = syncLoop.EventTarget();
     MOZ_ASSERT(mSyncLoopTarget);
 
-    if (NS_FAILED(NS_DispatchToMainThread(this, NS_DISPATCH_NORMAL))) {
+    if (NS_FAILED(NS_DispatchToMainThread(this))) {
       JS_ReportError(aCx, "Failed to dispatch to main thread!");
       return false;
     }
@@ -642,6 +648,8 @@ public:
   }
 
 private:
+  ~LogViolationDetailsRunnable() {}
+
   NS_DECL_NSIRUNNABLE
 };
 
@@ -717,8 +725,8 @@ GetPrincipalForAsmJSCacheOp()
 
 static bool
 AsmJSCacheOpenEntryForRead(JS::Handle<JSObject*> aGlobal,
-                           const jschar* aBegin,
-                           const jschar* aLimit,
+                           const char16_t* aBegin,
+                           const char16_t* aLimit,
                            size_t* aSize,
                            const uint8_t** aMemory,
                            intptr_t *aHandle)
@@ -732,18 +740,18 @@ AsmJSCacheOpenEntryForRead(JS::Handle<JSObject*> aGlobal,
                                       aHandle);
 }
 
-static bool
+static JS::AsmJSCacheResult
 AsmJSCacheOpenEntryForWrite(JS::Handle<JSObject*> aGlobal,
                             bool aInstalled,
-                            const jschar* aBegin,
-                            const jschar* aEnd,
+                            const char16_t* aBegin,
+                            const char16_t* aEnd,
                             size_t aSize,
                             uint8_t** aMemory,
                             intptr_t* aHandle)
 {
   nsIPrincipal* principal = GetPrincipalForAsmJSCacheOp();
   if (!principal) {
-    return false;
+    return JS::AsmJSCache_InternalError;
   }
 
   return asmjscache::OpenEntryForWrite(principal, aInstalled, aBegin, aEnd,
@@ -777,24 +785,16 @@ CreateJSContextForWorker(WorkerPrivate* aWorkerPrivate, JSRuntime* aRuntime)
     }
   }
 
-  JS_SetIsWorkerRuntime(aRuntime);
-
   JS_SetNativeStackQuota(aRuntime, WORKER_CONTEXT_NATIVE_STACK_LIMIT);
 
   // Security policy:
-  static JSSecurityCallbacks securityCallbacks = {
+  static const JSSecurityCallbacks securityCallbacks = {
     ContentSecurityPolicyAllows
   };
   JS_SetSecurityCallbacks(aRuntime, &securityCallbacks);
 
-  // DOM helpers:
-  static js::DOMCallbacks DOMCallbacks = {
-    InstanceClassHasProtoAtDepth
-  };
-  SetDOMCallbacks(aRuntime, &DOMCallbacks);
-
   // Set up the asm.js cache callbacks
-  static JS::AsmJSCacheOps asmJSCacheOps = {
+  static const JS::AsmJSCacheOps asmJSCacheOps = {
     AsmJSCacheOpenEntryForRead,
     asmjscache::CloseEntryForRead,
     AsmJSCacheOpenEntryForWrite,
@@ -814,21 +814,29 @@ CreateJSContextForWorker(WorkerPrivate* aWorkerPrivate, JSRuntime* aRuntime)
   rtPrivate->mWorkerPrivate = aWorkerPrivate;
   JS_SetRuntimePrivate(aRuntime, rtPrivate);
 
-  JS_SetErrorReporter(workerCx, ErrorReporter);
+  JS_SetErrorReporter(aRuntime, ErrorReporter);
 
   JS_SetInterruptCallback(aRuntime, InterruptCallback);
 
   js::SetCTypesActivityCallback(aRuntime, CTypesActivityCallback);
 
-  JS::ContextOptionsRef(workerCx) =
-    aWorkerPrivate->IsChromeWorker() ? settings.chrome.contextOptions
-                                     : settings.content.contextOptions;
+  JS::ContextOptionsRef(workerCx) = kRequiredContextOptions;
 
 #ifdef JS_GC_ZEAL
   JS_SetGCZeal(workerCx, settings.gcZeal, settings.gcZealFrequency);
 #endif
 
   return workerCx;
+}
+
+static bool
+PreserveWrapper(JSContext *cx, JSObject *obj)
+{
+    MOZ_ASSERT(cx);
+    MOZ_ASSERT(obj);
+    MOZ_ASSERT(mozilla::dom::IsDOMObject(obj));
+
+    return mozilla::dom::TryPreserveWrapper(obj);
 }
 
 class WorkerJSRuntime : public mozilla::CycleCollectedJSRuntime
@@ -839,9 +847,11 @@ public:
   WorkerJSRuntime(JSRuntime* aParentRuntime, WorkerPrivate* aWorkerPrivate)
     : CycleCollectedJSRuntime(aParentRuntime,
                               WORKER_DEFAULT_RUNTIME_HEAPSIZE,
-                              JS_NO_HELPER_THREADS),
+                              WORKER_DEFAULT_NURSERY_SIZE),
     mWorkerPrivate(aWorkerPrivate)
   {
+    js::SetPreserveWrapperCallback(Runtime(), PreserveWrapper);
+    JS_InitDestroyPrincipalsCallback(Runtime(), DestroyWorkerPrincipals);
   }
 
   ~WorkerJSRuntime()
@@ -862,22 +872,22 @@ public:
   }
 
   virtual void
-  PrepareForForgetSkippable() MOZ_OVERRIDE
+  PrepareForForgetSkippable() override
   {
   }
 
   virtual void
-  BeginCycleCollectionCallback() MOZ_OVERRIDE
+  BeginCycleCollectionCallback() override
   {
   }
 
   virtual void
-  EndCycleCollectionCallback(CycleCollectorResults &aResults) MOZ_OVERRIDE
+  EndCycleCollectionCallback(CycleCollectorResults &aResults) override
   {
   }
 
   void
-  DispatchDeferredDeletion(bool aContinuation) MOZ_OVERRIDE
+  DispatchDeferredDeletion(bool aContinuation) override
   {
     MOZ_ASSERT(!aContinuation);
 
@@ -885,7 +895,7 @@ public:
     nsCycleCollector_doDeferredDeletion();
   }
 
-  virtual void CustomGCCallback(JSGCStatus aStatus) MOZ_OVERRIDE
+  virtual void CustomGCCallback(JSGCStatus aStatus) override
   {
     if (!mWorkerPrivate) {
       // We're shutting down, no need to do anything.
@@ -903,18 +913,102 @@ private:
   WorkerPrivate* mWorkerPrivate;
 };
 
-class WorkerThreadPrimaryRunnable MOZ_FINAL : public nsRunnable
+#ifdef ENABLE_TESTS
+
+class TestPBackgroundCreateCallback final :
+  public nsIIPCBackgroundChildCreateCallback
+{
+public:
+  NS_DECL_ISUPPORTS
+
+  virtual void
+  ActorCreated(PBackgroundChild* aActor) override
+  {
+    MOZ_RELEASE_ASSERT(aActor);
+  }
+
+  virtual void
+  ActorFailed() override
+  {
+    MOZ_CRASH("TestPBackground() should not fail "
+              "GetOrCreateForCurrentThread()");
+  }
+
+private:
+  ~TestPBackgroundCreateCallback()
+  { }
+};
+
+NS_IMPL_ISUPPORTS(TestPBackgroundCreateCallback,
+                  nsIIPCBackgroundChildCreateCallback);
+
+void
+TestPBackground()
+{
+  using namespace mozilla::ipc;
+
+  if (gTestPBackground) {
+    // Randomize value to validate workers are not cross-posting messages.
+    uint32_t testValue;
+    size_t randomSize = PR_GetRandomNoise(&testValue, sizeof(testValue));
+    MOZ_RELEASE_ASSERT(randomSize == sizeof(testValue));
+    nsCString testStr;
+    testStr.AppendInt(testValue);
+    testStr.AppendInt(reinterpret_cast<int64_t>(PR_GetCurrentThread()));
+    PBackgroundChild* existingBackgroundChild =
+      BackgroundChild::GetForCurrentThread();
+    MOZ_RELEASE_ASSERT(existingBackgroundChild);
+    bool ok = existingBackgroundChild->SendPBackgroundTestConstructor(testStr);
+    MOZ_RELEASE_ASSERT(ok);
+  }
+}
+
+#endif // ENABLE_TESTS
+
+class WorkerBackgroundChildCallback final :
+  public nsIIPCBackgroundChildCreateCallback
+{
+  bool* mDone;
+
+public:
+  explicit WorkerBackgroundChildCallback(bool* aDone)
+  : mDone(aDone)
+  {
+    MOZ_ASSERT(!NS_IsMainThread());
+    MOZ_ASSERT(mDone);
+  }
+
+  NS_DECL_ISUPPORTS
+
+private:
+  ~WorkerBackgroundChildCallback()
+  { }
+
+  virtual void
+  ActorCreated(PBackgroundChild* aActor) override
+  {
+    *mDone = true;
+  }
+
+  virtual void
+  ActorFailed() override
+  {
+    *mDone = true;
+  }
+};
+
+class WorkerThreadPrimaryRunnable final : public nsRunnable
 {
   WorkerPrivate* mWorkerPrivate;
-  nsRefPtr<RuntimeService::WorkerThread> mThread;
+  nsRefPtr<WorkerThread> mThread;
   JSRuntime* mParentRuntime;
 
-  class FinishedRunnable MOZ_FINAL : public nsRunnable
+  class FinishedRunnable final : public nsRunnable
   {
-    nsRefPtr<RuntimeService::WorkerThread> mThread;
+    nsRefPtr<WorkerThread> mThread;
 
   public:
-    FinishedRunnable(already_AddRefed<RuntimeService::WorkerThread> aThread)
+    explicit FinishedRunnable(already_AddRefed<WorkerThread> aThread)
     : mThread(aThread)
     {
       MOZ_ASSERT(mThread);
@@ -931,7 +1025,7 @@ class WorkerThreadPrimaryRunnable MOZ_FINAL : public nsRunnable
 
 public:
   WorkerThreadPrimaryRunnable(WorkerPrivate* aWorkerPrivate,
-                              RuntimeService::WorkerThread* aThread,
+                              WorkerThread* aThread,
                               JSRuntime* aParentRuntime)
   : mWorkerPrivate(aWorkerPrivate), mThread(aThread), mParentRuntime(aParentRuntime)
   {
@@ -945,10 +1039,13 @@ private:
   ~WorkerThreadPrimaryRunnable()
   { }
 
+  nsresult
+  SynchronouslyCreatePBackground();
+
   NS_DECL_NSIRUNNABLE
 };
 
-class WorkerTaskRunnable MOZ_FINAL : public WorkerRunnable
+class WorkerTaskRunnable final : public WorkerRunnable
 {
   nsRefPtr<WorkerTask> mTask;
 
@@ -961,7 +1058,7 @@ public:
 
 private:
   virtual bool
-  PreDispatch(JSContext* aCx, WorkerPrivate* aWorkerPrivate) MOZ_OVERRIDE
+  PreDispatch(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
   {
     // May be called on any thread!
     return true;
@@ -969,142 +1066,111 @@ private:
 
   virtual void
   PostDispatch(JSContext* aCx, WorkerPrivate* aWorkerPrivate,
-               bool aDispatchResult) MOZ_OVERRIDE
+               bool aDispatchResult) override
   {
     // May be called on any thread!
   }
 
   virtual bool
-  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) MOZ_OVERRIDE
+  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
   {
     return mTask->RunTask(aCx);
   }
 };
 
-} /* anonymous namespace */
-
-class RuntimeService::WorkerThread MOZ_FINAL : public nsThread
-{
-  class Observer MOZ_FINAL : public nsIThreadObserver
-  {
-    WorkerPrivate* mWorkerPrivate;
-
-  public:
-    Observer(WorkerPrivate* aWorkerPrivate)
-    : mWorkerPrivate(aWorkerPrivate)
-    {
-      MOZ_ASSERT(aWorkerPrivate);
-      aWorkerPrivate->AssertIsOnWorkerThread();
-    }
-
-    NS_DECL_THREADSAFE_ISUPPORTS
-
-  private:
-    ~Observer()
-    {
-      mWorkerPrivate->AssertIsOnWorkerThread();
-    }
-
-    NS_DECL_NSITHREADOBSERVER
-  };
-
-  WorkerPrivate* mWorkerPrivate;
-  nsRefPtr<Observer> mObserver;
-
-#ifdef DEBUG
-  // Protected by nsThread::mLock.
-  bool mAcceptingNonWorkerRunnables;
-#endif
-
-public:
-  static already_AddRefed<WorkerThread>
-  Create();
-
-  void
-  SetWorker(WorkerPrivate* aWorkerPrivate);
-
-  NS_DECL_ISUPPORTS_INHERITED
-
-  NS_IMETHOD
-  Dispatch(nsIRunnable* aRunnable, uint32_t aFlags) MOZ_OVERRIDE;
-
-#ifdef DEBUG
-  bool
-  IsAcceptingNonWorkerRunnables()
-  {
-    MutexAutoLock lock(mLock);
-    return mAcceptingNonWorkerRunnables;
-  }
-
-  void
-  SetAcceptingNonWorkerRunnables(bool aAcceptingNonWorkerRunnables)
-  {
-    MutexAutoLock lock(mLock);
-    mAcceptingNonWorkerRunnables = aAcceptingNonWorkerRunnables;
-  }
-#endif
-
-private:
-  WorkerThread()
-  : nsThread(nsThread::NOT_MAIN_THREAD, WORKER_STACK_SIZE),
-    mWorkerPrivate(nullptr)
-#ifdef DEBUG
-    , mAcceptingNonWorkerRunnables(true)
-#endif
-  { }
-
-  ~WorkerThread()
-  { }
-};
-
-BEGIN_WORKERS_NAMESPACE
-
-// Entry point for main thread non-window globals.
-bool
-ResolveWorkerClasses(JSContext* aCx, JS::Handle<JSObject*> aObj, JS::Handle<jsid> aId,
-                     JS::MutableHandle<JSObject*> aObjp)
+void
+PrefLanguagesChanged(const char* /* aPrefName */, void* /* aClosure */)
 {
   AssertIsOnMainThread();
-  MOZ_ASSERT(nsContentUtils::IsCallerChrome());
 
-  // Make sure our strings are interned.
-  if (JSID_IS_VOID(gStringIDs[0])) {
-    for (uint32_t i = 0; i < ID_COUNT; i++) {
-      JSString* str = JS_InternString(aCx, gStringChars[i]);
-      if (!str) {
-        while (i) {
-          gStringIDs[--i] = JSID_VOID;
-        }
-        return false;
-      }
-      gStringIDs[i] = INTERNED_STRING_TO_JSID(aCx, str);
-    }
+  nsTArray<nsString> languages;
+  Navigator::GetAcceptLanguages(languages);
+
+  RuntimeService* runtime = RuntimeService::GetService();
+  if (runtime) {
+    runtime->UpdateAllWorkerLanguages(languages);
   }
-
-  bool shouldResolve = false;
-
-  for (uint32_t i = 0; i < ID_COUNT; i++) {
-    if (gStringIDs[i] == aId) {
-      shouldResolve = true;
-      break;
-    }
-  }
-
-  if (!shouldResolve) {
-    aObjp.set(nullptr);
-    return true;
-  }
-
-  if (!WorkerBinding::GetConstructorObject(aCx, aObj) ||
-      !ChromeWorkerBinding::GetConstructorObject(aCx, aObj) ||
-      !ErrorEventBinding::GetConstructorObject(aCx, aObj) ||
-      !MessageEventBinding::GetConstructorObject(aCx, aObj)) {
-    return false;
-  }
-
-  aObjp.set(aObj);
-  return true;
 }
+
+void
+AppNameOverrideChanged(const char* /* aPrefName */, void* /* aClosure */)
+{
+  AssertIsOnMainThread();
+
+  const nsAdoptingString& override =
+    mozilla::Preferences::GetString(PREF_GENERAL_APPNAME_OVERRIDE);
+
+  RuntimeService* runtime = RuntimeService::GetService();
+  if (runtime) {
+    runtime->UpdateAppNameOverridePreference(override);
+  }
+}
+
+void
+AppVersionOverrideChanged(const char* /* aPrefName */, void* /* aClosure */)
+{
+  AssertIsOnMainThread();
+
+  const nsAdoptingString& override =
+    mozilla::Preferences::GetString(PREF_GENERAL_APPVERSION_OVERRIDE);
+
+  RuntimeService* runtime = RuntimeService::GetService();
+  if (runtime) {
+    runtime->UpdateAppVersionOverridePreference(override);
+  }
+}
+
+void
+PlatformOverrideChanged(const char* /* aPrefName */, void* /* aClosure */)
+{
+  AssertIsOnMainThread();
+
+  const nsAdoptingString& override =
+    mozilla::Preferences::GetString(PREF_GENERAL_PLATFORM_OVERRIDE);
+
+  RuntimeService* runtime = RuntimeService::GetService();
+  if (runtime) {
+    runtime->UpdatePlatformOverridePreference(override);
+  }
+}
+
+class BackgroundChildCallback final
+  : public nsIIPCBackgroundChildCreateCallback
+{
+public:
+  BackgroundChildCallback()
+  {
+    AssertIsOnMainThread();
+  }
+
+  NS_DECL_ISUPPORTS
+
+private:
+  ~BackgroundChildCallback()
+  {
+    AssertIsOnMainThread();
+  }
+
+  virtual void
+  ActorCreated(PBackgroundChild* aActor) override
+  {
+    AssertIsOnMainThread();
+    MOZ_ASSERT(aActor);
+  }
+
+  virtual void
+  ActorFailed() override
+  {
+    AssertIsOnMainThread();
+    MOZ_CRASH("Unable to connect PBackground actor for the main thread!");
+  }
+};
+
+NS_IMPL_ISUPPORTS(BackgroundChildCallback, nsIIPCBackgroundChildCreateCallback)
+
+} /* anonymous namespace */
+
+BEGIN_WORKERS_NAMESPACE
 
 void
 CancelWorkersForWindow(nsPIDOMWindow* aWindow)
@@ -1210,6 +1276,12 @@ GetCurrentThreadJSContext()
 
 END_WORKERS_NAMESPACE
 
+struct RuntimeService::IdleThreadInfo
+{
+  nsRefPtr<WorkerThread> mThread;
+  mozilla::TimeStamp mExpirationTime;
+};
+
 // This is only touched on the main thread. Initialized in Init() below.
 JSSettings RuntimeService::sDefaultJSSettings;
 bool RuntimeService::sDefaultPreferences[WORKERPREF_COUNT] = { false };
@@ -1240,15 +1312,18 @@ RuntimeService::GetOrCreateService()
   AssertIsOnMainThread();
 
   if (!gRuntimeService) {
-    nsRefPtr<RuntimeService> service = new RuntimeService();
-    if (NS_FAILED(service->Init())) {
+    // The observer service now owns us until shutdown.
+    gRuntimeService = new RuntimeService();
+    if (NS_FAILED(gRuntimeService->Init())) {
       NS_WARNING("Failed to initialize!");
-      service->Cleanup();
+      gRuntimeService->Cleanup();
+      gRuntimeService = nullptr;
       return nullptr;
     }
 
-    // The observer service now owns us until shutdown.
-    gRuntimeService = service;
+#ifdef ENABLE_TESTS
+    gTestPBackground = mozilla::Preferences::GetBool("pbackground.testing", false);
+#endif // ENABLE_TESTS
   }
 
   return gRuntimeService;
@@ -1276,12 +1351,11 @@ RuntimeService::RegisterWorker(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
     }
   }
 
-  bool isSharedWorker = aWorkerPrivate->IsSharedWorker();
-
-  const nsCString& sharedWorkerName = aWorkerPrivate->SharedWorkerName();
   nsCString sharedWorkerScriptSpec;
 
-  if (isSharedWorker) {
+  bool isSharedOrServiceWorker = aWorkerPrivate->IsSharedWorker() ||
+                                 aWorkerPrivate->IsServiceWorker();
+  if (isSharedOrServiceWorker) {
     AssertIsOnMainThread();
 
     nsCOMPtr<nsIURI> scriptURI = aWorkerPrivate->GetResolvedScriptURI();
@@ -1326,7 +1400,9 @@ RuntimeService::RegisterWorker(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
       domainInfo->mActiveWorkers.AppendElement(aWorkerPrivate);
     }
 
-    if (isSharedWorker) {
+    if (isSharedOrServiceWorker) {
+      const nsCString& sharedWorkerName = aWorkerPrivate->SharedWorkerName();
+
       nsAutoCString key;
       GenerateSharedWorkerKey(sharedWorkerScriptSpec, sharedWorkerName, key);
       MOZ_ASSERT(!domainInfo->mSharedWorkerInfos.Get(key));
@@ -1347,15 +1423,20 @@ RuntimeService::RegisterWorker(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
   }
   else {
     if (!mNavigatorPropertiesLoaded) {
-      NS_GetNavigatorAppName(mNavigatorProperties.mAppName);
-      if (NS_FAILED(NS_GetNavigatorAppVersion(mNavigatorProperties.mAppVersion)) ||
-          NS_FAILED(NS_GetNavigatorPlatform(mNavigatorProperties.mPlatform)) ||
-          NS_FAILED(NS_GetNavigatorUserAgent(mNavigatorProperties.mUserAgent))) {
+      Navigator::AppName(mNavigatorProperties.mAppName,
+                         false /* aUsePrefOverriddenValue */);
+      if (NS_FAILED(Navigator::GetAppVersion(mNavigatorProperties.mAppVersion,
+                                             false /* aUsePrefOverriddenValue */)) ||
+          NS_FAILED(Navigator::GetPlatform(mNavigatorProperties.mPlatform,
+                                           false /* aUsePrefOverriddenValue */))) {
         JS_ReportError(aCx, "Failed to load navigator strings!");
         UnregisterWorker(aCx, aWorkerPrivate);
         return false;
       }
 
+      // The navigator overridden properties should have already been read.
+
+      Navigator::GetAcceptLanguages(mNavigatorProperties.mLanguages);
       mNavigatorPropertiesLoaded = true;
     }
 
@@ -1418,7 +1499,9 @@ RuntimeService::UnregisterWorker(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
       domainInfo->mActiveWorkers.RemoveElement(aWorkerPrivate);
     }
 
-    if (aWorkerPrivate->IsSharedWorker()) {
+
+    if (aWorkerPrivate->IsSharedWorker() ||
+        aWorkerPrivate->IsServiceWorker()) {
       MatchSharedWorkerInfo match(aWorkerPrivate);
       domainInfo->mSharedWorkerInfos.EnumerateRead(FindSharedWorkerInfo,
                                                    &match);
@@ -1466,7 +1549,7 @@ RuntimeService::UnregisterWorker(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
   if (parent) {
     parent->RemoveChildWorker(aCx, aWorkerPrivate);
   }
-  else if (aWorkerPrivate->IsSharedWorker()) {
+  else if (aWorkerPrivate->IsSharedWorker() || aWorkerPrivate->IsServiceWorker()) {
     mWindowMap.Enumerate(RemoveSharedWorkerFromWindowMap, aWorkerPrivate);
   }
   else {
@@ -1506,16 +1589,16 @@ RuntimeService::ScheduleWorker(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
     }
   }
 
+  const WorkerThreadFriendKey friendKey;
+
   if (!thread) {
-    thread = WorkerThread::Create();
+    thread = WorkerThread::Create(friendKey);
     if (!thread) {
       UnregisterWorker(aCx, aWorkerPrivate);
       JS_ReportError(aCx, "Could not create new thread!");
       return false;
     }
   }
-
-  MOZ_ASSERT(thread->IsAcceptingNonWorkerRunnables());
 
   int32_t priority = aWorkerPrivate->IsChromeWorker() ?
                      nsISupportsPriority::PRIORITY_NORMAL :
@@ -1527,15 +1610,11 @@ RuntimeService::ScheduleWorker(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
 
   nsCOMPtr<nsIRunnable> runnable =
     new WorkerThreadPrimaryRunnable(aWorkerPrivate, thread, JS_GetParentRuntime(aCx));
-  if (NS_FAILED(thread->Dispatch(runnable, NS_DISPATCH_NORMAL))) {
+  if (NS_FAILED(thread->DispatchPrimaryRunnable(friendKey, runnable))) {
     UnregisterWorker(aCx, aWorkerPrivate);
     JS_ReportError(aCx, "Could not dispatch to thread!");
     return false;
   }
-
-#ifdef DEBUG
-  thread->SetAcceptingNonWorkerRunnables(false);
-#endif
 
   return true;
 }
@@ -1607,13 +1686,20 @@ RuntimeService::Init()
 
   nsLayoutStatics::AddRef();
 
+  // Make sure PBackground actors are connected as soon as possible for the main
+  // thread in case workers clone remote blobs here.
+  if (!BackgroundChild::GetForCurrentThread()) {
+    nsRefPtr<BackgroundChildCallback> callback = new BackgroundChildCallback();
+    if (!BackgroundChild::GetOrCreateForCurrentThread(callback)) {
+      MOZ_CRASH("Unable to connect PBackground actor for the main thread!");
+    }
+  }
+
   // Initialize JSSettings.
   if (!sDefaultJSSettings.gcSettings[0].IsSet()) {
     sDefaultJSSettings.runtimeOptions = JS::RuntimeOptions();
-    sDefaultJSSettings.chrome.contextOptions = kRequiredContextOptions;
     sDefaultJSSettings.chrome.maxScriptRuntime = -1;
     sDefaultJSSettings.chrome.compartmentOptions.setVersion(JSVERSION_LATEST);
-    sDefaultJSSettings.content.contextOptions = kRequiredContextOptions;
     sDefaultJSSettings.content.maxScriptRuntime = MAX_SCRIPT_RUN_TIME_SEC;
 #ifdef JS_GC_ZEAL
     sDefaultJSSettings.gcZealFrequency = JS_DEFAULT_ZEAL_FREQ;
@@ -1661,8 +1747,8 @@ RuntimeService::Init()
     NS_WARNING("Failed to register for offline notification event!");
   }
 
-  NS_ASSERTION(!gRuntimeServiceDuringInit, "This should be null!");
-  gRuntimeServiceDuringInit = this;
+  MOZ_ASSERT(!gRuntimeServiceDuringInit, "This should be false!");
+  gRuntimeServiceDuringInit = true;
 
   if (NS_FAILED(Preferences::RegisterCallback(
                                  LoadJSGCMemoryOptions,
@@ -1688,13 +1774,32 @@ RuntimeService::Init()
                                   PREF_DOM_WINDOW_DUMP_ENABLED,
                                   reinterpret_cast<void *>(WORKERPREF_DUMP))) ||
 #endif
-      NS_FAILED(Preferences::RegisterCallback(LoadRuntimeAndContextOptions,
+      NS_FAILED(Preferences::RegisterCallbackAndCall(
+                                  WorkerPrefChanged,
+                                  PREF_DOM_FETCH_ENABLED,
+                                  reinterpret_cast<void *>(WORKERPREF_DOM_FETCH))) ||
+      NS_FAILED(Preferences::RegisterCallback(LoadRuntimeOptions,
                                               PREF_JS_OPTIONS_PREFIX,
                                               nullptr)) ||
       NS_FAILED(Preferences::RegisterCallbackAndCall(
-                                                   LoadRuntimeAndContextOptions,
+                                                   LoadRuntimeOptions,
                                                    PREF_WORKERS_OPTIONS_PREFIX,
                                                    nullptr)) ||
+      NS_FAILED(Preferences::RegisterCallbackAndCall(PrefLanguagesChanged,
+                                                     PREF_INTL_ACCEPT_LANGUAGES,
+                                                     nullptr)) ||
+      NS_FAILED(Preferences::RegisterCallbackAndCall(
+                                                  AppNameOverrideChanged,
+                                                  PREF_GENERAL_APPNAME_OVERRIDE,
+                                                  nullptr)) ||
+      NS_FAILED(Preferences::RegisterCallbackAndCall(
+                                               AppVersionOverrideChanged,
+                                               PREF_GENERAL_APPVERSION_OVERRIDE,
+                                               nullptr)) ||
+      NS_FAILED(Preferences::RegisterCallbackAndCall(
+                                                 PlatformOverrideChanged,
+                                                 PREF_GENERAL_PLATFORM_OVERRIDE,
+                                                 nullptr)) ||
       NS_FAILED(Preferences::RegisterCallbackAndCall(
                                                  JSVersionChanged,
                                                  PREF_WORKERS_LATEST_JS_VERSION,
@@ -1702,8 +1807,8 @@ RuntimeService::Init()
     NS_WARNING("Failed to register pref callbacks!");
   }
 
-  NS_ASSERTION(gRuntimeServiceDuringInit == this, "Should be 'this'!");
-  gRuntimeServiceDuringInit = nullptr;
+  MOZ_ASSERT(gRuntimeServiceDuringInit, "Should be true!");
+  gRuntimeServiceDuringInit = false;
 
   // We assume atomic 32bit reads/writes. If this assumption doesn't hold on
   // some wacky platform then the worst that could happen is that the close
@@ -1725,6 +1830,10 @@ RuntimeService::Init()
   rv = InitOSFileConstants();
   if (NS_FAILED(rv)) {
     return rv;
+  }
+
+  if (NS_WARN_IF(!IndexedDatabaseManager::GetOrCreate())) {
+    return NS_ERROR_UNEXPECTED;
   }
 
   return NS_OK;
@@ -1841,12 +1950,27 @@ RuntimeService::Cleanup()
     if (NS_FAILED(Preferences::UnregisterCallback(JSVersionChanged,
                                                   PREF_WORKERS_LATEST_JS_VERSION,
                                                   nullptr)) ||
-        NS_FAILED(Preferences::UnregisterCallback(LoadRuntimeAndContextOptions,
+        NS_FAILED(Preferences::UnregisterCallback(AppNameOverrideChanged,
+                                                  PREF_GENERAL_APPNAME_OVERRIDE,
+                                                  nullptr)) ||
+        NS_FAILED(Preferences::UnregisterCallback(
+                                               AppVersionOverrideChanged,
+                                               PREF_GENERAL_APPVERSION_OVERRIDE,
+                                               nullptr)) ||
+        NS_FAILED(Preferences::UnregisterCallback(
+                                                 PlatformOverrideChanged,
+                                                 PREF_GENERAL_PLATFORM_OVERRIDE,
+                                                 nullptr)) ||
+        NS_FAILED(Preferences::UnregisterCallback(LoadRuntimeOptions,
                                                   PREF_JS_OPTIONS_PREFIX,
                                                   nullptr)) ||
-        NS_FAILED(Preferences::UnregisterCallback(LoadRuntimeAndContextOptions,
+        NS_FAILED(Preferences::UnregisterCallback(LoadRuntimeOptions,
                                                   PREF_WORKERS_OPTIONS_PREFIX,
                                                   nullptr)) ||
+        NS_FAILED(Preferences::UnregisterCallback(
+                                  WorkerPrefChanged,
+                                  PREF_DOM_FETCH_ENABLED,
+                                  reinterpret_cast<void *>(WORKERPREF_DOM_FETCH))) ||
 #if DUMP_CONTROLLED_BY_PREF
         NS_FAILED(Preferences::UnregisterCallback(
                                   WorkerPrefChanged,
@@ -1944,7 +2068,7 @@ RuntimeService::RemoveSharedWorkerFromWindowMap(
 
   auto workerPrivate = static_cast<WorkerPrivate*>(aUserArg);
 
-  MOZ_ASSERT(workerPrivate->IsSharedWorker());
+  MOZ_ASSERT(workerPrivate->IsSharedWorker() || workerPrivate->IsServiceWorker());
 
   if (aData->RemoveElement(workerPrivate)) {
     MOZ_ASSERT(!aData->Contains(workerPrivate), "Added worker more than once!");
@@ -1998,19 +2122,16 @@ RuntimeService::CancelWorkersForWindow(nsPIDOMWindow* aWindow)
   GetWorkersForWindow(aWindow, workers);
 
   if (!workers.IsEmpty()) {
-    nsCOMPtr<nsIScriptGlobalObject> sgo = do_QueryInterface(aWindow);
-    MOZ_ASSERT(sgo);
-
-    nsIScriptContext* scx = sgo->GetContext();
-
-    AutoPushJSContext cx(scx ?
-                         scx->GetNativeContext() :
-                         nsContentUtils::GetSafeJSContext());
+    AutoJSAPI jsapi;
+    if (NS_WARN_IF(!jsapi.InitWithLegacyErrorReporting(aWindow))) {
+      return;
+    }
+    JSContext* cx = jsapi.cx();
 
     for (uint32_t index = 0; index < workers.Length(); index++) {
       WorkerPrivate*& worker = workers[index];
 
-      if (worker->IsSharedWorker()) {
+      if (worker->IsSharedWorker() || worker->IsServiceWorker()) {
         worker->CloseSharedWorkersForWindow(aWindow);
       } else if (!worker->Cancel(cx)) {
         JS_ReportPendingException(cx);
@@ -2029,14 +2150,11 @@ RuntimeService::SuspendWorkersForWindow(nsPIDOMWindow* aWindow)
   GetWorkersForWindow(aWindow, workers);
 
   if (!workers.IsEmpty()) {
-    nsCOMPtr<nsIScriptGlobalObject> sgo = do_QueryInterface(aWindow);
-    MOZ_ASSERT(sgo);
-
-    nsIScriptContext* scx = sgo->GetContext();
-
-    AutoPushJSContext cx(scx ?
-                         scx->GetNativeContext() :
-                         nsContentUtils::GetSafeJSContext());
+    AutoJSAPI jsapi;
+    if (NS_WARN_IF(!jsapi.InitWithLegacyErrorReporting(aWindow))) {
+      return;
+    }
+    JSContext* cx = jsapi.cx();
 
     for (uint32_t index = 0; index < workers.Length(); index++) {
       if (!workers[index]->Suspend(cx, aWindow)) {
@@ -2056,17 +2174,14 @@ RuntimeService::ResumeWorkersForWindow(nsPIDOMWindow* aWindow)
   GetWorkersForWindow(aWindow, workers);
 
   if (!workers.IsEmpty()) {
-    nsCOMPtr<nsIScriptGlobalObject> sgo = do_QueryInterface(aWindow);
-    MOZ_ASSERT(sgo);
-
-    nsIScriptContext* scx = sgo->GetContext();
-
-    AutoPushJSContext cx(scx ?
-                         scx->GetNativeContext() :
-                         nsContentUtils::GetSafeJSContext());
+    AutoJSAPI jsapi;
+    if (NS_WARN_IF(!jsapi.InitWithLegacyErrorReporting(aWindow))) {
+      return;
+    }
+    JSContext* cx = jsapi.cx();
 
     for (uint32_t index = 0; index < workers.Length(); index++) {
-      if (!workers[index]->SynchronizeAndResume(cx, aWindow, scx)) {
+      if (!workers[index]->SynchronizeAndResume(cx, aWindow)) {
         JS_ReportPendingException(cx);
       }
     }
@@ -2074,28 +2189,97 @@ RuntimeService::ResumeWorkersForWindow(nsPIDOMWindow* aWindow)
 }
 
 nsresult
-RuntimeService::CreateSharedWorker(const GlobalObject& aGlobal,
-                                   const nsAString& aScriptURL,
-                                   const nsACString& aName,
-                                   SharedWorker** aSharedWorker)
+RuntimeService::CreateServiceWorker(const GlobalObject& aGlobal,
+                                    const nsAString& aScriptURL,
+                                    const nsACString& aScope,
+                                    ServiceWorker** aServiceWorker)
 {
-  AssertIsOnMainThread();
+  nsresult rv;
 
   nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aGlobal.GetAsSupports());
   MOZ_ASSERT(window);
 
-  JSContext* cx = aGlobal.GetContext();
+  nsRefPtr<SharedWorker> sharedWorker;
+  rv = CreateSharedWorkerInternal(aGlobal, aScriptURL, aScope,
+                                  WorkerTypeService,
+                                  getter_AddRefs(sharedWorker));
+
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  nsRefPtr<ServiceWorker> serviceWorker =
+    new ServiceWorker(window, sharedWorker);
+
+  serviceWorker->mURL = aScriptURL;
+
+  serviceWorker.forget(aServiceWorker);
+  return rv;
+}
+
+nsresult
+RuntimeService::CreateServiceWorkerFromLoadInfo(JSContext* aCx,
+                                               WorkerPrivate::LoadInfo* aLoadInfo,
+                                               const nsAString& aScriptURL,
+                                               const nsACString& aScope,
+                                               ServiceWorker** aServiceWorker)
+{
+
+  nsRefPtr<SharedWorker> sharedWorker;
+  nsresult rv = CreateSharedWorkerFromLoadInfo(aCx, aLoadInfo, aScriptURL, aScope,
+                                               WorkerTypeService,
+                                               getter_AddRefs(sharedWorker));
+
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  nsRefPtr<ServiceWorker> serviceWorker =
+    new ServiceWorker(nullptr, sharedWorker);
+
+  serviceWorker->mURL = aScriptURL;
+
+  serviceWorker.forget(aServiceWorker);
+  return rv;
+}
+
+nsresult
+RuntimeService::CreateSharedWorkerInternal(const GlobalObject& aGlobal,
+                                           const nsAString& aScriptURL,
+                                           const nsACString& aName,
+                                           WorkerType aType,
+                                           SharedWorker** aSharedWorker)
+{
+  AssertIsOnMainThread();
+  MOZ_ASSERT(aType == WorkerTypeShared || aType == WorkerTypeService);
+
+  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aGlobal.GetAsSupports());
+  MOZ_ASSERT(window);
+
+  JSContext* cx = aGlobal.Context();
 
   WorkerPrivate::LoadInfo loadInfo;
   nsresult rv = WorkerPrivate::GetLoadInfo(cx, window, nullptr, aScriptURL,
-                                           false, &loadInfo);
+                                           false,
+                                           WorkerPrivate::OverrideLoadGroup,
+                                           &loadInfo);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  MOZ_ASSERT(loadInfo.mResolvedScriptURI);
+  return CreateSharedWorkerFromLoadInfo(cx, &loadInfo, aScriptURL, aName, aType,
+                                        aSharedWorker);
+}
 
-  nsCString scriptSpec;
-  rv = loadInfo.mResolvedScriptURI->GetSpec(scriptSpec);
-  NS_ENSURE_SUCCESS(rv, rv);
+nsresult
+RuntimeService::CreateSharedWorkerFromLoadInfo(JSContext* aCx,
+                                               WorkerPrivate::LoadInfo* aLoadInfo,
+                                               const nsAString& aScriptURL,
+                                               const nsACString& aName,
+                                               WorkerType aType,
+                                               SharedWorker** aSharedWorker)
+{
+  AssertIsOnMainThread();
+  MOZ_ASSERT(aLoadInfo);
+  MOZ_ASSERT(aLoadInfo->mResolvedScriptURI);
 
   nsRefPtr<WorkerPrivate> workerPrivate;
   {
@@ -2104,34 +2288,44 @@ RuntimeService::CreateSharedWorker(const GlobalObject& aGlobal,
     WorkerDomainInfo* domainInfo;
     SharedWorkerInfo* sharedWorkerInfo;
 
+    nsCString scriptSpec;
+    nsresult rv = aLoadInfo->mResolvedScriptURI->GetSpec(scriptSpec);
+    NS_ENSURE_SUCCESS(rv, rv);
+
     nsAutoCString key;
     GenerateSharedWorkerKey(scriptSpec, aName, key);
 
-    if (mDomainMap.Get(loadInfo.mDomain, &domainInfo) &&
+    if (mDomainMap.Get(aLoadInfo->mDomain, &domainInfo) &&
         domainInfo->mSharedWorkerInfos.Get(key, &sharedWorkerInfo)) {
       workerPrivate = sharedWorkerInfo->mWorkerPrivate;
     }
   }
 
-  bool created = false;
+  // Keep a reference to the window before spawning the worker. If the worker is
+  // a Shared/Service worker and the worker script loads and executes before
+  // the SharedWorker object itself is created before then WorkerScriptLoaded()
+  // will reset the loadInfo's window.
+  nsCOMPtr<nsPIDOMWindow> window = aLoadInfo->mWindow;
 
+  bool created = false;
   if (!workerPrivate) {
     ErrorResult rv;
     workerPrivate =
-      WorkerPrivate::Constructor(aGlobal, aScriptURL, false,
-                                 WorkerPrivate::WorkerTypeShared, aName,
-                                 &loadInfo, rv);
+      WorkerPrivate::Constructor(aCx, aScriptURL, false,
+                                 aType, aName, aLoadInfo, rv);
     NS_ENSURE_TRUE(workerPrivate, rv.ErrorCode());
 
     created = true;
+  } else {
+    // If we're attaching to an existing SharedWorker private, then we
+    // must update the overriden load group to account for our document's
+    // load group.
+    workerPrivate->UpdateOverridenLoadGroup(aLoadInfo->mLoadGroup);
   }
 
-  MOZ_ASSERT(workerPrivate->IsSharedWorker());
+  nsRefPtr<SharedWorker> sharedWorker = new SharedWorker(window, workerPrivate);
 
-  nsRefPtr<SharedWorker> sharedWorker =
-    new SharedWorker(window, workerPrivate);
-
-  if (!workerPrivate->RegisterSharedWorker(cx, sharedWorker)) {
+  if (!workerPrivate->RegisterSharedWorker(aCx, sharedWorker)) {
     NS_WARNING("Worker is unreachable, this shouldn't happen!");
     sharedWorker->Close();
     return NS_ERROR_FAILURE;
@@ -2160,7 +2354,8 @@ RuntimeService::ForgetSharedWorker(WorkerPrivate* aWorkerPrivate)
 {
   AssertIsOnMainThread();
   MOZ_ASSERT(aWorkerPrivate);
-  MOZ_ASSERT(aWorkerPrivate->IsSharedWorker());
+  MOZ_ASSERT(aWorkerPrivate->IsSharedWorker() ||
+             aWorkerPrivate->IsServiceWorker());
 
   MutexAutoLock lock(mMutex);
 
@@ -2184,10 +2379,6 @@ RuntimeService::NoteIdleThread(WorkerThread* aThread)
 {
   AssertIsOnMainThread();
   MOZ_ASSERT(aThread);
-
-#ifdef DEBUG
-  aThread->SetAcceptingNonWorkerRunnables(true);
-#endif
 
   static TimeDuration timeout =
     TimeDuration::FromSeconds(IDLE_THREAD_TIMEOUT_SEC);
@@ -2226,18 +2417,45 @@ RuntimeService::NoteIdleThread(WorkerThread* aThread)
 }
 
 void
-RuntimeService::UpdateAllWorkerRuntimeAndContextOptions()
+RuntimeService::UpdateAllWorkerRuntimeOptions()
 {
-  BROADCAST_ALL_WORKERS(UpdateRuntimeAndContextOptions,
-                        sDefaultJSSettings.runtimeOptions,
-                        sDefaultJSSettings.content.contextOptions,
-                        sDefaultJSSettings.chrome.contextOptions);
+  BROADCAST_ALL_WORKERS(UpdateRuntimeOptions, sDefaultJSSettings.runtimeOptions);
+}
+
+void
+RuntimeService::UpdateAppNameOverridePreference(const nsAString& aValue)
+{
+  AssertIsOnMainThread();
+  mNavigatorProperties.mAppNameOverridden = aValue;
+}
+
+void
+RuntimeService::UpdateAppVersionOverridePreference(const nsAString& aValue)
+{
+  AssertIsOnMainThread();
+  mNavigatorProperties.mAppVersionOverridden = aValue;
+}
+
+void
+RuntimeService::UpdatePlatformOverridePreference(const nsAString& aValue)
+{
+  AssertIsOnMainThread();
+  mNavigatorProperties.mPlatformOverridden = aValue;
 }
 
 void
 RuntimeService::UpdateAllWorkerPreference(WorkerPreference aPref, bool aValue)
 {
   BROADCAST_ALL_WORKERS(UpdatePreference, aPref, aValue);
+}
+
+void
+RuntimeService::UpdateAllWorkerLanguages(const nsTArray<nsString>& aLanguages)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  mNavigatorProperties.mLanguages = aLanguages;
+  BROADCAST_ALL_WORKERS(UpdateLanguages, aLanguages);
 }
 
 void
@@ -2309,6 +2527,12 @@ RuntimeService::Observe(nsISupports* aSubject, const char* aTopic,
     SendOfflineStatusChangeEventToAllWorkers(NS_IsOffline());
     return NS_OK;
   }
+  if (!strcmp(aTopic, NS_IOSERVICE_APP_OFFLINE_STATUS_TOPIC)) {
+    BROADCAST_ALL_WORKERS(OfflineStatusChangeEvent,
+                          NS_IsOffline() ||
+                          NS_IsAppOffline(workers[index]->GetPrincipal()));
+    return NS_OK;
+  }
 
   NS_NOTREACHED("Unknown observer topic!");
   return NS_OK;
@@ -2331,6 +2555,12 @@ RuntimeService::WorkerPrefChanged(const char* aPrefName, void* aClosure)
   }
 #endif
 
+  if (key == WORKERPREF_DOM_FETCH) {
+    key = WORKERPREF_DOM_FETCH;
+    sDefaultPreferences[WORKERPREF_DOM_FETCH] =
+      Preferences::GetBool(PREF_DOM_FETCH_ENABLED, false);
+  }
+
   // This function should never be registered as a callback for a preference it
   // does not handle.
   MOZ_ASSERT(key != WORKERPREF_COUNT);
@@ -2349,133 +2579,6 @@ RuntimeService::JSVersionChanged(const char* /* aPrefName */, void* /* aClosure 
   bool useLatest = Preferences::GetBool(PREF_WORKERS_LATEST_JS_VERSION, false);
   JS::CompartmentOptions& options = sDefaultJSSettings.content.compartmentOptions;
   options.setVersion(useLatest ? JSVERSION_LATEST : JSVERSION_DEFAULT);
-}
-
-// static
-already_AddRefed<RuntimeService::WorkerThread>
-RuntimeService::WorkerThread::Create()
-{
-  MOZ_ASSERT(nsThreadManager::get());
-
-  nsRefPtr<WorkerThread> thread = new WorkerThread();
-  if (NS_FAILED(thread->Init())) {
-    NS_WARNING("Failed to create new thread!");
-    return nullptr;
-  }
-
-  NS_SetThreadName(thread, "DOM Worker");
-
-  return thread.forget();
-}
-
-void
-RuntimeService::WorkerThread::SetWorker(WorkerPrivate* aWorkerPrivate)
-{
-  MOZ_ASSERT(PR_GetCurrentThread() == mThread);
-  MOZ_ASSERT_IF(aWorkerPrivate, !mWorkerPrivate);
-  MOZ_ASSERT_IF(!aWorkerPrivate, mWorkerPrivate);
-
-  // No need to lock here because mWorkerPrivate is only modified on mThread.
-
-  if (mWorkerPrivate) {
-    MOZ_ASSERT(mObserver);
-
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(RemoveObserver(mObserver)));
-
-    mObserver = nullptr;
-    mWorkerPrivate->SetThread(nullptr);
-  }
-
-  mWorkerPrivate = aWorkerPrivate;
-
-  if (mWorkerPrivate) {
-    mWorkerPrivate->SetThread(this);
-
-    nsRefPtr<Observer> observer = new Observer(mWorkerPrivate);
-
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(AddObserver(observer)));
-
-    mObserver.swap(observer);
-  }
-}
-
-NS_IMPL_ISUPPORTS_INHERITED0(RuntimeService::WorkerThread, nsThread)
-
-NS_IMETHODIMP
-RuntimeService::WorkerThread::Dispatch(nsIRunnable* aRunnable, uint32_t aFlags)
-{
-  // May be called on any thread!
-
-#ifdef DEBUG
-  if (PR_GetCurrentThread() == mThread) {
-    MOZ_ASSERT(mWorkerPrivate);
-    mWorkerPrivate->AssertIsOnWorkerThread();
-  }
-  else if (aRunnable && !IsAcceptingNonWorkerRunnables()) {
-    // Only enforce cancelable runnables after we've started the worker loop.
-    nsCOMPtr<nsICancelableRunnable> cancelable = do_QueryInterface(aRunnable);
-    MOZ_ASSERT(cancelable,
-               "Should have been wrapped by the worker's event target!");
-  }
-#endif
-
-  // Workers only support asynchronous dispatch for now.
-  if (NS_WARN_IF(aFlags != NS_DISPATCH_NORMAL)) {
-    return NS_ERROR_UNEXPECTED;
-  }
-
-  nsIRunnable* runnableToDispatch;
-  nsRefPtr<WorkerRunnable> workerRunnable;
-
-  if (aRunnable && PR_GetCurrentThread() == mThread) {
-    // No need to lock here because mWorkerPrivate is only modified on mThread.
-    workerRunnable = mWorkerPrivate->MaybeWrapAsWorkerRunnable(aRunnable);
-    runnableToDispatch = workerRunnable;
-  }
-  else {
-    runnableToDispatch = aRunnable;
-  }
-
-  nsresult rv = nsThread::Dispatch(runnableToDispatch, NS_DISPATCH_NORMAL);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  return NS_OK;
-}
-
-NS_IMPL_ISUPPORTS(RuntimeService::WorkerThread::Observer, nsIThreadObserver)
-
-NS_IMETHODIMP
-RuntimeService::WorkerThread::Observer::OnDispatchedEvent(
-                                                nsIThreadInternal* /*aThread */)
-{
-  MOZ_ASSUME_UNREACHABLE("This should never be called!");
-}
-
-NS_IMETHODIMP
-RuntimeService::WorkerThread::Observer::OnProcessNextEvent(
-                                               nsIThreadInternal* /* aThread */,
-                                               bool aMayWait,
-                                               uint32_t aRecursionDepth)
-{
-  mWorkerPrivate->AssertIsOnWorkerThread();
-  MOZ_ASSERT(!aMayWait);
-
-  mWorkerPrivate->OnProcessNextEvent(aRecursionDepth);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-RuntimeService::WorkerThread::Observer::AfterProcessNextEvent(
-                                               nsIThreadInternal* /* aThread */,
-                                               uint32_t aRecursionDepth,
-                                               bool /* aEventWasProcessed */)
-{
-  mWorkerPrivate->AssertIsOnWorkerThread();
-
-  mWorkerPrivate->AfterProcessNextEvent(aRecursionDepth);
-  return NS_OK;
 }
 
 NS_IMPL_ISUPPORTS_INHERITED0(LogViolationDetailsRunnable, nsRunnable)
@@ -2504,15 +2607,17 @@ LogViolationDetailsRunnable::Run()
   return NS_OK;
 }
 
+NS_IMPL_ISUPPORTS(WorkerBackgroundChildCallback, nsIIPCBackgroundChildCreateCallback)
+
 NS_IMPL_ISUPPORTS_INHERITED0(WorkerThreadPrimaryRunnable, nsRunnable)
 
 NS_IMETHODIMP
 WorkerThreadPrimaryRunnable::Run()
 {
+  using mozilla::ipc::BackgroundChild;
+
 #ifdef MOZ_NUWA_PROCESS
   if (IsNuwaProcess()) {
-    NS_ASSERTION(NuwaMarkCurrentThread != nullptr,
-                  "NuwaMarkCurrentThread is undefined!");
     NuwaMarkCurrentThread(nullptr, nullptr);
     NuwaFreezeCurrentThread();
   }
@@ -2520,14 +2625,29 @@ WorkerThreadPrimaryRunnable::Run()
 
   char stackBaseGuess;
 
+  PR_SetCurrentThreadName("DOM Worker");
+
   nsAutoCString threadName;
-  threadName.AssignLiteral("WebWorker '");
+  threadName.AssignLiteral("DOM Worker '");
   threadName.Append(NS_LossyConvertUTF16toASCII(mWorkerPrivate->ScriptURL()));
   threadName.Append('\'');
 
   profiler_register_thread(threadName.get(), &stackBaseGuess);
 
-  mThread->SetWorker(mWorkerPrivate);
+  // Note: SynchronouslyCreatePBackground() must be called prior to
+  //       mWorkerPrivate->SetThread() in order to avoid accidentally consuming
+  //       worker messages here.
+  nsresult rv = SynchronouslyCreatePBackground();
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    // XXX need to fire an error at parent.
+    return rv;
+  }
+
+  mWorkerPrivate->SetThread(mThread);
+
+#ifdef ENABLE_TESTS
+  TestPBackground();
+#endif
 
   mWorkerPrivate->AssertIsOnWorkerThread();
 
@@ -2560,6 +2680,12 @@ WorkerThreadPrimaryRunnable::Run()
         JS_ReportPendingException(cx);
       }
 
+#ifdef ENABLE_TESTS
+      TestPBackground();
+#endif
+
+      BackgroundChild::CloseForCurrentThread();
+
 #ifdef MOZ_ENABLE_PROFILER_SPS
       if (stack) {
         stack->sampleRuntime(nullptr);
@@ -2578,7 +2704,7 @@ WorkerThreadPrimaryRunnable::Run()
     // participating.
   }
 
-  mThread->SetWorker(nullptr);
+  mWorkerPrivate->SetThread(nullptr);
 
   mWorkerPrivate->ScheduleDeletion(WorkerPrivate::WorkerRan);
 
@@ -2598,6 +2724,34 @@ WorkerThreadPrimaryRunnable::Run()
   return NS_OK;
 }
 
+nsresult
+WorkerThreadPrimaryRunnable::SynchronouslyCreatePBackground()
+{
+  using mozilla::ipc::BackgroundChild;
+
+  MOZ_ASSERT(!BackgroundChild::GetForCurrentThread());
+
+  bool done = false;
+  nsCOMPtr<nsIIPCBackgroundChildCreateCallback> callback =
+    new WorkerBackgroundChildCallback(&done);
+
+  if (NS_WARN_IF(!BackgroundChild::GetOrCreateForCurrentThread(callback))) {
+    return NS_ERROR_FAILURE;
+  }
+
+  while (!done) {
+    if (NS_WARN_IF(!NS_ProcessNextEvent(mThread, true /* aMayWait */))) {
+      return NS_ERROR_FAILURE;
+    }
+  }
+
+  if (NS_WARN_IF(!BackgroundChild::GetForCurrentThread())) {
+    return NS_ERROR_FAILURE;
+  }
+
+  return NS_OK;
+}
+
 NS_IMPL_ISUPPORTS_INHERITED0(WorkerThreadPrimaryRunnable::FinishedRunnable,
                              nsRunnable)
 
@@ -2606,7 +2760,7 @@ WorkerThreadPrimaryRunnable::FinishedRunnable::Run()
 {
   AssertIsOnMainThread();
 
-  nsRefPtr<RuntimeService::WorkerThread> thread;
+  nsRefPtr<WorkerThread> thread;
   mThread.swap(thread);
 
   RuntimeService* rts = RuntimeService::GetService();

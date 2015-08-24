@@ -5,6 +5,7 @@
 import multiprocessing
 import sys
 import time
+import warnings
 
 # psutil will raise NotImplementedError if the platform is not supported.
 try:
@@ -178,15 +179,26 @@ class SystemResourceMonitor(object):
 
         self._running = False
         self._stopped = False
+        self._process = None
 
         if psutil is None:
             return
 
-        cpu_percent = psutil.cpu_percent(0.0, True)
-        cpu_times = psutil.cpu_times(False)
-        io = get_disk_io_counters()
-        virt = psutil.virtual_memory()
-        swap = psutil.swap_memory()
+        # This try..except should not be needed! However, some tools (like
+        # |mach build|) attempt to load psutil before properly creating a
+        # virtualenv by building psutil. As a result, python/psutil may be in
+        # sys.path and its .py files may pick up the psutil C extension from
+        # the system install. If the versions don't match, we typically see
+        # failures invoking one of these functions.
+        try:
+            cpu_percent = psutil.cpu_percent(0.0, True)
+            cpu_times = psutil.cpu_times(False)
+            io = get_disk_io_counters()
+            virt = psutil.virtual_memory()
+            swap = psutil.swap_memory()
+        except Exception as e:
+            warnings.warn('psutil failed to run: %s' % e)
+            return
 
         self._cpu_cores = len(cpu_percent)
         self._cpu_times_type = type(cpu_times)
@@ -215,7 +227,7 @@ class SystemResourceMonitor(object):
 
         You should only call this once per instance.
         """
-        if psutil is None:
+        if not self._process:
             return
 
         self._running = True
@@ -229,7 +241,7 @@ class SystemResourceMonitor(object):
 
         Currently, data is not available until you call stop().
         """
-        if psutil is None:
+        if not self._process:
             self._stopped = True
             return
 
@@ -488,3 +500,105 @@ class SystemResourceMonitor(object):
 
         return max(values)
 
+    def as_dict(self):
+        """Convert the recorded data to a dict, suitable for serialization.
+
+        The returned dict has the following keys:
+
+          version - Integer version number being rendered. Currently 1.
+          cpu_times_fields - A list of the names of the CPU times fields.
+          io_fields - A list of the names of the I/O fields.
+          virt_fields - A list of the names of the virtual memory fields.
+          swap_fields - A list of the names of the swap memory fields.
+          samples - A list of dicts containing low-level measurements.
+          events - A list of lists representing point events. The inner list
+            has 2 elements, the float wall time of the event and the string
+            event name.
+          phases - A list of dicts describing phases. Each phase looks a lot
+            like an entry from samples (see below). Some phases may not have
+            data recorded against them, so some keys may be None.
+
+        Each entry in the sample list is a dict with the following keys:
+
+          start - Float wall time this measurement began on.
+          end - Float wall time this measurement ended on.
+          io - List of numerics for I/O values.
+          virt - List of numerics for virtual memory values.
+          swap - List of numerics for swap memory values.
+          cpu_percent - List of floats representing CPU percent on each core.
+          cpu_times - List of lists. Main list is each core. Inner lists are
+            lists of floats representing CPU times on that core.
+          cpu_percent_mean - Float of mean CPU percent across all cores.
+          cpu_times_sum - List of floats representing the sum of CPU times
+            across all cores.
+          cpu_times_total - Float representing the sum of all CPU times across
+            all cores. This is useful for calculating the percent in each CPU
+            time.
+        """
+
+        o = dict(
+            version=1,
+            cpu_times_fields=list(self._cpu_times_type._fields),
+            io_fields=list(self._io_type._fields),
+            virt_fields=list(self._virt_type._fields),
+            swap_fields=list(self._swap_type._fields),
+            samples=[],
+            phases=[],
+        )
+
+        def populate_derived(e):
+            if e['cpu_percent_cores']:
+                e['cpu_percent_mean'] = sum(e['cpu_percent_cores']) / \
+                    len(e['cpu_percent_cores'])
+            else:
+                e['cpu_percent_mean'] = None
+
+            if e['cpu_times']:
+                e['cpu_times_sum'] = [0.0] * self._cpu_times_len
+                for i in range(0, self._cpu_times_len):
+                    e['cpu_times_sum'][i] = sum(core[i] for core in e['cpu_times'])
+
+                e['cpu_times_total'] = sum(e['cpu_times_sum'])
+
+
+        for m in self.measurements:
+            e = dict(
+                start=m.start,
+                end=m.end,
+                io=list(m.io),
+                virt=list(m.virt),
+                swap=list(m.swap),
+                cpu_percent_cores=list(m.cpu_percent),
+                cpu_times=list(list(cpu) for cpu in m.cpu_times)
+            )
+
+            populate_derived(e)
+            o['samples'].append(e)
+
+        if o['samples']:
+            o['start'] = o['samples'][0]['start']
+            o['end'] = o['samples'][-1]['end']
+            o['duration'] = o['end'] - o['start']
+        else:
+            o['start'] = None
+            o['end'] = None
+            o['duration'] = None
+
+        o['events'] = [list(ev) for ev in self.events]
+
+        for phase, v in self.phases.items():
+            e = dict(
+                name=phase,
+                start=v[0],
+                end=v[1],
+                duration=v[1] - v[0],
+                cpu_percent_cores=self.aggregate_cpu_percent(phase=phase),
+                cpu_times=[list(c) for c in
+                    self.aggregate_cpu_times(phase=phase)],
+                io=list(self.aggregate_io(phase=phase)),
+            )
+
+            populate_derived(e)
+            o['phases'].append(e)
+
+        return o

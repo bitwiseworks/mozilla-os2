@@ -18,12 +18,13 @@
 
 #define A_RTP_ASSEMBLER_H_
 
+#include "mozilla/Types.h"
 #include <media/stagefright/foundation/ABase.h>
 #include <utils/RefBase.h>
 
 namespace android {
 
-struct ABuffer;
+struct MOZ_EXPORT ABuffer;
 struct ARTPSource;
 
 struct ARTPAssembler : public RefBase {
@@ -43,7 +44,7 @@ protected:
     virtual AssemblyStatus assembleMore(const sp<ARTPSource> &source) = 0;
     virtual void packetLost() = 0;
 
-    static void CopyTimes(const sp<ABuffer> &to, const sp<ABuffer> &from);
+    static bool CopyTimes(const sp<ABuffer> &to, const sp<ABuffer> &from);
 
 private:
     int64_t mFirstFailureTimeUs;

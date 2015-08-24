@@ -23,7 +23,7 @@ NS_NewGridRowGroupFrame(nsIPresShell* aPresShell,
                         nsStyleContext* aContext)
 {
   nsCOMPtr<nsBoxLayout> layout = NS_NewGridRowGroupLayout();
-  return new (aPresShell) nsGridRowGroupFrame(aPresShell, aContext, layout);
+  return new (aPresShell) nsGridRowGroupFrame(aContext, layout);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsGridRowGroupFrame)
@@ -48,11 +48,11 @@ nsGridRowGroupFrame::GetFlex(nsBoxLayoutState& aState)
 
   // ok we are flexible add up our children
   nscoord totalFlex = 0;
-  nsIFrame* child = GetChildBox();
+  nsIFrame* child = nsBox::GetChildBox(this);
   while (child)
   {
     totalFlex += child->GetFlex(aState);
-    child = child->GetNextBox();
+    child = GetNextBox(child);
   }
 
   mFlex = totalFlex;

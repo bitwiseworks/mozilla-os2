@@ -15,14 +15,13 @@ class mozIStorageRow;
 namespace mozilla {
 namespace storage {
 
-class ResultSet MOZ_FINAL : public mozIStorageResultSet
+class ResultSet final : public mozIStorageResultSet
 {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_MOZISTORAGERESULTSET
 
   ResultSet();
-  ~ResultSet();
 
   /**
    * Adds a tuple to this result set.
@@ -35,6 +34,8 @@ public:
   int32_t rows() const { return mData.Count(); }
 
 private:
+  ~ResultSet();
+
   /**
    * Stores the current index of the active result set.
    */

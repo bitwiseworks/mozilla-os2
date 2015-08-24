@@ -4,28 +4,36 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-if CONFIG['MOZ_WIDGET_TOOLKIT'] != 'cocoa':
-    TEST_DIRS += ['tests']
+XPIDL_SOURCES += [
+    'nsIHangReport.idl',
+]
+
+XPIDL_MODULE = 'dom'
 
 EXPORTS += [
     'nsICachedFileDescriptorListener.h',
-    'PCOMContentPermissionRequestChild.h',
 ]
 
 EXPORTS.mozilla.dom.ipc += [
-    'Blob.h',
+    'BlobChild.h',
+    'BlobParent.h',
+    'IdType.h',
     'nsIRemoteBlob.h',
 ]
 
 EXPORTS.mozilla.dom += [
+    'ContentBridgeChild.h',
+    'ContentBridgeParent.h',
     'ContentChild.h',
     'ContentParent.h',
     'ContentProcess.h',
+    'ContentProcessManager.h',
+    'CPOWManagerGetter.h',
     'CrashReporterChild.h',
     'CrashReporterParent.h',
-    'FileDescriptorSetChild.h',
-    'FileDescriptorSetParent.h',
     'FilePickerParent.h',
+    'nsIContentChild.h',
+    'nsIContentParent.h',
     'PermissionMessageUtils.h',
     'StructuredCloneUtils.h',
     'TabChild.h',
@@ -37,21 +45,27 @@ EXPORTS.mozilla.dom += [
 EXPORTS.mozilla += [
     'AppProcessChecker.h',
     'PreallocatedProcessManager.h',
+    'ProcessHangMonitor.h',
+    'ProcessHangMonitorIPC.h',
     'ProcessPriorityManager.h',
 ]
 
 UNIFIED_SOURCES += [
     'AppProcessChecker.cpp',
     'ColorPickerParent.cpp',
+    'ContentBridgeChild.cpp',
+    'ContentBridgeParent.cpp',
     'ContentParent.cpp',
     'ContentProcess.cpp',
+    'ContentProcessManager.cpp',
     'CrashReporterParent.cpp',
-    'FileDescriptorSetChild.cpp',
-    'FileDescriptorSetParent.cpp',
     'FilePickerParent.cpp',
+    'nsIContentChild.cpp',
+    'nsIContentParent.cpp',
     'PermissionMessageUtils.cpp',
     'PreallocatedProcessManager.cpp',
     'ProcessPriorityManager.cpp',
+    'ScreenManagerParent.cpp',
     'StructuredCloneUtils.cpp',
     'TabChild.cpp',
     'TabContext.cpp',
@@ -60,13 +74,14 @@ UNIFIED_SOURCES += [
 ]
 
 # Blob.cpp cannot be compiled in unified mode because it triggers a fatal gcc warning.
-# ContentChild.cpp cannot be compiled in unified mode because it forces NSPR logging.
 # CrashReporterChild.cpp cannot be compiled in unified mode because of name clashes
 # in OS X headers.
+# ContentChild.cpp cannot be compiled in unified mode on  linux due to Time conflict
 SOURCES += [
     'Blob.cpp',
     'ContentChild.cpp',
     'CrashReporterChild.cpp',
+    'ProcessHangMonitor.cpp',
 ]
 
 IPDL_SOURCES += [
@@ -74,15 +89,20 @@ IPDL_SOURCES += [
     'PBlob.ipdl',
     'PBlobStream.ipdl',
     'PBrowser.ipdl',
+    'PBrowserOrId.ipdlh',
     'PColorPicker.ipdl',
     'PContent.ipdl',
+    'PContentBridge.ipdl',
     'PContentPermission.ipdlh',
     'PContentPermissionRequest.ipdl',
     'PCrashReporter.ipdl',
+    'PCycleCollectWithLogs.ipdl',
     'PDocumentRenderer.ipdl',
-    'PFileDescriptorSet.ipdl',
     'PFilePicker.ipdl',
     'PMemoryReportRequest.ipdl',
+    'PPluginWidget.ipdl',
+    'PProcessHangMonitor.ipdl',
+    'PScreenManager.ipdl',
     'PTabContext.ipdlh',
 ]
 
@@ -92,12 +112,8 @@ include('/ipc/chromium/chromium-config.mozbuild')
 
 FINAL_LIBRARY = 'xul'
 LOCAL_INCLUDES += [
-    '../src/base',
-    '../src/geolocation',
-    '../src/storage',
-    '/chrome/src',
-    '/content/base/src',
-    '/content/media/webspeech/synth/ipc',
+    '/caps',
+    '/chrome',
     '/docshell/base',
     '/dom/base',
     '/dom/bluetooth',
@@ -105,17 +121,21 @@ LOCAL_INCLUDES += [
     '/dom/devicestorage',
     '/dom/filesystem',
     '/dom/fmradio/ipc',
-    '/dom/indexedDB',
-    '/dom/indexedDB/ipc',
-    '/dom/mobilemessage/src/ipc',
+    '/dom/geolocation',
+    '/dom/media/webspeech/synth/ipc',
+    '/dom/mobilemessage/ipc',
+    '/dom/storage',
+    '/dom/workers',
+    '/editor/libeditor',
+    '/embedding/components/printingui/ipc',
     '/extensions/cookie',
+    '/extensions/spellcheck/src',
     '/hal/sandbox',
-    '/js/ipc',
     '/layout/base',
-    '/netwerk/base/src',
+    '/netwerk/base',
     '/toolkit/xre',
     '/uriloader/exthandler',
-    '/widget/xpwidgets',
+    '/widget',
     '/xpcom/base',
     '/xpcom/threads',
 ]
@@ -125,15 +145,16 @@ DEFINES['BIN_SUFFIX'] = '"%s"' % CONFIG['BIN_SUFFIX']
 if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('android', 'gtk2', 'gonk', 'qt'):
     DEFINES['MOZ_ENABLE_FREETYPE'] = True
 
+if CONFIG['MOZ_TOOLKIT_SEARCH']:
+    DEFINES['MOZ_TOOLKIT_SEARCH'] = True
+
 for var in ('MOZ_PERMISSIONS', 'MOZ_CHILD_PERMISSIONS'):
     if CONFIG[var]:
         DEFINES[var] = True
 
-if CONFIG['ENABLE_TESTS']:
-    DEFINES['ENABLE_TESTS'] = 1
-    LOCAL_INCLUDES += [
-      'ipc/glue',
-    ]
-
 JAR_MANIFESTS += ['jar.mn']
 
+MOCHITEST_CHROME_MANIFESTS += ['tests/chrome.ini']
+MOCHITEST_MANIFESTS += ['tests/mochitest.ini']
+
+CXXFLAGS += CONFIG['TK_CFLAGS']

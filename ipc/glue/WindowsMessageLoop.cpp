@@ -14,6 +14,7 @@
 #include "nsServiceManagerUtils.h"
 #include "nsString.h"
 #include "nsIXULAppInfo.h"
+#include "WinUtils.h"
 
 #include "mozilla/PaintTracker.h"
 
@@ -86,6 +87,7 @@ extern UINT sDefaultBrowserMsgId;
 namespace {
 
 const wchar_t kOldWndProcProp[] = L"MozillaIPCOldWndProc";
+const wchar_t k3rdPartyWindowProp[] = L"Mozilla3rdPartyWindow";
 
 // This isn't defined before Windows XP.
 enum { WM_XP_THEMECHANGED = 0x031A };
@@ -102,6 +104,9 @@ HHOOK gDeferredGetMsgHook = nullptr;
 HHOOK gDeferredCallWndProcHook = nullptr;
 
 DWORD gUIThreadId = 0;
+
+// WM_GETOBJECT id pulled from uia headers
+#define MOZOBJID_UIAROOT -25
 
 LRESULT CALLBACK
 DeferredMessageHook(int nCode,
@@ -159,6 +164,49 @@ ScheduleDeferredMessageRun()
     NS_ASSERTION(gDeferredGetMsgHook && gDeferredCallWndProcHook,
                  "Failed to set hooks!");
   }
+}
+
+static void
+DumpNeuteredMessage(HWND hwnd, UINT uMsg)
+{
+#ifdef DEBUG
+  nsAutoCString log("Received \"nonqueued\" ");
+  // classify messages
+  if (uMsg < WM_USER) {
+    int idx = 0;
+    while (mozilla::widget::gAllEvents[idx].mId != (long)uMsg &&
+           mozilla::widget::gAllEvents[idx].mStr != nullptr) {
+      idx++;
+    }
+    if (mozilla::widget::gAllEvents[idx].mStr) {
+      log.AppendPrintf("ui message \"%s\"", mozilla::widget::gAllEvents[idx].mStr);
+    } else {
+      log.AppendPrintf("ui message (0x%X)", uMsg);
+    }
+  } else if (uMsg >= WM_USER && uMsg < WM_APP) {
+    log.AppendPrintf("WM_USER message (0x%X)", uMsg);
+  } else if (uMsg >= WM_APP && uMsg < 0xC000) {
+    log.AppendPrintf("WM_APP message (0x%X)", uMsg);
+  } else if (uMsg >= 0xC000 && uMsg < 0x10000) {
+    log.AppendPrintf("registered windows message (0x%X)", uMsg);
+  } else {
+    log.AppendPrintf("system message (0x%X)", uMsg);
+  }
+
+  log.AppendLiteral(" during a synchronous IPC message for window ");
+  log.AppendPrintf("0x%X", hwnd);
+
+  wchar_t className[256] = { 0 };
+  if (GetClassNameW(hwnd, className, sizeof(className) - 1) > 0) {
+    log.AppendLiteral(" (\"");
+    log.Append(NS_ConvertUTF16toUTF8((char16_t*)className));
+    log.AppendLiteral("\")");
+  }
+
+  log.AppendLiteral(", sending it to DefWindowProc instead of the normal "
+                    "window procedure.");
+  NS_ERROR(log.get());
+#endif
 }
 
 LRESULT
@@ -270,7 +318,8 @@ ProcessOrDeferMessage(HWND hwnd,
     case WM_GETTEXT:
     case WM_NCHITTEST:
     case WM_STYLECHANGING:  // Intentional fall-through.
-    case WM_WINDOWPOSCHANGING: { 
+    case WM_WINDOWPOSCHANGING:
+    case WM_GETTEXTLENGTH: {
       return DefWindowProc(hwnd, uMsg, wParam, lParam);
     }
 
@@ -285,7 +334,24 @@ ProcessOrDeferMessage(HWND hwnd,
     case WM_APP-1:
       return 0;
 
+    // We only support a query for our IAccessible or UIA pointers.
+    // This should be safe, and needs to be sync.
+#if defined(ACCESSIBILITY)
+   case WM_GETOBJECT: {
+      if (!::GetPropW(hwnd, k3rdPartyWindowProp)) {
+        DWORD objId = static_cast<DWORD>(lParam);
+        WNDPROC oldWndProc = (WNDPROC)GetProp(hwnd, kOldWndProcProp);
+        if ((objId == OBJID_CLIENT || objId == MOZOBJID_UIAROOT) && oldWndProc) {
+          return CallWindowProcW(oldWndProc, hwnd, uMsg, wParam, lParam);
+        }
+      }
+      break;
+    }
+#endif // ACCESSIBILITY
+
     default: {
+      // Unknown messages only are logged in debug builds and sent to
+      // DefWindowProc.
       if (uMsg && uMsg == mozilla::widget::sAppShellGeckoMsgId) {
         // Widget's registered native event callback
         deferred = new DeferredSendMessage(hwnd, uMsg, wParam, lParam);
@@ -294,31 +360,16 @@ ProcessOrDeferMessage(HWND hwnd,
         // Metro widget's system shutdown message
         deferred = new DeferredSendMessage(hwnd, uMsg, wParam, lParam);
 #endif
-      } else {
-        // Unknown messages only
-#ifdef DEBUG
-        nsAutoCString log("Received \"nonqueued\" message ");
-        log.AppendInt(uMsg);
-        log.AppendLiteral(" during a synchronous IPC message for window ");
-        log.AppendInt((int64_t)hwnd);
-
-        wchar_t className[256] = { 0 };
-        if (GetClassNameW(hwnd, className, sizeof(className) - 1) > 0) {
-          log.AppendLiteral(" (\"");
-          log.Append(NS_ConvertUTF16toUTF8((char16_t*)className));
-          log.AppendLiteral("\")");
-        }
-
-        log.AppendLiteral(", sending it to DefWindowProc instead of the normal "
-                          "window procedure.");
-        NS_ERROR(log.get());
-#endif
-        return DefWindowProc(hwnd, uMsg, wParam, lParam);
       }
     }
   }
 
-  NS_ASSERTION(deferred, "Must have a message here!");
+  // No deferred message was created and we land here, this is an
+  // unhandled message.
+  if (!deferred) {
+    DumpNeuteredMessage(hwnd, uMsg);
+    return DefWindowProc(hwnd, uMsg, wParam, lParam);
+  }
 
   // Create the deferred message array if it doesn't exist already.
   if (!gDeferredMessages) {
@@ -400,6 +451,7 @@ WindowIsDeferredWindow(HWND hWnd)
   if (className.EqualsLiteral("ShockwaveFlashFullScreen") ||
       className.EqualsLiteral("QTNSHIDDEN") ||
       className.EqualsLiteral("AGFullScreenWinClass")) {
+    SetPropW(hWnd, k3rdPartyWindowProp, (HANDLE)1);
     return true;
   }
 
@@ -407,6 +459,7 @@ WindowIsDeferredWindow(HWND hWnd)
   // earth process. The earth process can trigger a plugin incall on the browser
   // at any time, which is badness if the instance is already making an incall.
   if (className.EqualsLiteral("__geplugin_bridge_window__")) {
+    SetPropW(hWnd, k3rdPartyWindowProp, (HANDLE)1);
     return true;
   }
 
@@ -419,7 +472,7 @@ WindowIsDeferredWindow(HWND hWnd)
     if (appInfo) {
       nsAutoCString appName;
       if (NS_SUCCEEDED(appInfo->GetName(appName))) {
-        appName.Append("MessageWindow");
+        appName.AppendLiteral("MessageWindow");
         nsDependentString windowName(gAppMessageWindowName);
         CopyUTF8toUTF16(appName, windowName);
         gAppMessageWindowNameLength = windowName.Length();
@@ -473,7 +526,8 @@ NeuterWindowProcedure(HWND hWnd)
     // Cleanup
     NS_WARNING("SetProp failed!");
     SetWindowLongPtr(hWnd, GWLP_WNDPROC, currentWndProc);
-    RemoveProp(hWnd, kOldWndProcProp);
+    RemovePropW(hWnd, kOldWndProcProp);
+    RemovePropW(hWnd, k3rdPartyWindowProp);
     return false;
   }
 
@@ -495,7 +549,8 @@ RestoreWindowProcedure(HWND hWnd)
     NS_ASSERTION(currentWndProc == (LONG_PTR)NeuteredWindowProc,
                  "This should never be switched out from under us!");
   }
-  RemoveProp(hWnd, kOldWndProcProp);
+  RemovePropW(hWnd, kOldWndProcProp);
+  RemovePropW(hWnd, k3rdPartyWindowProp);
 }
 
 LRESULT CALLBACK
@@ -595,7 +650,7 @@ InitUIThread()
   }
   MOZ_ASSERT(gUIThreadId);
   MOZ_ASSERT(gUIThreadId == GetCurrentThreadId(),
-               "Called InitUIThread multiple times on different threads!");
+             "Called InitUIThread multiple times on different threads!");
 }
 
 } // namespace windows
@@ -762,17 +817,18 @@ MessageChannel::WaitForSyncNotify()
     PRIntervalTime timeout = (kNoTimeout == mTimeoutMs) ?
                              PR_INTERVAL_NO_TIMEOUT :
                              PR_MillisecondsToInterval(mTimeoutMs);
-    // XXX could optimize away this syscall for "no timeout" case if desired
     PRIntervalTime waitStart = 0;
-    
+
     if (timeout != PR_INTERVAL_NO_TIMEOUT) {
       waitStart = PR_IntervalNow();
     }
 
+    MOZ_ASSERT(!mIsSyncWaitingOnNonMainThread);
     mIsSyncWaitingOnNonMainThread = true;
 
     mMonitor->Wait(timeout);
 
+    MOZ_ASSERT(mIsSyncWaitingOnNonMainThread);
     mIsSyncWaitingOnNonMainThread = false;
 
     // If the timeout didn't expire, we know we received an event. The
@@ -910,7 +966,7 @@ MessageChannel::WaitForInterruptNotify()
     return WaitForSyncNotify();
   }
 
-  if (!InterruptStackDepth()) {
+  if (!InterruptStackDepth() && !AwaitingIncomingMessage()) {
     // There is currently no way to recover from this condition.
     NS_RUNTIMEABORT("StackDepth() is 0 in call to MessageChannel::WaitForNotify!");
   }

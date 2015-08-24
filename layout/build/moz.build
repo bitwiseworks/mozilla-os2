@@ -25,8 +25,6 @@ FAIL_ON_WARNINGS = True
 
 MSVC_ENABLE_PGO = True
 
-LIBRARY_NAME = 'gklayout'
-
 include('/ipc/chromium/chromium-config.mozbuild')
 
 LOCAL_INCLUDES += [
@@ -38,53 +36,43 @@ LOCAL_INCLUDES += [
     '../style',
     '../tables',
     '../xul',
-    '/caps/include',
-    '/content/base/src',
-    '/content/canvas/src',
-    '/content/html/content/src',
-    '/content/html/document/src',
-    '/content/svg/content/src',
-    '/content/xul/content/src',
-    '/content/xul/document/src',
-    '/content/xul/templates/src',
+    '/caps',
     '/docshell/base',
     '/dom/audiochannel',
     '/dom/base',
     '/dom/camera',
-    '/dom/file',
+    '/dom/canvas',
     '/dom/filesystem',
+    '/dom/geolocation',
+    '/dom/html',
+    '/dom/json',
+    '/dom/jsurl',
     '/dom/media',
+    '/dom/offline',
     '/dom/speakermanager',
-    '/dom/src/geolocation',
-    '/dom/src/json',
-    '/dom/src/jsurl',
-    '/dom/src/offline',
-    '/dom/src/storage',
+    '/dom/storage',
+    '/dom/svg',
     '/dom/telephony',
     '/dom/xbl',
     '/dom/xslt/base',
     '/dom/xslt/xml',
     '/dom/xslt/xpath',
     '/dom/xslt/xslt',
-    '/editor/composer/src',
-    '/editor/libeditor/base',
-    '/editor/libeditor/html',
-    '/editor/libeditor/text',
-    '/editor/txmgr/src',
-    '/editor/txtsvc/src',
+    '/dom/xul',
+    '/dom/xul/templates',
+    '/editor/composer',
+    '/editor/libeditor',
+    '/editor/txmgr',
+    '/editor/txtsvc',
     '/extensions/cookie',
     '/js/xpconnect/loader',
     '/js/xpconnect/src',
-    '/netwerk/base/src',
+    '/netwerk/base',
     '/netwerk/cookie',
-    '/view/src',
+    '/view',
 ]
 
-if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('qt', 'gtk2', 'gtk3'):
-    LOCAL_INCLUDES += [
-        '/dom/system/unix',
-    ]
-elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
     LOCAL_INCLUDES += [
         '/dom/system/windows',
     ]
@@ -125,12 +113,15 @@ if CONFIG['MOZ_B2G_BT']:
 
 if CONFIG['MOZ_WEBSPEECH']:
     LOCAL_INCLUDES += [
-        '/content/media/webspeech/synth',
+        '/dom/media/webspeech/synth',
     ]
 
-if CONFIG['MOZ_FFMPEG']:
+if CONFIG['MOZ_GSTREAMER']:
+    CXXFLAGS += CONFIG['GSTREAMER_CFLAGS']
+
+if CONFIG['MOZ_SECUREELEMENT']:
     LOCAL_INCLUDES += [
-        '/content/media/fmp4/ffmpeg/include',
+        '/dom/secureelement',
     ]
 
 FINAL_LIBRARY = 'xul'

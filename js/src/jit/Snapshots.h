@@ -54,18 +54,36 @@ class RValueAllocation
         UNTYPED_REG         = 0x06,
         UNTYPED_STACK       = 0x07,
 #endif
+
+        // Recover instructions.
+        RECOVER_INSTRUCTION = 0x0a,
+        RI_WITH_DEFAULT_CST = 0x0b,
+
         // The JSValueType is packed in the Mode.
         TYPED_REG_MIN       = 0x10,
-        TYPED_REG_MAX       = 0x17,
+        TYPED_REG_MAX       = 0x1f,
         TYPED_REG = TYPED_REG_MIN,
 
         // The JSValueType is packed in the Mode.
-        TYPED_STACK_MIN     = 0x18,
-        TYPED_STACK_MAX     = 0x1f,
+        TYPED_STACK_MIN     = 0x20,
+        TYPED_STACK_MAX     = 0x2f,
         TYPED_STACK = TYPED_STACK_MIN,
+
+        // This mask can be used with any other valid mode. When this flag is
+        // set on the mode, this inform the snapshot iterator that even if the
+        // allocation is readable, the content of if might be incomplete unless
+        // all side-effects are executed.
+        RECOVER_SIDE_EFFECT_MASK = 0x80,
+
+        // This mask represents the set of bits which can be used to encode a
+        // value in a snapshot. The mode is used to determine how to interpret
+        // the union of values and how to pack the value in memory.
+        MODE_MASK           = 0x17f,
 
         INVALID = 0x100,
     };
+
+    enum { PACKED_TAG_MASK = 0x0f };
 
     // See Payload encoding in Snapshots.cpp
     enum PayloadType {
@@ -87,11 +105,25 @@ class RValueAllocation
     Mode mode_;
 
     // Additional information to recover the content of the allocation.
+    struct FloatRegisterBits {
+        uint32_t data;
+        bool operator == (const FloatRegisterBits& other) const {
+            return data == other.data;
+        }
+        uint32_t code() const {
+            return data;
+        }
+        const char* name() const {
+            FloatRegister tmp = FloatRegister::FromCode(data);
+            return tmp.name();
+        }
+    };
+
     union Payload {
         uint32_t index;
         int32_t stackOffset;
         Register gpr;
-        FloatRegister fpu;
+        FloatRegisterBits fpu;
         JSValueType type;
     };
 
@@ -115,7 +147,9 @@ class RValueAllocation
     }
     static Payload payloadOfFloatRegister(FloatRegister reg) {
         Payload p;
-        p.fpu = reg;
+        FloatRegisterBits b;
+        b.data = reg.code();
+        p.fpu = b;
         return p;
     }
     static Payload payloadOfValueType(JSValueType type) {
@@ -147,7 +181,7 @@ class RValueAllocation
     {
     }
 
-    RValueAllocation(Mode mode)
+    explicit RValueAllocation(Mode mode)
       : mode_(mode)
     {
     }
@@ -158,12 +192,12 @@ class RValueAllocation
     { }
 
     // DOUBLE_REG
-    static RValueAllocation Double(const FloatRegister& reg) {
+    static RValueAllocation Double(FloatRegister reg) {
         return RValueAllocation(DOUBLE_REG, payloadOfFloatRegister(reg));
     }
 
     // FLOAT32_REG or FLOAT32_STACK
-    static RValueAllocation Float32(const FloatRegister& reg) {
+    static RValueAllocation Float32(FloatRegister reg) {
         return RValueAllocation(FLOAT32_REG, payloadOfFloatRegister(reg));
     }
     static RValueAllocation Float32(int32_t offset) {
@@ -171,37 +205,37 @@ class RValueAllocation
     }
 
     // TYPED_REG or TYPED_STACK
-    static RValueAllocation Typed(JSValueType type, const Register& reg) {
-        JS_ASSERT(type != JSVAL_TYPE_DOUBLE &&
-                  type != JSVAL_TYPE_MAGIC &&
-                  type != JSVAL_TYPE_NULL &&
-                  type != JSVAL_TYPE_UNDEFINED);
+    static RValueAllocation Typed(JSValueType type, Register reg) {
+        MOZ_ASSERT(type != JSVAL_TYPE_DOUBLE &&
+                   type != JSVAL_TYPE_MAGIC &&
+                   type != JSVAL_TYPE_NULL &&
+                   type != JSVAL_TYPE_UNDEFINED);
         return RValueAllocation(TYPED_REG, payloadOfValueType(type),
                                 payloadOfRegister(reg));
     }
     static RValueAllocation Typed(JSValueType type, int32_t offset) {
-        JS_ASSERT(type != JSVAL_TYPE_MAGIC &&
-                  type != JSVAL_TYPE_NULL &&
-                  type != JSVAL_TYPE_UNDEFINED);
+        MOZ_ASSERT(type != JSVAL_TYPE_MAGIC &&
+                   type != JSVAL_TYPE_NULL &&
+                   type != JSVAL_TYPE_UNDEFINED);
         return RValueAllocation(TYPED_STACK, payloadOfValueType(type),
                                 payloadOfStackOffset(offset));
     }
 
     // UNTYPED
 #if defined(JS_NUNBOX32)
-    static RValueAllocation Untyped(const Register& type, const Register& payload) {
+    static RValueAllocation Untyped(Register type, Register payload) {
         return RValueAllocation(UNTYPED_REG_REG,
                                 payloadOfRegister(type),
                                 payloadOfRegister(payload));
     }
 
-    static RValueAllocation Untyped(const Register& type, int32_t payloadStackOffset) {
+    static RValueAllocation Untyped(Register type, int32_t payloadStackOffset) {
         return RValueAllocation(UNTYPED_REG_STACK,
                                 payloadOfRegister(type),
                                 payloadOfStackOffset(payloadStackOffset));
     }
 
-    static RValueAllocation Untyped(int32_t typeStackOffset, const Register& payload) {
+    static RValueAllocation Untyped(int32_t typeStackOffset, Register payload) {
         return RValueAllocation(UNTYPED_STACK_REG,
                                 payloadOfStackOffset(typeStackOffset),
                                 payloadOfRegister(payload));
@@ -214,7 +248,7 @@ class RValueAllocation
     }
 
 #elif defined(JS_PUNBOX64)
-    static RValueAllocation Untyped(const Register& reg) {
+    static RValueAllocation Untyped(Register reg) {
         return RValueAllocation(UNTYPED_REG, payloadOfRegister(reg));
     }
 
@@ -236,6 +270,21 @@ class RValueAllocation
         return RValueAllocation(CONSTANT, payloadOfIndex(index));
     }
 
+    // Recover instruction's index
+    static RValueAllocation RecoverInstruction(uint32_t index) {
+        return RValueAllocation(RECOVER_INSTRUCTION, payloadOfIndex(index));
+    }
+    static RValueAllocation RecoverInstruction(uint32_t riIndex, uint32_t cstIndex) {
+        return RValueAllocation(RI_WITH_DEFAULT_CST,
+                                payloadOfIndex(riIndex),
+                                payloadOfIndex(cstIndex));
+    }
+
+    void setNeedSideEffect() {
+        MOZ_ASSERT(!needSideEffect() && mode_ != INVALID);
+        mode_ = Mode(mode_ | RECOVER_SIDE_EFFECT_MASK);
+    }
+
     void writeHeader(CompactBufferWriter& writer, JSValueType type, uint32_t regCode) const;
   public:
     static RValueAllocation read(CompactBufferReader& reader);
@@ -243,36 +292,44 @@ class RValueAllocation
 
   public:
     Mode mode() const {
-        return mode_;
+        return Mode(mode_ & MODE_MASK);
+    }
+    bool needSideEffect() const {
+        return mode_ & RECOVER_SIDE_EFFECT_MASK;
     }
 
     uint32_t index() const {
-        JS_ASSERT(layoutFromMode(mode()).type1 == PAYLOAD_INDEX);
+        MOZ_ASSERT(layoutFromMode(mode()).type1 == PAYLOAD_INDEX);
         return arg1_.index;
     }
     int32_t stackOffset() const {
-        JS_ASSERT(layoutFromMode(mode()).type1 == PAYLOAD_STACK_OFFSET);
+        MOZ_ASSERT(layoutFromMode(mode()).type1 == PAYLOAD_STACK_OFFSET);
         return arg1_.stackOffset;
     }
     Register reg() const {
-        JS_ASSERT(layoutFromMode(mode()).type1 == PAYLOAD_GPR);
+        MOZ_ASSERT(layoutFromMode(mode()).type1 == PAYLOAD_GPR);
         return arg1_.gpr;
     }
     FloatRegister fpuReg() const {
-        JS_ASSERT(layoutFromMode(mode()).type1 == PAYLOAD_FPU);
-        return arg1_.fpu;
+        MOZ_ASSERT(layoutFromMode(mode()).type1 == PAYLOAD_FPU);
+        FloatRegisterBits b = arg1_.fpu;
+        return FloatRegister::FromCode(b.data);
     }
     JSValueType knownType() const {
-        JS_ASSERT(layoutFromMode(mode()).type1 == PAYLOAD_PACKED_TAG);
+        MOZ_ASSERT(layoutFromMode(mode()).type1 == PAYLOAD_PACKED_TAG);
         return arg1_.type;
     }
 
+    uint32_t index2() const {
+        MOZ_ASSERT(layoutFromMode(mode()).type2 == PAYLOAD_INDEX);
+        return arg2_.index;
+    }
     int32_t stackOffset2() const {
-        JS_ASSERT(layoutFromMode(mode()).type2 == PAYLOAD_STACK_OFFSET);
+        MOZ_ASSERT(layoutFromMode(mode()).type2 == PAYLOAD_STACK_OFFSET);
         return arg2_.stackOffset;
     }
     Register reg2() const {
-        JS_ASSERT(layoutFromMode(mode()).type2 == PAYLOAD_GPR);
+        MOZ_ASSERT(layoutFromMode(mode()).type2 == PAYLOAD_GPR);
         return arg2_.gpr;
     }
 
@@ -360,19 +417,19 @@ class SnapshotWriter
     }
 };
 
-class MResumePoint;
+class MNode;
 
 class RecoverWriter
 {
     CompactBufferWriter writer_;
 
-    uint32_t nframes_;
-    uint32_t framesWritten_;
+    uint32_t instructionCount_;
+    uint32_t instructionsWritten_;
 
   public:
-    SnapshotOffset startRecover(uint32_t frameCount, bool resumeAfter);
+    SnapshotOffset startRecover(uint32_t instructionCount, bool resumeAfter);
 
-    bool writeFrame(const MResumePoint* rp);
+    void writeInstruction(const MNode* rp);
 
     void endRecover();
 
@@ -472,6 +529,13 @@ class RecoverReader
 
   public:
     RecoverReader(SnapshotReader& snapshot, const uint8_t* recovers, uint32_t size);
+
+    uint32_t numInstructions() const {
+        return numInstructions_;
+    }
+    uint32_t numInstructionsRead() const {
+        return numInstructionsRead_;
+    }
 
     bool moreInstructions() const {
         return numInstructionsRead_ < numInstructions_;

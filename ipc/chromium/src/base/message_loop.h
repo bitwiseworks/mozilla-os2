@@ -9,13 +9,11 @@
 #include <queue>
 #include <string>
 #include <vector>
-
 #include <map>
+
 #include "base/lock.h"
 #include "base/message_pump.h"
 #include "base/observer_list.h"
-#include "base/ref_counted.h"
-#include "base/scoped_ptr.h"
 #include "base/task.h"
 #include "base/timer.h"
 
@@ -31,6 +29,8 @@
 // really just eliminate.
 #include "base/message_pump_os2.h"
 #endif
+
+#include "nsAutoPtr.h"
 
 namespace mozilla {
 namespace ipc {
@@ -181,7 +181,7 @@ public:
   // arbitrary MessageLoop to Quit.
   class QuitTask : public Task {
    public:
-    virtual void Run() {
+    virtual void Run() override {
       MessageLoop::current()->Quit();
     }
   };
@@ -212,13 +212,18 @@ public:
   //   This type of ML is used in Mozilla parent processes which initialize
   //   XPCOM and use the nsThread event loop.
   //
+  // TYPE_MOZILLA_NONMAINUITHREAD
+  //   This type of ML is used in Mozilla processes which initialize XPCOM
+  //   and use TYPE_UI loop logic.
+  //
   enum Type {
     TYPE_DEFAULT,
     TYPE_UI,
     TYPE_IO,
     TYPE_MOZILLA_CHILD,
     TYPE_MOZILLA_UI,
-    TYPE_MOZILLA_NONMAINTHREAD
+    TYPE_MOZILLA_NONMAINTHREAD,
+    TYPE_MOZILLA_NONMAINUITHREAD
   };
 
   // Normally, it is not necessary to instantiate a MessageLoop.  Instead, it
@@ -404,9 +409,9 @@ public:
                        int delay_ms, bool nestable);
 
   // base::MessagePump::Delegate methods:
-  virtual bool DoWork();
-  virtual bool DoDelayedWork(base::TimeTicks* next_delayed_work_time);
-  virtual bool DoIdleWork();
+  virtual bool DoWork() override;
+  virtual bool DoDelayedWork(base::TimeTicks* next_delayed_work_time) override;
+  virtual bool DoIdleWork() override;
 
   Type type_;
   int32_t id_;
@@ -423,7 +428,7 @@ public:
   // once we're out of nested message loops.
   TaskQueue deferred_non_nestable_work_queue_;
 
-  scoped_refptr<base::MessagePump> pump_;
+  nsRefPtr<base::MessagePump> pump_;
 
   base::ObserverList<DestructionObserver> destruction_observers_;
 
@@ -471,7 +476,7 @@ public:
 //
 class MessageLoopForUI : public MessageLoop {
  public:
-  MessageLoopForUI(Type type=TYPE_UI) : MessageLoop(type) {
+  explicit MessageLoopForUI(Type type=TYPE_UI) : MessageLoop(type) {
   }
 
   // Returns the MessageLoopForUI of the current thread.

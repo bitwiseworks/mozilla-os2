@@ -9,15 +9,15 @@
 #include "nsIAtomService.h"
 #include "mozilla/Attributes.h"
 
-class nsAtomService MOZ_FINAL : public nsIAtomService
+class nsAtomService final : public nsIAtomService
 {
- public:
+public:
   nsAtomService();
   NS_DECL_THREADSAFE_ISUPPORTS
-    
+
   NS_DECL_NSIATOMSERVICE
 
- private:
+private:
   ~nsAtomService() {}
 };
 

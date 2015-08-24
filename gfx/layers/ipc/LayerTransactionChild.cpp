@@ -7,9 +7,9 @@
 
 #include "LayerTransactionChild.h"
 #include "mozilla/layers/CompositableClient.h"  // for CompositableChild
-#include "mozilla/layers/LayersSurfaces.h"  // for PGrallocBufferChild
 #include "mozilla/layers/PCompositableChild.h"  // for PCompositableChild
 #include "mozilla/layers/PLayerChild.h"  // for PLayerChild
+#include "mozilla/layers/ShadowLayers.h"  // for ShadowLayerForwarder
 #include "mozilla/mozalloc.h"           // for operator delete, etc
 #include "nsDebug.h"                    // for NS_RUNTIMEABORT, etc
 #include "nsTArray.h"                   // for nsTArray
@@ -18,42 +18,33 @@
 namespace mozilla {
 namespace layers {
 
-class PGrallocBufferChild;
 
 void
 LayerTransactionChild::Destroy()
 {
-  NS_ABORT_IF_FALSE(0 == ManagedPLayerChild().Length(),
-                    "layers should have been cleaned up by now");
-  PLayerTransactionChild::Send__delete__(this);
-  // WARNING: |this| has gone to the great heap in the sky
+  if (!IPCOpen()) {
+    return;
+  }
+  // mDestroyed is used to prevent calling Send__delete__() twice.
+  // When this function is called from CompositorChild::Destroy(),
+  // under Send__delete__() call, this function is called from
+  // ShadowLayerForwarder's destructor.
+  // When it happens, IPCOpen() is still true.
+  // See bug 1004191.
+  mDestroyed = true;
+  MOZ_ASSERT(0 == ManagedPLayerChild().Length(),
+             "layers should have been cleaned up by now");
+
+  for (size_t i = 0; i < ManagedPTextureChild().Length(); ++i) {
+    TextureClient* texture = TextureClient::AsTextureClient(ManagedPTextureChild()[i]);
+    if (texture) {
+      texture->ForceRemove();
+    }
+  }
+
+  SendShutdown();
 }
 
-PGrallocBufferChild*
-LayerTransactionChild::AllocPGrallocBufferChild(const IntSize&,
-                                                const uint32_t&,
-                                                const uint32_t&,
-                                                MaybeMagicGrallocBufferHandle*)
-{
-#ifdef MOZ_HAVE_SURFACEDESCRIPTORGRALLOC
-  return GrallocBufferActor::Create();
-#else
-  NS_RUNTIMEABORT("No gralloc buffers for you");
-  return nullptr;
-#endif
-}
-
-bool
-LayerTransactionChild::DeallocPGrallocBufferChild(PGrallocBufferChild* actor)
-{
-#ifdef MOZ_HAVE_SURFACEDESCRIPTORGRALLOC
-  delete actor;
-  return true;
-#else
-  NS_RUNTIMEABORT("Um, how did we get here?");
-  return false;
-#endif
-}
 
 PLayerChild*
 LayerTransactionChild::AllocPLayerChild()
@@ -73,6 +64,7 @@ LayerTransactionChild::DeallocPLayerChild(PLayerChild* actor)
 PCompositableChild*
 LayerTransactionChild::AllocPCompositableChild(const TextureInfo& aInfo)
 {
+  MOZ_ASSERT(!mDestroyed);
   return CompositableClient::CreateIPDLActor();
 }
 
@@ -82,9 +74,63 @@ LayerTransactionChild::DeallocPCompositableChild(PCompositableChild* actor)
   return CompositableClient::DestroyIPDLActor(actor);
 }
 
+bool
+LayerTransactionChild::RecvParentAsyncMessages(InfallibleTArray<AsyncParentMessageData>&& aMessages)
+{
+  for (AsyncParentMessageArray::index_type i = 0; i < aMessages.Length(); ++i) {
+    const AsyncParentMessageData& message = aMessages[i];
+
+    switch (message.type()) {
+      case AsyncParentMessageData::TOpDeliverFence: {
+        const OpDeliverFence& op = message.get_OpDeliverFence();
+        FenceHandle fence = op.fence();
+        PTextureChild* child = op.textureChild();
+
+        RefPtr<TextureClient> texture = TextureClient::AsTextureClient(child);
+        if (texture) {
+          texture->SetReleaseFenceHandle(fence);
+        }
+        if (mForwarder) {
+          mForwarder->HoldTransactionsToRespond(op.transactionId());
+        } else {
+          // Send back a response.
+          InfallibleTArray<AsyncChildMessageData> replies;
+          replies.AppendElement(OpReplyDeliverFence(op.transactionId()));
+          SendChildAsyncMessages(replies);
+        }
+        break;
+      }
+      case AsyncParentMessageData::TOpReplyDeliverFence: {
+        const OpReplyDeliverFence& op = message.get_OpReplyDeliverFence();
+        TransactionCompleteted(op.transactionId());
+        break;
+      }
+      default:
+        NS_ERROR("unknown AsyncParentMessageData type");
+        return false;
+    }
+  }
+  return true;
+}
+
+void
+LayerTransactionChild::SendFenceHandle(AsyncTransactionTracker* aTracker,
+                                       PTextureChild* aTexture,
+                                       const FenceHandle& aFence)
+{
+  HoldUntilComplete(aTracker);
+  InfallibleTArray<AsyncChildMessageData> messages;
+  messages.AppendElement(OpDeliverFenceFromChild(aTracker->GetId(),
+                                                 nullptr, aTexture,
+                                                 FenceHandleFromChild(aFence)));
+  SendChildAsyncMessages(messages);
+}
+
 void
 LayerTransactionChild::ActorDestroy(ActorDestroyReason why)
 {
+  mDestroyed = true;
+  DestroyAsyncTransactionTrackersHolder();
 #ifdef MOZ_B2G
   // Due to poor lifetime management of gralloc (and possibly shmems) we will
   // crash at some point in the future when we get destroyed due to abnormal
@@ -100,6 +146,7 @@ PTextureChild*
 LayerTransactionChild::AllocPTextureChild(const SurfaceDescriptor&,
                                           const TextureFlags&)
 {
+  MOZ_ASSERT(!mDestroyed);
   return TextureClient::CreateIPDLActor();
 }
 

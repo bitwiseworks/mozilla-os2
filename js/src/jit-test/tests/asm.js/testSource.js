@@ -1,3 +1,4 @@
+// |jit-test| test-also-noasmjs
 setCachingEnabled(true);
 
 (function() {
@@ -239,7 +240,7 @@ if (isAsmJSCompilationAvailable() && isCachingEnabled()) {
 
 })();
 
-/* Implicit "use strict" context */
+/* Implicit "use strict" context in modules */
 (function() {
 
 var funcHeader =  'function (glob, ffi, heap) {',
@@ -335,6 +336,68 @@ if (isAsmJSCompilationAvailable() && isCachingEnabled()) {
     m = g3();
     assertEq(isAsmJSModuleLoadedFromCache(g3), true);
     checkFuncSrc(m);
+}
+
+})();
+
+/* Implicit "use strict" context in functions */
+(function () {
+
+var funcCode = 'function g(x) {\n\
+    x=x|0;\n\
+    return x + 1 | 0;}';
+var moduleCode = 'function () {\n\
+    "use asm";\n' + funcCode + '\n\
+    return g;\n\
+    }',
+    useStrict = '"use strict";';
+
+var f5 = eval(useStrict + ";\n(" + moduleCode + "())");
+
+var expectedToString = funcCode.replace('{', '{\n' + useStrict + '\n')
+var expectedToSource = expectedToString
+
+assertEq(f5.toString(), expectedToString);
+assertEq(f5.toSource(), expectedToSource);
+
+if (isAsmJSCompilationAvailable() && isCachingEnabled()) {
+    var mf5 = eval("\"use strict\";\n(" + moduleCode + ")");
+    assertEq(isAsmJSModuleLoadedFromCache(mf5), true);
+    var f5 = mf5();
+    assertEq(f5.toString(), expectedToString);
+    assertEq(f5.toSource(), expectedToSource);
+}
+
+})();
+
+/* Implicit "use strict" context in functions with dynamic linking failure */
+(function () {
+
+var funcCode = 'function g(x) {\n\
+    x=x|0;\n\
+    return x + 1 | 0;}';
+var moduleCode = 'function (glob) {\n\
+    "use asm";\n\
+    var fround = glob.Math.fround;\n\
+    ' + funcCode + '\n\
+    return g;\n\
+    }',
+    useStrict = '"use strict";';
+
+var f6 = eval(useStrict + ";\n(" + moduleCode + "({Math:{}}))");
+
+var expectedToString = funcCode.replace('{', '{\n' + useStrict + '\n')
+var expectedToSource = expectedToString
+
+assertEq(f6.toString(), expectedToString);
+assertEq(f6.toSource(), expectedToSource);
+
+if (isAsmJSCompilationAvailable() && isCachingEnabled()) {
+    var mf6 = eval("\"use strict\";\n(" + moduleCode + ")");
+    assertEq(isAsmJSModuleLoadedFromCache(mf6), true);
+    var f6 = mf6({Math:{}});
+    assertEq(f6.toString(), expectedToString);
+    assertEq(f6.toSource(), expectedToSource);
 }
 
 })();

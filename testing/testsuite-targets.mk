@@ -30,7 +30,7 @@ endif
 RUN_MOCHITEST_B2G_DESKTOP = \
   rm -f ./$@.log && \
   $(PYTHON) _tests/testing/mochitest/runtestsb2g.py --autorun --close-when-done \
-    --console-level=INFO --log-file=./$@.log --file-level=INFO \
+    --console-level=INFO --log-tbpl=./$@.log \
     --desktop --profile ${GAIA_PROFILE_DIR} \
     --failure-file=$(abspath _tests/testing/mochitest/makefailures.json) \
     $(TEST_PATH_ARG) $(EXTRA_TEST_ARGS)
@@ -38,7 +38,7 @@ RUN_MOCHITEST_B2G_DESKTOP = \
 RUN_MOCHITEST = \
   rm -f ./$@.log && \
   $(PYTHON) _tests/testing/mochitest/runtests.py --autorun --close-when-done \
-    --console-level=INFO --log-file=./$@.log --file-level=INFO \
+    --console-level=INFO --log-tbpl=./$@.log \
     --failure-file=$(abspath _tests/testing/mochitest/makefailures.json) \
     --testing-modules-dir=$(abspath _tests/modules) \
     --extra-profile-file=$(DIST)/plugins \
@@ -47,7 +47,7 @@ RUN_MOCHITEST = \
 RERUN_MOCHITEST = \
   rm -f ./$@.log && \
   $(PYTHON) _tests/testing/mochitest/runtests.py --autorun --close-when-done \
-    --console-level=INFO --log-file=./$@.log --file-level=INFO \
+    --console-level=INFO --log-tbpl=./$@.log \
     --run-only-tests=makefailures.json \
     --testing-modules-dir=$(abspath _tests/modules) \
     --extra-profile-file=$(DIST)/plugins \
@@ -56,7 +56,7 @@ RERUN_MOCHITEST = \
 RUN_MOCHITEST_REMOTE = \
   rm -f ./$@.log && \
   $(PYTHON) _tests/testing/mochitest/runtestsremote.py --autorun --close-when-done \
-    --console-level=INFO --log-file=./$@.log --file-level=INFO $(DM_FLAGS) --dm_trans=$(DM_TRANS) \
+    --console-level=INFO --log-tbpl=./$@.log $(DM_FLAGS) --dm_trans=$(DM_TRANS) \
     --app=$(TEST_PACKAGE_NAME) --deviceIP=${TEST_DEVICE} --xre-path=${MOZ_HOST_BIN} \
     --testing-modules-dir=$(abspath _tests/modules) \
     $(SYMBOLS_PATH) $(TEST_PATH_ARG) $(EXTRA_TEST_ARGS)
@@ -67,7 +67,7 @@ RUN_MOCHITEST_ROBOCOP = \
     --robocop-apk=$(DEPTH)/build/mobile/robocop/robocop-debug.apk \
     --robocop-ids=$(DEPTH)/mobile/android/base/fennec_ids.txt \
     --robocop-ini=$(DEPTH)/build/mobile/robocop/robocop.ini \
-    --console-level=INFO --log-file=./$@.log --file-level=INFO $(DM_FLAGS) --dm_trans=$(DM_TRANS) \
+    --console-level=INFO --log-tbpl=./$@.log $(DM_FLAGS) --dm_trans=$(DM_TRANS) \
     --app=$(TEST_PACKAGE_NAME) --deviceIP=${TEST_DEVICE} --xre-path=${MOZ_HOST_BIN} \
     $(SYMBOLS_PATH) $(TEST_PATH_ARG) $(EXTRA_TEST_ARGS)
 
@@ -169,7 +169,7 @@ endif
 	$(CHECK_TEST_ERROR)
 
 ifeq ($(OS_ARCH),Darwin)
-webapprt_stub_path = $(TARGET_DIST)/$(MOZ_MACBUNDLE_NAME)/Contents/MacOS/webapprt-stub$(BIN_SUFFIX)
+webapprt_stub_path = $(TARGET_DIST)/$(MOZ_MACBUNDLE_NAME)/Contents/Resources/webapprt-stub$(BIN_SUFFIX)
 endif
 ifeq ($(OS_ARCH),WINNT)
 webapprt_stub_path = $(TARGET_DIST)/bin/webapprt-stub$(BIN_SUFFIX)
@@ -195,21 +195,21 @@ RUN_REFTEST = rm -f ./$@.log && $(PYTHON) _tests/reftest/runreftest.py \
 REMOTE_REFTEST = rm -f ./$@.log && $(PYTHON) _tests/reftest/remotereftest.py \
   --dm_trans=$(DM_TRANS) --ignore-window-size \
   --app=$(TEST_PACKAGE_NAME) --deviceIP=${TEST_DEVICE} --xre-path=${MOZ_HOST_BIN} \
-  --httpd-path=_tests/reftest/reftest/components \
+  --httpd-path=_tests/modules \
   $(SYMBOLS_PATH) $(EXTRA_TEST_ARGS) '$(1)' | tee ./$@.log
 
 RUN_REFTEST_B2G = rm -f ./$@.log && $(PYTHON) _tests/reftest/runreftestb2g.py \
   --remote-webserver=10.0.2.2 --b2gpath=${B2G_PATH} --adbpath=${ADB_PATH} \
   --xre-path=${MOZ_HOST_BIN} $(SYMBOLS_PATH) --ignore-window-size \
-  --httpd-path=_tests/reftest/reftest/components \
+  --httpd-path=_tests/modules \
   $(EXTRA_TEST_ARGS) '$(1)' | tee ./$@.log
 
 ifeq ($(OS_ARCH),WINNT) #{
 # GPU-rendered shadow layers are unsupported here
-OOP_CONTENT = --setpref=browser.tabs.remote=true --setpref=browser.tabs.remote.autostart=true --setpref=layers.acceleration.disabled=true
+OOP_CONTENT = --setpref=layers.async-pan-zoom.enabled=true --setpref=browser.tabs.remote.autostart=true --setpref=layers.acceleration.disabled=true
 GPU_RENDERING =
 else
-OOP_CONTENT = --setpref=browser.tabs.remote=true --setpref=browser.tabs.remote.autostart=true
+OOP_CONTENT = --setpref=layers.async-pan-zoom.enabled=true --setpref=browser.tabs.remote.autostart=true
 GPU_RENDERING = --setpref=layers.acceleration.force-enabled=true
 endif #}
 
@@ -280,14 +280,20 @@ crashtest-ipc-gpu:
 	$(call RUN_REFTEST,'$(topsrcdir)/$(TEST_PATH)' $(OOP_CONTENT) $(GPU_RENDERING))
 	$(CHECK_TEST_ERROR)
 
-jstestbrowser: TESTS_PATH?=test-package-stage/jsreftest/tests/
+jstestbrowser: TESTS_PATH?=test-stage/jsreftest/tests/
 jstestbrowser:
 	$(MAKE) -C $(DEPTH)/config
 	$(MAKE) stage-jstests
-	$(call RUN_REFTEST,'$(DIST)/$(TESTS_PATH)/jstests.list' --extra-profile-file=$(DIST)/test-package-stage/jsreftest/tests/user.js)
+	$(call RUN_REFTEST,'$(DIST)/$(TESTS_PATH)/jstests.list' --extra-profile-file=$(DIST)/test-stage/jsreftest/tests/user.js)
 	$(CHECK_TEST_ERROR)
 
 GARBAGE += $(addsuffix .log,$(MOCHITESTS) reftest crashtest jstestbrowser)
+
+ifeq ($(OS_ARCH),Darwin)
+xpcshell_path = $(TARGET_DIST)/$(MOZ_MACBUNDLE_NAME)/Contents/MacOS/xpcshell
+else
+xpcshell_path = $(LIBXUL_DIST)/bin/xpcshell
+endif
 
 # Execute all xpcshell tests in the directories listed in the manifest.
 # See also config/rules.mk 'xpcshell-tests' target for local execution.
@@ -305,11 +311,9 @@ xpcshell-tests:
 	  --test-plugin-path='$(DIST)/plugins' \
 	  --tests-root-dir=$(abspath _tests/xpcshell) \
 	  --testing-modules-dir=$(abspath _tests/modules) \
-	  --xunit-file=$(abspath _tests/xpcshell/results.xml) \
-	  --xunit-suite-name=xpcshell \
           $(SYMBOLS_PATH) \
 	  $(TEST_PATH_ARG) $(EXTRA_TEST_ARGS) \
-	  $(LIBXUL_DIST)/bin/xpcshell
+	  $(xpcshell_path)
 
 B2G_XPCSHELL = \
 	rm -f ./@.log && \
@@ -379,12 +383,7 @@ cppunittests-remote:
         fi
 
 jetpack-tests:
-	$(PYTHON) $(topsrcdir)/addon-sdk/source/bin/cfx -b $(browser_path) --parseable testpkgs
-
-# -- -register
-# -- --trace-malloc malloc.log --shutdown-leaks=sdleak.log
-leaktest:
-	$(PYTHON) _leaktest/leaktest.py $(LEAKTEST_ARGS)
+	cd $(topsrcdir)/addon-sdk/source && $(PYTHON) bin/cfx -b $(abspath $(browser_path)) --parseable testpkgs
 
 pgo-profile-run:
 	$(PYTHON) $(topsrcdir)/build/pgo/profileserver.py $(EXTRA_TEST_ARGS)
@@ -393,7 +392,7 @@ pgo-profile-run:
 include $(topsrcdir)/toolkit/mozapps/installer/package-name.mk
 
 ifndef UNIVERSAL_BINARY
-PKG_STAGE = $(DIST)/test-package-stage
+PKG_STAGE = $(DIST)/test-stage
 package-tests: \
   stage-config \
   stage-mochitest \
@@ -408,10 +407,11 @@ package-tests: \
   stage-cppunittests \
   stage-jittest \
   stage-steeplechase \
+  stage-web-platform-tests \
   $(NULL)
 else
 # This staging area has been built for us by universal/flight.mk
-PKG_STAGE = $(DIST)/universal/test-package-stage
+PKG_STAGE = $(DIST)/universal/test-stage
 endif
 
 package-tests:
@@ -419,14 +419,14 @@ package-tests:
 ifndef UNIVERSAL_BINARY
 	$(NSINSTALL) -D $(DIST)/$(PKG_PATH)
 endif
-	find $(PKG_STAGE) -name '*.pyc' -exec rm {} \;
 	$(MKDIR) -p $(abspath $(DIST))/$(PKG_PATH) && \
 	cd $(PKG_STAGE) && \
 	  zip -rq9D '$(abspath $(DIST))/$(PKG_PATH)$(TEST_PACKAGE)' \
-	  * -x \*/.mkdir.done
+	  * -x \*/.mkdir.done \*.pyc
 
 ifeq ($(MOZ_WIDGET_TOOLKIT),android)
 package-tests: stage-android
+package-tests: stage-instrumentation-tests
 endif
 
 ifeq ($(MOZ_WIDGET_TOOLKIT),gonk)
@@ -504,22 +504,26 @@ ifdef STRIP_CPP_TESTS
 else
 	cp -RL $(DIST)/cppunittests $(PKG_STAGE)
 endif
-	$(NSINSTALL) $(topsrcdir)/testing/runcppunittests.py $(PKG_STAGE)/cppunittests
-	$(NSINSTALL) $(topsrcdir)/testing/remotecppunittests.py $(PKG_STAGE)/cppunittests
-ifeq ($(MOZ_WIDGET_TOOLKIT),android)
-	$(NSINSTALL) $(topsrcdir)/testing/android_cppunittest_manifest.txt $(PKG_STAGE)/cppunittests
+	cp $(topsrcdir)/testing/runcppunittests.py $(PKG_STAGE)/cppunittests
+	cp $(topsrcdir)/testing/remotecppunittests.py $(PKG_STAGE)/cppunittests
+	cp $(topsrcdir)/testing/cppunittest.ini $(PKG_STAGE)/cppunittests
+ifeq ($(MOZ_DISABLE_STARTUPCACHE),)
+	cp $(topsrcdir)/startupcache/test/TestStartupCacheTelemetry.js $(PKG_STAGE)/cppunittests
+	cp $(topsrcdir)/startupcache/test/TestStartupCacheTelemetry.manifest $(PKG_STAGE)/cppunittests
 endif
-	$(NSINSTALL) $(topsrcdir)/startupcache/test/TestStartupCacheTelemetry.js $(PKG_STAGE)/cppunittests
-	$(NSINSTALL) $(topsrcdir)/startupcache/test/TestStartupCacheTelemetry.manifest $(PKG_STAGE)/cppunittests
+ifdef STRIP_CPP_TESTS
+	$(OBJCOPY) $(or $(STRIP_FLAGS),--strip-unneeded) $(DIST)/bin/jsapi-tests$(BIN_SUFFIX) $(PKG_STAGE)/cppunittests/jsapi-tests$(BIN_SUFFIX)
+else
 	cp -RL $(DIST)/bin/jsapi-tests$(BIN_SUFFIX) $(PKG_STAGE)/cppunittests
+endif
 
 stage-jittest: make-stage-dir
 	$(NSINSTALL) -D $(PKG_STAGE)/jit-test/tests
-	cp -RL $(topsrcdir)/js/src/jsapi.h $(PKG_STAGE)/jit-test
-	cp -RL $(topsrcdir)/js/src/jit-test $(PKG_STAGE)/jit-test/jit-test
-	cp -RL $(topsrcdir)/js/src/tests/ecma_6 $(PKG_STAGE)/jit-test/tests/ecma_6
-	cp -RL $(topsrcdir)/js/src/tests/js1_8_5 $(PKG_STAGE)/jit-test/tests/js1_8_5
-	cp -RL $(topsrcdir)/js/src/tests/lib $(PKG_STAGE)/jit-test/tests/lib
+	cp -RL $(topsrcdir)/js/src/jsapi.h $(PKG_STAGE)/jit-test/
+	cp -RL $(topsrcdir)/js/src/jit-test $(PKG_STAGE)/jit-test/
+	cp -RL $(topsrcdir)/js/src/tests/ecma_6 $(PKG_STAGE)/jit-test/tests/
+	cp -RL $(topsrcdir)/js/src/tests/js1_8_5 $(PKG_STAGE)/jit-test/tests/
+	cp -RL $(topsrcdir)/js/src/tests/lib $(PKG_STAGE)/jit-test/tests/
 
 stage-steeplechase: make-stage-dir
 	$(NSINSTALL) -D $(PKG_STAGE)/steeplechase/
@@ -531,16 +535,30 @@ MARIONETTE_DIR=$(PKG_STAGE)/marionette
 stage-marionette: make-stage-dir
 	$(NSINSTALL) -D $(MARIONETTE_DIR)/tests
 	$(NSINSTALL) -D $(MARIONETTE_DIR)/transport
+	$(NSINSTALL) -D $(MARIONETTE_DIR)/driver
 	@(cd $(topsrcdir)/testing/marionette/client && tar --exclude marionette/tests $(TAR_CREATE_FLAGS) - *) | (cd $(MARIONETTE_DIR)/ && tar -xf -)
 	@(cd $(topsrcdir)/testing/marionette/transport && tar $(TAR_CREATE_FLAGS) - *) | (cd $(MARIONETTE_DIR)/transport && tar -xf -)
+	@(cd $(topsrcdir)/testing/marionette/driver && tar $(TAR_CREATE_FLAGS) - *) | (cd $(MARIONETTE_DIR)/driver && tar -xf -)
 	$(PYTHON) $(topsrcdir)/testing/marionette/client/marionette/tests/print-manifest-dirs.py \
           $(topsrcdir) \
           $(topsrcdir)/testing/marionette/client/marionette/tests/unit-tests.ini \
           | (cd $(topsrcdir) && xargs tar $(TAR_CREATE_FLAGS) -) \
           | (cd $(MARIONETTE_DIR)/tests && tar -xf -)
+	$(PYTHON) $(topsrcdir)/testing/marionette/client/marionette/tests/print-manifest-dirs.py \
+          $(topsrcdir) \
+          $(topsrcdir)/testing/marionette/client/marionette/tests/webapi-tests.ini \
+          | (cd $(topsrcdir) && xargs tar $(TAR_CREATE_FLAGS) -) \
+          | (cd $(MARIONETTE_DIR)/tests && tar -xf -)
 
 stage-mozbase: make-stage-dir
 	$(MAKE) -C $(DEPTH)/testing/mozbase stage-package
+
+stage-web-platform-tests: make-stage-dir
+	$(MAKE) -C $(DEPTH)/testing/web-platform stage-package
+
+stage-instrumentation-tests: make-stage-dir
+	$(MAKE) -C $(DEPTH)/testing/instrumentation stage-package
+
 .PHONY: \
   mochitest \
   mochitest-plain \
@@ -567,5 +585,7 @@ stage-mozbase: make-stage-dir
   stage-modules \
   stage-marionette \
   stage-steeplechase \
+  stage-web-platform-tests \
+  stage-instrumentation-tests \
   $(NULL)
 

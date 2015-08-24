@@ -71,15 +71,15 @@ Initialize()
 
 PRThread*
 PR_CreateThread(PRThreadType type,
-		void (*start)(void* arg),
-		void* arg,
-		PRThreadPriority priority,
-		PRThreadScope scope,
-		PRThreadState state,
-		uint32_t stackSize)
+                void (*start)(void* arg),
+                void* arg,
+                PRThreadPriority priority,
+                PRThreadScope scope,
+                PRThreadState state,
+                uint32_t stackSize)
 {
-    JS_ASSERT(type == PR_USER_THREAD);
-    JS_ASSERT(priority == PR_PRIORITY_NORMAL);
+    MOZ_ASSERT(type == PR_USER_THREAD);
+    MOZ_ASSERT(priority == PR_PRIORITY_NORMAL);
 
     if (!gInitialized) {
         /*
@@ -174,13 +174,13 @@ PR_NewThreadPrivateIndex(unsigned* newIndex, PRThreadPrivateDTOR destructor)
      * We only call PR_NewThreadPrivateIndex from the main thread, so there's no
      * need to lock the table of TLS keys.
      */
-    JS_ASSERT(PR_GetCurrentThread() == &gMainThread);
+    MOZ_ASSERT(PR_GetCurrentThread() == &gMainThread);
 
     pthread_key_t key;
     if (pthread_key_create(&key, destructor))
         return PR_FAILURE;
 
-    JS_ASSERT(gTLSKeyCount + 1 < MaxTLSKeyCount);
+    MOZ_ASSERT(gTLSKeyCount + 1 < MaxTLSKeyCount);
 
     gTLSKeys[gTLSKeyCount] = key;
     *newIndex = gTLSKeyCount;
@@ -210,13 +210,13 @@ PR_GetThreadPrivate(unsigned index)
 PRStatus
 PR_CallOnce(PRCallOnceType* once, PRCallOnceFN func)
 {
-    MOZ_ASSUME_UNREACHABLE("PR_CallOnce unimplemented");
+    MOZ_CRASH("PR_CallOnce unimplemented");
 }
 
 PRStatus
 PR_CallOnceWithArg(PRCallOnceType* once, PRCallOnceWithArgFN func, void* arg)
 {
-    MOZ_ASSUME_UNREACHABLE("PR_CallOnceWithArg unimplemented");
+    MOZ_CRASH("PR_CallOnceWithArg unimplemented");
 }
 
 class nspr::Lock
@@ -317,6 +317,12 @@ uint32_t
 PR_MillisecondsToInterval(uint32_t milli)
 {
     return milli;
+}
+
+uint32_t
+PR_MicrosecondsToInterval(uint32_t micro)
+{
+    return (micro + 999) / 1000;
 }
 
 static const uint64_t TicksPerSecond = 1000;

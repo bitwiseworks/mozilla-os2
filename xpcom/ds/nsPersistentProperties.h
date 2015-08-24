@@ -15,7 +15,7 @@
 
 class nsIUnicharInputStream;
 
-class nsPersistentProperties MOZ_FINAL : public nsIPersistentProperties
+class nsPersistentProperties final : public nsIPersistentProperties
 {
 public:
   nsPersistentProperties();
@@ -24,8 +24,7 @@ public:
   NS_DECL_NSIPROPERTIES
   NS_DECL_NSIPERSISTENTPROPERTIES
 
-  static nsresult
-  Create(nsISupports *aOuter, REFNSIID aIID, void **aResult);
+  static nsresult Create(nsISupports* aOuter, REFNSIID aIID, void** aResult);
 
 private:
   ~nsPersistentProperties();
@@ -33,12 +32,11 @@ private:
 protected:
   nsCOMPtr<nsIUnicharInputStream> mIn;
 
-  nsIPersistentProperties* mSubclass;
-  struct PLDHashTable mTable;
+  PLDHashTable mTable;
   PLArenaPool mArena;
 };
 
-class nsPropertyElement MOZ_FINAL : public nsIPropertyElement
+class nsPropertyElement final : public nsIPropertyElement
 {
 public:
   nsPropertyElement()
@@ -46,15 +44,15 @@ public:
   }
 
   nsPropertyElement(const nsACString& aKey, const nsAString& aValue)
-    : mKey(aKey), mValue(aValue)
+    : mKey(aKey)
+    , mValue(aValue)
   {
   }
 
   NS_DECL_ISUPPORTS
   NS_DECL_NSIPROPERTYELEMENT
 
-  static NS_METHOD
-  Create(nsISupports *aOuter, REFNSIID aIID, void **aResult);
+  static NS_METHOD Create(nsISupports* aOuter, REFNSIID aIID, void** aResult);
 
 private:
   ~nsPropertyElement() {}

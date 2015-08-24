@@ -6,6 +6,19 @@
 interface MozWakeLockListener;
 
 /**
+  * The reason for the factory reset.
+  * "normal" : simple factory reset.
+  * "wipe"   : will also attempt to wipe all user storage areas.
+  * "root"   : simple factory reset that also root the phone to get more
+  *            privileges when using devtools.
+  */
+enum FactoryResetReason {
+    "normal",
+    "wipe",
+    "root"
+};
+
+/**
  * This interface implements navigator.mozPower
  */
 interface MozPowerManager
@@ -14,7 +27,7 @@ interface MozPowerManager
     void    powerOff();
     [Throws]
     void    reboot();
-    void    factoryReset();
+    void    factoryReset(optional FactoryResetReason reason = "normal");
 
     /**
      * The listeners are notified when a resource changes its lock state to:
@@ -48,6 +61,13 @@ interface MozPowerManager
      * device's screen, so setting it to false will turn off the screen.
      */
     attribute boolean screenEnabled;
+
+    /**
+     * Is the device's keypad/button backlight enabled? Setting it to false will
+     * turn off the device's keypad/button backlight. And the brightness level
+     * is the same as |screenBrightness|.
+     */
+    attribute boolean keyLightEnabled;
 
     /**
      * How bright is the screen's backlight, on a scale from 0 (very dim) to 1

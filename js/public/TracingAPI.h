@@ -7,15 +7,59 @@
 #ifndef js_TracingAPI_h
 #define js_TracingAPI_h
 
-#include "mozilla/NullPtr.h"
-
+#include "jsalloc.h"
 #include "jspubtd.h"
+
+#include "js/HashTable.h"
 
 class JS_PUBLIC_API(JSTracer);
 
 namespace JS {
 template <typename T> class Heap;
 template <typename T> class TenuredHeap;
+}
+
+// When tracing a thing, the GC needs to know about the layout of the object it
+// is looking at. There are a fixed number of different layouts that the GC
+// knows about. The "trace kind" is a static map which tells which layout a GC
+// thing has.
+//
+// Although this map is public, the details are completely hidden. Not all of
+// the matching C++ types are exposed, and those that are, are opaque.
+//
+// See Value::gcKind() and JSTraceCallback in Tracer.h for more details.
+enum JSGCTraceKind
+{
+    // These trace kinds have a publicly exposed, although opaque, C++ type.
+    // Note: The order here is determined by our Value packing. Other users
+    //       should sort alphabetically, for consistency.
+    JSTRACE_OBJECT = 0x00,
+    JSTRACE_STRING = 0x01,
+    JSTRACE_SYMBOL = 0x02,
+    JSTRACE_SCRIPT = 0x03,
+
+    // Shape details are exposed through JS_TraceShapeCycleCollectorChildren.
+    JSTRACE_SHAPE = 0x04,
+
+    // The kind associated with a nullptr.
+    JSTRACE_NULL = 0x06,
+
+    // A kind that indicates the real kind should be looked up in the arena.
+    JSTRACE_OUTOFLINE = 0x07,
+
+    // The following kinds do not have an exposed C++ idiom.
+    JSTRACE_BASE_SHAPE = 0x0F,
+    JSTRACE_JITCODE = 0x1F,
+    JSTRACE_LAZY_SCRIPT = 0x2F,
+    JSTRACE_OBJECT_GROUP = 0x3F,
+
+    JSTRACE_LAST = JSTRACE_OBJECT_GROUP
+};
+
+namespace JS {
+// Returns a static string equivalent of |kind|.
+JS_FRIEND_API(const char*)
+GCTraceKindToAscii(JSGCTraceKind kind);
 }
 
 // Tracer callback, called for each traceable thing directly referenced by a
@@ -155,37 +199,40 @@ class JS_PUBLIC_API(JSTracer)
 // and re-inserted with the correct hash.
 //
 extern JS_PUBLIC_API(void)
-JS_CallValueTracer(JSTracer* trc, JS::Value* valuep, const char* name);
+JS_CallValueTracer(JSTracer* trc, JS::Heap<JS::Value>* valuep, const char* name);
 
 extern JS_PUBLIC_API(void)
-JS_CallIdTracer(JSTracer* trc, jsid* idp, const char* name);
+JS_CallIdTracer(JSTracer* trc, JS::Heap<jsid>* idp, const char* name);
 
 extern JS_PUBLIC_API(void)
-JS_CallObjectTracer(JSTracer* trc, JSObject** objp, const char* name);
+JS_CallObjectTracer(JSTracer* trc, JS::Heap<JSObject*>* objp, const char* name);
 
 extern JS_PUBLIC_API(void)
-JS_CallStringTracer(JSTracer* trc, JSString** strp, const char* name);
+JS_CallStringTracer(JSTracer* trc, JS::Heap<JSString*>* strp, const char* name);
 
 extern JS_PUBLIC_API(void)
-JS_CallScriptTracer(JSTracer* trc, JSScript** scriptp, const char* name);
+JS_CallScriptTracer(JSTracer* trc, JS::Heap<JSScript*>* scriptp, const char* name);
 
 extern JS_PUBLIC_API(void)
-JS_CallHeapValueTracer(JSTracer* trc, JS::Heap<JS::Value>* valuep, const char* name);
+JS_CallFunctionTracer(JSTracer* trc, JS::Heap<JSFunction*>* funp, const char* name);
+
+// The following JS_CallUnbarriered*Tracer functions should only be called where
+// you know for sure that a heap post barrier is not required.  Use with extreme
+// caution!
+extern JS_PUBLIC_API(void)
+JS_CallUnbarrieredValueTracer(JSTracer* trc, JS::Value* valuep, const char* name);
 
 extern JS_PUBLIC_API(void)
-JS_CallHeapIdTracer(JSTracer* trc, JS::Heap<jsid>* idp, const char* name);
+JS_CallUnbarrieredIdTracer(JSTracer* trc, jsid* idp, const char* name);
 
 extern JS_PUBLIC_API(void)
-JS_CallHeapObjectTracer(JSTracer* trc, JS::Heap<JSObject*>* objp, const char* name);
+JS_CallUnbarrieredObjectTracer(JSTracer* trc, JSObject** objp, const char* name);
 
 extern JS_PUBLIC_API(void)
-JS_CallHeapStringTracer(JSTracer* trc, JS::Heap<JSString*>* strp, const char* name);
+JS_CallUnbarrieredStringTracer(JSTracer* trc, JSString** strp, const char* name);
 
 extern JS_PUBLIC_API(void)
-JS_CallHeapScriptTracer(JSTracer* trc, JS::Heap<JSScript*>* scriptp, const char* name);
-
-extern JS_PUBLIC_API(void)
-JS_CallHeapFunctionTracer(JSTracer* trc, JS::Heap<JSFunction*>* funp, const char* name);
+JS_CallUnbarrieredScriptTracer(JSTracer* trc, JSScript** scriptp, const char* name);
 
 template <typename HashSetEnum>
 inline void
@@ -193,9 +240,9 @@ JS_CallHashSetObjectTracer(JSTracer* trc, HashSetEnum& e, JSObject* const& key, 
 {
     JSObject* updated = key;
     trc->setTracingLocation(reinterpret_cast<void*>(&const_cast<JSObject*&>(key)));
-    JS_CallObjectTracer(trc, &updated, name);
+    JS_CallUnbarrieredObjectTracer(trc, &updated, name);
     if (updated != key)
-        e.rekeyFront(key, updated);
+        e.rekeyFront(updated);
 }
 
 // Trace an object that is known to always be tenured.  No post barriers are
@@ -208,6 +255,15 @@ JS_TraceChildren(JSTracer* trc, void* thing, JSGCTraceKind kind);
 
 extern JS_PUBLIC_API(void)
 JS_TraceRuntime(JSTracer* trc);
+
+namespace JS {
+typedef js::HashSet<Zone*, js::DefaultHasher<Zone*>, js::SystemAllocPolicy> ZoneSet;
+}
+
+// Trace every value within |zones| that is wrapped by a cross-compartment
+// wrapper from a zone that is not an element of |zones|.
+extern JS_PUBLIC_API(void)
+JS_TraceIncomingCCWs(JSTracer* trc, const JS::ZoneSet& zones);
 
 extern JS_PUBLIC_API(void)
 JS_GetTraceThingInfo(char* buf, size_t bufsize, JSTracer* trc,

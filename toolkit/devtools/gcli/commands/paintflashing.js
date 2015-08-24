@@ -17,11 +17,13 @@ const gcli = require("gcli/index");
 
 function onPaintFlashingChanged(context) {
   let tab = context.environment.chromeWindow.gBrowser.selectedTab;
-  eventEmitter.emit("changed", tab);
-  function fireChange() {
-    eventEmitter.emit("changed", tab);
-  }
   let target = TargetFactory.forTab(tab);
+
+  eventEmitter.emit("changed", { target: target });
+  function fireChange() {
+    eventEmitter.emit("changed", { target: target });
+  }
+
   target.off("navigate", fireChange);
   target.once("navigate", fireChange);
 
@@ -100,10 +102,14 @@ exports.items = [
     state: {
       isChecked: function(aTarget) {
         if (aTarget.isLocalTab) {
+          let isChecked = false;
           let window = aTarget.tab.linkedBrowser.contentWindow;
-          let wUtils = window.QueryInterface(Ci.nsIInterfaceRequestor).
-                              getInterface(Ci.nsIDOMWindowUtils);
-          return wUtils.paintFlashing;
+          if (window) {
+            let wUtils = window.QueryInterface(Ci.nsIInterfaceRequestor).
+                                getInterface(Ci.nsIDOMWindowUtils);
+            isChecked = wUtils.paintFlashing;
+          }
+          return isChecked;
         } else {
           throw new Error("Unsupported target");
         }

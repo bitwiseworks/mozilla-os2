@@ -1,5 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -32,10 +32,11 @@ namespace mozilla {
  * is created on the main thread then it will automatically join its thread on
  * XPCOM shutdown using the Observer Service.
  */
-class LazyIdleThread MOZ_FINAL : public nsIThread,
-                                 public nsITimerCallback,
-                                 public nsIThreadObserver,
-                                 public nsIObserver
+class LazyIdleThread final
+  : public nsIThread
+  , public nsITimerCallback
+  , public nsIThreadObserver
+  , public nsIObserver
 {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
@@ -45,7 +46,8 @@ public:
   NS_DECL_NSITHREADOBSERVER
   NS_DECL_NSIOBSERVER
 
-  enum ShutdownMethod {
+  enum ShutdownMethod
+  {
     AutomaticShutdown = 0,
     ManualShutdown
   };
@@ -128,7 +130,8 @@ private:
    * Returns true if events should be queued rather than immediately dispatched
    * to mThread. Currently only happens when the thread is shutting down.
    */
-  bool UseRunnableQueue() {
+  bool UseRunnableQueue()
+  {
     return !!mQueuedRunnables;
   }
 
@@ -165,7 +168,7 @@ private:
    * Temporary storage for events that happen to be dispatched while we're in
    * the process of shutting down our real thread.
    */
-  nsTArray<nsCOMPtr<nsIRunnable> >* mQueuedRunnables;
+  nsTArray<nsCOMPtr<nsIRunnable>>* mQueuedRunnables;
 
   /**
    * The number of milliseconds a thread should be idle before dying.

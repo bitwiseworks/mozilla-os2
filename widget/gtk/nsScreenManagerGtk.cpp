@@ -188,6 +188,30 @@ nsScreenManagerGtk :: Init()
   return NS_OK;
 }
 
+NS_IMETHODIMP
+nsScreenManagerGtk :: ScreenForId ( uint32_t aId, nsIScreen **outScreen )
+{
+  *outScreen = nullptr;
+
+  nsresult rv;
+  rv = EnsureInit();
+  if (NS_FAILED(rv)) {
+    NS_ERROR("nsScreenManagerGtk::EnsureInit() failed from ScreenForId");
+    return rv;
+  }
+
+  for (int32_t i = 0, i_end = mCachedScreenArray.Count(); i < i_end; ++i) {
+    uint32_t id;
+    rv = mCachedScreenArray[i]->GetId(&id);
+    if (NS_SUCCEEDED(rv) && id == aId) {
+      NS_IF_ADDREF(*outScreen = mCachedScreenArray[i]);
+      return NS_OK;
+    }
+  }
+
+  return NS_ERROR_FAILURE;
+}
+
 
 //
 // ScreenForRect 
@@ -195,12 +219,30 @@ nsScreenManagerGtk :: Init()
 // Returns the screen that contains the rectangle. If the rect overlaps
 // multiple screens, it picks the screen with the greatest area of intersection.
 //
-// The coordinates are in pixels (not app units) and in screen coordinates.
+// The coordinates are in CSS pixels (not app units) and in screen coordinates.
 //
 NS_IMETHODIMP
-nsScreenManagerGtk :: ScreenForRect ( int32_t aX, int32_t aY,
-                                      int32_t aWidth, int32_t aHeight,
-                                      nsIScreen **aOutScreen )
+nsScreenManagerGtk :: ScreenForRect( int32_t aX, int32_t aY,
+                                     int32_t aWidth, int32_t aHeight,
+                                     nsIScreen **aOutScreen )
+{
+  uint32_t scale = nsScreenGtk::GetDPIScale();
+  return ScreenForRectPix(aX*scale, aY*scale, aWidth*scale, aHeight*scale,
+                          aOutScreen);
+}
+
+//
+// ScreenForRectPix
+//
+// Returns the screen that contains the rectangle. If the rect overlaps
+// multiple screens, it picks the screen with the greatest area of intersection.
+//
+// The coordinates are in device (X11) pixels.
+//
+nsresult
+nsScreenManagerGtk :: ScreenForRectPix( int32_t aX, int32_t aY,
+                                        int32_t aWidth, int32_t aHeight,
+                                        nsIScreen **aOutScreen )
 {
   nsresult rv;
   rv = EnsureInit();
@@ -208,6 +250,7 @@ nsScreenManagerGtk :: ScreenForRect ( int32_t aX, int32_t aY,
     NS_ERROR("nsScreenManagerGtk::EnsureInit() failed from ScreenForRect");
     return rv;
   }
+
   // which screen ( index from zero ) should we return?
   uint32_t which = 0;
   // Optimize for the common case.  If the number of screens is only
@@ -283,7 +326,7 @@ nsScreenManagerGtk :: GetNumberOfScreens(uint32_t *aNumberOfScreens)
 NS_IMETHODIMP
 nsScreenManagerGtk::GetSystemDefaultScale(float *aDefaultScale)
 {
-  *aDefaultScale = 1.0f;
+  *aDefaultScale = nsScreenGtk::GetDPIScale();
   return NS_OK;
 }
 
@@ -313,7 +356,7 @@ nsScreenManagerGtk :: ScreenForNativeWidget (void *aWidget, nsIScreen **outScree
     gdk_window_get_geometry(GDK_WINDOW(aWidget), &x, &y, &width, &height);
 #endif
     gdk_window_get_origin(GDK_WINDOW(aWidget), &x, &y);
-    rv = ScreenForRect(x, y, width, height, outScreen);
+    rv = ScreenForRectPix(x, y, width, height, outScreen);
   } else {
     rv = GetPrimaryScreen(outScreen);
   }

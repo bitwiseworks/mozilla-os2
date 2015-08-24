@@ -104,6 +104,11 @@ int32_t ViERenderer::SetExternalRenderer(
                                                   incoming_external_callback_);
 }
 
+int32_t ViERenderer::SetVideoRenderCallback(int32_t render_id,
+                                            VideoRenderCallback* callback) {
+  return render_module_.AddExternalRenderCallback(render_id, callback);
+}
+
 ViERenderer::ViERenderer(const int32_t render_id,
                          const int32_t engine_id,
                          VideoRender& render_module,
@@ -176,6 +181,7 @@ int32_t ViEExternalRendererImpl::RenderFrame(
       external_renderer_->DeliverFrame(NULL,
                                        0,
                                        video_frame.timestamp(),
+                                       video_frame.ntp_time_ms(),
                                        video_frame.render_time_ms(),
                                        video_frame.native_handle());
     } else {
@@ -239,6 +245,7 @@ int32_t ViEExternalRendererImpl::RenderFrame(
     external_renderer_->DeliverFrame(out_frame->Buffer(),
                                      out_frame->Length(),
                                      video_frame.timestamp(),
+                                     video_frame.ntp_time_ms(),
                                      video_frame.render_time_ms(),
                                      NULL);
   }

@@ -8,18 +8,22 @@ SOURCES += [
     'OmxPlugin236.cpp',
 ]
 
-LIBRARY_NAME = 'omxplugingb'
-
-FORCE_SHARED_LIB = True
+SharedLibrary('omxplugingb')
 
 LOCAL_INCLUDES += [
-    '../../../content/media/plugins',
     '../include/gb',
     '../include/gb/media/stagefright/openmax',
 ]
 
+USE_LIBS += [
+    '/media/omx-plugin/lib/gb/libstagefright/stagefright',
+    '/media/omx-plugin/lib/gb/libutils/utils',
+    'stagefright_color_conversion',
+]
+
 # Don't use STL wrappers; this isn't Gecko code
 DISABLE_STL_WRAPPING = True
+NO_VISIBILITY_FLAGS = True
 
 # Suppress warnings in third-party code.
 CXXFLAGS += ['-Wno-multichar']

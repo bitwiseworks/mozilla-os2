@@ -8,7 +8,6 @@ function test() {
 }
 
 let urls = [
-  "javascript:'foopy';",
   "data:text/html,<body>hi"
 ];
 
@@ -46,7 +45,7 @@ function testURL(url, loadFunc, endFunc) {
     loadFunc(url);
 
     addPageShowListener(function () {
-      let fm = Cc["@mozilla.org/focus-manager;1"].getService(Ci.nsIFocusManager);
+      let fm = Services.focus;
       is(fm.focusedElement, null, "should be no focused element");
       is(fm.focusedWindow, gBrowser.contentWindow, "content window should be focused");
 

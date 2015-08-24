@@ -1,5 +1,3 @@
-// -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
-
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -160,6 +158,19 @@ function GetTreeSelections(tree) {
   return selections;
 }
 
+function HandleTreeColumnClick(sortFunction, event) {
+  if (event.target.nodeName != "treecol" || event.button != 0) {
+    return;
+  }
+
+  let sortField = event.target.getAttribute("data-field-name");
+  if (!sortField) {
+    return;
+  }
+
+  sortFunction(sortField);
+}
+
 function SortTree(tree, view, table, column, lastSortColumn, lastSortAscending, updateSelection) {
 
   // remember which item was selected so we can restore it after the sort
@@ -169,18 +180,40 @@ function SortTree(tree, view, table, column, lastSortColumn, lastSortAscending, 
   // determine if sort is to be ascending or descending
   var ascending = (column == lastSortColumn) ? !lastSortAscending : true;
 
-  // do the sort
-  var compareFunc;
-  if (ascending) {
-    compareFunc = function compare(first, second) {
-      return CompareLowerCase(first[column], second[column]);
+  function compareFunc(a, b) {
+    var valA, valB;
+    switch (column) {
+      case "hostname":
+        var realmA = a.httpRealm;
+        var realmB = b.httpRealm;
+        realmA = realmA == null ? "" : realmA.toLowerCase();
+        realmB = realmB == null ? "" : realmB.toLowerCase();
+
+        valA = a[column].toLowerCase() + realmA;
+        valB = b[column].toLowerCase() + realmB;
+        break;
+      case "username":
+      case "password":
+        valA = a[column].toLowerCase();
+        valB = b[column].toLowerCase();
+        break;
+
+      default:
+        valA = a[column];
+        valB = b[column];
     }
-  } else {
-    compareFunc = function compare(first, second) {
-      return CompareLowerCase(second[column], first[column]);
-    }
+
+    if (valA < valB)
+      return -1;
+    if (valA > valB)
+      return 1;
+    return 0;
   }
+
+  // do the sort
   table.sort(compareFunc);
+  if (!ascending)
+    table.reverse();
 
   // restore the selection
   var selectedRow = -1;
@@ -206,28 +239,3 @@ function SortTree(tree, view, table, column, lastSortColumn, lastSortAscending, 
   return ascending;
 }
 
-/**
- * Case insensitive string comparator.
- */
-function CompareLowerCase(first, second) {
-  var firstLower, secondLower;
-
-  // Are we sorting nsILoginInfo entries or just strings?
-  if (first.hostname) {
-    firstLower  = first.hostname.toLowerCase();
-    secondLower = second.hostname.toLowerCase();
-  } else {
-    firstLower  = first.toLowerCase();
-    secondLower = second.toLowerCase();
-  }
-
-  if (firstLower < secondLower) {
-    return -1;
-  }
-
-  if (firstLower > secondLower) {
-    return 1;
-  }
-
-  return 0;
-}

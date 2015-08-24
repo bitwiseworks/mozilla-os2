@@ -15,6 +15,8 @@
 
 namespace webrtc {
 
+namespace acm2 {
+
 class ACMPCM16B : public ACMGenericCodec {
  public:
   explicit ACMPCM16B(int16_t codec_id);
@@ -23,19 +25,22 @@ class ACMPCM16B : public ACMGenericCodec {
   // For FEC.
   ACMGenericCodec* CreateInstance(void);
 
-  int16_t InternalEncode(uint8_t* bitstream, int16_t* bitstream_len_byte);
+  int16_t InternalEncode(uint8_t* bitstream,
+                         int16_t* bitstream_len_byte) OVERRIDE
+      EXCLUSIVE_LOCKS_REQUIRED(codec_wrapper_lock_);
 
   int16_t InternalInitEncoder(WebRtcACMCodecParams* codec_params);
 
  protected:
-  void DestructEncoderSafe();
+  void DestructEncoderSafe() OVERRIDE
+      EXCLUSIVE_LOCKS_REQUIRED(codec_wrapper_lock_);
 
   int16_t InternalCreateEncoder();
 
-  void InternalDestructEncoderInst(void* ptr_inst);
-
   int32_t sampling_freq_hz_;
 };
+
+}  // namespace acm2
 
 }  // namespace webrtc
 

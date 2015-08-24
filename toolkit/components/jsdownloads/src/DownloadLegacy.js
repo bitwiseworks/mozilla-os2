@@ -1,4 +1,4 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim: set ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -139,6 +139,7 @@ DownloadLegacyTransfer.prototype = {
         if (Components.isSuccessCode(aStatus)) {
           download.saver.setSha256Hash(this._sha256Hash);
           download.saver.setSignatureInfo(this._signatureInfo);
+          download.saver.setRedirects(this._redirects);
         }
         download.saver.onTransferFinished(aRequest, aStatus);
       }).then(null, Cu.reportError);
@@ -260,6 +261,11 @@ DownloadLegacyTransfer.prototype = {
   setSignatureInfo: function (signatureInfo)
   {
     this._signatureInfo = signatureInfo;
+  },
+
+  setRedirects: function (redirects)
+  {
+    this._redirects = redirects;
   },
 
   //////////////////////////////////////////////////////////////////////////////

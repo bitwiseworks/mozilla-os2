@@ -19,14 +19,13 @@ nsDOMCSSRGBColor::nsDOMCSSRGBColor(nsROCSSPrimitiveValue* aRed,
   : mRed(aRed), mGreen(aGreen), mBlue(aBlue), mAlpha(aAlpha)
   , mHasAlpha(aHasAlpha)
 {
-  SetIsDOMBinding();
 }
 
 nsDOMCSSRGBColor::~nsDOMCSSRGBColor(void)
 {
 }
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_4(nsDOMCSSRGBColor, mAlpha,  mBlue, mGreen, mRed)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(nsDOMCSSRGBColor, mAlpha,  mBlue, mGreen, mRed)
 
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(nsDOMCSSRGBColor, AddRef)
 NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(nsDOMCSSRGBColor, Release)

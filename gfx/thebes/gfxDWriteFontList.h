@@ -114,7 +114,6 @@ public:
         mWeight = aWeight;
         mStretch = aStretch;
         mItalic = aItalic;
-        mIsUserFont = true;
         mIsLocalUserFont = true;
         mIsCJK = UNINITIALIZED_VALUE;
     }
@@ -139,7 +138,7 @@ public:
         mWeight = aWeight;
         mStretch = aStretch;
         mItalic = aItalic;
-        mIsUserFont = true;
+        mIsDataUserFont = true;
         mIsCJK = UNINITIALIZED_VALUE;
     }
 
@@ -147,7 +146,7 @@ public:
 
     virtual bool IsSymbolFont();
 
-    virtual hb_blob_t* GetFontTable(uint32_t aTableTag) MOZ_OVERRIDE;
+    virtual hb_blob_t* GetFontTable(uint32_t aTableTag) override;
 
     nsresult ReadCMAP(FontInfoData *aFontInfoData = nullptr);
 
@@ -166,7 +165,7 @@ protected:
     friend class gfxDWriteFontList;
 
     virtual nsresult CopyFontTable(uint32_t aTableTag,
-                                   FallibleTArray<uint8_t>& aBuffer) MOZ_OVERRIDE;
+                                   FallibleTArray<uint8_t>& aBuffer) override;
 
     virtual gfxFont *CreateFontInstance(const gfxFontStyle *aFontStyle,
                                         bool aNeedsBold);
@@ -195,7 +194,7 @@ protected:
 };
 
 // custom text renderer used to determine the fallback font for a given char
-class FontFallbackRenderer MOZ_FINAL : public IDWriteTextRenderer
+class FontFallbackRenderer final : public IDWriteTextRenderer
 {
 public:
     FontFallbackRenderer(IDWriteFactory *aFactory)
@@ -347,23 +346,26 @@ public:
 
     virtual gfxFontFamily* GetDefaultFont(const gfxFontStyle* aStyle);
 
-    virtual gfxFontEntry* LookupLocalFont(const gfxProxyFontEntry *aProxyEntry,
-                                          const nsAString& aFontName);
+    virtual gfxFontEntry* LookupLocalFont(const nsAString& aFontName,
+                                          uint16_t aWeight,
+                                          int16_t aStretch,
+                                          bool aItalic);
 
-    virtual gfxFontEntry* MakePlatformFont(const gfxProxyFontEntry *aProxyEntry,
-                                           const uint8_t *aFontData,
+    virtual gfxFontEntry* MakePlatformFont(const nsAString& aFontName,
+                                           uint16_t aWeight,
+                                           int16_t aStretch,
+                                           bool aItalic,
+                                           const uint8_t* aFontData,
                                            uint32_t aLength);
     
-    virtual bool ResolveFontName(const nsAString& aFontName,
-                                   nsAString& aResolvedFontName);
-
     bool GetStandardFamilyName(const nsAString& aFontName,
                                  nsAString& aFamilyName);
 
     IDWriteGdiInterop *GetGDIInterop() { return mGDIInterop; }
     bool UseGDIFontTableAccess() { return mGDIFontTableAccess; }
 
-    virtual gfxFontFamily* FindFamily(const nsAString& aFamily);
+    virtual gfxFontFamily* FindFamily(const nsAString& aFamily,
+                                      bool aUseSystemFonts = false);
 
     virtual void GetFontFamilyList(nsTArray<nsRefPtr<gfxFontFamily> >& aFamilyArray);
 
@@ -389,6 +391,13 @@ private:
                                              gfxFontFamily** aMatchedFamily);
 
     virtual bool UsesSystemFallback() { return true; }
+
+    void GetFontsFromCollection(IDWriteFontCollection* aCollection);
+
+#ifdef MOZ_BUNDLED_FONTS
+    already_AddRefed<IDWriteFontCollection>
+    CreateBundledFontsCollection(IDWriteFactory* aFactory);
+#endif
 
     /**
      * Fonts listed in the registry as substitutes but for which no actual
@@ -417,6 +426,11 @@ private:
 
     nsRefPtr<FontFallbackRenderer> mFallbackRenderer;
     nsRefPtr<IDWriteTextFormat>    mFallbackFormat;
+
+    nsRefPtr<IDWriteFontCollection> mSystemFonts;
+#ifdef MOZ_BUNDLED_FONTS
+    nsRefPtr<IDWriteFontCollection> mBundledFonts;
+#endif
 };
 
 

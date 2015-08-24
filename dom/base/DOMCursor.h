@@ -27,7 +27,7 @@ public:
 
   DOMCursor(nsPIDOMWindow* aWindow, nsICursorContinueCallback *aCallback);
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) override;
 
   bool Done() const
   {
@@ -38,8 +38,16 @@ public:
   void Reset();
   void FireDone();
 
+protected:
+  ~DOMCursor() {}
+
 private:
-  DOMCursor() MOZ_DELETE;
+  DOMCursor() = delete;
+  // Calling Then() on DOMCursor is a mistake, since the DOMCursor object
+  // should not have a .then() method from JS' point of view.
+  already_AddRefed<mozilla::dom::Promise>
+  Then(JSContext* aCx, AnyCallback* aResolveCallback,
+       AnyCallback* aRejectCallback, ErrorResult& aRv) = delete;
 
   nsCOMPtr<nsICursorContinueCallback> mCallback;
   bool mFinished;

@@ -8,10 +8,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <ostream>
 
 #include "mozilla/Assertions.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/TypeTraits.h"
+#include "Types.h"
 
 namespace mozilla {
 namespace gfx {
@@ -78,13 +80,17 @@ struct BaseRect {
            (x <= aRect.x && aRect.XMost() <= XMost() &&
             y <= aRect.y && aRect.YMost() <= YMost());
   }
-  // Returns true if this rectangle contains the rectangle (aX,aY,1,1).
+  // Returns true if this rectangle contains the point. Points are considered
+  // in the rectangle if they are on the left or top edge, but outside if they
+  // are on the right or bottom edge.
   bool Contains(T aX, T aY) const
   {
-    return x <= aX && aX + 1 <= XMost() &&
-           y <= aY && aY + 1 <= YMost();
+    return x <= aX && aX < XMost() &&
+           y <= aY && aY < YMost();
   }
-  // Returns true if this rectangle contains the rectangle (aPoint.x,aPoint.y,1,1).
+  // Returns true if this rectangle contains the point. Points are considered
+  // in the rectangle if they are on the left or top edge, but outside if they
+  // are on the right or bottom edge.
   bool Contains(const Point& aPoint) const { return Contains(aPoint.x, aPoint.y); }
 
   // Intersection. Returns TRUE if the receiver's area has non-empty
@@ -92,7 +98,8 @@ struct BaseRect {
   // Always returns false if aRect is empty or 'this' is empty.
   bool Intersects(const Sub& aRect) const
   {
-    return x < aRect.XMost() && aRect.x < XMost() &&
+    return !IsEmpty() && !aRect.IsEmpty() &&
+           x < aRect.XMost() && aRect.x < XMost() &&
            y < aRect.YMost() && aRect.y < YMost();
   }
   // Returns the rectangle containing the intersection of the points
@@ -170,6 +177,23 @@ struct BaseRect {
     *static_cast<Sub*>(this) = aRect1.UnionEdges(aRect2);
   }
 
+  // Expands the rect to include the point
+  void ExpandToEnclose(const Point& aPoint)
+  {
+    if (aPoint.x < x) {
+      width = XMost() - aPoint.x;
+      x = aPoint.x;
+    } else if (aPoint.x > XMost()) {
+      width = aPoint.x - x;
+    }
+    if (aPoint.y < y) {
+      height = YMost() - aPoint.y;
+      y = aPoint.y;
+    } else if (aPoint.y > YMost()) {
+      height = aPoint.y - y;
+    }
+  }
+
   void SetRect(T aX, T aY, T aWidth, T aHeight)
   {
     x = aX; y = aY; width = aWidth; height = aHeight;
@@ -201,6 +225,20 @@ struct BaseRect {
     height += aMargin.TopBottom();
   }
   void Inflate(const SizeT& aSize) { Inflate(aSize.width, aSize.height); }
+
+  void InflateToMultiple(const SizeT& aMultiple)
+  {
+    T xMost = XMost();
+    T yMost = YMost();
+
+    x = static_cast<T>(floor(x / aMultiple.width)) * aMultiple.width;
+    y = static_cast<T>(floor(y / aMultiple.height)) * aMultiple.height;
+    xMost = static_cast<T>(ceil(x / aMultiple.width)) * aMultiple.width;
+    yMost = static_cast<T>(ceil(y / aMultiple.height)) * aMultiple.height;
+
+    width = xMost - x;
+    height = yMost - y;
+  }
 
   void Deflate(T aD) { Deflate(aD, aD); }
   void Deflate(T aDx, T aDy)
@@ -235,13 +273,25 @@ struct BaseRect {
     return IsEqualEdges(aRect) || (IsEmpty() && aRect.IsEmpty());
   }
 
-  Sub operator+(const Point& aPoint) const
+  friend Sub operator+(Sub aSub, const Point& aPoint)
   {
-    return Sub(x + aPoint.x, y + aPoint.y, width, height);
+    aSub += aPoint;
+    return aSub;
   }
-  Sub operator-(const Point& aPoint) const
+  friend Sub operator-(Sub aSub, const Point& aPoint)
   {
-    return Sub(x - aPoint.x, y - aPoint.y, width, height);
+    aSub -= aPoint;
+    return aSub;
+  }
+  friend Sub operator+(Sub aSub, const SizeT& aSize)
+  {
+    aSub += aSize;
+    return aSub;
+  }
+  friend Sub operator-(Sub aSub, const SizeT& aSize)
+  {
+    aSub -= aSize;
+    return aSub;
   }
   Sub& operator+=(const Point& aPoint)
   {
@@ -253,7 +303,18 @@ struct BaseRect {
     MoveBy(-aPoint);
     return *static_cast<Sub*>(this);
   }
-
+  Sub& operator+=(const SizeT& aSize)
+  {
+    width += aSize.width;
+    height += aSize.height;
+    return *static_cast<Sub*>(this);
+  }
+  Sub& operator-=(const SizeT& aSize)
+  {
+    width -= aSize.width;
+    height -= aSize.height;
+    return *static_cast<Sub*>(this);
+  }
   // Find difference as a Margin
   MarginT operator-(const Sub& aRect) const
   {
@@ -268,6 +329,33 @@ struct BaseRect {
   Point TopRight() const { return Point(XMost(), y); }
   Point BottomLeft() const { return Point(x, YMost()); }
   Point BottomRight() const { return Point(XMost(), YMost()); }
+  Point AtCorner(int aCorner) const {
+    switch (aCorner) {
+      case RectCorner::TopLeft: return TopLeft();
+      case RectCorner::TopRight: return TopRight();
+      case RectCorner::BottomRight: return BottomRight();
+      case RectCorner::BottomLeft: return BottomLeft();
+    }
+    MOZ_CRASH("Incomplete switch");
+  }
+  Point CCWCorner(mozilla::Side side) const {
+    switch (side) {
+      case NS_SIDE_TOP: return TopLeft();
+      case NS_SIDE_RIGHT: return TopRight();
+      case NS_SIDE_BOTTOM: return BottomRight();
+      case NS_SIDE_LEFT: return BottomLeft();
+    }
+    MOZ_CRASH("Incomplete switch");
+  }
+  Point CWCorner(mozilla::Side side) const {
+    switch (side) {
+      case NS_SIDE_TOP: return TopRight();
+      case NS_SIDE_RIGHT: return BottomRight();
+      case NS_SIDE_BOTTOM: return BottomLeft();
+      case NS_SIDE_LEFT: return TopLeft();
+    }
+    MOZ_CRASH("Incomplete switch");
+  }
   Point Center() const { return Point(x, y) + Point(width, height)/2; }
   SizeT Size() const { return SizeT(width, height); }
 
@@ -457,6 +545,12 @@ struct BaseRect {
     rect.x = std::min(rect.XMost(), aRect.XMost()) - rect.width;
     rect.y = std::min(rect.YMost(), aRect.YMost()) - rect.height;
     return rect;
+  }
+
+  friend std::ostream& operator<<(std::ostream& stream,
+      const BaseRect<T, Sub, Point, SizeT, MarginT>& aRect) {
+    return stream << '(' << aRect.x << ',' << aRect.y << ','
+                  << aRect.width << ',' << aRect.height << ')';
   }
 
 private:

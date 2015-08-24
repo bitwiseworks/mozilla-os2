@@ -9,18 +9,20 @@
 
 #include "mozilla/dom/FileSystemTaskBase.h"
 #include "nsAutoPtr.h"
+#include "mozilla/ErrorResult.h"
 
 namespace mozilla {
 namespace dom {
 
 class Promise;
 
-class CreateDirectoryTask MOZ_FINAL
+class CreateDirectoryTask final
   : public FileSystemTaskBase
 {
 public:
   CreateDirectoryTask(FileSystemBase* aFileSystem,
-                      const nsAString& aPath);
+                      const nsAString& aPath,
+                      ErrorResult& aRv);
   CreateDirectoryTask(FileSystemBase* aFileSystem,
                       const FileSystemCreateDirectoryParams& aParam,
                       FileSystemRequestParent* aParent);
@@ -32,23 +34,23 @@ public:
   GetPromise();
 
   virtual void
-  GetPermissionAccessType(nsCString& aAccess) const MOZ_OVERRIDE;
+  GetPermissionAccessType(nsCString& aAccess) const override;
 
 protected:
   virtual FileSystemParams
-  GetRequestParams(const nsString& aFileSystem) const MOZ_OVERRIDE;
+  GetRequestParams(const nsString& aFileSystem) const override;
 
   virtual FileSystemResponseValue
-  GetSuccessRequestResult() const MOZ_OVERRIDE;
+  GetSuccessRequestResult() const override;
 
   virtual void
-  SetSuccessRequestResult(const FileSystemResponseValue& aValue) MOZ_OVERRIDE;
+  SetSuccessRequestResult(const FileSystemResponseValue& aValue) override;
 
   virtual nsresult
-  Work() MOZ_OVERRIDE;
+  Work() override;
 
   virtual void
-  HandlerCallback() MOZ_OVERRIDE;
+  HandlerCallback() override;
 
 private:
   nsRefPtr<Promise> mPromise;

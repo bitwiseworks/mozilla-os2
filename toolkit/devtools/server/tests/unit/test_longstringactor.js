@@ -1,14 +1,13 @@
-/* -*- Mode: javascript; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2; js-indent-level: 2; -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2; js-indent-level: 2 -*- */
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
+
+const { LongStringActor } = devtools.require("devtools/server/actors/script");
 
 function run_test()
 {
   Cu.import("resource://gre/modules/jsdebugger.jsm");
   addDebuggerToGlobal(this);
-  let loader = Cc["@mozilla.org/moz/jssubscript-loader;1"]
-    .getService(Components.interfaces.mozIJSSubScriptLoader);
-  loader.loadSubScript("resource://gre/modules/devtools/server/actors/script.js");
 
   test_LSA_disconnect();
   test_LSA_grip();

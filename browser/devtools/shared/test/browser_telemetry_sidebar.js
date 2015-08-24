@@ -7,40 +7,33 @@ const TEST_URI = "data:text/html;charset=utf-8,<p>browser_telemetry_sidebar.js</
 // opened we make use of setTimeout() to create tool active times.
 const TOOL_DELAY = 200;
 
-let {Promise: promise} = Cu.import("resource://gre/modules/devtools/deprecated-sync-thenables.js", {});
-let {Services} = Cu.import("resource://gre/modules/Services.jsm", {});
-
-let require = Cu.import("resource://gre/modules/devtools/Loader.jsm", {}).devtools.require;
-let Telemetry = require("devtools/shared/telemetry");
-
-function init() {
-  Telemetry.prototype.telemetryInfo = {};
-  Telemetry.prototype._oldlog = Telemetry.prototype.log;
-  Telemetry.prototype.log = function(histogramId, value) {
-    if (histogramId) {
-      if (!this.telemetryInfo[histogramId]) {
-        this.telemetryInfo[histogramId] = [];
-      }
-
-      this.telemetryInfo[histogramId].push(value);
-    }
-  };
-
-  testSidebar();
-}
-
-function testSidebar() {
-  info("Testing sidebar");
+add_task(function*() {
+  yield promiseTab(TEST_URI);
+  let Telemetry = loadTelemetryAndRecordLogs();
 
   let target = TargetFactory.forTab(gBrowser.selectedTab);
+  let toolbox = yield gDevTools.showToolbox(target, "inspector");
+  info("inspector opened");
 
-  gDevTools.showToolbox(target, "inspector").then(function(toolbox) {
-    let inspector = toolbox.getCurrentPanel();
-    let sidebarTools = ["ruleview", "computedview", "fontinspector", "layoutview"];
+  yield testSidebar(toolbox);
+  checkResults(Telemetry);
 
-    // Concatenate the array with itself so that we can open each tool twice.
-    sidebarTools.push.apply(sidebarTools, sidebarTools);
+  stopRecordingTelemetryLogs(Telemetry);
+  yield gDevTools.closeToolbox(target);
+  gBrowser.removeCurrentTab();
+});
 
+function* testSidebar(toolbox) {
+  info("Testing sidebar");
+
+  let inspector = toolbox.getCurrentPanel();
+  let sidebarTools = ["ruleview", "computedview", "fontinspector",
+                      "layoutview", "animationinspector"];
+
+  // Concatenate the array with itself so that we can open each tool twice.
+  sidebarTools.push.apply(sidebarTools, sidebarTools);
+
+  return new Promise(resolve => {
     // See TOOL_DELAY for why we need setTimeout here
     setTimeout(function selectSidebarTab() {
       let tool = sidebarTools.pop();
@@ -50,13 +43,13 @@ function testSidebar() {
           setTimeout(selectSidebarTab, TOOL_DELAY);
         }, TOOL_DELAY);
       } else {
-        checkResults();
+        resolve();
       }
     }, TOOL_DELAY);
   });
 }
 
-function checkResults() {
+function checkResults(Telemetry) {
   let result = Telemetry.prototype.telemetryInfo;
 
   for (let [histId, value] of Iterator(result)) {
@@ -69,6 +62,8 @@ function checkResults() {
     if (histId.endsWith("OPENED_PER_USER_FLAG")) {
       ok(value.length === 1 && value[0] === true,
          "Per user value " + histId + " has a single value of true");
+    } else if (histId === "DEVTOOLS_TOOLBOX_OPENED_BOOLEAN") {
+      is(value.length, 1, histId + " has only one entry");
     } else if (histId.endsWith("OPENED_BOOLEAN")) {
       ok(value.length > 1, histId + " has more than one entry");
 
@@ -87,29 +82,4 @@ function checkResults() {
       ok(okay, "All " + histId + " entries have time > 0");
     }
   }
-
-  finishUp();
-}
-
-function finishUp() {
-  gBrowser.removeCurrentTab();
-
-  Telemetry.prototype.log = Telemetry.prototype._oldlog;
-  delete Telemetry.prototype._oldlog;
-  delete Telemetry.prototype.telemetryInfo;
-
-  TargetFactory = Services = promise = require = null;
-
-  finish();
-}
-
-function test() {
-  waitForExplicitFinish();
-  gBrowser.selectedTab = gBrowser.addTab();
-  gBrowser.selectedBrowser.addEventListener("load", function() {
-    gBrowser.selectedBrowser.removeEventListener("load", arguments.callee, true);
-    waitForFocus(init, content);
-  }, true);
-
-  content.location = TEST_URI;
 }

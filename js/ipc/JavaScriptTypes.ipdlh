@@ -27,14 +27,67 @@ struct JSIID
     uint8_t m3_7;
 };
 
+struct LocalObject
+{
+    uint64_t serializedId;
+};
+
+struct RemoteObject
+{
+    uint64_t serializedId;
+    bool isCallable;
+    bool isConstructor;
+    nsCString objectTag;
+};
+
+union ObjectVariant
+{
+    LocalObject;
+    RemoteObject;
+};
+
+struct WellKnownSymbol
+{
+    uint32_t which;
+};
+
+struct RegisteredSymbol
+{
+    nsString key;
+};
+
+union SymbolVariant
+{
+    WellKnownSymbol;
+    RegisteredSymbol;
+};
+
+struct UndefinedVariant {};
+struct NullVariant {};
+
+union ObjectOrNullVariant
+{
+    ObjectVariant;
+    NullVariant;
+};
+
 union JSVariant
 {
-    void_t;     /* |undefined| */
+    UndefinedVariant;
+    NullVariant;
+    ObjectVariant;
+    SymbolVariant;
     nsString;   /* StringValue(x) */
-    uint64_t;   /* ID that maps to a JSObject (cpow on parent, original on child). */
     double;     /* NumberValue(x) */
     bool;       /* BooleanValue(x) */
     JSIID;      /* XPC nsIID */
+};
+
+union JSIDVariant
+{
+    SymbolVariant;
+    nsString;
+    int32_t;
 };
 
 struct ReturnSuccess
@@ -63,11 +116,17 @@ union JSParam
     JSVariant;  /* actual value to pass through */
 };
 
+union GetterSetter
+{
+    uint64_t;
+    ObjectVariant;
+};
+
 struct PPropertyDescriptor
 {
-    uint64_t    objId;
-    uint32_t    attrs;
-    JSVariant   value;
+    ObjectOrNullVariant obj;
+    uint32_t attrs;
+    JSVariant value;
 
     // How to interpret these values depends on whether JSPROP_GETTER/SETTER
     // are set. If set, the corresponding value is a CPOW or 0 for NULL.
@@ -75,10 +134,9 @@ struct PPropertyDescriptor
     //
     //  0 - NULL
     //  1 - Default getter or setter.
-    //  2 - js_GetterOnlyPropertyStub (setter only)
-    //  3 - Unknown
-    uint64_t    getter;
-    uint64_t    setter;
+    //  2 - Unknown
+    GetterSetter getter;
+    GetterSetter setter;
 };
 
 struct CpowEntry

@@ -4,13 +4,50 @@
 // See browser/components/search/test/browser_*_behavior.js for tests of actual
 // searches.
 
-const ENGINE_LOGO = "searchEngineLogo.xml";
-const ENGINE_NO_LOGO = "searchEngineNoLogo.xml";
+Cu.import("resource://gre/modules/Task.jsm");
+
+const ENGINE_NO_LOGO = {
+  name: "searchEngineNoLogo.xml",
+  numLogos: 0,
+};
+
+const ENGINE_FAVICON = {
+  name: "searchEngineFavicon.xml",
+  logoPrefix1x: "data:image/png;base64,AAABAAIAICAAAAEAIACoEAAAJgAAABAQAAABACAAaAQAAM4QAAAoAAAAIAAAAEAAAAABACAAAAAAAAAQAAATCwAAEwsA",
+  numLogos: 1,
+};
+ENGINE_FAVICON.logoPrefix2x = ENGINE_FAVICON.logoPrefix1x;
+
+const ENGINE_1X_LOGO = {
+  name: "searchEngine1xLogo.xml",
+  logoPrefix1x: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEEAAAAaCAIAAABn3KYmAAAACXBIWXMAAAsTAAALEwEAmpwYAAAAB3RJTUUH3gkTADEw",
+  numLogos: 1,
+};
+ENGINE_1X_LOGO.logoPrefix2x = ENGINE_1X_LOGO.logoPrefix1x;
+
+const ENGINE_2X_LOGO = {
+  name: "searchEngine2xLogo.xml",
+  logoPrefix2x: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIIAAAA0CAIAAADJ8nfCAAAACXBIWXMAAAsTAAALEwEAmpwYAAAAB3RJTUUH3gkTADMU",
+  numLogos: 1,
+};
+ENGINE_2X_LOGO.logoPrefix1x = ENGINE_2X_LOGO.logoPrefix2x;
+
+const ENGINE_1X_2X_LOGO = {
+  name: "searchEngine1x2xLogo.xml",
+  logoPrefix1x: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEEAAAAaCAIAAABn3KYmAAAACXBIWXMAAAsTAAALEwEAmpwYAAAAB3RJTUUH3gkTADIG",
+  logoPrefix2x: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIIAAAA0CAIAAADJ8nfCAAAACXBIWXMAAAsTAAALEwEAmpwYAAAAB3RJTUUH3gkTADMo",
+  numLogos: 2,
+};
+
+const ENGINE_SUGGESTIONS = {
+  name: "searchSuggestionEngine.xml",
+  numLogos: 0,
+};
 
 const SERVICE_EVENT_NAME = "ContentSearchService";
 
-const LOGO_LOW_DPI_SIZE = [65, 26];
-const LOGO_HIGH_DPI_SIZE = [130, 52];
+const LOGO_1X_DPI_SIZE = [65, 26];
+const LOGO_2X_DPI_SIZE = [130, 52];
 
 // The test has an expected search event queue and a search event listener.
 // Search events that are expected to happen are added to the queue, and the
@@ -25,10 +62,14 @@ var gExpectedSearchEventQueue = [];
 var gNewEngines = [];
 
 function runTests() {
+  runTaskifiedTests().then(TestRunner.next, TestRunner.next);
+  yield;
+}
+
+let runTaskifiedTests = Task.async(function* () {
   let oldCurrentEngine = Services.search.currentEngine;
 
-  yield addNewTabPageTab();
-  yield whenSearchInitDone();
+  yield addNewTabPageTabPromise();
 
   // The tab is removed at the end of the test, so there's no need to remove
   // this listener at the end of the test.
@@ -42,107 +83,151 @@ function runTests() {
   // children, which makes the test click the wrong children, so disable it.
   panel.setAttribute("animate", "false");
 
-  // Add the two test engines.
-  let logoEngine = null;
-  yield promiseNewSearchEngine(true).then(engine => {
-    logoEngine = engine;
-    TestRunner.next();
-  });
-  ok(!!logoEngine.getIconURLBySize(...LOGO_LOW_DPI_SIZE),
-     "Sanity check: engine should have 1x logo");
-  ok(!!logoEngine.getIconURLBySize(...LOGO_HIGH_DPI_SIZE),
-     "Sanity check: engine should have 2x logo");
+  // Add the engine without any logos and switch to it.
+  let noLogoEngine = yield promiseNewSearchEngine(ENGINE_NO_LOGO);
+  Services.search.currentEngine = noLogoEngine;
+  yield promiseSearchEvents(["CurrentEngine"]);
+  yield checkCurrentEngine(ENGINE_NO_LOGO);
 
-  let noLogoEngine = null;
-  yield promiseNewSearchEngine(false).then(engine => {
-    noLogoEngine = engine;
-    TestRunner.next();
-  });
-  ok(!noLogoEngine.getIconURLBySize(...LOGO_LOW_DPI_SIZE),
-     "Sanity check: engine should not have 1x logo");
-  ok(!noLogoEngine.getIconURLBySize(...LOGO_HIGH_DPI_SIZE),
-     "Sanity check: engine should not have 2x logo");
+  // Add the engine with favicon and switch to it.
+  let faviconEngine = yield promiseNewSearchEngine(ENGINE_FAVICON);
+  Services.search.currentEngine = faviconEngine;
+  yield promiseSearchEvents(["CurrentEngine"]);
+  yield checkCurrentEngine(ENGINE_FAVICON);
 
-  // Use the search service to change the current engine to the logo engine.
-  Services.search.currentEngine = logoEngine;
-  yield promiseSearchEvents(["CurrentEngine"]).then(TestRunner.next);
-  checkCurrentEngine(ENGINE_LOGO);
+  // Add the engine with a 1x-DPI logo and switch to it.
+  let logo1xEngine = yield promiseNewSearchEngine(ENGINE_1X_LOGO);
+  Services.search.currentEngine = logo1xEngine;
+  yield promiseSearchEvents(["CurrentEngine"]);
+  yield checkCurrentEngine(ENGINE_1X_LOGO);
+
+  // Add the engine with a 2x-DPI logo and switch to it.
+  let logo2xEngine = yield promiseNewSearchEngine(ENGINE_2X_LOGO);
+  Services.search.currentEngine = logo2xEngine;
+  yield promiseSearchEvents(["CurrentEngine"]);
+  yield checkCurrentEngine(ENGINE_2X_LOGO);
+
+  // Add the engine with 1x- and 2x-DPI logos and switch to it.
+  let logo1x2xEngine = yield promiseNewSearchEngine(ENGINE_1X_2X_LOGO);
+  Services.search.currentEngine = logo1x2xEngine;
+  yield promiseSearchEvents(["CurrentEngine"]);
+  yield checkCurrentEngine(ENGINE_1X_2X_LOGO);
 
   // Click the logo to open the search panel.
   yield Promise.all([
     promisePanelShown(panel),
     promiseClick(logoImg()),
-  ]).then(TestRunner.next);
+  ]);
 
-  // In the search panel, click the no-logo engine.  It should become the
-  // current engine.
-  let noLogoBox = null;
-  for (let box of panel.childNodes) {
-    if (box.getAttribute("engine") == noLogoEngine.name) {
-      noLogoBox = box;
-      break;
-    }
-  }
-  ok(noLogoBox, "Search panel should contain the no-logo engine");
-  yield Promise.all([
-    promiseSearchEvents(["CurrentEngine"]),
-    promiseClick(noLogoBox),
-  ]).then(TestRunner.next);
-
-  checkCurrentEngine(ENGINE_NO_LOGO);
-
-  // Switch back to the logo engine.
-  Services.search.currentEngine = logoEngine;
-  yield promiseSearchEvents(["CurrentEngine"]).then(TestRunner.next);
-  checkCurrentEngine(ENGINE_LOGO);
-
-  // Open the panel again.
-  yield Promise.all([
-    promisePanelShown(panel),
-    promiseClick(logoImg()),
-  ]).then(TestRunner.next);
-
-  // In the search panel, click the Manage Engines box.
   let manageBox = $("manage");
   ok(!!manageBox, "The Manage Engines box should be present in the document");
-  yield Promise.all([
-    promiseManagerOpen(),
-    promiseClick(manageBox),
-  ]).then(TestRunner.next);
+  is(panel.childNodes.length, 1, "Search panel should only contain the Manage Engines entry");
+  is(panel.childNodes[0], manageBox, "Search panel should contain the Manage Engines entry");
+
+  panel.hidePopup();
+
+  // Add the engine that provides search suggestions and switch to it.
+  let suggestionEngine = yield promiseNewSearchEngine(ENGINE_SUGGESTIONS);
+  Services.search.currentEngine = suggestionEngine;
+  yield promiseSearchEvents(["CurrentEngine"]);
+  yield checkCurrentEngine(ENGINE_SUGGESTIONS);
+
+  // Avoid intermittent failures.
+  gSearch()._suggestionController.remoteTimeout = 5000;
+
+  // Type an X in the search input.  This is only a smoke test.  See
+  // browser_searchSuggestionUI.js for comprehensive content search suggestion
+  // UI tests.
+  let input = $("text");
+  input.focus();
+  EventUtils.synthesizeKey("x", {});
+  let suggestionsPromise = promiseSearchEvents(["Suggestions"]);
+
+  // Wait for the search suggestions to become visible and for the Suggestions
+  // message.
+  let suggestionsUnhiddenDefer = Promise.defer();
+  let table = getContentDocument().getElementById("searchSuggestionTable");
+  info("Waiting for suggestions table to open");
+  let observer = new MutationObserver(() => {
+    if (input.getAttribute("aria-expanded") == "true") {
+      observer.disconnect();
+      ok(!table.hidden, "Search suggestion table unhidden");
+      suggestionsUnhiddenDefer.resolve();
+    }
+  });
+  observer.observe(input, {
+    attributes: true,
+    attributeFilter: ["aria-expanded"],
+  });
+  yield suggestionsUnhiddenDefer.promise;
+  yield suggestionsPromise;
+
+  // Empty the search input, causing the suggestions to be hidden.
+  EventUtils.synthesizeKey("a", { accelKey: true });
+  EventUtils.synthesizeKey("VK_DELETE", {});
+  ok(table.hidden, "Search suggestion table hidden");
+
+  // Remove the search bar from toolbar
+  CustomizableUI.removeWidgetFromArea("search-container");
+  // Focus a different element than the search input from the page.
+  let btn = getContentDocument().getElementById("newtab-customize-button");
+  yield promiseClick(btn);
+
+  isnot(input, getContentDocument().activeElement, "Search input should not be focused");
+  // Test that Ctrl/Cmd + K will focus the input field from the page.
+  EventUtils.synthesizeKey("k", { accelKey: true });
+  yield promiseSearchEvents(["FocusInput"]);
+  is(input, getContentDocument().activeElement, "Search input should be focused");
+  // Reset changes made to toolbar
+  CustomizableUI.reset();
+
+  // Test that Ctrl/Cmd + K will focus the search bar from toolbar.
+  let searchBar = gWindow.document.getElementById("searchbar");
+  EventUtils.synthesizeKey("k", { accelKey: true });
+  is(searchBar.textbox.inputField, gWindow.document.activeElement, "Toolbar's search bar should be focused");
+
+  // Test that Ctrl/Cmd + K will focus the search bar from a new about:home page if
+  // the newtab is disabled from `NewTabUtils.allPages.enabled`.
+  yield addNewTabPageTabPromise();
+  // Remove the search bar from toolbar
+  CustomizableUI.removeWidgetFromArea("search-container");
+  NewTabUtils.allPages.enabled = false;
+  EventUtils.synthesizeKey("k", { accelKey: true });
+  let waitEvent = "AboutHomeLoadSnippetsCompleted";
+  yield promiseTabLoadEvent(gWindow.gBrowser.selectedTab, "about:home", waitEvent);
+
+  is(getContentDocument().documentURI.toLowerCase(), "about:home", "New tab's uri should be about:home");
+  let searchInput = getContentDocument().getElementById("searchText");
+  is(searchInput, getContentDocument().activeElement, "Search input must be the selected element");
+
+  NewTabUtils.allPages.enabled = true;
+  CustomizableUI.reset();
+  gBrowser.removeCurrentTab();
 
   // Done.  Revert the current engine and remove the new engines.
   Services.search.currentEngine = oldCurrentEngine;
-  yield promiseSearchEvents(["CurrentEngine"]).then(TestRunner.next);
+  yield promiseSearchEvents(["CurrentEngine"]);
 
   let events = [];
   for (let engine of gNewEngines) {
     Services.search.removeEngine(engine);
-    events.push("State");
+    events.push("CurrentState");
   }
-  yield promiseSearchEvents(events).then(TestRunner.next);
-}
+  yield promiseSearchEvents(events);
+});
 
 function searchEventListener(event) {
   info("Got search event " + event.detail.type);
-  let passed = false;
   let nonempty = gExpectedSearchEventQueue.length > 0;
   ok(nonempty, "Expected search event queue should be nonempty");
   if (nonempty) {
     let { type, deferred } = gExpectedSearchEventQueue.shift();
     is(event.detail.type, type, "Got expected search event " + type);
     if (event.detail.type == type) {
-      passed = true;
-      // Let gSearch respond to the event before continuing.
-      executeSoon(() => deferred.resolve());
+      deferred.resolve();
+    } else {
+      deferred.reject();
     }
-  }
-  if (!passed) {
-    info("Didn't get expected event, stopping the test");
-    getContentWindow().removeEventListener(SERVICE_EVENT_NAME,
-                                           searchEventListener);
-    // Set next() to a no-op so the test really does stop.
-    TestRunner.next = function () {};
-    TestRunner.finish();
   }
 }
 
@@ -157,16 +242,15 @@ function promiseSearchEvents(events) {
   return Promise.all(events.map(e => e.deferred.promise));
 }
 
-function promiseNewSearchEngine(withLogo) {
-  let basename = withLogo ? ENGINE_LOGO : ENGINE_NO_LOGO;
+function promiseNewSearchEngine({name: basename, numLogos}) {
   info("Waiting for engine to be added: " + basename);
 
   // Wait for the search events triggered by adding the new engine.
   // engine-added engine-loaded
-  let expectedSearchEvents = ["State", "State"];
-  if (withLogo) {
-    // an engine-changed for each of the two logos
-    expectedSearchEvents.push("State", "State");
+  let expectedSearchEvents = ["CurrentState", "CurrentState"];
+  // engine-changed for each of the logos
+  for (let i = 0; i < numLogos; i++) {
+    expectedSearchEvents.push("CurrentState");
   }
   let eventPromise = promiseSearchEvents(expectedSearchEvents);
 
@@ -185,19 +269,40 @@ function promiseNewSearchEngine(withLogo) {
     },
   });
 
-  // Make a new promise that wraps the previous promises.  The only point of
-  // this is to pass the new engine to the yielder via deferred.resolve(),
-  // which is a little nicer than passing an array whose first element is the
-  // new engine.
-  let deferred = Promise.defer();
-  Promise.all([addDeferred.promise, eventPromise]).then(values => {
-    let newEngine = values[0];
-    deferred.resolve(newEngine);
-  }, () => deferred.reject());
-  return deferred.promise;
+  return Promise.all([addDeferred.promise, eventPromise]).then(([newEngine, _]) => {
+    return newEngine;
+  });
 }
 
-function checkCurrentEngine(basename) {
+function objectURLToBlob(url) {
+  return new Promise(function (resolve, reject) {
+    let xhr = new XMLHttpRequest();
+    xhr.open("get", url, true);
+    xhr.responseType = "blob";
+    xhr.overrideMimeType("image/png");
+    xhr.onload = function(e) {
+      if (this.status == 200) {
+        return resolve(this.response);
+      }
+      reject("Failed to get logo, xhr returned status: " + this.status);
+    };
+    xhr.onerror = reject;
+    xhr.send();
+  });
+}
+
+function blobToBase64(blob) {
+  return new Promise(function (resolve, reject) {
+    var reader = new FileReader();
+    reader.onload = function() {
+      resolve(reader.result);
+    }
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+let checkCurrentEngine = Task.async(function* ({name: basename, logoPrefix1x, logoPrefix2x}) {
   let engine = Services.search.currentEngine;
   ok(engine.name.contains(basename),
      "Sanity check: current engine: engine.name=" + engine.name +
@@ -206,33 +311,7 @@ function checkCurrentEngine(basename) {
   // gSearch.currentEngineName
   is(gSearch().currentEngineName, engine.name,
      "currentEngineName: " + engine.name);
-
-  // search bar logo
-  let logoSize = [px * window.devicePixelRatio for (px of LOGO_LOW_DPI_SIZE)];
-  let logoURI = engine.getIconURLBySize(...logoSize);
-  let logo = logoImg();
-  is(logo.hidden, !logoURI,
-     "Logo should be visible iff engine has a logo: " + engine.name);
-  if (logoURI) {
-    is(logo.style.backgroundImage, 'url("' + logoURI + '")', "Logo URI");
-  }
-
-  // "selected" attributes of engines in the panel
-  let panel = searchPanel();
-  for (let engineBox of panel.childNodes) {
-    let engineName = engineBox.getAttribute("engine");
-    if (engineName == engine.name) {
-      is(engineBox.getAttribute("selected"), "true",
-         "Engine box's selected attribute should be true for " +
-         "selected engine: " + engineName);
-    }
-    else {
-      ok(!engineBox.hasAttribute("selected"),
-         "Engine box's selected attribute should be absent for " +
-         "non-selected engine: " + engineName);
-    }
-  }
-}
+});
 
 function promisePanelShown(panel) {
   let deferred = Promise.defer();
@@ -240,7 +319,7 @@ function promisePanelShown(panel) {
   panel.addEventListener("popupshown", function onEvent() {
     panel.removeEventListener("popupshown", onEvent);
     is(panel.state, "open", "Panel state");
-    executeSoon(() => deferred.resolve());
+    deferred.resolve();
   });
   return deferred.promise;
 }
@@ -255,33 +334,6 @@ function promiseClick(node) {
   return deferred.promise;
 }
 
-function promiseManagerOpen() {
-  info("Waiting for the search manager window to open...");
-  let deferred = Promise.defer();
-  let winWatcher = Cc["@mozilla.org/embedcomp/window-watcher;1"].
-                   getService(Ci.nsIWindowWatcher);
-  winWatcher.registerNotification(function onWin(subj, topic, data) {
-    if (topic == "domwindowopened" && subj instanceof Ci.nsIDOMWindow) {
-      subj.addEventListener("load", function onLoad() {
-        subj.removeEventListener("load", onLoad);
-        if (subj.document.documentURI ==
-            "chrome://browser/content/search/engineManager.xul") {
-          winWatcher.unregisterNotification(onWin);
-          ok(true, "Observed search manager window opened");
-          is(subj.opener, gWindow,
-             "Search engine manager opener should be the chrome browser " +
-             "window containing the newtab page");
-          executeSoon(() => {
-            subj.close();
-            deferred.resolve();
-          });
-        }
-      });
-    }
-  });
-  return deferred.promise;
-}
-
 function searchPanel() {
   return $("panel");
 }
@@ -292,4 +344,47 @@ function logoImg() {
 
 function gSearch() {
   return getContentWindow().gSearch;
+}
+
+/**
+ * Waits for a load (or custom) event to finish in a given tab. If provided
+ * load an uri into the tab.
+ *
+ * @param tab
+ *        The tab to load into.
+ * @param [optional] url
+ *        The url to load, or the current url.
+ * @param [optional] event
+ *        The load event type to wait for.  Defaults to "load".
+ * @return {Promise} resolved when the event is handled.
+ * @resolves to the received event
+ * @rejects if a valid load event is not received within a meaningful interval
+ */
+function promiseTabLoadEvent(tab, url, eventType="load") {
+  let deferred = Promise.defer();
+  info("Wait tab event: " + eventType);
+
+  function handle(event) {
+    if (event.originalTarget != tab.linkedBrowser.contentDocument ||
+        event.target.location.href == "about:blank" ||
+        (url && event.target.location.href != url)) {
+      info("Skipping spurious '" + eventType + "'' event" +
+           " for " + event.target.location.href);
+      return;
+    }
+    clearTimeout(timeout);
+    tab.linkedBrowser.removeEventListener(eventType, handle, true);
+    info("Tab event received: " + eventType);
+    deferred.resolve(event);
+  }
+
+  let timeout = setTimeout(() => {
+    tab.linkedBrowser.removeEventListener(eventType, handle, true);
+    deferred.reject(new Error("Timed out while waiting for a '" + eventType + "'' event"));
+  }, 20000);
+
+  tab.linkedBrowser.addEventListener(eventType, handle, true, true);
+  if (url)
+    tab.linkedBrowser.loadURI(url);
+  return deferred.promise;
 }

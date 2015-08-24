@@ -7,6 +7,7 @@
 #ifndef mozJSComponentLoader_h
 #define mozJSComponentLoader_h
 
+#include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/ModuleLoader.h"
 #include "nsISupports.h"
@@ -14,16 +15,15 @@
 #include "nsIURI.h"
 #include "xpcIJSModuleLoader.h"
 #include "nsClassHashtable.h"
-#include "nsCxPusher.h"
 #include "nsDataHashtable.h"
 #include "jsapi.h"
 
 #include "xpcIJSGetFactory.h"
 
 class nsIFile;
-class nsIJSRuntimeService;
 class nsIPrincipal;
 class nsIXPConnectJSObjectHolder;
+class ComponentLoaderInfo;
 
 /* 6bd13476-1dd2-11b2-bbef-f0ccb5fa64b6 (thanks, mozbot) */
 
@@ -32,47 +32,43 @@ class nsIXPConnectJSObjectHolder;
     { 0xbb, 0xef, 0xf0, 0xcc, 0xb5, 0xfa, 0x64, 0xb6 }}
 #define MOZJSCOMPONENTLOADER_CONTRACTID "@mozilla.org/moz/jsloader;1"
 
-class JSCLContextHelper;
-
 class mozJSComponentLoader : public mozilla::ModuleLoader,
                              public xpcIJSModuleLoader,
                              public nsIObserver
 {
-    friend class JSCLContextHelper;
  public:
     NS_DECL_ISUPPORTS
     NS_DECL_XPCIJSMODULELOADER
     NS_DECL_NSIOBSERVER
 
     mozJSComponentLoader();
-    virtual ~mozJSComponentLoader();
 
     // ModuleLoader
-    const mozilla::Module* LoadModule(mozilla::FileLocation& aFile);
+    const mozilla::Module* LoadModule(mozilla::FileLocation& aFile) override;
 
     nsresult FindTargetObject(JSContext* aCx,
                               JS::MutableHandleObject aTargetObject);
 
     static mozJSComponentLoader* Get() { return sSelf; }
 
-    void NoteSubScript(JS::HandleScript aScript, JS::HandleObject aThisObject);
-
     size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf);
 
  protected:
+    virtual ~mozJSComponentLoader();
+
     static mozJSComponentLoader* sSelf;
 
     nsresult ReallyInit();
     void UnloadModules();
 
-    JSObject* PrepareObjectForLocation(JSCLContextHelper& aCx,
+    JSObject* PrepareObjectForLocation(JSContext* aCx,
                                        nsIFile* aComponentFile,
                                        nsIURI* aComponent,
                                        bool aReuseLoaderGlobal,
                                        bool* aRealFile);
 
-    nsresult ObjectForLocation(nsIFile* aComponentFile,
-                               nsIURI* aComponent,
+    nsresult ObjectForLocation(ComponentLoaderInfo& aInfo,
+                               nsIFile* aComponentFile,
                                JS::MutableHandleObject aObject,
                                JS::MutableHandleScript aTableScript,
                                char** location,
@@ -85,16 +81,13 @@ class mozJSComponentLoader : public mozilla::ModuleLoader,
                         JS::MutableHandleObject vp);
 
     nsCOMPtr<nsIComponentManager> mCompMgr;
-    nsCOMPtr<nsIJSRuntimeService> mRuntimeService;
     nsCOMPtr<nsIPrincipal> mSystemPrincipal;
     nsCOMPtr<nsIXPConnectJSObjectHolder> mLoaderGlobal;
-    JSRuntime* mRuntime;
-    JSContext* mContext;
 
     class ModuleEntry : public mozilla::Module
     {
     public:
-        ModuleEntry(JSContext* aCx)
+        explicit ModuleEntry(JSContext* aCx)
           : mozilla::Module(), obj(aCx, nullptr), thisObjectKey(aCx, nullptr)
         {
             mVersion = mozilla::Module::kVersion;
@@ -157,7 +150,6 @@ class mozJSComponentLoader : public mozilla::ModuleLoader,
 
     nsClassHashtable<nsCStringHashKey, ModuleEntry> mImports;
     nsDataHashtable<nsCStringHashKey, ModuleEntry*> mInProgressImports;
-    nsDataHashtable<nsPtrHashKey<JSScript>, JSObject*> mThisObjects;
 
     bool mInitialized;
     bool mReuseLoaderGlobal;

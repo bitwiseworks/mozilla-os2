@@ -21,6 +21,7 @@
 #include "nsNetUtil.h"
 #include "nsThreadUtils.h"
 #include "mozilla/LazyIdleThread.h"
+#include "nsIObserverService.h"
 
 #include "WinUtils.h"
 
@@ -41,6 +42,8 @@ bool JumpListBuilder::sBuildingList = false;
 const char kPrefTaskbarEnabled[] = "browser.taskbar.lists.enabled";
 
 NS_IMPL_ISUPPORTS(JumpListBuilder, nsIJumpListBuilder, nsIObserver)
+#define TOPIC_PROFILE_BEFORE_CHANGE "profile-before-change"
+#define TOPIC_CLEAR_PRIVATE_DATA "clear-private-data"
 
 JumpListBuilder::JumpListBuilder() :
   mMaxItems(0),
@@ -56,11 +59,17 @@ JumpListBuilder::JumpListBuilder() :
                                  NS_LITERAL_CSTRING("Jump List"),
                                  LazyIdleThread::ManualShutdown);
   Preferences::AddStrongObserver(this, kPrefTaskbarEnabled);
+
+  nsCOMPtr<nsIObserverService> observerService =
+    do_GetService("@mozilla.org/observer-service;1");
+  if (observerService) {
+    observerService->AddObserver(this, TOPIC_PROFILE_BEFORE_CHANGE, false);
+    observerService->AddObserver(this, TOPIC_CLEAR_PRIVATE_DATA, false);
+  }
 }
 
 JumpListBuilder::~JumpListBuilder()
 {
-  mIOThread->Shutdown();
   Preferences::RemoveObserver(this, kPrefTaskbarEnabled);
   mJumpListMgr = nullptr;
   ::CoUninitialize();
@@ -126,6 +135,9 @@ NS_IMETHODIMP JumpListBuilder::InitListBuild(nsIMutableArray *removedItems, bool
 
   IObjectArray *objArray;
 
+  // The returned objArray of removed items are for manually removed items.
+  // This does not return items which are removed because they were previously
+  // part of the jump list but are no longer part of the jump list.
   if (SUCCEEDED(mJumpListMgr->BeginList(&mMaxItems, IID_PPV_ARGS(&objArray)))) {
     if (objArray) {
       TransferIObjectArrayToIMutableArray(objArray, removedItems);
@@ -379,6 +391,12 @@ NS_IMETHODIMP JumpListBuilder::AddListToBuild(int16_t aCatType, nsIArray *items,
       hr = mJumpListMgr->AppendCategory(reinterpret_cast<const wchar_t*>(catName.BeginReading()), pArray);
       if (SUCCEEDED(hr))
         *_retval = true;
+
+      // Get rid of the old icons
+      nsCOMPtr<nsIRunnable> event =
+        new mozilla::widget::AsyncDeleteAllFaviconsFromDisk(true);
+      mIOThread->Dispatch(event, NS_DISPATCH_NORMAL);
+
       return NS_OK;
     }
     break;
@@ -501,10 +519,19 @@ nsresult JumpListBuilder::TransferIObjectArrayToIMutableArray(IObjectArray *objA
 }
 
 NS_IMETHODIMP JumpListBuilder::Observe(nsISupports* aSubject,
-                                        const char* aTopic,
-                                        const char16_t* aData)
+                                       const char* aTopic,
+                                       const char16_t* aData)
 {
-  if (nsDependentString(aData).EqualsASCII(kPrefTaskbarEnabled)) {
+  NS_ENSURE_ARG_POINTER(aTopic);
+  if (strcmp(aTopic, TOPIC_PROFILE_BEFORE_CHANGE) == 0) {
+    nsCOMPtr<nsIObserverService> observerService =
+      do_GetService("@mozilla.org/observer-service;1");
+    if (observerService) {
+      observerService->RemoveObserver(this, TOPIC_PROFILE_BEFORE_CHANGE);
+    }
+    mIOThread->Shutdown();
+  } else if (strcmp(aTopic, "nsPref:changed") == 0 &&
+             nsDependentString(aData).EqualsASCII(kPrefTaskbarEnabled)) {
     bool enabled = Preferences::GetBool(kPrefTaskbarEnabled, true);
     if (!enabled) {
       
@@ -512,6 +539,11 @@ NS_IMETHODIMP JumpListBuilder::Observe(nsISupports* aSubject,
         new mozilla::widget::AsyncDeleteAllFaviconsFromDisk();
       mIOThread->Dispatch(event, NS_DISPATCH_NORMAL);
     }
+  } else if (strcmp(aTopic, TOPIC_CLEAR_PRIVATE_DATA) == 0) {
+    // Delete JumpListCache icons from Disk, if any.
+    nsCOMPtr<nsIRunnable> event =
+      new mozilla::widget::AsyncDeleteAllFaviconsFromDisk(false);
+    mIOThread->Dispatch(event, NS_DISPATCH_NORMAL);
   }
   return NS_OK;
 }

@@ -1,4 +1,4 @@
 {
-    "repo": "http://hg.mozilla.org/build/mozharness",
+    "repo": "https://hg.mozilla.org/build/mozharness",
     "revision": "aa543babe6b7"
 }

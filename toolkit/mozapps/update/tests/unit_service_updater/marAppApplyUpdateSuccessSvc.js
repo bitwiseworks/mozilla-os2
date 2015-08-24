@@ -20,7 +20,9 @@ function run_test() {
   setupTestCommon();
   gTestFiles = gTestFilesCompleteSuccess;
   gTestDirs = gTestDirsCompleteSuccess;
-  setupUpdaterTest(FILE_COMPLETE_MAR, false, false);
+  setupUpdaterTest(FILE_COMPLETE_MAR);
+
+  createUpdaterINI();
 
   // For Mac OS X set the last modified time for the root directory to a date in
   // the past to test that the last modified time is updated on a successful
@@ -50,10 +52,23 @@ function setupAppFilesFinished() {
 }
 
 /**
+ * Checks if the post update binary was properly launched for the platforms that
+ * support launching post update process.
+ */
+function checkUpdateFinished() {
+  if (IS_WIN || IS_MACOSX) {
+    gCheckFunc = finishCheckUpdateFinished;
+    checkPostUpdateAppLog();
+  } else {
+    finishCheckUpdateFinished();
+  }
+}
+
+/**
  * Checks if the update has finished and if it has finished performs checks for
  * the test.
  */
-function checkUpdateFinished() {
+function finishCheckUpdateFinished() {
   gTimeoutRuns++;
   // Don't proceed until the update's status state is the expected value.
   let state = readStatusState();
@@ -109,18 +124,18 @@ function checkUpdateFinished() {
     do_check_true(timeDiff < MAC_MAX_TIME_DIFFERENCE);
   }
 
-  checkFilesAfterUpdateSuccess();
-  // Sorting on Linux is different so skip this check for now.
-  if (!IS_UNIX) {
-    checkUpdateLogContents(LOG_COMPLETE_SUCCESS);
-  }
-
+  checkFilesAfterUpdateSuccess(getApplyDirFile, false, false);
+  checkUpdateLogContents(LOG_COMPLETE_SUCCESS);
   checkCallbackAppLog();
 
   standardInit();
 
   let update = gUpdateManager.getUpdateAt(0);
   do_check_eq(update.state, STATE_SUCCEEDED);
+
+  let updatesPatchDir = getUpdatesPatchDir();
+  logTestInfo("testing " + updatesPatchDir.path + " should exist");
+  do_check_true(updatesPatchDir.exists());
 
   log = getUpdatesPatchDir();
   log.append(FILE_UPDATE_LOG);
@@ -136,10 +151,6 @@ function checkUpdateFinished() {
   log.append(FILE_BACKUP_LOG);
   logTestInfo("testing " + log.path + " shouldn't exist");
   do_check_false(log.exists());
-
-  let updatesPatchDir = getUpdatesPatchDir();
-  logTestInfo("testing " + updatesPatchDir.path + " should exist");
-  do_check_true(updatesPatchDir.exists());
 
   waitForFilesInUse();
 }

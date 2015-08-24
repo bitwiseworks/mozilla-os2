@@ -21,31 +21,32 @@ class nsMathMLmtableOuterFrame : public nsTableOuterFrame,
                                  public nsMathMLFrame
 {
 public:
-  friend nsIFrame* NS_NewMathMLmtableOuterFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
+  friend nsContainerFrame* NS_NewMathMLmtableOuterFrame(nsIPresShell* aPresShell,
+                                                        nsStyleContext* aContext);
 
   NS_DECL_QUERYFRAME
   NS_DECL_FRAMEARENA_HELPERS
 
   // overloaded nsTableOuterFrame methods
 
-  virtual nsresult
+  virtual void
   Reflow(nsPresContext*          aPresContext,
          nsHTMLReflowMetrics&     aDesiredSize,
          const nsHTMLReflowState& aReflowState,
-         nsReflowStatus&          aStatus) MOZ_OVERRIDE;
+         nsReflowStatus&          aStatus) override;
 
   virtual nsresult
   AttributeChanged(int32_t  aNameSpaceID,
                    nsIAtom* aAttribute,
-                   int32_t  aModType) MOZ_OVERRIDE;
+                   int32_t  aModType) override;
 
-  virtual bool IsFrameOfType(uint32_t aFlags) const MOZ_OVERRIDE
+  virtual bool IsFrameOfType(uint32_t aFlags) const override
   {
     return nsTableOuterFrame::IsFrameOfType(aFlags & ~(nsIFrame::eMathML));
   }
 
 protected:
-  nsMathMLmtableOuterFrame(nsStyleContext* aContext) : nsTableOuterFrame(aContext) {}
+  explicit nsMathMLmtableOuterFrame(nsStyleContext* aContext) : nsTableOuterFrame(aContext) {}
   virtual ~nsMathMLmtableOuterFrame();
 
   // helper to find the row frame at a given index, positive or negative, e.g.,
@@ -61,45 +62,45 @@ protected:
 class nsMathMLmtableFrame : public nsTableFrame
 {
 public:
+  NS_DECL_QUERYFRAME_TARGET(nsMathMLmtableFrame)
+  NS_DECL_QUERYFRAME
   NS_DECL_FRAMEARENA_HELPERS
 
-  friend nsIFrame* NS_NewMathMLmtableFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
+  friend nsContainerFrame* NS_NewMathMLmtableFrame(nsIPresShell* aPresShell,
+                                                   nsStyleContext* aContext);
 
   // Overloaded nsTableFrame methods
 
-  virtual nsresult
+  virtual void
   SetInitialChildList(ChildListID  aListID,
-                      nsFrameList& aChildList) MOZ_OVERRIDE;
+                      nsFrameList& aChildList) override;
 
-  virtual nsresult
+  virtual void
   AppendFrames(ChildListID  aListID,
-               nsFrameList& aFrameList) MOZ_OVERRIDE
+               nsFrameList& aFrameList) override
   {
-    nsresult rv = nsTableFrame::AppendFrames(aListID, aFrameList);
+    nsTableFrame::AppendFrames(aListID, aFrameList);
     RestyleTable();
-    return rv;
   }
 
-  virtual nsresult
+  virtual void
   InsertFrames(ChildListID aListID,
                nsIFrame* aPrevFrame,
-               nsFrameList& aFrameList) MOZ_OVERRIDE
+               nsFrameList& aFrameList) override
   {
-    nsresult rv = nsTableFrame::InsertFrames(aListID, aPrevFrame, aFrameList);
+    nsTableFrame::InsertFrames(aListID, aPrevFrame, aFrameList);
     RestyleTable();
-    return rv;
   }
 
-  virtual nsresult
+  virtual void
   RemoveFrame(ChildListID aListID,
-              nsIFrame* aOldFrame) MOZ_OVERRIDE
+              nsIFrame* aOldFrame) override
   {
-    nsresult rv = nsTableFrame::RemoveFrame(aListID, aOldFrame);
+    nsTableFrame::RemoveFrame(aListID, aOldFrame);
     RestyleTable();
-    return rv;
   }
 
-  virtual bool IsFrameOfType(uint32_t aFlags) const MOZ_OVERRIDE
+  virtual bool IsFrameOfType(uint32_t aFlags) const override
   {
     return nsTableFrame::IsFrameOfType(aFlags & ~(nsIFrame::eMathML));
   }
@@ -109,9 +110,62 @@ public:
   // safer (albeit grossly suboptimal) to just relayout the whole thing.
   void RestyleTable();
 
+  /** helper to get the cell spacing X style value */
+  nscoord GetCellSpacingX(int32_t aColIndex) override;
+
+  /** Sums the combined cell spacing between the columns aStartColIndex to
+   *  aEndColIndex.
+   */
+  nscoord GetCellSpacingX(int32_t aStartColIndex,
+                          int32_t aEndColIndex) override;
+
+  /** helper to get the cell spacing Y style value */
+  nscoord GetCellSpacingY(int32_t aRowIndex) override;
+
+  /** Sums the combined cell spacing between the rows aStartRowIndex to
+   *  aEndRowIndex.
+   */
+  nscoord GetCellSpacingY(int32_t aStartRowIndex,
+                          int32_t aEndRowIndex) override;
+
+  void SetColSpacingArray(const nsTArray<nscoord>& aColSpacing)
+  {
+    mColSpacing = aColSpacing;
+  }
+
+  void SetRowSpacingArray(const nsTArray<nscoord>& aRowSpacing)
+  {
+    mRowSpacing = aRowSpacing;
+  }
+
+  void SetFrameSpacing(nscoord aSpacingX, nscoord aSpacingY)
+  {
+    mFrameSpacingX = aSpacingX;
+    mFrameSpacingY = aSpacingY;
+  }
+
+  /** Determines whether the placement of table cells is determined by CSS
+   * spacing based on padding and border-spacing, or one based upon the
+   * rowspacing, columnspacing and framespacing attributes.  The second
+   * approach is used if the user specifies at least one of those attributes.
+   */
+  void SetUseCSSSpacing();
+
+  bool GetUseCSSSpacing()
+  {
+    return mUseCSSSpacing;
+  }
+
 protected:
-  nsMathMLmtableFrame(nsStyleContext* aContext) : nsTableFrame(aContext) {}
+  explicit nsMathMLmtableFrame(nsStyleContext* aContext) : nsTableFrame(aContext) {}
   virtual ~nsMathMLmtableFrame();
+
+private:
+  nsTArray<nscoord> mColSpacing;
+  nsTArray<nscoord> mRowSpacing;
+  nscoord mFrameSpacingX;
+  nscoord mFrameSpacingY;
+  bool mUseCSSSpacing;
 }; // class nsMathMLmtableFrame
 
 // --------------
@@ -121,44 +175,42 @@ class nsMathMLmtrFrame : public nsTableRowFrame
 public:
   NS_DECL_FRAMEARENA_HELPERS
 
-  friend nsIFrame* NS_NewMathMLmtrFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
+  friend nsContainerFrame* NS_NewMathMLmtrFrame(nsIPresShell* aPresShell,
+                                                nsStyleContext* aContext);
 
   // overloaded nsTableRowFrame methods
 
   virtual nsresult
   AttributeChanged(int32_t  aNameSpaceID,
                    nsIAtom* aAttribute,
-                   int32_t  aModType) MOZ_OVERRIDE;
+                   int32_t  aModType) override;
 
-  virtual nsresult
+  virtual void
   AppendFrames(ChildListID  aListID,
-               nsFrameList& aFrameList) MOZ_OVERRIDE
+               nsFrameList& aFrameList) override
   {
-    nsresult rv = nsTableRowFrame::AppendFrames(aListID, aFrameList);
+    nsTableRowFrame::AppendFrames(aListID, aFrameList);
     RestyleTable();
-    return rv;
   }
 
-  virtual nsresult
+  virtual void
   InsertFrames(ChildListID aListID,
                nsIFrame* aPrevFrame,
-               nsFrameList& aFrameList) MOZ_OVERRIDE
+               nsFrameList& aFrameList) override
   {
-    nsresult rv = nsTableRowFrame::InsertFrames(aListID, aPrevFrame, aFrameList);
+    nsTableRowFrame::InsertFrames(aListID, aPrevFrame, aFrameList);
     RestyleTable();
-    return rv;
   }
 
-  virtual nsresult
+  virtual void
   RemoveFrame(ChildListID aListID,
-              nsIFrame* aOldFrame) MOZ_OVERRIDE
+              nsIFrame* aOldFrame) override
   {
-    nsresult rv = nsTableRowFrame::RemoveFrame(aListID, aOldFrame);
+    nsTableRowFrame::RemoveFrame(aListID, aOldFrame);
     RestyleTable();
-    return rv;
   }
 
-  virtual bool IsFrameOfType(uint32_t aFlags) const MOZ_OVERRIDE
+  virtual bool IsFrameOfType(uint32_t aFlags) const override
   {
     return nsTableRowFrame::IsFrameOfType(aFlags & ~(nsIFrame::eMathML));
   }
@@ -174,7 +226,7 @@ public:
   }
 
 protected:
-  nsMathMLmtrFrame(nsStyleContext* aContext) : nsTableRowFrame(aContext) {}
+  explicit nsMathMLmtrFrame(nsStyleContext* aContext) : nsTableRowFrame(aContext) {}
   virtual ~nsMathMLmtrFrame();
 }; // class nsMathMLmtrFrame
 
@@ -185,31 +237,38 @@ class nsMathMLmtdFrame : public nsTableCellFrame
 public:
   NS_DECL_FRAMEARENA_HELPERS
 
-  friend nsIFrame* NS_NewMathMLmtdFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
+  friend nsContainerFrame* NS_NewMathMLmtdFrame(nsIPresShell* aPresShell,
+                                                nsStyleContext* aContext);
 
   // overloaded nsTableCellFrame methods
+
+  virtual void Init(nsIContent*       aContent,
+                    nsContainerFrame* aParent,
+                    nsIFrame*         aPrevInFlow) override;
 
   virtual nsresult
   AttributeChanged(int32_t  aNameSpaceID,
                    nsIAtom* aAttribute,
-                   int32_t  aModType) MOZ_OVERRIDE;
+                   int32_t  aModType) override;
 
-  virtual uint8_t GetVerticalAlign() const MOZ_OVERRIDE;
+  virtual uint8_t GetVerticalAlign() const override;
   virtual nsresult ProcessBorders(nsTableFrame* aFrame,
                                   nsDisplayListBuilder* aBuilder,
-                                  const nsDisplayListSet& aLists) MOZ_OVERRIDE;
+                                  const nsDisplayListSet& aLists) override;
 
-  virtual int32_t GetRowSpan() MOZ_OVERRIDE;
-  virtual int32_t GetColSpan() MOZ_OVERRIDE;
-  virtual bool IsFrameOfType(uint32_t aFlags) const MOZ_OVERRIDE
+  virtual int32_t GetRowSpan() override;
+  virtual int32_t GetColSpan() override;
+  virtual bool IsFrameOfType(uint32_t aFlags) const override
   {
     return nsTableCellFrame::IsFrameOfType(aFlags & ~(nsIFrame::eMathML));
   }
 
-  virtual nsMargin* GetBorderWidth(nsMargin& aBorder) const MOZ_OVERRIDE;
+  virtual nsMargin* GetBorderWidth(nsMargin& aBorder) const override;
+
+  virtual nsMargin GetBorderOverflow() override;
 
 protected:
-  nsMathMLmtdFrame(nsStyleContext* aContext) : nsTableCellFrame(aContext) {}
+  explicit nsMathMLmtdFrame(nsStyleContext* aContext) : nsTableCellFrame(aContext) {}
   virtual ~nsMathMLmtdFrame();
 }; // class nsMathMLmtdFrame
 
@@ -218,7 +277,7 @@ protected:
 class nsMathMLmtdInnerFrame : public nsBlockFrame,
                               public nsMathMLFrame {
 public:
-  friend nsIFrame* NS_NewMathMLmtdInnerFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
+  friend nsContainerFrame* NS_NewMathMLmtdInnerFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 
   NS_DECL_QUERYFRAME
   NS_DECL_FRAMEARENA_HELPERS
@@ -229,36 +288,36 @@ public:
   UpdatePresentationDataFromChildAt(int32_t         aFirstIndex,
                                     int32_t         aLastIndex,
                                     uint32_t        aFlagsValues,
-                                    uint32_t        aFlagsToUpdate) MOZ_OVERRIDE
+                                    uint32_t        aFlagsToUpdate) override
   {
     nsMathMLContainerFrame::PropagatePresentationDataFromChildAt(this,
       aFirstIndex, aLastIndex, aFlagsValues, aFlagsToUpdate);
     return NS_OK;
   }
 
-  virtual nsresult
+  virtual void
   Reflow(nsPresContext*          aPresContext,
          nsHTMLReflowMetrics&     aDesiredSize,
          const nsHTMLReflowState& aReflowState,
-         nsReflowStatus&          aStatus) MOZ_OVERRIDE;
+         nsReflowStatus&          aStatus) override;
 
-  virtual bool IsFrameOfType(uint32_t aFlags) const MOZ_OVERRIDE
+  virtual bool IsFrameOfType(uint32_t aFlags) const override
   {
     return nsBlockFrame::IsFrameOfType(aFlags &
       ~(nsIFrame::eMathML | nsIFrame::eExcludesIgnorableWhitespace));
   }
 
-  virtual const nsStyleText* StyleTextForLineLayout() MOZ_OVERRIDE;
-  virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext) MOZ_OVERRIDE;
+  virtual const nsStyleText* StyleTextForLineLayout() override;
+  virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext) override;
 
   bool
-  IsMrowLike() MOZ_OVERRIDE {
+  IsMrowLike() override {
     return mFrames.FirstChild() != mFrames.LastChild() ||
            !mFrames.FirstChild();
   }
 
 protected:
-  nsMathMLmtdInnerFrame(nsStyleContext* aContext);
+  explicit nsMathMLmtdInnerFrame(nsStyleContext* aContext);
   virtual ~nsMathMLmtdInnerFrame();
 
   nsStyleText* mUniqueStyleText;

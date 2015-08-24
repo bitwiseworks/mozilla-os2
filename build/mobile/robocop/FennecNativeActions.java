@@ -41,7 +41,7 @@ public class FennecNativeActions implements Actions {
     }
 
     class GeckoEventExpecter implements RepeatedEventExpecter {
-        private static final int MAX_WAIT_MS = 90000;
+        private static final int MAX_WAIT_MS = 180000;
 
         private volatile boolean mIsRegistered;
 
@@ -72,7 +72,7 @@ public class FennecNativeActions implements Actions {
                 }
             };
 
-            GeckoAppShell.registerEventListener(mGeckoEvent, mListener);
+            EventDispatcher.getInstance().registerGeckoThreadListener(mListener, mGeckoEvent);
             mIsRegistered = true;
         }
 
@@ -158,7 +158,7 @@ public class FennecNativeActions implements Actions {
             FennecNativeDriver.log(LogLevel.INFO,
                     "EventExpecter: no longer listening for " + mGeckoEvent);
 
-            GeckoAppShell.unregisterEventListener(mGeckoEvent, mListener);
+            EventDispatcher.getInstance().unregisterGeckoThreadListener(mListener, mGeckoEvent);
             mIsRegistered = false;
         }
 

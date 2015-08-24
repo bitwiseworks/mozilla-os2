@@ -23,7 +23,6 @@
 #include "nsJSPrincipals.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsContentUtils.h"
-#include "nsCxPusher.h"
 #include "nsDOMJSUtils.h"
 #include "mozilla/Services.h"
 #include "xpcpublic.h"
@@ -51,9 +50,9 @@ TraverseProtos(const nsACString &aKey, nsXBLPrototypeBinding *aProto, void* aClo
 }
 
 static PLDHashOperator
-UnlinkProtoJSObjects(const nsACString &aKey, nsXBLPrototypeBinding *aProto, void* aClosure)
+UnlinkProto(const nsACString &aKey, nsXBLPrototypeBinding *aProto, void* aClosure)
 {
-  aProto->UnlinkJSObjects();
+  aProto->Unlink();
   return PL_DHASH_NEXT;
 }
 
@@ -75,7 +74,7 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(nsXBLDocumentInfo)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsXBLDocumentInfo)
   if (tmp->mBindingTable) {
-    tmp->mBindingTable->EnumerateRead(UnlinkProtoJSObjects, nullptr);
+    tmp->mBindingTable->EnumerateRead(UnlinkProto, nullptr);
   }
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mDocument)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
@@ -99,9 +98,9 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(nsXBLDocumentInfo)
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 static void
-UnmarkXBLJSObject(void* aP, const char* aName, void* aClosure)
+UnmarkXBLJSObject(JS::GCCellPtr aPtr, const char* aName, void* aClosure)
 {
-  JS::ExposeObjectToActiveJS(static_cast<JSObject*>(aP));
+  JS::ExposeObjectToActiveJS(aPtr.toObject());
 }
 
 static PLDHashOperator
@@ -360,7 +359,6 @@ void
 AssertInCompilationScope()
 {
   AutoJSContext cx;
-  // Note - Inverting the order of these operands is a rooting hazard.
-  MOZ_ASSERT(xpc::GetCompilationScope() == JS::CurrentGlobalOrNull(cx));
+  MOZ_ASSERT(xpc::CompilationScope() == JS::CurrentGlobalOrNull(cx));
 }
 #endif

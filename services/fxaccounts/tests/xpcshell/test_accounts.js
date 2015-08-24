@@ -8,6 +8,7 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/FxAccounts.jsm");
 Cu.import("resource://gre/modules/FxAccountsClient.jsm");
 Cu.import("resource://gre/modules/FxAccountsCommon.js");
+Cu.import("resource://gre/modules/FxAccountsOAuthGrantClient.jsm");
 Cu.import("resource://gre/modules/Promise.jsm");
 Cu.import("resource://gre/modules/Log.jsm");
 
@@ -24,7 +25,13 @@ let log = Log.repository.getLogger("Services.FxAccounts.test");
 log.level = Log.Level.Debug;
 
 // See verbose logging from FxAccounts.jsm
-Services.prefs.setCharPref("identity.fxaccounts.loglevel", "DEBUG");
+Services.prefs.setCharPref("identity.fxaccounts.loglevel", "Trace");
+Log.repository.getLogger("FirefoxAccounts").level = Log.Level.Trace;
+
+// The oauth server is mocked, but set these prefs to pass param checks
+Services.prefs.setCharPref("identity.fxaccounts.remote.oauth.uri", "https://example.com/v1");
+Services.prefs.setCharPref("identity.fxaccounts.oauth.client_id", "abc123");
+
 
 function run_test() {
   run_next_test();
@@ -41,19 +48,21 @@ function run_test() {
 function MockFxAccountsClient() {
   this._email = "nobody@example.com";
   this._verified = false;
+  this._deletedOnServer = false; // for testing accountStatus
 
   // mock calls up to the auth server to determine whether the
   // user account has been verified
   this.recoveryEmailStatus = function (sessionToken) {
     // simulate a call to /recovery_email/status
-    let deferred = Promise.defer();
-
-    let response = {
+    return Promise.resolve({
       email: this._email,
       verified: this._verified
-    };
-    deferred.resolve(response);
+    });
+  };
 
+  this.accountStatus = function(uid) {
+    let deferred = Promise.defer();
+    deferred.resolve(!!uid && (!this._deletedOnServer));
     return deferred.promise;
   };
 
@@ -106,6 +115,8 @@ MockStorage.prototype = Object.freeze({
  */
 function MockFxAccounts() {
   return new FxAccounts({
+    VERIFICATION_POLL_TIMEOUT_INITIAL: 100, // 100ms
+
     _getCertificateSigned_calls: [],
     _d_signCertificate: Promise.defer(),
     _now_is: new Date(),
@@ -122,6 +133,21 @@ function MockFxAccounts() {
   });
 }
 
+add_test(function test_non_https_remote_server_uri_with_requireHttps_false() {
+  Services.prefs.setBoolPref(
+    "identity.fxaccounts.allowHttp",
+    true);
+  Services.prefs.setCharPref(
+    "identity.fxaccounts.remote.signup.uri",
+    "http://example.com/browser/browser/base/content/test/general/accounts_testRemoteCommands.html");
+  do_check_eq(fxAccounts.getAccountsSignUpURI(),
+              "http://example.com/browser/browser/base/content/test/general/accounts_testRemoteCommands.html");
+
+  Services.prefs.clearUserPref("identity.fxaccounts.remote.signup.uri");
+  Services.prefs.clearUserPref("identity.fxaccounts.allowHttp");
+  run_next_test();
+});
+
 add_test(function test_non_https_remote_server_uri() {
   Services.prefs.setCharPref(
     "identity.fxaccounts.remote.signup.uri",
@@ -136,10 +162,12 @@ add_test(function test_non_https_remote_server_uri() {
 });
 
 add_task(function test_get_signed_in_user_initially_unset() {
-  // This test, unlike the rest, uses an un-mocked FxAccounts instance.
-  // However, we still need to pass an object to the constructor to
-  // force it to expose "internal", so we can test the disk storage.
-  let account = new FxAccounts({onlySetInternal: true})
+  // This test, unlike many of the the rest, uses a (largely) un-mocked
+  // FxAccounts instance.
+  // We do mock the storage to keep the test fast on b2g.
+  let account = new FxAccounts({
+    signedInUserStorage: new MockStorage(),
+  });
   let credentials = {
     email: "foo@example.com",
     uid: "1234@lcip.org",
@@ -149,13 +177,15 @@ add_task(function test_get_signed_in_user_initially_unset() {
     kB: "cafe",
     verified: true
   };
+  // and a sad hack to ensure the mocked storage is used for the initial reads.
+  account.internal.currentAccountState.signedInUserStorage = account.internal.signedInUserStorage;
 
   let result = yield account.getSignedInUser();
   do_check_eq(result, null);
 
   yield account.setSignedInUser(credentials);
 
-  let result = yield account.getSignedInUser();
+  result = yield account.getSignedInUser();
   do_check_eq(result.email, credentials.email);
   do_check_eq(result.assertion, credentials.assertion);
   do_check_eq(result.kB, credentials.kB);
@@ -163,7 +193,7 @@ add_task(function test_get_signed_in_user_initially_unset() {
   // Delete the memory cache and force the user
   // to be read and parsed from storage (e.g. disk via JSONStorage).
   delete account.internal.signedInUser;
-  let result = yield account.getSignedInUser();
+  result = yield account.getSignedInUser();
   do_check_eq(result.email, credentials.email);
   do_check_eq(result.assertion, credentials.assertion);
   do_check_eq(result.kB, credentials.kB);
@@ -173,9 +203,51 @@ add_task(function test_get_signed_in_user_initially_unset() {
   yield account.signOut(localOnly);
 
   // user should be undefined after sign out
-  let result = yield account.getSignedInUser();
+  result = yield account.getSignedInUser();
   do_check_eq(result, null);
 });
+
+add_task(function* test_getCertificate() {
+  _("getCertificate()");
+  // This test, unlike many of the the rest, uses a (largely) un-mocked
+  // FxAccounts instance.
+  // We do mock the storage to keep the test fast on b2g.
+  let fxa = new FxAccounts({
+    signedInUserStorage: new MockStorage(),
+  });
+  let credentials = {
+    email: "foo@example.com",
+    uid: "1234@lcip.org",
+    assertion: "foobar",
+    sessionToken: "dead",
+    kA: "beef",
+    kB: "cafe",
+    verified: true
+  };
+  // and a sad hack to ensure the mocked storage is used for the initial reads.
+  fxa.internal.currentAccountState.signedInUserStorage = fxa.internal.signedInUserStorage;
+  yield fxa.setSignedInUser(credentials);
+
+  // Test that an expired cert throws if we're offline.
+  fxa.internal.currentAccountState.cert = {
+    validUntil: Date.parse("Mon, 13 Jan 2000 21:45:06 GMT")
+  };
+  let offline = Services.io.offline;
+  Services.io.offline = true;
+  // This call would break from missing parameters ...
+  yield fxa.internal.currentAccountState.getCertificate().then(
+    result => {
+      Services.io.offline = offline;
+      do_throw("Unexpected success");
+    },
+    err => {
+      Services.io.offline = offline;
+      // ... so we have to check the error string.
+      do_check_eq(err, "Error: OFFLINE");
+    }
+  );
+});
+
 
 // Sanity-check that our mocked client is working correctly
 add_test(function test_client_mock() {
@@ -256,7 +328,6 @@ add_test(function test_polling_timeout() {
   });
 
   fxa.internal.POLL_SESSION = 1;
-  fxa.internal.POLL_STEP = 2;
 
   let p = fxa.internal.whenVerified({});
 
@@ -287,8 +358,9 @@ add_test(function test_getKeys() {
       // Before getKeys, we have no keys
       do_check_eq(!!user.kA, false);
       do_check_eq(!!user.kB, false);
-      // And we still have a key-fetch token to use
+      // And we still have a key-fetch token and unwrapBKey to use
       do_check_eq(!!user.keyFetchToken, true);
+      do_check_eq(!!user.unwrapBKey, true);
 
       fxa.internal.getKeys().then(() => {
         fxa.getSignedInUser().then((user) => {
@@ -298,6 +370,7 @@ add_test(function test_getKeys() {
           do_check_eq(user.kA, expandHex("11"));
           do_check_eq(user.kB, expandHex("66"));
           do_check_eq(user.keyFetchToken, undefined);
+          do_check_eq(user.unwrapBKey, undefined);
           do_test_finished();
           run_next_test();
         });
@@ -322,9 +395,16 @@ add_test(function test_fetchAndUnwrapKeys_no_token() {
     });
   });
 
-  fxa.setSignedInUser(user).then((user) => {
-    fxa.internal.fetchAndUnwrapKeys();
-  });
+  fxa.setSignedInUser(user).then(
+    user => {
+      return fxa.internal.fetchAndUnwrapKeys();
+    }
+  ).then(
+    null,
+    error => {
+      log.info("setSignedInUser correctly rejected");
+    }
+  )
 });
 
 // Alice (User A) signs up but never verifies her email.  Then Bob (User B)
@@ -499,6 +579,39 @@ add_task(function test_resend_email_not_signed_in() {
   do_throw("Should not be able to resend email when nobody is signed in");
 });
 
+add_test(function test_accountStatus() {
+  let fxa = new MockFxAccounts();
+  let alice = getTestUser("alice");
+
+  // If we have no user, we have no account server-side
+  fxa.accountStatus().then(
+    (result) => {
+      do_check_false(result);
+    }
+  ).then(
+    () => {
+      fxa.setSignedInUser(alice).then(
+        () => {
+          fxa.accountStatus().then(
+            (result) => {
+               // FxAccounts.accountStatus() should match Client.accountStatus()
+               do_check_true(result);
+               fxa.internal.fxAccountsClient._deletedOnServer = true;
+               fxa.accountStatus().then(
+                 (result) => {
+                   do_check_false(result);
+                   fxa.internal.fxAccountsClient._deletedOnServer = false;
+                   run_next_test();
+                 }
+               );
+            }
+          )
+        }
+      );
+    }
+  );
+});
+
 add_test(function test_resend_email() {
   let fxa = new MockFxAccounts();
   let alice = getTestUser("alice");
@@ -579,6 +692,174 @@ add_test(function test_sign_out_with_remote_error() {
   fxa.signOut();
 });
 
+add_test(function test_getOAuthToken() {
+  let fxa = new MockFxAccounts();
+  let alice = getTestUser("alice");
+  alice.verified = true;
+  let getTokenFromAssertionCalled = false;
+
+  fxa.internal._d_signCertificate.resolve("cert1");
+
+  // create a mock oauth client
+  let client = new FxAccountsOAuthGrantClient({
+    serverURL: "http://example.com/v1",
+    client_id: "abc123"
+  });
+  client.getTokenFromAssertion = function () {
+    getTokenFromAssertionCalled = true;
+    return Promise.resolve({ access_token: "token" });
+  };
+
+  fxa.setSignedInUser(alice).then(
+    () => {
+      fxa.getOAuthToken({ scope: "profile", client: client }).then(
+        (result) => {
+           do_check_true(getTokenFromAssertionCalled);
+           do_check_eq(result, "token");
+           run_next_test();
+        }
+      )
+    }
+  );
+
+});
+
+
+Services.prefs.setCharPref("identity.fxaccounts.remote.oauth.uri", "https://example.com/v1");
+add_test(function test_getOAuthToken_invalid_param() {
+  let fxa = new MockFxAccounts();
+
+  fxa.getOAuthToken()
+    .then(null, err => {
+       do_check_eq(err.message, "INVALID_PARAMETER");
+       run_next_test();
+    });
+});
+
+add_test(function test_getOAuthToken_misconfigure_oauth_uri() {
+  let fxa = new MockFxAccounts();
+
+  Services.prefs.deleteBranch("identity.fxaccounts.remote.oauth.uri");
+
+  fxa.getOAuthToken()
+    .then(null, err => {
+       do_check_eq(err.message, "INVALID_PARAMETER");
+       // revert the pref
+       Services.prefs.setCharPref("identity.fxaccounts.remote.oauth.uri", "https://example.com/v1");
+       run_next_test();
+    });
+});
+
+add_test(function test_getOAuthToken_no_account() {
+  let fxa = new MockFxAccounts();
+
+  fxa.internal.currentAccountState.getUserAccountData = function () {
+    return Promise.resolve(null);
+  };
+
+  fxa.getOAuthToken({ scope: "profile" })
+    .then(null, err => {
+       do_check_eq(err.message, "NO_ACCOUNT");
+       run_next_test();
+    });
+});
+
+add_test(function test_getOAuthToken_unverified() {
+  let fxa = new MockFxAccounts();
+  let alice = getTestUser("alice");
+
+  fxa.setSignedInUser(alice).then(() => {
+    fxa.getOAuthToken({ scope: "profile" })
+      .then(null, err => {
+         do_check_eq(err.message, "UNVERIFIED_ACCOUNT");
+         run_next_test();
+      });
+  });
+});
+
+add_test(function test_getOAuthToken_network_error() {
+  let fxa = new MockFxAccounts();
+  let alice = getTestUser("alice");
+  alice.verified = true;
+
+  fxa.internal._d_signCertificate.resolve("cert1");
+
+  // create a mock oauth client
+  let client = new FxAccountsOAuthGrantClient({
+    serverURL: "http://example.com/v1",
+    client_id: "abc123"
+  });
+  client.getTokenFromAssertion = function () {
+    return Promise.reject(new FxAccountsOAuthGrantClientError({
+      error: ERROR_NETWORK,
+      errno: ERRNO_NETWORK
+    }));
+  };
+
+  fxa.setSignedInUser(alice).then(() => {
+    fxa.getOAuthToken({ scope: "profile", client: client })
+      .then(null, err => {
+         do_check_eq(err.message, "NETWORK_ERROR");
+         do_check_eq(err.details.errno, ERRNO_NETWORK);
+         run_next_test();
+      });
+  });
+});
+
+add_test(function test_getOAuthToken_auth_error() {
+  let fxa = new MockFxAccounts();
+  let alice = getTestUser("alice");
+  alice.verified = true;
+
+  fxa.internal._d_signCertificate.resolve("cert1");
+
+  // create a mock oauth client
+  let client = new FxAccountsOAuthGrantClient({
+    serverURL: "http://example.com/v1",
+    client_id: "abc123"
+  });
+  client.getTokenFromAssertion = function () {
+    return Promise.reject(new FxAccountsOAuthGrantClientError({
+      error: ERROR_INVALID_FXA_ASSERTION,
+      errno: ERRNO_INVALID_FXA_ASSERTION
+    }));
+  };
+
+  fxa.setSignedInUser(alice).then(() => {
+    fxa.getOAuthToken({ scope: "profile", client: client })
+      .then(null, err => {
+         do_check_eq(err.message, "AUTH_ERROR");
+         do_check_eq(err.details.errno, ERRNO_INVALID_FXA_ASSERTION);
+         run_next_test();
+      });
+  });
+});
+
+add_test(function test_getOAuthToken_unknown_error() {
+  let fxa = new MockFxAccounts();
+  let alice = getTestUser("alice");
+  alice.verified = true;
+
+  fxa.internal._d_signCertificate.resolve("cert1");
+
+  // create a mock oauth client
+  let client = new FxAccountsOAuthGrantClient({
+    serverURL: "http://example.com/v1",
+    client_id: "abc123"
+  });
+  client.getTokenFromAssertion = function () {
+    return Promise.reject("boom");
+  };
+
+  fxa.setSignedInUser(alice).then(() => {
+    fxa.getOAuthToken({ scope: "profile", client: client })
+      .then(null, err => {
+         do_check_eq(err.message, "UNKNOWN_ERROR");
+         run_next_test();
+      });
+  });
+});
+
 /*
  * End of tests.
  * Utility functions follow.
@@ -641,7 +922,7 @@ function do_check_throws(func, result, stack)
     if (ex.name == result) {
       return;
     }
-    do_throw("Expected result " + result + ", caught " + ex, stack);
+    do_throw("Expected result " + result + ", caught " + ex.name, stack);
   }
 
   if (result) {

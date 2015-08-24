@@ -19,6 +19,7 @@
 #define WEBRTC_VIDEO_ENGINE_INCLUDE_VIE_CAPTURE_H_
 
 #include "webrtc/common_types.h"
+#include "webrtc/common_video/interface/i420_video_frame.h"
 
 namespace webrtc {
 
@@ -44,6 +45,20 @@ struct CaptureCapability {
     expectedCaptureDelay = 0;
     interlaced = false;
   }
+};
+
+enum CaptureDeviceType {
+  Camera = 0,
+  Screen = 1,
+  Application = 2,
+  Window = 3,
+  Browser = 4
+};
+struct CaptureDeviceInfo {
+  CaptureDeviceType type;
+
+  CaptureDeviceInfo() : type(CaptureDeviceType::Camera) {}
+  CaptureDeviceInfo(CaptureDeviceType t) : type(t) {}
 };
 
 // This enumerator tells the current brightness alarm mode.
@@ -117,6 +132,8 @@ class WEBRTC_DLLEXPORT ViEExternalCapture {
   virtual int IncomingFrameI420(
       const ViEVideoFrameI420& video_frame,
       unsigned long long capture_time = 0) = 0;
+
+  virtual void SwapFrame(I420VideoFrame* frame) {}
 };
 
 // This class declares an abstract interface for a user defined observer. It is

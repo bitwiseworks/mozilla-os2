@@ -15,7 +15,7 @@ function testConferenceTwoAndRemoveOne() {
   let inInfo = gInCallStrPool(inNumber);
 
   return Promise.resolve()
-    .then(() => gSetupConferenceTwoCalls(outNumber, inNumber))
+    .then(() => gSetupConference([outNumber, inNumber]))
     .then(calls => {
       [outCall, inCall] = calls;
     })
@@ -30,8 +30,6 @@ function testConferenceTwoAndRemoveOne() {
 // Start the test
 startTest(function() {
   testConferenceTwoAndRemoveOne()
-    .then(null, error => {
-      ok(false, 'promise rejects during test.');
-    })
+    .catch(error => ok(false, "Promise reject: " + error))
     .then(finish);
 });

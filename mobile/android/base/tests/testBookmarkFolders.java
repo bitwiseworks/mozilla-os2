@@ -1,5 +1,10 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 package org.mozilla.gecko.tests;
 
+import org.mozilla.gecko.home.HomePager;
 import org.mozilla.gecko.sync.Utils;
 
 import android.content.ContentResolver;
@@ -29,21 +34,19 @@ public class testBookmarkFolders extends AboutHomeTest {
         waitForText(StringHelper.TOOLBAR_FOLDER_LABEL);
 
         // Verify the number of folders displayed in the Desktop Bookmarks folder is correct
-        ListView desktopFolderContent = findListViewWithTag("bookmarks");
+        ListView desktopFolderContent = findListViewWithTag(HomePager.LIST_TAG_BOOKMARKS);
         ListAdapter adapter = desktopFolderContent.getAdapter();
-        if (mDevice.type.equals("tablet")) { // On tablets it's 4 folders and 1 view for top padding
-            mAsserter.is(adapter.getCount(), 5, "Checking that the correct number of folders is displayed in the Desktop Bookmarks folder");
-        } else { // On phones it's just the 4 folders
-            mAsserter.is(adapter.getCount(), 4, "Checking that the correct number of folders is displayed in the Desktop Bookmarks folder");
-        }
+
+        // Three folders and "Up to Bookmarks".
+        mAsserter.is(adapter.getCount(), 4, "Checking that the correct number of folders is displayed in the Desktop Bookmarks folder");
 
         clickOnBookmarkFolder(StringHelper.TOOLBAR_FOLDER_LABEL);
 
         // Go up in the bookmark folder hierarchy
-        clickOnBookmarkFolder(StringHelper.TOOLBAR_FOLDER_LABEL);
+        clickOnBookmarkFolder(String.format(StringHelper.BOOKMARKS_UP_TO, StringHelper.DESKTOP_FOLDER_LABEL));
         mAsserter.ok(waitForText(StringHelper.BOOKMARKS_MENU_FOLDER_LABEL), "Going up in the folder hierarchy", "We are back in the Desktop Bookmarks folder");
 
-        clickOnBookmarkFolder(StringHelper.DESKTOP_FOLDER_LABEL);
+        clickOnBookmarkFolder(String.format(StringHelper.BOOKMARKS_UP_TO, StringHelper.BOOKMARKS_ROOT_LABEL));
         mAsserter.ok(waitForText(StringHelper.DESKTOP_FOLDER_LABEL), "Going up in the folder hierarchy", "We are back in the main Bookmarks List View");
 
         clickOnBookmarkFolder(StringHelper.DESKTOP_FOLDER_LABEL);
@@ -52,8 +55,7 @@ public class testBookmarkFolders extends AboutHomeTest {
 
         // Open the bookmark from a bookmark folder hierarchy
         loadBookmark(DESKTOP_BOOKMARK_URL);
-        waitForText(StringHelper.ROBOCOP_BLANK_PAGE_02_TITLE);
-        verifyPageTitle(StringHelper.ROBOCOP_BLANK_PAGE_02_TITLE);
+        verifyUrlBarTitle(DESKTOP_BOOKMARK_URL);
         openAboutHomeTab(AboutHomeTabs.BOOKMARKS);
 
         // Check that folders don't have a context menu
@@ -74,7 +76,7 @@ public class testBookmarkFolders extends AboutHomeTest {
         mAsserter.ok(!waitForText(contextMenuString), "Folders do not have context menus", "The context menu was not opened");
 
         // Even if no context menu is opened long clicking a folder still opens it. We need to close it.
-        clickOnBookmarkFolder(StringHelper.DESKTOP_FOLDER_LABEL);
+        clickOnBookmarkFolder(String.format(StringHelper.BOOKMARKS_UP_TO, StringHelper.BOOKMARKS_ROOT_LABEL));
     }
 
     private void clickOnBookmarkFolder(final String folderName) {
@@ -98,7 +100,7 @@ public class testBookmarkFolders extends AboutHomeTest {
         mSolo.hideSoftKeyboard();
         getInstrumentation().waitForIdleSync();
 
-        ListView bookmarksTabList = findListViewWithTag("bookmarks");
+        ListView bookmarksTabList = findListViewWithTag(HomePager.LIST_TAG_BOOKMARKS);
         if (!waitForNonEmptyListToLoad(bookmarksTabList)) {
             return null;
         }

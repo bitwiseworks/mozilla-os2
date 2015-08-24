@@ -21,9 +21,12 @@
 #include "mozilla/ErrorResult.h"
 
 class nsPresContext;
-class nsCSSStyleSheet;
 class nsAString;
 struct nsMediaFeature;
+
+namespace mozilla {
+class CSSStyleSheet;
+} // namespace mozilla
 
 struct nsMediaExpression {
   enum Range { eMin, eMax, eEqual };
@@ -34,7 +37,16 @@ struct nsMediaExpression {
 
   // aActualValue must be obtained from mFeature->mGetter
   bool Matches(nsPresContext* aPresContext,
-                 const nsCSSValue& aActualValue) const;
+               const nsCSSValue& aActualValue) const;
+
+  bool operator==(const nsMediaExpression& aOther) const {
+    return mFeature == aOther.mFeature && // pointer equality fine (atom-like)
+           mRange == aOther.mRange &&
+           mValue == aOther.mValue;
+  }
+  bool operator!=(const nsMediaExpression& aOther) const {
+    return !(*this == aOther);
+  }
 };
 
 /**
@@ -58,7 +70,7 @@ struct nsMediaExpression {
  */
 class nsMediaQueryResultCacheKey {
 public:
-  nsMediaQueryResultCacheKey(nsIAtom* aMedium)
+  explicit nsMediaQueryResultCacheKey(nsIAtom* aMedium)
     : mMedium(aMedium)
   {}
 
@@ -70,6 +82,21 @@ public:
   void AddExpression(const nsMediaExpression* aExpression,
                      bool aExpressionMatches);
   bool Matches(nsPresContext* aPresContext) const;
+  bool HasFeatureConditions() const {
+    return !mFeatureCache.IsEmpty();
+  }
+
+  /**
+   * An operator== that implements list equality, which isn't quite as
+   * good as set equality, but catches the trivial equality cases.
+   */
+  bool operator==(const nsMediaQueryResultCacheKey& aOther) const {
+    return mMedium == aOther.mMedium &&
+           mFeatureCache == aOther.mFeatureCache;
+  }
+  bool operator!=(const nsMediaQueryResultCacheKey& aOther) const {
+    return !(*this == aOther);
+  }
 private:
   struct ExpressionEntry {
     // FIXME: if we were better at maintaining invariants about clearing
@@ -77,10 +104,26 @@ private:
     // nsMediaExpression*| instead.
     nsMediaExpression mExpression;
     bool mExpressionMatches;
+
+    bool operator==(const ExpressionEntry& aOther) const {
+      return mExpression == aOther.mExpression &&
+             mExpressionMatches == aOther.mExpressionMatches;
+    }
+    bool operator!=(const ExpressionEntry& aOther) const {
+      return !(*this == aOther);
+    }
   };
   struct FeatureEntry {
     const nsMediaFeature *mFeature;
     InfallibleTArray<ExpressionEntry> mExpressions;
+
+    bool operator==(const FeatureEntry& aOther) const {
+      return mFeature == aOther.mFeature &&
+             mExpressions == aOther.mExpressions;
+    }
+    bool operator!=(const FeatureEntry& aOther) const {
+      return !(*this == aOther);
+    }
   };
   nsCOMPtr<nsIAtom> mMedium;
   nsTArray<FeatureEntry> mFeatureCache;
@@ -145,7 +188,7 @@ private:
   nsTArray<nsMediaExpression> mExpressions;
 };
 
-class nsMediaList MOZ_FINAL : public nsIDOMMediaList
+class nsMediaList final : public nsIDOMMediaList
                             , public nsWrapperCache
 {
 public:
@@ -154,7 +197,7 @@ public:
   nsMediaList();
 
   virtual JSObject*
-  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  WrapObject(JSContext* aCx) override;
   nsISupports* GetParentObject() const
   {
     return nullptr;
@@ -173,7 +216,7 @@ public:
   bool Matches(nsPresContext* aPresContext,
                  nsMediaQueryResultCacheKey* aKey);
 
-  nsresult SetStyleSheet(nsCSSStyleSheet* aSheet);
+  void SetStyleSheet(mozilla::CSSStyleSheet* aSheet);
   void AppendQuery(nsAutoPtr<nsMediaQuery>& aQuery) {
     // Takes ownership of aQuery
     mArray.AppendElement(aQuery.forget());
@@ -208,6 +251,6 @@ protected:
   // not refcounted; sheet will let us know when it goes away
   // mStyleSheet is the sheet that needs to be dirtied when this medialist
   // changes
-  nsCSSStyleSheet*         mStyleSheet;
+  mozilla::CSSStyleSheet* mStyleSheet;
 };
 #endif /* !defined(nsIMediaList_h_) */

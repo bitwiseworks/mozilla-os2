@@ -2,28 +2,20 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-;(function(id, factory) { // Module boilerplate :(
-  if (typeof(define) === 'function') { // RequireJS
-    define(factory);
-  } else if (typeof(require) === 'function') { // CommonJS
-    factory.call(this, require, exports, module);
-  } else if (~String(this).indexOf('BackstagePass')) { // JSM
-    this[factory.name] = {};
-    factory(function require(uri) {
-      var imports = {};
-      this['Components'].utils.import(uri, imports);
-      return imports;
-    }, this[factory.name], { uri: __URI__, id: id });
-    this.EXPORTED_SYMBOLS = [factory.name];
-  } else if (~String(this).indexOf('Sandbox')) { // Sandbox
-    factory(function require(uri) {}, this, { uri: __URI__, id: id });
-  } else {  // Browser or alike
-    var globals = this
-    factory(function require(id) {
-      return globals[id];
-    }, (globals[id] = {}), { uri: document.location.href + '#' + id, id: id });
+;((factory) => { // Module boilerplate :(
+  if (typeof(require) === 'function') { // CommonJS
+    require("chrome").Cu.import(module.uri, exports);
   }
-}).call(this, 'loader', function Loader(require, exports, module) {
+  else if (~String(this).indexOf('BackstagePass')) { // JSM
+    let module = { uri: __URI__, id: "toolkit/loader", exports: Object.create(null) }
+    factory(module);
+    Object.assign(this, module.exports);
+    this.EXPORTED_SYMBOLS = Object.getOwnPropertyNames(module.exports);
+  }
+  else {
+    throw Error("Loading environment is not supported");
+  }
+})(module => {
 
 'use strict';
 
@@ -38,25 +30,31 @@ const { loadSubScript } = Cc['@mozilla.org/moz/jssubscript-loader;1'].
                      getService(Ci.mozIJSSubScriptLoader);
 const { notifyObservers } = Cc['@mozilla.org/observer-service;1'].
                         getService(Ci.nsIObserverService);
+const { XPCOMUtils } = Cu.import("resource://gre/modules/XPCOMUtils.jsm", {});
 const { NetUtil } = Cu.import("resource://gre/modules/NetUtil.jsm", {});
-const { Reflect } = Cu.import("resource://gre/modules/reflect.jsm", {});
-const { console } = Cu.import("resource://gre/modules/devtools/Console.jsm");
 const { join: pathJoin, normalize, dirname } = Cu.import("resource://gre/modules/osfile/ospath_unix.jsm");
+
+XPCOMUtils.defineLazyGetter(this, "XulApp", () => {
+  let xulappURI = module.uri.replace("toolkit/loader.js",
+                                       "sdk/system/xul-app.jsm");
+  return Cu.import(xulappURI, {});
+});
 
 // Define some shortcuts.
 const bind = Function.call.bind(Function.bind);
-const getOwnPropertyNames = Object.getOwnPropertyNames;
 const getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
 const define = Object.defineProperties;
 const prototypeOf = Object.getPrototypeOf;
 const create = Object.create;
 const keys = Object.keys;
+const getOwnIdentifiers = x => [...Object.getOwnPropertyNames(x),
+                                ...Object.getOwnPropertySymbols(x)];
 
 const NODE_MODULES = ["assert", "buffer_ieee754", "buffer", "child_process", "cluster", "console", "constants", "crypto", "_debugger", "dgram", "dns", "domain", "events", "freelist", "fs", "http", "https", "_linklist", "module", "net", "os", "path", "punycode", "querystring", "readline", "repl", "stream", "string_decoder", "sys", "timers", "tls", "tty", "url", "util", "vm", "zlib"];
 
 const COMPONENT_ERROR = '`Components` is not available in this context.\n' +
   'Functionality provided by Components may be available in an SDK\n' +
-  'module: https://jetpack.mozillalabs.com/sdk/latest/docs/ \n\n' +
+  'module: https://developer.mozilla.org/en-US/Add-ons/SDK \n\n' +
   'However, if you still need to import Components, you may use the\n' +
   '`chrome` module\'s properties for shortcuts to Component properties:\n\n' +
   'Shortcuts: \n' +
@@ -84,12 +82,12 @@ function freeze(object) {
 // Returns map of given `object`-s own property descriptors.
 const descriptor = iced(function descriptor(object) {
   let value = {};
-  getOwnPropertyNames(object).forEach(function(name) {
+  getOwnIdentifiers(object).forEach(function(name) {
     value[name] = getOwnPropertyDescriptor(object, name)
   });
   return value;
 });
-exports.descriptor = descriptor;
+Loader.descriptor = descriptor;
 
 // Freeze important built-ins so they can't be used by untrusted code as a
 // message passing channel.
@@ -121,20 +119,20 @@ function iced(f) {
 const override = iced(function override(target, source) {
   let properties = descriptor(target)
   let extension = descriptor(source || {})
-  getOwnPropertyNames(extension).forEach(function(name) {
+  getOwnIdentifiers(extension).forEach(function(name) {
     properties[name] = extension[name];
   });
   return define({}, properties);
 });
-exports.override = override;
+Loader.override = override;
 
 function sourceURI(uri) { return String(uri).split(" -> ").pop(); }
-exports.sourceURI = iced(sourceURI);
+Loader.sourceURI = iced(sourceURI);
 
 function isntLoaderFrame(frame) { return frame.fileName !== module.uri }
 
 function parseURI(uri) { return String(uri).split(" -> ").pop(); }
-exports.parseURI = parseURI;
+Loader.parseURI = parseURI;
 
 function parseStack(stack) {
   let lines = String(stack).split("\n");
@@ -157,7 +155,7 @@ function parseStack(stack) {
     return frames;
   }, []);
 }
-exports.parseStack = parseStack;
+Loader.parseStack = parseStack;
 
 function serializeStack(frames) {
   return frames.reduce(function(stack, frame) {
@@ -168,10 +166,17 @@ function serializeStack(frames) {
            stack;
   }, "");
 }
-exports.serializeStack = serializeStack;
+Loader.serializeStack = serializeStack;
 
 function readURI(uri) {
-  let stream = NetUtil.newChannel(uri, 'UTF-8', null).open();
+  let stream = NetUtil.newChannel2(uri,
+                                   'UTF-8',
+                                   null,
+                                   null,      // aLoadingNode
+                                   systemPrincipal,
+                                   null,      // aTriggeringPrincipal
+                                   Ci.nsILoadInfo.SEC_NORMAL,
+                                   Ci.nsIContentPolicy.TYPE_OTHER).open();
   let count = stream.available();
   let data = NetUtil.readInputStreamToString(stream, count, {
     charset: 'UTF-8'
@@ -193,7 +198,7 @@ function join (...paths) {
   resolved = resolved.replace(/^chrome\:\/([^\/])/, 'chrome://$1');
   return resolved;
 }
-exports.join = join;
+Loader.join = join;
 
 // Function takes set of options and returns a JS sandbox. Function may be
 // passed set of options:
@@ -229,6 +234,10 @@ const Sandbox = iced(function Sandbox(options) {
     metadata: 'metadata' in options ? options.metadata : {}
   };
 
+  if (options.metadata && options.metadata.addonID) {
+    options.addonId = options.metadata.addonID;
+  }
+
   let sandbox = Cu.Sandbox(options.principal, options);
 
   // Each sandbox at creation gets set of own properties that will be shadowing
@@ -241,7 +250,7 @@ const Sandbox = iced(function Sandbox(options) {
 
   return sandbox;
 });
-exports.Sandbox = Sandbox;
+Loader.Sandbox = Sandbox;
 
 // Evaluates code from the given `uri` into given `sandbox`. If
 // `options.source` is passed, then that code is evaluated instead.
@@ -261,7 +270,7 @@ const evaluate = iced(function evaluate(sandbox, uri, options) {
   return source ? Cu.evalInSandbox(source, sandbox, version, uri, line)
                 : loadSubScript(uri, sandbox, encoding);
 });
-exports.evaluate = evaluate;
+Loader.evaluate = evaluate;
 
 // Populates `exports` of the given CommonJS `module` object, in the context
 // of the given `loader` by evaluating code associated with it.
@@ -283,21 +292,37 @@ const load = iced(function load(loader, module) {
     }
   });
 
-  let sandbox = sandboxes[module.uri] = Sandbox({
-    name: module.uri,
-    prototype: create(globals, descriptors),
-    wantXrays: false,
-    wantGlobalProperties: module.id == "sdk/indexed-db" ? ["indexedDB"] : [],
-    invisibleToDebugger: loader.invisibleToDebugger,
-    metadata: {
-      addonID: loader.id,
-      URI: module.uri
-    }
-  });
+  let sandbox;
+  if (loader.sharedGlobalSandbox &&
+      loader.sharedGlobalBlacklist.indexOf(module.id) == -1) {
+    // Create a new object in this sandbox, that will be used as
+    // the scope object for this particular module
+    sandbox = new loader.sharedGlobalSandbox.Object();
+    // Inject all expected globals in the scope object
+    getOwnIdentifiers(globals).forEach(function(name) {
+      descriptors[name] = getOwnPropertyDescriptor(globals, name)
+    });
+    define(sandbox, descriptors);
+  }
+  else {
+    sandbox = Sandbox({
+      name: module.uri,
+      prototype: create(globals, descriptors),
+      wantXrays: false,
+      wantGlobalProperties: module.id == "sdk/indexed-db" ? ["indexedDB"] : [],
+      invisibleToDebugger: loader.invisibleToDebugger,
+      metadata: {
+        addonID: loader.id,
+        URI: module.uri
+      }
+    });
+  }
+  sandboxes[module.uri] = sandbox;
 
   try {
     evaluate(sandbox, module.uri);
-  } catch (error) {
+  }
+  catch (error) {
     let { message, fileName, lineNumber } = error;
     let stack = error.stack || Error().stack;
     let frames = parseStack(stack).filter(isntLoaderFrame);
@@ -308,7 +333,7 @@ const load = iced(function load(loader, module) {
     // not puts `:` after `"Error"` unlike regular errors thrown by JS code.
     // If there is a JS stack then this error has already been handled by an
     // inner module load.
-    if (String(error) === "Error opening input stream (invalid filename?)") {
+    if (/^Error opening input stream/.test(String(error))) {
       let caller = frames.slice(0).pop();
       fileName = caller.fileName;
       lineNumber = caller.lineNumber;
@@ -335,12 +360,19 @@ const load = iced(function load(loader, module) {
     });
   }
 
+  if (loader.checkCompatibility) {
+    let err = XulApp.incompatibility(module);
+    if (err) {
+      throw err;
+    }
+  }
+
   if (module.exports && typeof(module.exports) === 'object')
     freeze(module.exports);
 
   return module;
 });
-exports.load = load;
+Loader.load = load;
 
 // Utility function to normalize module `uri`s so they have `.js` extension.
 function normalizeExt (uri) {
@@ -377,37 +409,37 @@ const resolve = iced(function resolve(id, base) {
 
   return resolved;
 });
-exports.resolve = resolve;
+Loader.resolve = resolve;
 
 // Node-style module lookup
 // Takes an id and path and attempts to load a file using node's resolving
 // algorithm.
 // `id` should already be resolved relatively at this point.
 // http://nodejs.org/api/modules.html#modules_all_together
-const nodeResolve = iced(function nodeResolve(id, requirer, { manifest, rootURI }) {
+const nodeResolve = iced(function nodeResolve(id, requirer, { rootURI }) {
   // Resolve again
-  id = exports.resolve(id, requirer);
+  id = Loader.resolve(id, requirer);
 
   // we assume that extensions are correct, i.e., a directory doesnt't have '.js'
   // and a js file isn't named 'file.json.js'
-
   let fullId = join(rootURI, id);
-
   let resolvedPath;
-  if (resolvedPath = loadAsFile(fullId))
+
+  if ((resolvedPath = loadAsFile(fullId)))
     return stripBase(rootURI, resolvedPath);
-  else if (resolvedPath = loadAsDirectory(fullId))
+
+  if ((resolvedPath = loadAsDirectory(fullId)))
     return stripBase(rootURI, resolvedPath);
+
   // If manifest has dependencies, attempt to look up node modules
   // in the `dependencies` list
-  else if (manifest.dependencies) {
-    let dirs = getNodeModulePaths(dirname(join(rootURI, requirer))).map(dir => join(dir, id));
-    for (let i = 0; i < dirs.length; i++) {
-      if (resolvedPath = loadAsFile(dirs[i]))
-        return stripBase(rootURI, resolvedPath);
-      if (resolvedPath = loadAsDirectory(dirs[i]))
-        return stripBase(rootURI, resolvedPath);
-    }
+  let dirs = getNodeModulePaths(dirname(join(rootURI, requirer))).map(dir => join(dir, id));
+  for (let i = 0; i < dirs.length; i++) {
+    if ((resolvedPath = loadAsFile(dirs[i])))
+      return stripBase(rootURI, resolvedPath);
+
+    if ((resolvedPath = loadAsDirectory(dirs[i])))
+      return stripBase(rootURI, resolvedPath);
   }
 
   // We would not find lookup for things like `sdk/tabs`, as that's part of
@@ -415,7 +447,7 @@ const nodeResolve = iced(function nodeResolve(id, requirer, { manifest, rootURI 
   // with `resolveURI` -- if during runtime, then `resolve` will throw.
   return void 0;
 });
-exports.nodeResolve = nodeResolve;
+Loader.nodeResolve = nodeResolve;
 
 // Attempts to load `path` and then `path.js`
 // Returns `path` with valid file, or `undefined` otherwise
@@ -439,14 +471,14 @@ function loadAsFile (path) {
 // Attempts to load `path/package.json`'s `main` entry,
 // followed by `path/index.js`, or `undefined` otherwise
 function loadAsDirectory (path) {
-  let found;
   try {
     // If `path/package.json` exists, parse the `main` entry
     // and attempt to load that
     let main = getManifestMain(JSON.parse(readURI(path + '/package.json')));
     if (main != null) {
       let tmpPath = join(path, main);
-      if (found = loadAsFile(tmpPath))
+      let found = loadAsFile(tmpPath);
+      if (found)
         return found
     }
     try {
@@ -503,7 +535,7 @@ const resolveURI = iced(function resolveURI(id, mapping) {
   let count = mapping.length, index = 0;
 
   // Do not resolve if already a resource URI
-  if (isResourceURI(id)) return normalizeExt(id);
+  if (isAbsoluteURI(id)) return normalizeExt(id);
 
   while (index < count) {
     let [ path, uri ] = mapping[index ++];
@@ -512,7 +544,7 @@ const resolveURI = iced(function resolveURI(id, mapping) {
   }
   return void 0; // otherwise we raise a warning, see bug 910304
 });
-exports.resolveURI = resolveURI;
+Loader.resolveURI = resolveURI;
 
 // Creates version of `require` that will be exposed to the given `module`
 // in the context of the given `loader`. Each module gets own limited copy
@@ -520,7 +552,7 @@ exports.resolveURI = resolveURI;
 // with it during link time.
 const Require = iced(function Require(loader, requirer) {
   let {
-    modules, mapping, resolve, load, manifest, rootURI, isNative, requireMap
+    modules, mapping, resolve: loaderResolve, load, manifest, rootURI, isNative, requireMap
   } = loader;
 
   function require(id) {
@@ -528,56 +560,7 @@ const Require = iced(function Require(loader, requirer) {
       throw Error('you must provide a module name when calling require() from '
                   + requirer.id, requirer.uri);
 
-    let requirement;
-    let uri;
-
-    // TODO should get native Firefox modules before doing node-style lookups
-    // to save on loading time
-
-    if (isNative) {
-      // If a requireMap is available from `generateMap`, use that to
-      // immediately resolve the node-style mapping.
-      if (requireMap && requireMap[requirer.id])
-        requirement = requireMap[requirer.id][id];
-
-      // For native modules, we want to check if it's a module specified
-      // in 'modules', like `chrome`, or `@loader` -- if it exists,
-      // just set the uri to skip resolution
-      if (!requirement && modules[id])
-        uri = requirement = id;
-
-      // If no requireMap was provided, or resolution not found in
-      // the requireMap, and not a npm dependency, attempt a runtime lookup
-      if (!requirement && !isNodeModule(id)) {
-        // If `isNative` defined, this is using the new, native-style
-        // loader, not cuddlefish, so lets resolve using node's algorithm
-        // and get back a path that needs to be resolved via paths mapping
-        // in `resolveURI`
-        requirement = resolve(id, requirer.id, {
-          manifest: manifest,
-          rootURI: rootURI
-        });
-      }
-
-      // If not found in the map, not a node module, and wasn't able to be
-      // looked up, it's something
-      // found in the paths most likely, like `sdk/tabs`, which should
-      // be resolved relatively if needed using traditional resolve
-      if (!requirement) {
-        requirement = isRelative(id) ? exports.resolve(id, requirer.id) : id;
-      }
-    } else {
-      // Resolve `id` to its requirer if it's relative.
-      requirement = requirer ? resolve(id, requirer.id) : id;
-    }
-
-    // Resolves `uri` of module using loaders resolve function.
-    uri = uri || resolveURI(requirement, mapping);
-
-    if (!uri) // Throw if `uri` can not be resolved.
-      throw Error('Module: Can not resolve "' + id + '" module required by ' +
-                  requirer.id + ' located at ' + requirer.uri, requirer.uri);
-
+    let { uri, requirement } = getRequirements(id);
     let module = null;
     // If module is already cached by loader then just use it.
     if (uri in modules) {
@@ -631,11 +614,78 @@ const Require = iced(function Require(loader, requirer) {
 
     return module.exports;
   }
+
+  // Resolution function taking a module name/path and
+  // returning a resourceURI and a `requirement` used by the loader.
+  // Used by both `require` and `require.resolve`.
+  function getRequirements(id) {
+    if (!id) // Throw if `id` is not passed.
+      throw Error('you must provide a module name when calling require() from '
+                  + requirer.id, requirer.uri);
+
+    let requirement;
+    let uri;
+
+    // TODO should get native Firefox modules before doing node-style lookups
+    // to save on loading time
+    if (isNative) {
+      // If a requireMap is available from `generateMap`, use that to
+      // immediately resolve the node-style mapping.
+      if (requireMap && requireMap[requirer.id])
+        requirement = requireMap[requirer.id][id];
+
+      // For native modules, we want to check if it's a module specified
+      // in 'modules', like `chrome`, or `@loader` -- if it exists,
+      // just set the uri to skip resolution
+      if (!requirement && modules[id])
+        uri = requirement = id;
+
+      // If no requireMap was provided, or resolution not found in
+      // the requireMap, and not a npm dependency, attempt a runtime lookup
+      if (!requirement && !isNodeModule(id)) {
+        // If `isNative` defined, this is using the new, native-style
+        // loader, not cuddlefish, so lets resolve using node's algorithm
+        // and get back a path that needs to be resolved via paths mapping
+        // in `resolveURI`
+        requirement = loaderResolve(id, requirer.id, {
+          manifest: manifest,
+          rootURI: rootURI
+        });
+      }
+
+      // If not found in the map, not a node module, and wasn't able to be
+      // looked up, it's something
+      // found in the paths most likely, like `sdk/tabs`, which should
+      // be resolved relatively if needed using traditional resolve
+      if (!requirement) {
+        requirement = isRelative(id) ? Loader.resolve(id, requirer.id) : id;
+      }
+    } else {
+      // Resolve `id` to its requirer if it's relative.
+      requirement = requirer ? loaderResolve(id, requirer.id) : id;
+    }
+
+    // Resolves `uri` of module using loaders resolve function.
+    uri = uri || resolveURI(requirement, mapping);
+
+    if (!uri) // Throw if `uri` can not be resolved.
+      throw Error('Module: Can not resolve "' + id + '" module required by ' +
+                  requirer.id + ' located at ' + requirer.uri, requirer.uri);
+
+    return { uri: uri, requirement: requirement };
+  }
+
+  // Expose the `resolve` function for this `Require` instance
+  require.resolve = function resolve(id) {
+    let { uri } = getRequirements(id);
+    return uri;
+  }
+
   // Make `require.main === module` evaluate to true in main module scope.
   require.main = loader.main === requirer ? requirer : undefined;
   return iced(require);
 });
-exports.Require = Require;
+Loader.Require = Require;
 
 const main = iced(function main(loader, id) {
   // If no main entry provided, and native loader is used,
@@ -646,7 +696,7 @@ const main = iced(function main(loader, id) {
   let module = loader.main = loader.modules[uri] = Module(id, uri);
   return loader.load(loader, module).exports;
 });
-exports.main = main;
+Loader.main = main;
 
 // Makes module object that is made available to CommonJS modules when they
 // are evaluated, along with `exports` and `require`.
@@ -657,7 +707,7 @@ const Module = iced(function Module(id, uri) {
     uri: { value: uri }
   });
 });
-exports.Module = Module;
+Loader.Module = Module;
 
 // Takes `loader`, and unload `reason` string and notifies all observers that
 // they should cleanup after them-self.
@@ -672,7 +722,7 @@ const unload = iced(function unload(loader, reason) {
   let subject = { wrappedJSObject: loader.destructor };
   notifyObservers(subject, 'sdk:loader:destroy', reason);
 });
-exports.unload = unload;
+Loader.unload = unload;
 
 // Function makes new loader that can be used to load CommonJS modules
 // described by a given `options.manifest`. Loader takes following options:
@@ -687,18 +737,30 @@ exports.unload = unload;
 //   module object (that has `uri` property) and `baseURI` of the loader.
 //   If `resolve` does not returns `uri` string exception will be thrown by
 //   an associated `require` call.
-const Loader = iced(function Loader(options) {
+function Loader(options) {
   let {
-    modules, globals, resolve, paths, rootURI, manifest, requireMap, isNative
+    modules, globals, resolve, paths, rootURI, manifest, requireMap, isNative,
+    metadata, sharedGlobal, sharedGlobalBlacklist, checkCompatibility
   } = override({
     paths: {},
     modules: {},
     globals: {
-      console: console
+      get console() {
+        // Import Console.jsm from here to prevent loading it until someone uses it
+        let { ConsoleAPI } = Cu.import("resource://gre/modules/devtools/Console.jsm");
+        let console = new ConsoleAPI({
+          consoleID: options.id ? "addon/" + options.id : ""
+        });
+        Object.defineProperty(this, "console", { value: console });
+        return this.console;
+      }
     },
+    checkCompatibility: false,
     resolve: options.isNative ?
-      exports.nodeResolve :
-      exports.resolve,
+      // Make the returned resolve function have the same signature
+      (id, requirer) => Loader.nodeResolve(id, requirer, { rootURI: rootURI }) :
+      Loader.resolve,
+    sharedGlobalBlacklist: ["sdk/indexed-db"]
   }, options);
 
   // We create an identity object that will be dispatched on an unload
@@ -735,6 +797,24 @@ const Loader = iced(function Loader(options) {
     return result;
   }, {});
 
+  let sharedGlobalSandbox;
+  if (sharedGlobal) {
+    // Create the unique sandbox we will be using for all modules,
+    // so that we prevent creating a new comportment per module.
+    // The side effect is that all modules will share the same
+    // global objects.
+    sharedGlobalSandbox = Sandbox({
+      name: "Addon-SDK",
+      wantXrays: false,
+      wantGlobalProperties: [],
+      invisibleToDebugger: options.invisibleToDebugger || false,
+      metadata: {
+        addonID: options.id,
+        URI: "Addon-SDK"
+      }
+    });
+  }
+
   // Loader object is just a representation of a environment
   // state. We freeze it and mark make it's properties non-enumerable
   // as they are pure implementation detail that no one should rely upon.
@@ -744,6 +824,9 @@ const Loader = iced(function Loader(options) {
     mapping: { enumerable: false, value: mapping },
     // Map of module objects indexed by module URIs.
     modules: { enumerable: false, value: modules },
+    metadata: { enumerable: false, value: metadata },
+    sharedGlobalSandbox: { enumerable: false, value: sharedGlobalSandbox },
+    sharedGlobalBlacklist: { enumerable: false, value: sharedGlobalBlacklist },
     // Map of module sandboxes indexed by module URIs.
     sandboxes: { enumerable: false, value: {} },
     resolve: { enumerable: false, value: resolve },
@@ -753,6 +836,7 @@ const Loader = iced(function Loader(options) {
     invisibleToDebugger: { enumerable: false,
                            value: options.invisibleToDebugger || false },
     load: { enumerable: false, value: options.load || load },
+    checkCompatibility: { enumerable: false, value: checkCompatibility },
     // Main (entry point) module, it can be set only once, since loader
     // instance can have only one main module.
     main: new function() {
@@ -774,19 +858,21 @@ const Loader = iced(function Loader(options) {
   }
 
   return freeze(create(null, returnObj));
-});
-exports.Loader = Loader;
+};
+Loader.Loader = Loader;
 
 let isJSONURI = uri => uri.substr(-5) === '.json';
 let isJSMURI = uri => uri.substr(-4) === '.jsm';
 let isJSURI = uri => uri.substr(-3) === '.js';
-let isResourceURI = uri => uri.substr(0, 11) === 'resource://';
+let isAbsoluteURI = uri => uri.indexOf("resource://") >= 0 ||
+                           uri.indexOf("chrome://") >= 0 ||
+                           uri.indexOf("file://") >= 0
 let isRelative = id => id[0] === '.'
 
 const generateMap = iced(function generateMap(options, callback) {
   let { rootURI, resolve, paths } = override({
     paths: {},
-    resolve: exports.nodeResolve
+    resolve: Loader.nodeResolve
   }, options);
 
   rootURI = addTrailingSlash(rootURI);
@@ -808,7 +894,7 @@ const generateMap = iced(function generateMap(options, callback) {
   }, {}, callback);
 
 });
-exports.generateMap = generateMap;
+Loader.generateMap = generateMap;
 
 // Default `main` entry to './index.js' and ensure is relative,
 // since node allows 'lib/index.js' without relative `./`
@@ -824,14 +910,14 @@ function findAllModuleIncludes (uri, options, results, callback) {
   // Abort if JSON or JSM
   if (isJSONURI(uri) || isJSMURI(uri)) {
     callback(results);
-    return void 0;
+    return;
   }
 
   findModuleIncludes(join(rootURI, uri), modules => {
     // If no modules are included in the file, just call callback immediately
     if (!modules.length) {
       callback(results);
-      return void 0;
+      return;
     }
 
     results[uri] = modules.reduce((agg, mod) => {
@@ -864,7 +950,7 @@ function findAllModuleIncludes (uri, options, results, callback) {
 // Given a resource URI or source, return an array of strings passed into
 // the require statements from the source
 function findModuleIncludes (uri, callback) {
-  let src = isResourceURI(uri) ? readURI(uri) : uri;
+  let src = isAbsoluteURI(uri) ? readURI(uri) : uri;
   let modules = [];
 
   walk(src, function (node) {
@@ -876,6 +962,8 @@ function findModuleIncludes (uri, callback) {
 }
 
 function walk (src, callback) {
+  // Import Reflect.jsm from here to prevent loading it until someone uses it
+  let { Reflect } = Cu.import("resource://gre/modules/reflect.jsm", {});
   let nodes = Reflect.parse(src);
   traverse(nodes, callback);
 }
@@ -914,5 +1002,5 @@ function isRequire (node) {
    && node.arguments[0].type === 'Literal';
 }
 
+module.exports = iced(Loader);
 });
-

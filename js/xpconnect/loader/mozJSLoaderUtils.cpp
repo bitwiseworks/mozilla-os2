@@ -7,7 +7,7 @@
 #include "nsAutoPtr.h"
 
 #include "jsapi.h"
-#include "js/OldDebugAPI.h"
+#include "jsfriendapi.h"
 
 #include "nsJSPrincipals.h"
 
@@ -30,7 +30,7 @@ ReadCachedScript(StartupCache* cache, nsACString& uri, JSContext* cx,
     if (NS_FAILED(rv))
         return rv; // don't warn since NOT_AVAILABLE is an ok error
 
-    scriptp.set(JS_DecodeScript(cx, buf, len, nullptr));
+    scriptp.set(JS_DecodeScript(cx, buf, len));
     if (!scriptp)
         return NS_ERROR_OUT_OF_MEMORY;
     return NS_OK;
@@ -62,7 +62,6 @@ WriteCachedScript(StartupCache* cache, nsACString& uri, JSContext* cx,
                   nsIPrincipal* systemPrincipal, HandleScript script)
 {
     MOZ_ASSERT(JS_GetScriptPrincipals(script) == nsJSPrincipals::get(systemPrincipal));
-    MOZ_ASSERT(JS_GetScriptOriginPrincipals(script) == nsJSPrincipals::get(systemPrincipal));
 
     uint32_t size;
     void* data = JS_EncodeScript(cx, script, &size);

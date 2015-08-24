@@ -1,4 +1,4 @@
-/* -*- js2-basic-offset: 2; indent-tabs-mode: nil; -*- */
+/* -*- js-indent-level: 2; indent-tabs-mode: nil -*- */
 /* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -19,6 +19,7 @@ loader.lazyImporter(this, "devtools", "resource://gre/modules/devtools/Loader.js
 loader.lazyImporter(this, "Services", "resource://gre/modules/Services.jsm");
 loader.lazyImporter(this, "DebuggerServer", "resource://gre/modules/devtools/dbg-server.jsm");
 loader.lazyImporter(this, "DebuggerClient", "resource://gre/modules/devtools/dbg-client.jsm");
+loader.lazyGetter(this, "showDoorhanger", () => require("devtools/shared/doorhanger").showDoorhanger);
 
 const STRINGS_URI = "chrome://browser/locale/devtools/webconsole.properties";
 let l10n = new WebConsoleUtils.l10n(STRINGS_URI);
@@ -191,7 +192,7 @@ HUD_SERVICE.prototype =
       client.connect(() =>
         client.listTabs((aResponse) => {
           // Add Global Process debugging...
-          let globals = JSON.parse(JSON.stringify(aResponse));
+          let globals = Cu.cloneInto(aResponse, {});
           delete globals.tabs;
           delete globals.selected;
           // ...only if there are appropriate actors (a 'from' property will
@@ -248,6 +249,21 @@ HUD_SERVICE.prototype =
     }, console.error);
 
     return this._browserConsoleDefer.promise;
+  },
+
+  /**
+   * Opens or focuses the Browser Console.
+   */
+  openBrowserConsoleOrFocus: function HS_openBrowserConsoleOrFocus()
+  {
+    let hud = this.getBrowserConsole();
+    if (hud) {
+      hud.iframeWindow.focus();
+      return promise.resolve(hud);
+    }
+    else {
+      return this.toggleBrowserConsole();
+    }
   },
 
   /**
@@ -485,15 +501,18 @@ WebConsole.prototype = {
     }
 
     let showSource = ({ DebuggerView }) => {
-      if (DebuggerView.Sources.containsValue(aSourceURL)) {
-        DebuggerView.setEditorLocation(aSourceURL, aSourceLine,
+      let item = DebuggerView.Sources.getItemForAttachment(
+        a => a.source.url === aSourceURL
+      );
+      if (item) {
+        DebuggerView.setEditorLocation(item.attachment.source.actor, aSourceLine,
                                        { noDebug: true }).then(() => {
           this.ui.emit("source-in-debugger-opened");
         });
         return;
       }
-      toolbox.selectTool("webconsole");
-      this.viewSource(aSourceURL, aSourceLine);
+      toolbox.selectTool("webconsole")
+             .then(() => this.viewSource(aSourceURL, aSourceLine));
     }
 
     // If the Debugger was already open, switch to it and try to show the
@@ -578,6 +597,30 @@ WebConsole.prototype = {
       };
     }
     return null;
+  },
+
+  /**
+   * Retrieves the current selection from the Inspector, if such a selection
+   * exists. This is used to pass the ID of the selected actor to the Web
+   * Console server for the $0 helper.
+   *
+   * @return object|null
+   *         A Selection referring to the currently selected node in the
+   *         Inspector.
+   *         If the inspector was never opened, or no node was ever selected,
+   *         then |null| is returned.
+   */
+  getInspectorSelection: function WC_getInspectorSelection()
+  {
+    let toolbox = gDevTools.getToolbox(this.target);
+    if (!toolbox) {
+      return null;
+    }
+    let panel = toolbox.getPanel("inspector");
+    if (!panel || !panel.selection) {
+      return null;
+    }
+    return panel.selection;
   },
 
   /**
@@ -680,6 +723,7 @@ BrowserConsole.prototype = Heritage.extend(WebConsole.prototype,
     // instance.
     let onClose = () => {
       window.removeEventListener("unload", onClose);
+      window.removeEventListener("focus", onFocus);
       this.destroy();
     };
     window.addEventListener("unload", onClose);
@@ -688,6 +732,12 @@ BrowserConsole.prototype = Heritage.extend(WebConsole.prototype,
     window.document.getElementById("cmd_close").removeAttribute("disabled");
 
     this._telemetry.toolOpened("browserconsole");
+
+    // Create an onFocus handler just to display the dev edition promo.
+    // This is to prevent race conditions in some environments.
+    // Hook to display promotional Developer Edition doorhanger. Only displayed once.
+    let onFocus = () => showDoorhanger({ window, type: "deveditionpromo" });
+    window.addEventListener("focus", onFocus);
 
     this._bc_init = this.$init();
     return this._bc_init;
@@ -728,7 +778,8 @@ const HUDService = new HUD_SERVICE();
 (() => {
   let methods = ["openWebConsole", "openBrowserConsole",
                  "toggleBrowserConsole", "getOpenWebConsole",
-                 "getBrowserConsole", "getHudByWindow", "getHudReferenceById"];
+                 "getBrowserConsole", "getHudByWindow",
+                 "openBrowserConsoleOrFocus", "getHudReferenceById"];
   for (let method of methods) {
     exports[method] = HUDService[method].bind(HUDService);
   }

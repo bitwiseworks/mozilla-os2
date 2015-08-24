@@ -64,7 +64,7 @@
  *     Block-local Scope
  *     This
  *     Arguments
- *   [Operator]
+ *   [Operators]
  *     Comparison Operators
  *     Arithmetic Operators
  *     Bitwise Logical Operators
@@ -72,6 +72,7 @@
  *     Logical Operators
  *     Special Operators
  *     Stack Operations
+ *     Debugger
  *   [Literals]
  *     Constants
  *     Object
@@ -100,7 +101,26 @@
      */ \
     macro(JSOP_UNDEFINED, 1,  js_undefined_str, "",       1,  0,  1, JOF_BYTE) \
     macro(JSOP_UNUSED2,   2,  "unused2",    NULL,         1,  1,  0, JOF_BYTE) \
+    /*
+     * Pops the top of stack value, converts it to an object, and adds a
+     * 'DynamicWithObject' wrapping that object to the scope chain.
+     *
+     * There is a matching JSOP_LEAVEWITH instruction later. All name
+     * lookups between the two that may need to consult the With object
+     * are deoptimized.
+     *   Category: Statements
+     *   Type: With Statement
+     *   Operands: uint32_t staticWithIndex
+     *   Stack: val =>
+     */ \
     macro(JSOP_ENTERWITH, 3,  "enterwith",  NULL,         5,  1,  0, JOF_OBJECT) \
+    /*
+     * Pops the scope chain object pushed by JSOP_ENTERWITH.
+     *   Category: Statements
+     *   Type: With Statement
+     *   Operands:
+     *   Stack: =>
+     */ \
     macro(JSOP_LEAVEWITH, 4,  "leavewith",  NULL,         1,  0,  0, JOF_BYTE) \
     /*
      * Pops the top of stack value as 'rval', stops interpretation of current
@@ -111,8 +131,35 @@
      *   Stack: rval =>
      */ \
     macro(JSOP_RETURN,    5,  "return",     NULL,         1,  1,  0, JOF_BYTE) \
+    /*
+     * Jumps to a 32-bit offset from the current bytecode.
+     *   Category: Statements
+     *   Type: Jumps
+     *   Operands: int32_t offset
+     *   Stack: =>
+     */ \
     macro(JSOP_GOTO,      6,  "goto",       NULL,         5,  0,  0, JOF_JUMP) \
+    /*
+     * Pops the top of stack value, converts it into a boolean, if the result is
+     * 'false', jumps to a 32-bit offset from the current bytecode.
+     *
+     * The idea is that a sequence like
+     * JSOP_ZERO; JSOP_ZERO; JSOP_EQ; JSOP_IFEQ; JSOP_RETURN;
+     * reads like a nice linear sequence that will execute the return.
+     *   Category: Statements
+     *   Type: Jumps
+     *   Operands: int32_t offset
+     *   Stack: cond =>
+     */ \
     macro(JSOP_IFEQ,      7,  "ifeq",       NULL,         5,  1,  0, JOF_JUMP|JOF_DETECTING) \
+    /*
+     * Pops the top of stack value, converts it into a boolean, if the result is
+     * 'true', jumps to a 32-bit offset from the current bytecode.
+     *   Category: Statements
+     *   Type: Jumps
+     *   Operands: int32_t offset
+     *   Stack: cond =>
+     */ \
     macro(JSOP_IFNE,      8,  "ifne",       NULL,         5,  1,  0, JOF_JUMP) \
     \
     /*
@@ -133,7 +180,7 @@
     /*
      * Swaps the top two values on the stack. This is useful for things like
      * post-increment/decrement.
-     *   Category: Operator
+     *   Category: Operators
      *   Type: Stack Operations
      *   Operands:
      *   Stack: v1, v2 => v2, v1
@@ -141,7 +188,7 @@
     macro(JSOP_SWAP,      10, "swap",       NULL,         1,  2,  2, JOF_BYTE) \
     /*
      * Pops the top 'n' values from the stack.
-     *   Category: Operator
+     *   Category: Operators
      *   Type: Stack Operations
      *   Operands: uint16_t n
      *   Stack: v[n-1], ..., v[1], v[0] =>
@@ -152,7 +199,7 @@
     /* More long-standing bytecodes. */ \
     /*
      * Pushes a copy of the top value on the stack.
-     *   Category: Operator
+     *   Category: Operators
      *   Type: Stack Operations
      *   Operands:
      *   Stack: v => v, v
@@ -160,7 +207,7 @@
     macro(JSOP_DUP,       12, "dup",        NULL,         1,  1,  2, JOF_BYTE) \
     /*
      * Duplicates the top two values on the stack.
-     *   Category: Operator
+     *   Category: Operators
      *   Type: Stack Operations
      *   Operands:
      *   Stack: v1, v2 => v1, v2, v1, v2
@@ -179,7 +226,7 @@
      * Pops the top two values 'lval' and 'rval' from the stack, then pushes
      * the result of the operation applied to the two operands, converting
      * both to 32-bit signed integers if necessary.
-     *   Category: Operator
+     *   Category: Operators
      *   Type: Bitwise Logical Operators
      *   Operands:
      *   Stack: lval, rval => (lval OP rval)
@@ -190,7 +237,7 @@
     /*
      * Pops the top two values from the stack and pushes the result of
      * comparing them.
-     *   Category: Operator
+     *   Category: Operators
      *   Type: Comparison Operators
      *   Operands:
      *   Stack: lval, rval => (lval OP rval)
@@ -204,7 +251,7 @@
     /*
      * Pops the top two values 'lval' and 'rval' from the stack, then pushes
      * the result of the operation applied to the operands.
-     *   Category: Operator
+     *   Category: Operators
      *   Type: Bitwise Shift Operators
      *   Operands:
      *   Stack: lval, rval => (lval OP rval)
@@ -214,7 +261,7 @@
     /*
      * Pops the top two values 'lval' and 'rval' from the stack, then pushes
      * 'lval >>> rval'.
-     *   Category: Operator
+     *   Category: Operators
      *   Type: Bitwise Shift Operators
      *   Operands:
      *   Stack: lval, rval => (lval >>> rval)
@@ -223,7 +270,7 @@
     /*
      * Pops the top two values 'lval' and 'rval' from the stack, then pushes
      * the result of 'lval + rval'.
-     *   Category: Operator
+     *   Category: Operators
      *   Type: Arithmetic Operators
      *   Operands:
      *   Stack: lval, rval => (lval + rval)
@@ -232,7 +279,7 @@
     /*
      * Pops the top two values 'lval' and 'rval' from the stack, then pushes
      * the result of applying the arithmetic operation to them.
-     *   Category: Operator
+     *   Category: Operators
      *   Type: Arithmetic Operators
      *   Operands:
      *   Stack: lval, rval => (lval OP rval)
@@ -243,7 +290,7 @@
     macro(JSOP_MOD,       31, "mod",        "%",          1,  2,  1, JOF_BYTE|JOF_LEFTASSOC|JOF_ARITH) \
     /*
      * Pops the value 'val' from the stack, then pushes '!val'.
-     *   Category: Operator
+     *   Category: Operators
      *   Type: Logical Operators
      *   Operands:
      *   Stack: val => (!val)
@@ -251,7 +298,7 @@
     macro(JSOP_NOT,       32, "not",        "!",          1,  1,  1, JOF_BYTE|JOF_ARITH|JOF_DETECTING) \
     /*
      * Pops the value 'val' from the stack, then pushes '~val'.
-     *   Category: Operator
+     *   Category: Operators
      *   Type: Bitwise Logical Operators
      *   Operands:
      *   Stack: val => (~val)
@@ -259,7 +306,7 @@
     macro(JSOP_BITNOT,    33, "bitnot",     "~",          1,  1,  1, JOF_BYTE|JOF_ARITH) \
     /*
      * Pops the value 'val' from the stack, then pushes '-val'.
-     *   Category: Operator
+     *   Category: Operators
      *   Type: Arithmetic Operators
      *   Operands:
      *   Stack: val => (-val)
@@ -268,7 +315,7 @@
     /*
      * Pops the value 'val' from the stack, then pushes '+val'.
      * ('+val' is the value converted to a number.)
-     *   Category: Operator
+     *   Category: Operators
      *   Type: Arithmetic Operators
      *   Operands:
      *   Stack: val => (+val)
@@ -285,29 +332,29 @@
      *   Operands: uint32_t nameIndex
      *   Stack: => succeeded
      */ \
-    macro(JSOP_DELNAME,   36, "delname",    NULL,         5,  0,  1, JOF_ATOM|JOF_NAME) \
+    macro(JSOP_DELNAME,   36, "delname",    NULL,         5,  0,  1, JOF_ATOM|JOF_NAME|JOF_CHECKSLOPPY) \
     /*
      * Pops the top of stack value, deletes property from it, pushes 'true' onto
      * the stack if succeeded, 'false' if not.
-     *   Category: Literals
-     *   Type: Object
+     *   Category: Operators
+     *   Type: Special Operators
      *   Operands: uint32_t nameIndex
      *   Stack: obj => succeeded
      */ \
-    macro(JSOP_DELPROP,   37, "delprop",    NULL,         5,  1,  1, JOF_ATOM|JOF_PROP) \
+    macro(JSOP_DELPROP,   37, "delprop",    NULL,         5,  1,  1, JOF_ATOM|JOF_PROP|JOF_CHECKSLOPPY) \
     /*
      * Pops the top two values on the stack as 'propval' and 'obj',
      * deletes 'propval' property from 'obj', pushes 'true'  onto the stack if
      * succeeded, 'false' if not.
-     *   Category: Literals
-     *   Type: Object
+     *   Category: Operators
+     *   Type: Special Operators
      *   Operands:
      *   Stack: obj, propval => succeeded
      */ \
-    macro(JSOP_DELELEM,   38, "delelem",    NULL,         1,  2,  1, JOF_BYTE |JOF_ELEM) \
+    macro(JSOP_DELELEM,   38, "delelem",    NULL,         1,  2,  1, JOF_BYTE |JOF_ELEM|JOF_CHECKSLOPPY) \
     /*
      * Pops the value 'val' from the stack, then pushes 'typeof val'.
-     *   Category: Operator
+     *   Category: Operators
      *   Type: Special Operators
      *   Operands:
      *   Stack: val => (typeof val)
@@ -315,7 +362,7 @@
     macro(JSOP_TYPEOF,    39, js_typeof_str,NULL,         1,  1,  1, JOF_BYTE|JOF_DETECTING) \
     /*
      * Pops the top value on the stack and pushes 'undefined'.
-     *   Category: Operator
+     *   Category: Operators
      *   Type: Special Operators
      *   Operands:
      *   Stack: val => undefined
@@ -358,11 +405,11 @@
      *   Operands:
      *   Stack: callee, this, args => rval
      */ \
-    macro(JSOP_SPREADEVAL,43, "spreadeval", NULL,         1,  3,  1, JOF_BYTE|JOF_INVOKE|JOF_TYPESET) \
+    macro(JSOP_SPREADEVAL,43, "spreadeval", NULL,         1,  3,  1, JOF_BYTE|JOF_INVOKE|JOF_TYPESET|JOF_CHECKSLOPPY) \
     \
     /*
      * Duplicates the Nth value from the top onto the stack.
-     *   Category: Operator
+     *   Category: Operators
      *   Type: Stack Operations
      *   Operands: uint24_t n
      *   Stack: v[n], v[n-1], ..., v[1], v[0] =>
@@ -370,12 +417,69 @@
      */ \
     macro(JSOP_DUPAT,     44, "dupat",      NULL,         4,  0,  1,  JOF_UINT24) \
     \
-    macro(JSOP_UNUSED45,  45, "unused45",   NULL,         1,  0,  0,  JOF_BYTE) \
-    macro(JSOP_UNUSED46,  46, "unused46",   NULL,         1,  0,  0,  JOF_BYTE) \
-    macro(JSOP_UNUSED47,  47, "unused47",   NULL,         1,  0,  0,  JOF_BYTE) \
-    macro(JSOP_UNUSED48,  48, "unused48",   NULL,         1,  0,  0,  JOF_BYTE) \
-    macro(JSOP_UNUSED49,  49, "unused49",   NULL,         1,  0,  0,  JOF_BYTE) \
-    macro(JSOP_UNUSED50,  50, "unused50",   NULL,         1,  0,  0,  JOF_BYTE) \
+    /*
+     * Push a well-known symbol onto the operand stack.
+     *   Category: Literals
+     *   Type: Constants
+     *   Operands: uint8_t n, the JS::SymbolCode of the symbol to use
+     *   Stack: => symbol
+     */ \
+    macro(JSOP_SYMBOL,    45, "symbol",     NULL,         2,  0,  1,  JOF_UINT8) \
+    \
+    /*
+     * Pops the top of stack value and attempts to delete the given property
+     * from it. Pushes 'true' onto success, else throws a TypeError per strict
+     * mode property-deletion requirements.
+     *   Category: Operators
+     *   Type: Special Operators
+     *   Operands: uint32_t nameIndex
+     *   Stack: obj => succeeded
+     */ \
+    macro(JSOP_STRICTDELPROP,   46, "strict-delprop",    NULL,         5,  1,  1, JOF_ATOM|JOF_PROP|JOF_CHECKSTRICT) \
+    /*
+     * Pops the top two values on the stack as 'propval' and 'obj',
+     * and attempts to delete 'propval' property from 'obj'. Pushes 'true' onto
+     * the stack on success, else throws a TypeError per strict mode property
+     * deletion requirements.
+     *   Category: Literals
+     *   Type: Object
+     *   Operands:
+     *   Stack: obj, propval => succeeded
+     */ \
+    macro(JSOP_STRICTDELELEM,   47, "strict-delelem",    NULL,         1,  2,  1, JOF_BYTE|JOF_ELEM|JOF_CHECKSTRICT) \
+    /*
+     * Pops the top two values on the stack as 'val' and 'obj', and performs
+     * 'obj.prop = val', pushing 'val' back onto the stack. Throws a TypeError
+     * if the set-operation failed (per strict mode semantics).
+     *   Category: Literals
+     *   Type: Object
+     *   Operands: uint32_t nameIndex
+     *   Stack: obj, val => val
+     */ \
+    macro(JSOP_STRICTSETPROP,   48, "strict-setprop",    NULL,         5,  2,  1, JOF_ATOM|JOF_PROP|JOF_SET|JOF_DETECTING|JOF_CHECKSTRICT) \
+    /*
+     * Pops a scope and value from the stack, assigns value to the given name,
+     * and pushes the value back on the stack. If the set failed, then throw
+     * a TypeError, per usual strict mode semantics.
+     *   Category: Variables and Scopes
+     *   Type: Variables
+     *   Operands: uint32_t nameIndex
+     *   Stack: scope, val => val
+     */ \
+    macro(JSOP_STRICTSETNAME,   49, "strict-setname",    NULL,         5,  2,  1,  JOF_ATOM|JOF_NAME|JOF_SET|JOF_DETECTING|JOF_CHECKSTRICT) \
+    /*
+     * spreadcall variant of JSOP_EVAL
+     *
+     * Invokes 'eval' with 'args' and pushes the return value onto the stack.
+     *
+     * If 'eval' in global scope is not original one, invokes the function
+     * with 'this' and 'args', and pushes return value onto the stack.
+     *   Category: Statements
+     *   Type: Function
+     *   Operands:
+     *   Stack: callee, this, args => rval
+     */ \
+    macro(JSOP_STRICTSPREADEVAL,      50, "strict-spreadeval", NULL,         1,  3,  1, JOF_BYTE|JOF_INVOKE|JOF_TYPESET|JOF_CHECKSTRICT) \
     macro(JSOP_UNUSED51,  51, "unused51",   NULL,         1,  0,  0,  JOF_BYTE) \
     macro(JSOP_UNUSED52,  52, "unused52",   NULL,         1,  0,  0,  JOF_BYTE) \
     \
@@ -388,14 +492,14 @@
      */ \
     macro(JSOP_GETPROP,   53, "getprop",    NULL,         5,  1,  1, JOF_ATOM|JOF_PROP|JOF_TYPESET|JOF_TMPSLOT3) \
     /*
-     * Pops the top two values on the stack as 'val' and 'obj', sets property of
-     * 'obj' as 'val', pushes 'obj' onto the stack.
+     * Pops the top two values on the stack as 'val' and 'obj' and performs
+     * 'obj.prop = val', pushing 'val' back onto the stack.
      *   Category: Literals
      *   Type: Object
      *   Operands: uint32_t nameIndex
      *   Stack: obj, val => val
      */ \
-    macro(JSOP_SETPROP,   54, "setprop",    NULL,         5,  2,  1, JOF_ATOM|JOF_PROP|JOF_SET|JOF_DETECTING) \
+    macro(JSOP_SETPROP,   54, "setprop",    NULL,         5,  2,  1, JOF_ATOM|JOF_PROP|JOF_SET|JOF_DETECTING|JOF_CHECKSLOPPY) \
     /*
      * Pops the top two values on the stack as 'propval' and 'obj', pushes
      * 'propval' property of 'obj' onto the stack.
@@ -414,8 +518,18 @@
      *   Operands:
      *   Stack: obj, propval, val => val
      */ \
-    macro(JSOP_SETELEM,   56, "setelem",    NULL,         1,  3,  1, JOF_BYTE |JOF_ELEM|JOF_SET|JOF_DETECTING) \
-    macro(JSOP_UNUSED57,  57, "unused57",   NULL,         1,  0,  0, JOF_BYTE) \
+    macro(JSOP_SETELEM,   56, "setelem",    NULL,         1,  3,  1, JOF_BYTE |JOF_ELEM|JOF_SET|JOF_DETECTING|JOF_CHECKSLOPPY) \
+    /*
+     * Pops the top three values on the stack as 'val', 'propval' and 'obj',
+     * sets 'propval' property of 'obj' as 'val', pushes 'obj' onto the
+     * stack. Throws a TypeError if the set fails, per strict mode
+     * semantics.
+     *   Category: Literals
+     *   Type: Object
+     *   Operands:
+     *   Stack: obj, propval, val => val
+     */ \
+    macro(JSOP_STRICTSETELEM,   57, "strict-setelem",    NULL,         1,  3,  1, JOF_BYTE |JOF_ELEM|JOF_SET|JOF_DETECTING|JOF_CHECKSTRICT) \
     /*
      * Invokes 'callee' with 'this' and 'args', pushes return value onto the
      * stack.
@@ -433,7 +547,7 @@
      *   Operands: uint32_t nameIndex
      *   Stack: => val
      */ \
-    macro(JSOP_NAME,      59, "name",       NULL,         5,  0,  1, JOF_ATOM|JOF_NAME|JOF_TYPESET) \
+    macro(JSOP_GETNAME,   59, "getname",    NULL,         5,  0,  1, JOF_ATOM|JOF_NAME|JOF_TYPESET) \
     /*
      * Pushes numeric constant onto the stack.
      *   Category: Literals
@@ -491,10 +605,38 @@
      */ \
     macro(JSOP_FALSE,     66, js_false_str, js_false_str, 1,  0,  1, JOF_BYTE) \
     macro(JSOP_TRUE,      67, js_true_str,  js_true_str,  1,  0,  1, JOF_BYTE) \
+    /*
+     * Converts the top of stack value into a boolean, if the result is 'true',
+     * jumps to a 32-bit offset from the current bytecode.
+     *   Category: Statements
+     *   Type: Jumps
+     *   Operands: int32_t offset
+     *   Stack: cond => cond
+     */ \
     macro(JSOP_OR,        68, "or",         NULL,         5,  1,  1, JOF_JUMP|JOF_DETECTING|JOF_LEFTASSOC) \
+    /*
+     * Converts the top of stack value into a boolean, if the result is 'false',
+     * jumps to a 32-bit offset from the current bytecode.
+     *   Category: Statements
+     *   Type: Jumps
+     *   Operands: int32_t offset
+     *   Stack: cond => cond
+     */ \
     macro(JSOP_AND,       69, "and",        NULL,         5,  1,  1, JOF_JUMP|JOF_DETECTING|JOF_LEFTASSOC) \
     \
-    /* The switch bytecodes have variable length. */ \
+    /*
+     * Pops the top of stack value as 'i', if 'low <= i <= high',
+     * jumps to a 32-bit offset: 'offset[i - low]' from the current bytecode,
+     * jumps to a 32-bit offset: 'len' from the current bytecode if not.
+     *
+     * This opcode has variable length.
+     *   Category: Statements
+     *   Type: Switch Statement
+     *   Operands: int32_t len, int32_t low, int32_t high,
+     *             int32_t offset[0], ..., int32_t offset[high-low]
+     *   Stack: i =>
+     *   len: len
+     */ \
     macro(JSOP_TABLESWITCH, 70, "tableswitch", NULL,     -1,  1,  0,  JOF_TABLESWITCH|JOF_DETECTING) \
     \
     /*
@@ -511,7 +653,7 @@
     /*
      * Pops the top two values from the stack, then pushes the result of
      * applying the operator to the two values.
-     *   Category: Operator
+     *   Category: Operators
      *   Type: Comparison Operators
      *   Operands:
      *   Stack: lval, rval => (lval OP rval)
@@ -531,20 +673,43 @@
     macro(JSOP_SETCALL,   74, "setcall",    NULL,         1,  0,  0, JOF_BYTE) \
     \
     /*
-     * JSOP_ITER sets up a for-in or for-each-in loop using the JSITER_* flag bits
-     * in this op's uint8_t immediate operand. It replaces the top of stack value
-     * with an iterator for that value.
-     *
-     * JSOP_MOREITER stores the next iterated value into cx->iterValue and pushes
-     * true if another value is available, and false otherwise. It is followed
-     * immediately by JSOP_IFNE.
-     *
-     * JSOP_ENDITER cleans up after the loop. It uses the slot above the iterator
-     * for temporary GC rooting.
+     * Sets up a for-in or for-each-in loop using the JSITER_* flag bits in
+     * this op's uint8_t immediate operand. It pops the top of stack value as
+     * 'val' and pushes 'iter' which is an iterator for 'val'.
+     *   Category: Statements
+     *   Type: For-In Statement
+     *   Operands: uint8_t flags
+     *   Stack: val => iter
      */ \
     macro(JSOP_ITER,      75, "iter",       NULL,         2,  1,  1,  JOF_UINT8) \
+    /*
+     * Pushes the next iterated value onto the stack. If no value is available,
+     * MagicValue(JS_NO_ITER_VALUE) is pushed.
+     *
+     *   Category: Statements
+     *   Type: For-In Statement
+     *   Operands:
+     *   Stack: iter => iter, val
+     */ \
     macro(JSOP_MOREITER,  76, "moreiter",   NULL,         1,  1,  2,  JOF_BYTE) \
-    macro(JSOP_ITERNEXT,  77, "iternext",   "<next>",     1,  0,  1,  JOF_BYTE) \
+    /*
+     * Pushes a boolean indicating whether the value on top of the stack is
+     * MagicValue(JS_NO_ITER_VALUE).
+     *
+     *   Category: Statements
+     *   Type: For-In Statement
+     *   Operands:
+     *   Stack: val => val, res
+     */ \
+    macro(JSOP_ISNOITER,  77, "isnoiter",   NULL,         1,  1,  2,  JOF_BYTE) \
+    /*
+     * Exits a for-in loop by popping the iterator object from the stack and
+     * closing it.
+     *   Category: Statements
+     *   Type: For-In Statement
+     *   Operands:
+     *   Stack: iter =>
+     */ \
     macro(JSOP_ENDITER,   78, "enditer",    NULL,         1,  1,  0,  JOF_BYTE) \
     \
     /*
@@ -571,7 +736,7 @@
     \
     /*
      * Pops the top value off the stack.
-     *   Category: Operator
+     *   Category: Operators
      *   Type: Stack Operations
      *   Operands:
      *   Stack: v =>
@@ -588,20 +753,8 @@
      *   nuses: (argc+2)
      */ \
     macro(JSOP_NEW,       82, js_new_str,   NULL,         3, -1,  1,  JOF_UINT16|JOF_INVOKE|JOF_TYPESET) \
-    /*
-     * Pops the top three values on the stack as 'iterable', 'index' and 'obj',
-     * iterates over 'iterable' and stores the iteration values as 'index + i'
-     * elements of 'obj', pushes 'obj' and 'index + iteration count' onto the
-     * stack.
-     *
-     * This opcode is used in Array literals with spread and spreadcall
-     * arguments.
-     *   Category: Literals
-     *   Type: Array
-     *   Operands:
-     *   Stack: obj, index, iterable => obj, (index + iteration count)
-     */ \
-    macro(JSOP_SPREAD,    83, "spread",     NULL,         1,  3,  2,  JOF_BYTE|JOF_ELEM|JOF_SET) \
+    \
+    macro(JSOP_UNUSED83,  83, "unused83",   NULL,         1,  0,  0,  JOF_BYTE) \
     \
     /*
      * Fast get op for function arguments and local variables.
@@ -685,17 +838,9 @@
      *   Stack: => obj
      */ \
     macro(JSOP_NEWOBJECT, 91, "newobject",  NULL,         5,  0,  1, JOF_OBJECT) \
-    /*
-     * A no-operation bytecode.
-     *
-     * Indicates the end of object/array initialization, and used for
-     * Type-Inference, decompile, etc.
-     *   Category: Literals
-     *   Type: Object
-     *   Operands:
-     *   Stack: =>
-     */ \
-    macro(JSOP_ENDINIT,   92, "endinit",    NULL,         1,  0,  0, JOF_BYTE) \
+    \
+    macro(JSOP_UNUSED92,  92, "unused92",   NULL,         1,  0,  0, JOF_BYTE) \
+    \
     /*
      * Initialize a named property in an object literal, like '{a: x}'.
      *
@@ -792,14 +937,42 @@
      *   Stack: obj, id, val => obj
      */ \
     macro(JSOP_INITELEM_SETTER, 100, "initelem_setter",   NULL, 1,  3,  1, JOF_BYTE|JOF_ELEM|JOF_SET|JOF_DETECTING) \
+    /*
+     * Pushes the call site object specified by objectIndex onto the stack. Defines the raw
+     * property specified by objectIndex + 1 on the call site object and freezes both the call site
+     * object as well as its raw property.
+     *   Category: Literals
+     *   Type: Object
+     *   Operands: uint32_t objectIndex
+     *   Stack: => obj
+     */ \
+    macro(JSOP_CALLSITEOBJ,     101, "callsiteobj",     NULL,         5,  0,  1,  JOF_OBJECT) \
     \
-    macro(JSOP_UNUSED101,  101, "unused101",   NULL,         1,  0,  0,  JOF_BYTE) \
-    macro(JSOP_UNUSED102,  102, "unused102",   NULL,         1,  0,  0,  JOF_BYTE) \
+    /*
+     * Pushes a newly created array onto the stack, whose elements are the same
+     * as that of a template object's copy on write elements.
+     *
+     *   Category: Literals
+     *   Type: Array
+     *   Operands: uint32_t objectIndex
+     *   Stack: => obj
+     */ \
+    macro(JSOP_NEWARRAY_COPYONWRITE, 102, "newarray_copyonwrite", NULL, 5, 0, 1, JOF_OBJECT) \
+    \
     macro(JSOP_UNUSED103,  103, "unused103",   NULL,         1,  0,  0,  JOF_BYTE) \
     macro(JSOP_UNUSED104,  104, "unused104",   NULL,         1,  0,  0,  JOF_BYTE) \
     macro(JSOP_UNUSED105,  105, "unused105",   NULL,         1,  0,  0,  JOF_BYTE) \
     \
-    /* The argument is the offset to the next statement and is used by IonMonkey. */ \
+    /*
+     * This opcode precedes every labeled statement. It's a no-op.
+     *
+     * 'offset' is the offset to the next instruction after this statement,
+     * the one 'break LABEL;' would jump to. IonMonkey uses this.
+     *   Category: Statements
+     *   Type: Jumps
+     *   Operands: int32_t offset
+     *   Stack: =>
+     */ \
     macro(JSOP_LABEL,     106,"label",     NULL,          5,  0,  0,  JOF_JUMP) \
     \
     macro(JSOP_UNUSED107, 107,"unused107",  NULL,         1,  0,  0,  JOF_BYTE) \
@@ -822,7 +995,15 @@
      */ \
     macro(JSOP_FUNCALL,   108,"funcall",    NULL,         3, -1,  1, JOF_UINT16|JOF_INVOKE|JOF_TYPESET) \
     \
-    /* This opcode is the target of the backwards jump for some loop. */ \
+    /*
+     * Another no-op.
+     *
+     * This opcode is the target of the backwards jump for some loop.
+     *   Category: Statements
+     *   Type: Jumps
+     *   Operands:
+     *   Stack: =>
+     */ \
     macro(JSOP_LOOPHEAD,  109,"loophead",   NULL,         1,  0,  0,  JOF_BYTE) \
     \
     /* ECMA-compliant assignment ops. */ \
@@ -844,9 +1025,17 @@
      *   Operands: uint32_t nameIndex
      *   Stack: scope, val => val
      */ \
-    macro(JSOP_SETNAME,   111,"setname",    NULL,         5,  2,  1,  JOF_ATOM|JOF_NAME|JOF_SET|JOF_DETECTING) \
+    macro(JSOP_SETNAME,   111,"setname",    NULL,         5,  2,  1,  JOF_ATOM|JOF_NAME|JOF_SET|JOF_DETECTING|JOF_CHECKSLOPPY) \
     \
     /* Exception handling ops. */ \
+    /*
+     * Pops the top of stack value as 'v', sets pending exception as 'v', then
+     * raises error.
+     *   Category: Statements
+     *   Type: Exception Handling
+     *   Operands:
+     *   Stack: v =>
+     */ \
     macro(JSOP_THROW,     112,js_throw_str, NULL,         1,  1,  0,  JOF_BYTE) \
     \
     /*
@@ -854,7 +1043,7 @@
      * 'id in obj'.  This will throw a 'TypeError' if 'obj' is not an object.
      *
      * Note that 'obj' is the top value.
-     *   Category: Operator
+     *   Category: Operators
      *   Type: Special Operators
      *   Operands:
      *   Stack: id, obj => (id in obj)
@@ -864,7 +1053,7 @@
      * Pops the top two values 'obj' and 'ctor' from the stack, then pushes
      * 'obj instanceof ctor'.  This will throw a 'TypeError' if 'obj' is not an
      * object.
-     *   Category: Operator
+     *   Category: Operators
      *   Type: Special Operators
      *   Operands:
      *   Stack: obj, ctor => (obj instanceof ctor)
@@ -880,11 +1069,41 @@
      */ \
     macro(JSOP_DEBUGGER,  115,"debugger",   NULL,         1,  0,  0, JOF_BYTE) \
     \
-    /* gosub/retsub for finally handling */ \
+    /*
+     * Pushes 'false' and next bytecode's PC onto the stack, and jumps to
+     * a 32-bit offset from the current bytecode.
+     *
+     * This opcode is used for entering 'finally' block.
+     *   Category: Statements
+     *   Type: Exception Handling
+     *   Operands: int32_t offset
+     *   Stack: => false, (next bytecode's PC)
+     */ \
     macro(JSOP_GOSUB,     116,"gosub",      NULL,         5,  0,  0,  JOF_JUMP) \
+    /*
+     * Pops the top two values on the stack as 'rval' and 'lval', converts
+     * 'lval' into a boolean, raises error if the result is 'true',
+     * jumps to a 32-bit absolute PC: 'rval' if 'false'.
+     *
+     * This opcode is used for returning from 'finally' block.
+     *   Category: Statements
+     *   Type: Exception Handling
+     *   Operands:
+     *   Stack: lval, rval =>
+     */ \
     macro(JSOP_RETSUB,    117,"retsub",     NULL,         1,  2,  0,  JOF_BYTE) \
     \
     /* More exception handling ops. */ \
+    /*
+     * Pushes the current pending exception onto the stack and clears the
+     * pending exception. This is only emitted at the beginning of code for a
+     * catch-block, so it is known that an exception is pending. It is used to
+     * implement catch-blocks and 'yield*'.
+     *   Category: Statements
+     *   Type: Exception Handling
+     *   Operands:
+     *   Stack: => exception
+     */ \
     macro(JSOP_EXCEPTION, 118,"exception",  NULL,         1,  0,  1,  JOF_BYTE) \
     \
     /*
@@ -896,12 +1115,58 @@
     macro(JSOP_LINENO,    119,"lineno",     NULL,         3,  0,  0,  JOF_UINT16) \
     \
     /*
-     * ECMA-compliant switch statement ops.
-     * CONDSWITCH is a decompilable NOP; CASE is ===, POP, jump if true, re-push
-     * lval if false; and DEFAULT is POP lval and GOTO.
+     * This no-op appears after the bytecode for EXPR in 'switch (EXPR) {...}'
+     * if the switch cannot be optimized using JSOP_TABLESWITCH.
+     * For a non-optimized switch statement like this:
+     *
+     *     switch (EXPR) {
+     *       case V0:
+     *         C0;
+     *       ...
+     *       default:
+     *         D;
+     *     }
+     *
+     * the bytecode looks like this:
+     *
+     *     (EXPR)
+     *     condswitch
+     *     (V0)
+     *     case ->C0
+     *     ...
+     *     default ->D
+     *     (C0)
+     *     ...
+     *     (D)
+     *
+     * Note that code for all case-labels is emitted first, then code for
+     * the body of each case clause.
+     *   Category: Statements
+     *   Type: Switch Statement
+     *   Operands:
+     *   Stack: =>
      */ \
     macro(JSOP_CONDSWITCH,120,"condswitch", NULL,         1,  0,  0,  JOF_BYTE) \
+    /*
+     * Pops the top two values on the stack as 'rval' and 'lval', compare them
+     * with '===', if the result is 'true', jumps to a 32-bit offset from the
+     * current bytecode, re-pushes 'lval' onto the stack if 'false'.
+     *   Category: Statements
+     *   Type: Switch Statement
+     *   Operands: int32_t offset
+     *   Stack: lval, rval => lval(if lval !== rval)
+     */ \
     macro(JSOP_CASE,      121,"case",       NULL,         5,  2,  1,  JOF_JUMP) \
+    /*
+     * This appears after all cases in a JSOP_CONDSWITCH, whether there is a
+     * 'default:' label in the switch statement or not. Pop the switch operand
+     * from the stack and jump to a 32-bit offset from the current bytecode.
+     * offset from the current bytecode.
+     *   Category: Statements
+     *   Type: Switch Statement
+     *   Operands: int32_t offset
+     *   Stack: lval =>
+     */ \
     macro(JSOP_DEFAULT,   122,"default",    NULL,         5,  1,  0,  JOF_JUMP) \
     \
     /* ECMA-compliant call to eval op. */ \
@@ -916,9 +1181,21 @@
      *   Stack: callee, this, args[0], ..., args[argc-1] => rval
      *   nuses: (argc+2)
      */ \
-    macro(JSOP_EVAL,      123,"eval",       NULL,         3, -1,  1, JOF_UINT16|JOF_INVOKE|JOF_TYPESET) \
+    macro(JSOP_EVAL,      123,"eval",       NULL,         3, -1,  1, JOF_UINT16|JOF_INVOKE|JOF_TYPESET|JOF_CHECKSLOPPY) \
     \
-    macro(JSOP_UNUSED124,  124, "unused124", NULL,      1,  0,  0,  JOF_BYTE) \
+    /* ECMA-compliant call to eval op. */ \
+    /*
+     * Invokes 'eval' with 'args' and pushes return value onto the stack.
+     *
+     * If 'eval' in global scope is not original one, invokes the function
+     * with 'this' and 'args', and pushes return value onto the stack.
+     *   Category: Statements
+     *   Type: Function
+     *   Operands: uint16_t argc
+     *   Stack: callee, this, args[0], ..., args[argc-1] => rval
+     *   nuses: (argc+2)
+     */ \
+    macro(JSOP_STRICTEVAL,       124, "strict-eval",       NULL,         3, -1,  1, JOF_UINT16|JOF_INVOKE|JOF_TYPESET|JOF_CHECKSTRICT) \
     macro(JSOP_UNUSED125,  125, "unused125", NULL,      1,  0,  0,  JOF_BYTE) \
     macro(JSOP_UNUSED126,  126, "unused126", NULL,      1,  0,  0,  JOF_BYTE) \
     \
@@ -935,8 +1212,9 @@
     macro(JSOP_DEFFUN,    127,"deffun",     NULL,         5,  0,  0,  JOF_OBJECT) \
     /*
      * Defines the new binding on the frame's current variables-object (the
-     * scope object on the scope chain designated to receive new variables)
-     * with 'READONLY' attribute.
+     * scope object on the scope chain designated to receive new variables) with
+     * 'READONLY' attribute. The binding is *not* JSPROP_PERMANENT. See bug
+     * 1019181 for the reason.
      *
      * This is used for global scripts and also in some cases for function
      * scripts where use of dynamic scoping inhibits optimization.
@@ -992,7 +1270,7 @@
     /*
      * Picks the nth element from the stack and moves it to the top of the
      * stack.
-     *   Category: Operator
+     *   Category: Operators
      *   Type: Stack Operations
      *   Operands: uint8_t n
      *   Stack: v[n], v[n-1], ..., v[1], v[0] => v[n-1], ..., v[1], v[0], v[n]
@@ -1000,10 +1278,24 @@
     macro(JSOP_PICK,        133, "pick",      NULL,       2,  0,  0,  JOF_UINT8|JOF_TMPSLOT2) \
     \
     /*
-     * Exception handling no-op, for more economical byte-coding than SRC_TRYFIN
-     * srcnote-annotated JSOP_NOPs and to simply stack balance handling.
+     * This no-op appears at the top of the bytecode for a 'TryStatement'.
+     *
+     * Location information for catch/finally blocks is stored in a
+     * side table, 'script->trynotes()'.
+     *   Category: Statements
+     *   Type: Exception Handling
+     *   Operands:
+     *   Stack: =>
      */ \
     macro(JSOP_TRY,         134,"try",        NULL,       1,  0,  0,  JOF_BYTE) \
+    /*
+     * This opcode has a def count of 2, but these values are already on the
+     * stack (they're pushed by JSOP_GOSUB).
+     *   Category: Statements
+     *   Type: Exception Handling
+     *   Operands:
+     *   Stack: => false, (next bytecode's PC)
+     */ \
     macro(JSOP_FINALLY,     135,"finally",    NULL,       1,  0,  2,  JOF_BYTE) \
     \
     /*
@@ -1035,14 +1327,54 @@
      */ \
     macro(JSOP_SETALIASEDVAR, 137,"setaliasedvar",NULL,      5,  1,  1,  JOF_SCOPECOORD|JOF_NAME|JOF_SET|JOF_DETECTING) \
     \
-    macro(JSOP_UNUSED138,  138, "unused138",   NULL,         1,  0,  0,  JOF_BYTE) \
-    macro(JSOP_UNUSED139,  139, "unused139",   NULL,         1,  0,  0,  JOF_BYTE) \
-    macro(JSOP_UNUSED140,  140, "unused140",   NULL,         1,  0,  0,  JOF_BYTE) \
-    macro(JSOP_UNUSED141,  141, "unused141",   NULL,         1,  0,  0,  JOF_BYTE) \
-    macro(JSOP_UNUSED142,  142, "unused142",   NULL,         1,  0,  0,  JOF_BYTE) \
-    \
     /*
-     * Pushes the value of the intrinsic onto the stack.
+     * Checks if the value of the local variable is the
+     * JS_UNINITIALIZED_LEXICAL magic, throwing an error if so.
+     *   Category: Variables and Scopes
+     *   Type: Local Variables
+     *   Operands: uint32_t localno
+     *   Stack: =>
+     */ \
+    macro(JSOP_CHECKLEXICAL,  138, "checklexical", NULL,     4,  0,  0, JOF_LOCAL|JOF_NAME) \
+    /*
+     * Initializes an uninitialized local lexical binding with the top of stack
+     * value.
+     *   Category: Variables and Scopes
+     *   Type: Local Variables
+     *   Operands: uint32_t localno
+     *   Stack: v => v
+     */ \
+    macro(JSOP_INITLEXICAL,   139, "initlexical",  NULL,      4,  1,  1, JOF_LOCAL|JOF_NAME|JOF_SET|JOF_DETECTING) \
+    /*
+     * Checks if the value of the aliased variable is the
+     * JS_UNINITIALIZED_LEXICAL magic, throwing an error if so.
+     *   Category: Variables and Scopes
+     *   Type: Aliased Variables
+     *   Operands: uint8_t hops, uint24_t slot
+     *   Stack: =>
+     */ \
+    macro(JSOP_CHECKALIASEDLEXICAL, 140, "checkaliasedlexical", NULL, 5,  0,  0, JOF_SCOPECOORD|JOF_NAME) \
+    /*
+     * Initializes an uninitialized aliased lexical binding with the top of
+     * stack value.
+     *   Category: Variables and Scopes
+     *   Type: Aliased Variables
+     *   Operands: uint8_t hops, uint24_t slot
+     *   Stack: v => v
+     */ \
+    macro(JSOP_INITALIASEDLEXICAL,  141, "initaliasedlexical",  NULL, 5,  1,  1, JOF_SCOPECOORD|JOF_NAME|JOF_SET|JOF_DETECTING) \
+    /*
+     * Pushes a JS_UNINITIALIZED_LEXICAL value onto the stack, representing an
+     * uninitialized lexical binding.
+     *
+     * This opcode is used with the JSOP_INITLET opcode.
+     *   Category: Literals
+     *   Type: Constants
+     *   Operands:
+     *   Stack: => uninitialized
+     */ \
+    macro(JSOP_UNINITIALIZED, 142, "uninitialized", NULL, 1,  0,  1, JOF_BYTE) \
+    /* Pushes the value of the intrinsic onto the stack.
      *
      * Intrinsic names are emitted instead of JSOP_*NAME ops when the
      * 'CompileOptions' flag 'selfHostingMode' is set.
@@ -1080,11 +1412,27 @@
     macro(JSOP_UNUSED147,     147,"unused147", NULL,      1,  0,  0,  JOF_BYTE) \
     macro(JSOP_UNUSED148,     148,"unused148", NULL,      1,  0,  0,  JOF_BYTE) \
     \
-    /* Placeholders for a real jump opcode set during backpatch chain fixup. */ \
+    /*
+     * Placeholder opcode used during bytecode generation. This never
+     * appears in a finished script. FIXME: bug 473671.
+     *   Category: Statements
+     *   Type: Jumps
+     *   Operands: int32_t offset
+     *   Stack: =>
+     */ \
     macro(JSOP_BACKPATCH,     149,"backpatch", NULL,      5,  0,  0,  JOF_JUMP) \
     macro(JSOP_UNUSED150,     150,"unused150", NULL,      1,  0,  0,  JOF_BYTE) \
     \
-    /* Set pending exception from the stack, to trigger rethrow. */ \
+    /*
+     * Pops the top of stack value as 'v', sets pending exception as 'v',
+     * to trigger rethrow.
+     *
+     * This opcode is used in conditional catch clauses.
+     *   Category: Statements
+     *   Type: Exception Handling
+     *   Operands:
+     *   Stack: v =>
+     */ \
     macro(JSOP_THROWING,      151,"throwing", NULL,       1,  1,  0,  JOF_BYTE) \
     \
     /*
@@ -1130,9 +1478,20 @@
      *   Operands: uint32_t nameIndex
      *   Stack: scope, val => val
      */ \
-    macro(JSOP_SETGNAME,      155,"setgname",  NULL,       5,  2,  1, JOF_ATOM|JOF_NAME|JOF_SET|JOF_DETECTING|JOF_GNAME) \
+    macro(JSOP_SETGNAME,      155,"setgname",  NULL,       5,  2,  1, JOF_ATOM|JOF_NAME|JOF_SET|JOF_DETECTING|JOF_GNAME|JOF_CHECKSLOPPY) \
     \
-    macro(JSOP_UNUSED156,  156, "unused156",   NULL,         1,  0,  0,  JOF_BYTE) \
+    /*
+     * Pops the top two values on the stack as 'val' and 'scope', sets property
+     * of 'scope' as 'val' and pushes 'val' back on the stack. Throws a
+     * TypeError if the set fails, per strict mode semantics.
+     *
+     * 'scope' should be the global scope.
+     *   Category: Variables and Scopes
+     *   Type: Free Variables
+     *   Operands: uint32_t nameIndex
+     *   Stack: scope, val => val
+     */ \
+    macro(JSOP_STRICTSETGNAME, 156, "strict-setgname",  NULL,       5,  2,  1, JOF_ATOM|JOF_NAME|JOF_SET|JOF_DETECTING|JOF_GNAME|JOF_CHECKSTRICT) \
     macro(JSOP_UNUSED157,  157, "unused157",   NULL,         1,  0,  0,  JOF_BYTE) \
     macro(JSOP_UNUSED158,  158, "unused158",   NULL,         1,  0,  0,  JOF_BYTE) \
     macro(JSOP_UNUSED159,  159, "unused159",   NULL,         1,  0,  0,  JOF_BYTE) \
@@ -1242,7 +1601,7 @@
      * this opcode isn't used when, in the original source code, 'val' is a
      * name -- see 'JSOP_TYPEOF' for that.
      * (This is because 'typeof undefinedName === "undefined"'.)
-     *   Category: Operator
+     *   Category: Operators
      *   Type: Special Operators
      *   Operands:
      *   Stack: val => (typeof val)
@@ -1275,27 +1634,52 @@
      */ \
     macro(JSOP_DEBUGLEAVEBLOCK, 200,"debugleaveblock", NULL, 1,  0,  0,  JOF_BYTE) \
     \
-    macro(JSOP_UNUSED201,     201,"unused201",  NULL,     1,  0,  0,  JOF_BYTE) \
-    \
     /*
-     * Initializes generator frame, creates a generator, sets 'YIELDING' flag,
-     * stops interpretation and returns the generator.
+     * Initializes generator frame, creates a generator and pushes it on the
+     * stack.
      *   Category: Statements
      *   Type: Generator
      *   Operands:
-     *   Stack: =>
+     *   Stack: => generator
      */ \
-    macro(JSOP_GENERATOR,     202,"generator",   NULL,    1,  0,  0,  JOF_BYTE) \
+    macro(JSOP_GENERATOR,     201,"generator",   NULL,    1,  0,  1,  JOF_BYTE) \
     /*
-     * Pops the top of stack value as 'rval1', sets 'YIELDING' flag,
-     * stops interpretation and returns 'rval1', pushes sent value from
-     * 'send()' onto the stack.
+     * Pops the generator from the top of the stack, suspends it and stops
+     * interpretation.
+     *   Category: Statements
+     *   Type: Generator
+     *   Operands: uint24_t yieldIndex
+     *   Stack: generator =>
+     */ \
+    macro(JSOP_INITIALYIELD,  202,"initialyield", NULL,   4,  1,  1,  JOF_UINT24) \
+    /*
+     * Pops the generator and the return value 'rval1', stops interpretation and
+     * returns 'rval1'. Pushes sent value from 'send()' onto the stack.
+     *   Category: Statements
+     *   Type: Generator
+     *   Operands: uint24_t yieldIndex
+     *   Stack: rval1, gen => rval2
+     */ \
+    macro(JSOP_YIELD,         203,"yield",       NULL,    4,  2,  1,  JOF_UINT24) \
+    /*
+     * Pops the generator and suspends and closes it. Yields the value in the
+     * frame's return value slot.
      *   Category: Statements
      *   Type: Generator
      *   Operands:
-     *   Stack: rval1 => rval2
+     *   Stack: gen =>
      */ \
-    macro(JSOP_YIELD,         203,"yield",       NULL,    1,  1,  1,  JOF_BYTE) \
+    macro(JSOP_FINALYIELDRVAL,204,"finalyieldrval",NULL,  1,  1,  0,  JOF_BYTE) \
+    /*
+     * Pops the generator and argument from the stack, pushes a new generator
+     * frame and resumes execution of it. Pushes the return value after the
+     * generator yields.
+     *   Category: Statements
+     *   Type: Generator
+     *   Operands: resume kind (GeneratorObject::ResumeKind)
+     *   Stack: gen, val => rval
+     */ \
+    macro(JSOP_RESUME,        205,"resume",      NULL,    3,  2,  1,  JOF_UINT8|JOF_INVOKE) \
     /*
      * Pops the top two values on the stack as 'obj' and 'v', pushes 'v' to
      * 'obj'.
@@ -1306,13 +1690,28 @@
      *   Operands:
      *   Stack: v, obj =>
      */ \
-    macro(JSOP_ARRAYPUSH,     204,"arraypush",   NULL,    1,  2,  0,  JOF_BYTE) \
+    macro(JSOP_ARRAYPUSH,     206,"arraypush",   NULL,    1,  2,  0,  JOF_BYTE) \
     \
-    macro(JSOP_UNUSED205,     205, "unused205",    NULL,  1,  0,  0,  JOF_BYTE) \
-    macro(JSOP_UNUSED206,     206, "unused206",    NULL,  1,  0,  0,  JOF_BYTE) \
+    /*
+     * No-op bytecode only emitted in some self-hosted functions. Not handled by
+     * the JITs so the script always runs in the interpreter.
+     *
+     *   Category: Other
+     *   Operands:
+     *   Stack: =>
+     */ \
+    macro(JSOP_FORCEINTERPRETER, 207, "forceinterpreter", NULL,  1,  0,  0,  JOF_BYTE) \
     \
-    macro(JSOP_UNUSED207,     207, "unused207",    NULL,  1,  0,  0,  JOF_BYTE) \
-    macro(JSOP_UNUSED208,     208, "unused208",    NULL,  1,  0,  0,  JOF_BYTE) \
+    /*
+     * Bytecode emitted after 'yield' expressions to help the Debugger
+     * fix up the frame in the JITs. No-op in the interpreter.
+     *
+     *   Category: Operators
+     *   Type: Debugger
+     *   Operands:
+     *   Stack: =>
+     */ \
+    macro(JSOP_DEBUGAFTERYIELD,  208, "debugafteryield",  NULL,  1,  0,  0,  JOF_BYTE) \
     macro(JSOP_UNUSED209,     209, "unused209",    NULL,  1,  0,  0,  JOF_BYTE) \
     macro(JSOP_UNUSED210,     210, "unused210",    NULL,  1,  0,  0,  JOF_BYTE) \
     macro(JSOP_UNUSED211,     211, "unused211",    NULL,  1,  0,  0,  JOF_BYTE) \
@@ -1411,15 +1810,25 @@
      * loops all have the same value.  The upper bit is set if Ion should be
      * able to OSR at this point, which is true unless there is non-loop state
      * on the stack.
+     *   Category: Statements
+     *   Type: Jumps
+     *   Operands: uint8_t BITFIELD
+     *   Stack: =>
      */ \
-    macro(JSOP_LOOPENTRY,     227, "loopentry",    NULL,  2,  0,  0,  JOF_UINT8)
+    macro(JSOP_LOOPENTRY,     227, "loopentry",    NULL,  2,  0,  0,  JOF_UINT8) \
+    /*
+     * Converts the value on the top of the stack to a String
+     *   Category: Other
+     *   Operands:
+     *   Stack: val => ToString(val)
+     */ \
+    macro(JSOP_TOSTRING,    228, "tostring",       NULL,  1,  1,  1,  JOF_BYTE)
 
 /*
  * In certain circumstances it may be useful to "pad out" the opcode space to
  * a power of two.  Use this macro to do so.
  */
 #define FOR_EACH_TRAILING_UNUSED_OPCODE(macro) \
-    macro(228) \
     macro(229) \
     macro(230) \
     macro(231) \

@@ -7,8 +7,6 @@
 #ifndef jit_BaselineCompiler_h
 #define jit_BaselineCompiler_h
 
-#ifdef JS_ION
-
 #include "jit/FixedList.h"
 #if defined(JS_CODEGEN_X86)
 # include "jit/x86/BaselineCompiler-x86.h"
@@ -18,6 +16,8 @@
 # include "jit/arm/BaselineCompiler-arm.h"
 #elif defined(JS_CODEGEN_MIPS)
 # include "jit/mips/BaselineCompiler-mips.h"
+#elif defined(JS_CODEGEN_NONE)
+# include "jit/none/BaselineCompiler-none.h"
 #else
 # error "Unknown architecture!"
 #endif
@@ -61,7 +61,9 @@ namespace jit {
     _(JSOP_UINT24)             \
     _(JSOP_DOUBLE)             \
     _(JSOP_STRING)             \
+    _(JSOP_SYMBOL)             \
     _(JSOP_OBJECT)             \
+    _(JSOP_CALLSITEOBJ)        \
     _(JSOP_REGEXP)             \
     _(JSOP_LAMBDA)             \
     _(JSOP_LAMBDA_ARROW)       \
@@ -91,36 +93,43 @@ namespace jit {
     _(JSOP_BITNOT)             \
     _(JSOP_NEG)                \
     _(JSOP_NEWARRAY)           \
+    _(JSOP_NEWARRAY_COPYONWRITE) \
     _(JSOP_INITELEM_ARRAY)     \
     _(JSOP_NEWOBJECT)          \
     _(JSOP_NEWINIT)            \
     _(JSOP_INITELEM)           \
     _(JSOP_INITELEM_GETTER)    \
     _(JSOP_INITELEM_SETTER)    \
+    _(JSOP_INITELEM_INC)       \
     _(JSOP_MUTATEPROTO)        \
     _(JSOP_INITPROP)           \
     _(JSOP_INITPROP_GETTER)    \
     _(JSOP_INITPROP_SETTER)    \
-    _(JSOP_ENDINIT)            \
     _(JSOP_ARRAYPUSH)          \
     _(JSOP_GETELEM)            \
     _(JSOP_SETELEM)            \
+    _(JSOP_STRICTSETELEM)      \
     _(JSOP_CALLELEM)           \
     _(JSOP_DELELEM)            \
+    _(JSOP_STRICTDELELEM)      \
     _(JSOP_IN)                 \
     _(JSOP_GETGNAME)           \
     _(JSOP_BINDGNAME)          \
     _(JSOP_SETGNAME)           \
+    _(JSOP_STRICTSETGNAME)     \
     _(JSOP_SETNAME)            \
+    _(JSOP_STRICTSETNAME)      \
     _(JSOP_GETPROP)            \
     _(JSOP_SETPROP)            \
+    _(JSOP_STRICTSETPROP)      \
     _(JSOP_CALLPROP)           \
     _(JSOP_DELPROP)            \
+    _(JSOP_STRICTDELPROP)      \
     _(JSOP_LENGTH)             \
     _(JSOP_GETXPROP)           \
     _(JSOP_GETALIASEDVAR)      \
     _(JSOP_SETALIASEDVAR)      \
-    _(JSOP_NAME)               \
+    _(JSOP_GETNAME)            \
     _(JSOP_BINDNAME)           \
     _(JSOP_DELNAME)            \
     _(JSOP_GETINTRINSIC)       \
@@ -132,17 +141,28 @@ namespace jit {
     _(JSOP_SETLOCAL)           \
     _(JSOP_GETARG)             \
     _(JSOP_SETARG)             \
+    _(JSOP_CHECKLEXICAL)       \
+    _(JSOP_INITLEXICAL)        \
+    _(JSOP_CHECKALIASEDLEXICAL) \
+    _(JSOP_INITALIASEDLEXICAL) \
+    _(JSOP_UNINITIALIZED)      \
     _(JSOP_CALL)               \
     _(JSOP_FUNCALL)            \
     _(JSOP_FUNAPPLY)           \
     _(JSOP_NEW)                \
     _(JSOP_EVAL)               \
+    _(JSOP_STRICTEVAL)         \
+    _(JSOP_SPREADCALL)         \
+    _(JSOP_SPREADNEW)          \
+    _(JSOP_SPREADEVAL)         \
+    _(JSOP_STRICTSPREADEVAL)   \
     _(JSOP_IMPLICITTHIS)       \
     _(JSOP_INSTANCEOF)         \
     _(JSOP_TYPEOF)             \
     _(JSOP_TYPEOFEXPR)         \
     _(JSOP_SETCALL)            \
     _(JSOP_THROW)              \
+    _(JSOP_THROWING)           \
     _(JSOP_TRY)                \
     _(JSOP_FINALLY)            \
     _(JSOP_GOSUB)              \
@@ -159,8 +179,14 @@ namespace jit {
     _(JSOP_TABLESWITCH)        \
     _(JSOP_ITER)               \
     _(JSOP_MOREITER)           \
-    _(JSOP_ITERNEXT)           \
+    _(JSOP_ISNOITER)           \
     _(JSOP_ENDITER)            \
+    _(JSOP_GENERATOR)          \
+    _(JSOP_INITIALYIELD)       \
+    _(JSOP_YIELD)              \
+    _(JSOP_DEBUGAFTERYIELD)    \
+    _(JSOP_FINALYIELDRVAL)     \
+    _(JSOP_RESUME)             \
     _(JSOP_CALLEE)             \
     _(JSOP_SETRVAL)            \
     _(JSOP_RETRVAL)            \
@@ -170,9 +196,7 @@ class BaselineCompiler : public BaselineCompilerSpecific
 {
     FixedList<Label>            labels_;
     NonAssertingLabel           return_;
-#ifdef JSGC_GENERATIONAL
     NonAssertingLabel           postBarrierSlot_;
-#endif
 
     // Native code offset right before the scope chain is initialized.
     CodeOffsetLabel prologueOffset_;
@@ -184,6 +208,10 @@ class BaselineCompiler : public BaselineCompilerSpecific
     // Native code offset right after debug prologue and epilogue, or
     // equivalent positions when debug mode is off.
     CodeOffsetLabel postDebugPrologueOffset_;
+
+    // For each INITIALYIELD or YIELD op, this Vector maps the yield index
+    // to the bytecode offset of the next op.
+    Vector<uint32_t>            yieldOffsets_;
 
     // Whether any on stack arguments are modified.
     bool modifiesArguments_;
@@ -208,11 +236,10 @@ class BaselineCompiler : public BaselineCompilerSpecific
   private:
     MethodStatus emitBody();
 
+    void emitInitializeLocals(size_t n, const Value& v);
     bool emitPrologue();
     bool emitEpilogue();
-#ifdef JSGC_GENERATIONAL
     bool emitOutOfLinePostBarrierSlot();
-#endif
     bool emitIC(ICStub* stub, ICEntry::Kind kind);
     bool emitOpIC(ICStub* stub) {
         return emitIC(stub, ICEntry::Kind_Op);
@@ -223,12 +250,16 @@ class BaselineCompiler : public BaselineCompilerSpecific
 
     bool emitStackCheck(bool earlyCheck=false);
     bool emitInterruptCheck();
-    bool emitUseCountIncrement(bool allowOsr=true);
+    bool emitWarmUpCounterIncrement(bool allowOsr=true);
     bool emitArgumentTypeChecks();
+    void emitIsDebuggeeCheck();
     bool emitDebugPrologue();
     bool emitDebugTrap();
-    bool emitSPSPush();
-    void emitSPSPop();
+    bool emitTraceLoggerEnter();
+    bool emitTraceLoggerExit();
+
+    void emitProfilerEnterFrame();
+    void emitProfilerExitFrame();
 
     bool initScopeChain();
 
@@ -254,22 +285,27 @@ class BaselineCompiler : public BaselineCompilerSpecific
     bool emitTest(bool branchIfTrue);
     bool emitAndOr(bool branchIfTrue);
     bool emitCall();
+    bool emitSpreadCall();
 
     bool emitInitPropGetterSetter();
     bool emitInitElemGetterSetter();
 
     bool emitFormalArgAccess(uint32_t arg, bool get);
 
+    bool emitUninitializedLexicalCheck(const ValueOperand& val);
+
     bool addPCMappingEntry(bool addIndexEntry);
+
+    bool addYieldOffset();
 
     void getScopeCoordinateObject(Register reg);
     Address getScopeCoordinateAddressFromObject(Register objReg, Register reg);
     Address getScopeCoordinateAddress(Register reg);
 };
 
+extern const VMFunction NewArrayCopyOnWriteInfo;
+
 } // namespace jit
 } // namespace js
-
-#endif // JS_ION
 
 #endif /* jit_BaselineCompiler_h */

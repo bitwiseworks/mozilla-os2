@@ -63,16 +63,8 @@ class Handle(Common):
 class MutableHandle(Common):
     handle = True
 
-@template_pretty_printer("js::EncapsulatedPtr")
-class EncapsulatedPtr(Common):
-    member = 'value'
-
-@pretty_printer("js::EncapsulatedValue")
-class EncapsulatedValue(Common):
-    member = 'value'
-
-@pretty_printer("js::BarrieredValue")
-class BarrieredValue(Common):
+@template_pretty_printer("js::BarrieredBase")
+class BarrieredBase(Common):
     member = 'value'
 
 # Return the referent of a HeapPtr, Rooted, or Handle.

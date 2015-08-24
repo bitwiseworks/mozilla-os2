@@ -116,10 +116,10 @@ treechildren.autocomplete-treebody::-moz-tree-cell-text(selected) {
     background-color: transparent;
     /* four gradients for the bevel highlights on each edge, one for blue background */
     background-image:
-      linear-gradient(to bottom, rgba(255,255,255,0.9) 3px, rgba(255,255,255,0) 3px),
-      linear-gradient(to right, rgba(255,255,255,0.5) 3px, rgba(255,255,255,0) 3px),
-      linear-gradient(to left, rgba(255,255,255,0.5) 3px, rgba(255,255,255,0) 3px),
-      linear-gradient(to top, rgba(255,255,255,0.4) 3px, rgba(255,255,255,0) 3px),
+      linear-gradient(to bottom, rgba(255,255,255,0.9) 3px, transparent 3px),
+      linear-gradient(to right, rgba(255,255,255,0.5) 3px, transparent 3px),
+      linear-gradient(to left, rgba(255,255,255,0.5) 3px, transparent 3px),
+      linear-gradient(to top, rgba(255,255,255,0.4) 3px, transparent 3px),
       linear-gradient(to bottom, rgba(163,196,247,0.3), rgba(122,180,246,0.3));
     background-clip: content-box;
     border-radius: 6px;
@@ -135,7 +135,25 @@ treechildren.autocomplete-treebody::-moz-tree-cell-text(selected) {
 }
 
 .ac-url-box {
+  /* When setting a vertical margin here, half of that needs to be added
+     .ac-title-box's translateY for when .ac-url-box is hidden (see below). */
   margin: 1px 0 4px;
+}
+
+.autocomplete-richlistitem[actiontype="keyword"] .ac-url-box,
+.autocomplete-richlistitem[actiontype="searchengine"] .ac-url-box,
+.autocomplete-richlistitem[actiontype="visiturl"] .ac-url-box,
+.autocomplete-richlistitem[type~="autofill"] .ac-url-box {
+  visibility: hidden;
+}
+
+.autocomplete-richlistitem[actiontype="keyword"] .ac-title-box,
+.autocomplete-richlistitem[actiontype="searchengine"] .ac-title-box,
+.autocomplete-richlistitem[actiontype="visiturl"] .ac-title-box,
+.autocomplete-richlistitem[type~="autofill"] .ac-title-box {
+  /* Center the title by moving it down by half of .ac-url-box's height,
+     including vertical margins (if any). */
+  transform: translateY(calc(.5em + 2px));
 }
 
 .ac-site-icon {

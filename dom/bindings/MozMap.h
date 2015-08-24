@@ -27,7 +27,7 @@ template<typename DataType>
 class MozMapEntry : public nsStringHashKey
 {
 public:
-  MozMapEntry(const nsAString* aKeyTypePointer)
+  explicit MozMapEntry(const nsAString* aKeyTypePointer)
     : nsStringHashKey(aKeyTypePointer)
   {
   }
@@ -69,6 +69,13 @@ public:
     return ent->mData;
   }
 
+  DataType& Get(const nsAString& aKey)
+  {
+    EntryType* ent = this->GetEntry(aKey);
+    MOZ_ASSERT(ent, "Why are you using a key we didn't claim to have?");
+    return ent->mData;
+  }
+
   // The return value is only safe to use until an AddEntry call.
   const DataType* GetIfExists(const nsAString& aKey) const
   {
@@ -95,9 +102,7 @@ public:
 
   DataType* AddEntry(const nsAString& aKey) NS_WARN_UNUSED_RESULT
   {
-    // XXXbz can't just use fallible_t() because our superclass has a
-    // private typedef by that name.
-    EntryType* ent = this->PutEntry(aKey, mozilla::fallible_t());
+    EntryType* ent = this->PutEntry(aKey, fallible);
     if (!ent) {
       return nullptr;
     }

@@ -19,6 +19,8 @@ struct CELT_decinst_t_;
 
 namespace webrtc {
 
+namespace acm2 {
+
 class ACMCELT : public ACMGenericCodec {
  public:
   explicit ACMCELT(int16_t codec_id);
@@ -35,8 +37,6 @@ class ACMCELT : public ACMGenericCodec {
 
   int16_t InternalCreateEncoder();
 
-  void InternalDestructEncoderInst(void* ptr_inst);
-
   int16_t SetBitRateSafe(const int32_t rate);
 
   CELT_encinst_t_* enc_inst_ptr_;
@@ -44,6 +44,8 @@ class ACMCELT : public ACMGenericCodec {
   int32_t bitrate_;
   uint16_t channels_;
 };
+
+}  // namespace acm2
 
 }  // namespace webrtc
 

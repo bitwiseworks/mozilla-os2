@@ -5,7 +5,6 @@
 #include "jsfriendapi.h"
 #include "nsCOMPtr.h"
 #include "nsIRandomGenerator.h"
-#include "nsPIDOMWindow.h"
 #include "MainThreadUtils.h"
 #include "nsXULAppAPI.h"
 
@@ -14,8 +13,6 @@
 #include "nsServiceManagerUtils.h"
 
 using mozilla::dom::ContentChild;
-
-using namespace js::ArrayBufferView;
 
 namespace mozilla {
 namespace dom {
@@ -29,12 +26,11 @@ NS_INTERFACE_MAP_END
 NS_IMPL_CYCLE_COLLECTING_ADDREF(Crypto)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(Crypto)
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(Crypto, mWindow)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(Crypto, mParent, mSubtle)
 
 Crypto::Crypto()
 {
   MOZ_COUNT_CTOR(Crypto);
-  SetIsDOMBinding();
 }
 
 Crypto::~Crypto()
@@ -43,10 +39,10 @@ Crypto::~Crypto()
 }
 
 void
-Crypto::Init(nsIDOMWindow* aWindow)
+Crypto::Init(nsIGlobalObject* aParent)
 {
-  mWindow = do_QueryInterface(aWindow);
-  MOZ_ASSERT(mWindow);
+  mParent = do_QueryInterface(aParent);
+  MOZ_ASSERT(mParent);
 }
 
 /* virtual */ JSObject*
@@ -57,23 +53,23 @@ Crypto::WrapObject(JSContext* aCx)
 
 void
 Crypto::GetRandomValues(JSContext* aCx, const ArrayBufferView& aArray,
-			JS::MutableHandle<JSObject*> aRetval,
-			ErrorResult& aRv)
+                        JS::MutableHandle<JSObject*> aRetval,
+                        ErrorResult& aRv)
 {
-  NS_ABORT_IF_FALSE(NS_IsMainThread(), "Called on the wrong thread");
+  MOZ_ASSERT(NS_IsMainThread(), "Called on the wrong thread");
 
   JS::Rooted<JSObject*> view(aCx, aArray.Obj());
 
   // Throw if the wrong type of ArrayBufferView is passed in
   // (Part of the Web Crypto API spec)
   switch (JS_GetArrayBufferViewType(view)) {
-    case TYPE_INT8:
-    case TYPE_UINT8:
-    case TYPE_UINT8_CLAMPED:
-    case TYPE_INT16:
-    case TYPE_UINT16:
-    case TYPE_INT32:
-    case TYPE_UINT32:
+    case js::Scalar::Int8:
+    case js::Scalar::Uint8:
+    case js::Scalar::Uint8Clamped:
+    case js::Scalar::Int16:
+    case js::Scalar::Uint16:
+    case js::Scalar::Int32:
+    case js::Scalar::Uint32:
       break;
     default:
       aRv.Throw(NS_ERROR_DOM_TYPE_MISMATCH_ERR);
@@ -120,81 +116,14 @@ Crypto::GetRandomValues(JSContext* aCx, const ArrayBufferView& aArray,
   aRetval.set(view);
 }
 
-#ifndef MOZ_DISABLE_CRYPTOLEGACY
-// Stub out the legacy nsIDOMCrypto methods. The actual
-// implementations are in security/manager/ssl/src/nsCrypto.{cpp,h}
-
-NS_IMETHODIMP
-Crypto::GetEnableSmartCardEvents(bool *aEnableSmartCardEvents)
+SubtleCrypto*
+Crypto::Subtle()
 {
-  return NS_ERROR_NOT_IMPLEMENTED;
+  if(!mSubtle) {
+    mSubtle = new SubtleCrypto(GetParentObject());
+  }
+  return mSubtle;
 }
-
-NS_IMETHODIMP
-Crypto::SetEnableSmartCardEvents(bool aEnableSmartCardEvents)
-{
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-bool
-Crypto::EnableSmartCardEvents()
-{
-  return false;
-}
-
-void
-Crypto::SetEnableSmartCardEvents(bool aEnable, ErrorResult& aRv)
-{
-  aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
-}
-
-void
-Crypto::GetVersion(nsString& aVersion)
-{
-}
-
-mozilla::dom::CRMFObject*
-Crypto::GenerateCRMFRequest(JSContext* aContext,
-                            const nsCString& aReqDN,
-                            const nsCString& aRegToken,
-                            const nsCString& aAuthenticator,
-                            const nsCString& aEaCert,
-                            const nsCString& aJsCallback,
-                            const Sequence<JS::Value>& aArgs,
-                            ErrorResult& aRv)
-{
-  aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
-  return nullptr;
-}
-
-void
-Crypto::ImportUserCertificates(const nsAString& aNickname,
-                               const nsAString& aCmmfResponse,
-                               bool aDoForcedBackup,
-                               nsAString& aReturn,
-                               ErrorResult& aRv)
-{
-  aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
-}
-
-void
-Crypto::SignText(JSContext* aContext,
-                 const nsAString& aStringToSign,
-                 const nsAString& aCaOption,
-                 const Sequence<nsCString>& aArgs,
-                 nsAString& aReturn)
-
-{
-  aReturn.AssignLiteral("error:internalError");
-}
-
-void
-Crypto::Logout(ErrorResult& aRv)
-{
-  aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
-}
-
-#endif
 
 /* static */ uint8_t*
 Crypto::GetRandomValues(uint32_t aLength)

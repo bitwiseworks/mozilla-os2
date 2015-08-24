@@ -23,6 +23,7 @@ function test_existent_actor(aClient, anActor)
   aClient.request({ to: anActor, type: "requestTypes" }, function (aResponse) {
     var expectedRequestTypes = Object.keys(DebuggerServer.
                                            globalActorFactories["chromeDebugger"].
+                                           _getConstructor().
                                            prototype.requestTypes);
 
     do_check_true(Array.isArray(aResponse.requestTypes));
@@ -37,7 +38,7 @@ function test_existent_actor(aClient, anActor)
 
 function run_test()
 {
-  DebuggerServer.init(function () { return true; });
+  DebuggerServer.init();
   DebuggerServer.addBrowserActors();
   var client = new DebuggerClient(DebuggerServer.connectPipe());
   client.connect(function() {

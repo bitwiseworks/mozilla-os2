@@ -17,19 +17,8 @@
         '<(webrtc_root)/modules/video_coding/utility/video_coding_utility.gyp:video_coding_utility',
         '<(webrtc_root)/system_wrappers/source/system_wrappers.gyp:system_wrappers',
         '<(webrtc_vp8_dir)/vp8.gyp:webrtc_vp8',
+        '<(webrtc_vp9_dir)/vp9.gyp:webrtc_vp9',
       ],
-      'include_dirs': [
-        '../interface',
-        '../../../interface',
-        '../../codecs/interface',
-        '../../../../common_video/interface',
-      ],
-      'direct_dependent_settings': {
-        'include_dirs': [
-          '../interface',
-          '../../codecs/interface',
-        ],
-      },
       'sources': [
         # interfaces
         '../interface/video_coding.h',
@@ -60,7 +49,6 @@
         'receiver.h',
         'rtt_filter.h',
         'session_info.h',
-        'timestamp_extrapolator.h',
         'timestamp_map.h',
         'timing.h',
         'video_coding_impl.h',
@@ -84,7 +72,6 @@
         'receiver.cc',
         'rtt_filter.cc',
         'session_info.cc',
-        'timestamp_extrapolator.cc',
         'timestamp_map.cc',
         'timing.cc',
         'video_coding_impl.cc',

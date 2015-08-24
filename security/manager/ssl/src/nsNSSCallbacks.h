@@ -27,12 +27,16 @@ void HandshakeCallback(PRFileDesc *fd, void *client_data);
 SECStatus CanFalseStartCallback(PRFileDesc* fd, void* client_data,
                                 PRBool *canFalseStart);
 
-class nsHTTPListener MOZ_FINAL : public nsIStreamLoaderObserver
+class nsHTTPListener final : public nsIStreamLoaderObserver
 {
 private:
   // For XPCOM implementations that are not a base class for some other
   // class, it is good practice to make the destructor non-virtual and
   // private.  Then the only way to delete the object is via Release.
+#ifdef _MSC_VER
+  // C4265: Class has virtual members but destructor is not virtual
+  __pragma(warning(disable:4265))
+#endif
   ~nsHTTPListener();
 
 public:
@@ -216,9 +220,6 @@ public:
 
   static void initTable();
   static SEC_HttpClientFcn sNSSInterfaceTable;
-
-  void registerHttpClient();
-  void unregisterHttpClient();
 };
 
 #endif // _NSNSSCALLBACKS_H_

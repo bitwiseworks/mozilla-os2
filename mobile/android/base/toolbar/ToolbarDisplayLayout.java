@@ -5,47 +5,48 @@
 
 package org.mozilla.gecko.toolbar;
 
+import java.util.Arrays;
+import java.util.EnumSet;
+import java.util.List;
+
 import org.mozilla.gecko.AboutPages;
-import org.mozilla.gecko.animation.PropertyAnimator;
-import org.mozilla.gecko.animation.ViewHelper;
+import org.mozilla.gecko.AppConstants.Versions;
 import org.mozilla.gecko.BrowserApp;
+import org.mozilla.gecko.NewTabletUI;
 import org.mozilla.gecko.R;
+import org.mozilla.gecko.ReaderModeUtils;
 import org.mozilla.gecko.SiteIdentity;
 import org.mozilla.gecko.SiteIdentity.SecurityMode;
+import org.mozilla.gecko.SiteIdentity.MixedMode;
+import org.mozilla.gecko.SiteIdentity.TrackingMode;
 import org.mozilla.gecko.Tab;
-import org.mozilla.gecko.Tabs;
-import org.mozilla.gecko.toolbar.BrowserToolbar.ForwardButtonAnimation;
+import org.mozilla.gecko.animation.PropertyAnimator;
+import org.mozilla.gecko.animation.ViewHelper;
+import org.mozilla.gecko.favicons.Favicons;
+import org.mozilla.gecko.toolbar.BrowserToolbarTabletBase.ForwardButtonAnimation;
+import org.mozilla.gecko.util.HardwareUtils;
 import org.mozilla.gecko.util.StringUtils;
 import org.mozilla.gecko.widget.ThemedLinearLayout;
 import org.mozilla.gecko.widget.ThemedTextView;
 
-import org.json.JSONObject;
-
 import android.content.Context;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
-import android.os.Build;
 import android.os.SystemClock;
-import android.text.style.ForegroundColorSpan;
 import android.text.Spannable;
 import android.text.SpannableStringBuilder;
-import android.text.Spanned;
 import android.text.TextUtils;
+import android.text.style.ForegroundColorSpan;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
-import android.view.animation.Animation;
-import android.view.animation.AnimationUtils;
 import android.view.animation.AlphaAnimation;
+import android.view.animation.Animation;
 import android.view.animation.TranslateAnimation;
 import android.widget.Button;
 import android.widget.ImageButton;
-import android.widget.LinearLayout.LayoutParams;
-
-import java.util.Arrays;
-import java.util.EnumSet;
-import java.util.List;
+import android.widget.LinearLayout;
 
 /**
 * {@code ToolbarDisplayLayout} is the UI for when the toolbar is in
@@ -99,30 +100,35 @@ public class ToolbarDisplayLayout extends ThemedLinearLayout
 
     private UIMode mUiMode;
 
-    private ThemedTextView mTitle;
-    private int mTitlePadding;
-    private ToolbarTitlePrefs mTitlePrefs;
+    private boolean mIsAttached;
+
+    private final ThemedTextView mTitle;
+    private final int mTitlePadding;
+    private ToolbarPrefs mPrefs;
     private OnTitleChangeListener mTitleChangeListener;
 
-    private ImageButton mSiteSecurity;
+    private final ImageButton mSiteSecurity;
     private boolean mSiteSecurityVisible;
 
     // To de-bounce sets.
     private Bitmap mLastFavicon;
-    private ImageButton mFavicon;
+    private final ImageButton mFavicon;
     private int mFaviconSize;
 
-    private ImageButton mStop;
+    private final ImageButton mStop;
     private OnStopListener mStopListener;
 
-    private PageActionLayout mPageActionLayout;
+    private final PageActionLayout mPageActionLayout;
 
     private AlphaAnimation mLockFadeIn;
     private TranslateAnimation mTitleSlideLeft;
     private TranslateAnimation mTitleSlideRight;
 
-    private SiteIdentityPopup mSiteIdentityPopup;
-    private SecurityMode mSecurityMode;
+    private final SiteIdentityPopup mSiteIdentityPopup;
+    private int mSecurityImageLevel;
+
+    private final int LEVEL_SHIELD_ENABLED = 3;
+    private final int LEVEL_SHIELD_DISABLED = 4;
 
     private PropertyAnimator mForwardAnim;
 
@@ -150,12 +156,39 @@ public class ToolbarDisplayLayout extends ThemedLinearLayout
         mPrivateDomainColor = new ForegroundColorSpan(res.getColor(R.color.url_bar_domaintext_private));
 
         mFavicon = (ImageButton) findViewById(R.id.favicon);
-        if (Build.VERSION.SDK_INT >= 16) {
-            mFavicon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        }
-        mFaviconSize = Math.round(res.getDimension(R.dimen.browser_toolbar_favicon_size));
-
         mSiteSecurity = (ImageButton) findViewById(R.id.site_security);
+
+        if (NewTabletUI.isEnabled(context)) {
+            mSiteSecurity.setVisibility(View.VISIBLE);
+            // TODO: Rename this resource and remove this call when new tablet is default.
+            mSiteSecurity.setImageResource(R.drawable.new_tablet_site_security_level);
+
+            // TODO: This can likely be set statically in resources when new tablet is default.
+            // Dynamically update parameters for new tablet.
+            final LinearLayout.LayoutParams lp =
+                    (LinearLayout.LayoutParams) mSiteSecurity.getLayoutParams();
+            lp.height = res.getDimensionPixelSize(R.dimen.new_tablet_site_security_height);
+            lp.width = res.getDimensionPixelSize(R.dimen.new_tablet_site_security_width);
+            // TODO: Override a common static value when new tablet is standard.
+            lp.rightMargin = res.getDimensionPixelSize(R.dimen.new_tablet_site_security_right_margin);
+            mSiteSecurity.setLayoutParams(lp);
+            final int siteSecurityVerticalPadding =
+                    res.getDimensionPixelSize(R.dimen.new_tablet_site_security_padding_vertical);
+            final int siteSecurityHorizontalPadding =
+                    res.getDimensionPixelSize(R.dimen.new_tablet_site_security_padding_horizontal);
+            mSiteSecurity.setPadding(siteSecurityHorizontalPadding, siteSecurityVerticalPadding,
+                    siteSecurityHorizontalPadding, siteSecurityVerticalPadding);
+
+            // We don't show favicons in the toolbar on new tablet. Note that while we could
+            // null the favicon reference, we don't do so to avoid excessive null-checking.
+            removeView(mFavicon);
+        } else {
+            if (Versions.feature16Plus) {
+                mFavicon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            }
+            mFaviconSize = Math.round(Favicons.browserToolbarFaviconSize);
+        }
+
         mSiteSecurityVisible = (mSiteSecurity.getVisibility() == View.VISIBLE);
 
         mSiteIdentityPopup = new SiteIdentityPopup(mActivity);
@@ -167,15 +200,11 @@ public class ToolbarDisplayLayout extends ThemedLinearLayout
 
     @Override
     public void onAttachedToWindow() {
-        mTitlePrefs = new ToolbarTitlePrefs();
+        mIsAttached = true;
 
         Button.OnClickListener faviconListener = new Button.OnClickListener() {
             @Override
             public void onClick(View view) {
-                if (mSiteSecurity.getVisibility() != View.VISIBLE) {
-                    return;
-                }
-
                 mSiteIdentityPopup.show();
             }
         };
@@ -197,7 +226,7 @@ public class ToolbarDisplayLayout extends ThemedLinearLayout
             }
         });
 
-        float slideWidth = getResources().getDimension(R.dimen.browser_toolbar_lock_width);
+        float slideWidth = getResources().getDimension(R.dimen.browser_toolbar_site_security_width);
 
         LayoutParams siteSecParams = (LayoutParams) mSiteSecurity.getLayoutParams();
         final float scale = getResources().getDisplayMetrics().density;
@@ -220,7 +249,7 @@ public class ToolbarDisplayLayout extends ThemedLinearLayout
 
     @Override
     public void onDetachedFromWindow() {
-        mTitlePrefs.close();
+        mIsAttached = false;
     }
 
     @Override
@@ -259,7 +288,17 @@ public class ToolbarDisplayLayout extends ThemedLinearLayout
         mPageActionLayout.setNextFocusDownId(nextId);
     }
 
+    void setToolbarPrefs(final ToolbarPrefs prefs) {
+        mPrefs = prefs;
+    }
+
     void updateFromTab(Tab tab, EnumSet<UpdateFlags> flags) {
+        // Several parts of ToolbarDisplayLayout's state depends
+        // on the views being attached to the view tree.
+        if (!mIsAttached) {
+            return;
+        }
+
         if (flags.contains(UpdateFlags.TITLE)) {
             updateTitle(tab);
         }
@@ -316,16 +355,19 @@ public class ToolbarDisplayLayout extends ThemedLinearLayout
             return;
         }
 
-        // If the pref to show the URL isn't set, just use the tab's display title.
-        if (!mTitlePrefs.shouldShowUrl() || url == null) {
+        // If the pref to show the title is set, use the tab's display title.
+        if (!mPrefs.shouldShowUrl() || url == null) {
             setTitle(tab.getDisplayTitle());
             return;
         }
 
-        CharSequence title = url;
-        if (mTitlePrefs.shouldTrimUrls()) {
-            title = StringUtils.stripCommonSubdomains(StringUtils.stripScheme(url));
+        String strippedURL = stripAboutReaderURL(url);
+
+        if (mPrefs.shouldTrimUrls()) {
+            strippedURL = StringUtils.stripCommonSubdomains(StringUtils.stripScheme(strippedURL));
         }
+
+        CharSequence title = strippedURL;
 
         final String baseDomain = tab.getBaseDomain();
         if (!TextUtils.isEmpty(baseDomain)) {
@@ -344,7 +386,20 @@ public class ToolbarDisplayLayout extends ThemedLinearLayout
         setTitle(title);
     }
 
+    private String stripAboutReaderURL(final String url) {
+        if (!AboutPages.isAboutReader(url)) {
+            return url;
+        }
+
+        return ReaderModeUtils.getUrlFromAboutReader(url);
+    }
+
     private void updateFavicon(Tab tab) {
+        if (HardwareUtils.isTablet()) {
+            // We don't display favicons in the toolbar on tablet.
+            return;
+        }
+
         if (tab == null) {
             mFavicon.setImageDrawable(null);
             return;
@@ -366,7 +421,7 @@ public class ToolbarDisplayLayout extends ThemedLinearLayout
             image = Bitmap.createScaledBitmap(image, mFaviconSize, mFaviconSize, false);
             mFavicon.setImageBitmap(image);
         } else {
-            mFavicon.setImageResource(R.drawable.favicon);
+            mFavicon.setImageResource(R.drawable.favicon_globe);
         }
     }
 
@@ -381,15 +436,34 @@ public class ToolbarDisplayLayout extends ThemedLinearLayout
         mSiteIdentityPopup.setSiteIdentity(siteIdentity);
 
         final SecurityMode securityMode;
+        final MixedMode mixedMode;
+        final TrackingMode trackingMode;
         if (siteIdentity == null) {
             securityMode = SecurityMode.UNKNOWN;
+            mixedMode = MixedMode.UNKNOWN;
+            trackingMode = TrackingMode.UNKNOWN;
         } else {
             securityMode = siteIdentity.getSecurityMode();
+            mixedMode = siteIdentity.getMixedMode();
+            trackingMode = siteIdentity.getTrackingMode();
         }
 
-        if (mSecurityMode != securityMode) {
-            mSecurityMode = securityMode;
-            mSiteSecurity.setImageLevel(mSecurityMode.ordinal());
+        // This is a bit tricky, but we have one icon and three potential indicators.
+        // Default to the identity level
+        int imageLevel = securityMode.ordinal();
+
+        // Check to see if any protection was overridden first
+        if (trackingMode == TrackingMode.TRACKING_CONTENT_LOADED ||
+            mixedMode == MixedMode.MIXED_CONTENT_LOADED) {
+          imageLevel = LEVEL_SHIELD_DISABLED;
+        } else if (trackingMode == TrackingMode.TRACKING_CONTENT_BLOCKED ||
+                   mixedMode == MixedMode.MIXED_CONTENT_BLOCKED) {
+          imageLevel = LEVEL_SHIELD_ENABLED;
+        }
+
+        if (mSecurityImageLevel != imageLevel) {
+            mSecurityImageLevel = imageLevel;
+            mSiteSecurity.setImageLevel(mSecurityImageLevel);
             updatePageActions(flags);
         }
     }
@@ -426,8 +500,7 @@ public class ToolbarDisplayLayout extends ThemedLinearLayout
         mStop.setVisibility(isShowingProgress ? View.VISIBLE : View.GONE);
         mPageActionLayout.setVisibility(!isShowingProgress ? View.VISIBLE : View.GONE);
 
-        boolean shouldShowSiteSecurity = (!isShowingProgress &&
-                                          mSecurityMode != SecurityMode.UNKNOWN);
+        boolean shouldShowSiteSecurity = (!isShowingProgress && mSecurityImageLevel > 0);
 
         setSiteSecurityVisibility(shouldShowSiteSecurity, flags);
 
@@ -438,7 +511,8 @@ public class ToolbarDisplayLayout extends ThemedLinearLayout
     }
 
     private void setSiteSecurityVisibility(boolean visible, EnumSet<UpdateFlags> flags) {
-        if (visible == mSiteSecurityVisible) {
+        // We don't hide site security on tablet.
+        if (visible == mSiteSecurityVisible || HardwareUtils.isTablet()) {
             return;
         }
 
@@ -483,13 +557,19 @@ public class ToolbarDisplayLayout extends ThemedLinearLayout
     }
 
     View getDoorHangerAnchor() {
-        return mFavicon;
+        if (!HardwareUtils.isTablet()) {
+            return mFavicon;
+        } else {
+            return mSiteSecurity;
+        }
     }
 
     void prepareForwardAnimation(PropertyAnimator anim, ForwardButtonAnimation animation, int width) {
         mForwardAnim = anim;
 
         if (animation == ForwardButtonAnimation.HIDE) {
+            // We animate these items individually, rather than this entire view,
+            // so that we don't animate certain views, e.g. the stop button.
             anim.attach(mTitle,
                         PropertyAnimator.Property.TRANSLATION_X,
                         0);
@@ -535,7 +615,7 @@ public class ToolbarDisplayLayout extends ThemedLinearLayout
 
     void prepareStopEditingAnimation(PropertyAnimator anim) {
         // Fade toolbar buttons (page actions, stop) after the entry
-        // is schrunk back to its original size.
+        // is shrunk back to its original size.
         anim.attach(mPageActionLayout,
                     PropertyAnimator.Property.ALPHA,
                     1);

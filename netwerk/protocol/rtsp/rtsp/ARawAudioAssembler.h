@@ -18,13 +18,14 @@
 
 #define A_RAW_AUDIO_ASSEMBLER_H_
 
+#include "mozilla/Types.h"
 #include "ARTPAssembler.h"
 
 namespace android {
 
 struct AMessage;
-struct AString;
-struct MetaData;
+struct MOZ_EXPORT AString;
+struct MOZ_EXPORT MetaData;
 
 struct ARawAudioAssembler : public ARTPAssembler {
     ARawAudioAssembler(
@@ -33,7 +34,7 @@ struct ARawAudioAssembler : public ARTPAssembler {
 
     static bool Supports(const char *desc);
 
-    static void MakeFormat(
+    static bool MakeFormat(
             const char *desc, const sp<MetaData> &format);
 
 protected:

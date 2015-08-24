@@ -61,6 +61,7 @@ const OperatingSystemVersionInfo osVersionStrings[] = {
     { LookAndFeel::eOperatingSystemVersion_WindowsVista,  L"windows-vista" },
     { LookAndFeel::eOperatingSystemVersion_Windows7,      L"windows-win7" },
     { LookAndFeel::eOperatingSystemVersion_Windows8,      L"windows-win8" },
+    { LookAndFeel::eOperatingSystemVersion_Windows10,     L"windows-win10" }
 };
 #endif
 
@@ -307,8 +308,8 @@ static nsresult
 GetSystemMetric(nsPresContext* aPresContext, const nsMediaFeature* aFeature,
                 nsCSSValue& aResult)
 {
-    NS_ABORT_IF_FALSE(aFeature->mValueType == nsMediaFeature::eBoolInteger,
-                      "unexpected type");
+    MOZ_ASSERT(aFeature->mValueType == nsMediaFeature::eBoolInteger,
+               "unexpected type");
     nsIAtom *metricAtom = *aFeature->mData.mMetric;
     bool hasMetric = nsCSSRuleProcessor::HasSystemMetric(metricAtom);
     aResult.SetIntValue(hasMetric ? 1 : 0, eCSSUnit_Integer);
@@ -578,6 +579,13 @@ nsMediaFeatures::features[] = {
         nsMediaFeature::eBoolInteger,
         { &nsGkAtoms::mac_lion_theme },
         GetSystemMetric
+    },
+    {
+      &nsGkAtoms::_moz_mac_yosemite_theme,
+      nsMediaFeature::eMinMaxNotAllowed,
+      nsMediaFeature::eBoolInteger,
+      { &nsGkAtoms::mac_yosemite_theme },
+      GetSystemMetric
     },
     {
         &nsGkAtoms::_moz_windows_compositor,

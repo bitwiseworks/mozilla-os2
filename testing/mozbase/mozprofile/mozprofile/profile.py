@@ -7,7 +7,6 @@ __all__ = ['Profile',
            'MetroFirefoxProfile',
            'ThunderbirdProfile']
 
-import json
 import os
 import time
 import tempfile
@@ -106,7 +105,7 @@ class Profile(object):
         self.webapps.update_manifests()
 
     def __del__(self):
-      self.cleanup()
+        self.cleanup()
 
     ### cleanup
 
@@ -198,6 +197,25 @@ class Profile(object):
             f.write('%s\n' % self.delimeters[1])
 
         f.close()
+
+    def set_persistent_preferences(self, preferences):
+        """
+        Adds preferences dict to profile preferences and save them during a
+        profile reset
+        """
+
+        # this is a dict sometimes, convert
+        if isinstance(preferences, dict):
+            preferences = preferences.items()
+
+        # add new prefs to preserve them during reset
+        for new_pref in preferences:
+            # if dupe remove item from original list
+            self._preferences = [
+                pref for pref in self._preferences if not new_pref[0] == pref[0]]
+            self._preferences.append(new_pref)
+
+        self.set_preferences(preferences, filename='user.js')
 
     def pop_preferences(self, filename):
         """

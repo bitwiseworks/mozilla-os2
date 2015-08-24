@@ -16,6 +16,7 @@
 #include "nsCRT.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsHashKeys.h"
+#include <mozilla/Monitor.h>
 
 #define MOZ_PERSONALDICTIONARY_CONTRACTID "@mozilla.org/spellchecker/personaldictionary;1"
 #define MOZ_PERSONALDICTIONARY_CID         \
@@ -23,9 +24,11 @@
 0X7EF52EAF, 0XB7E1, 0X462B, \
   { 0X87, 0XE2, 0X5D, 0X1D, 0XBA, 0XCA, 0X90, 0X48 } }
 
-class mozPersonalDictionary : public mozIPersonalDictionary,
-                              public nsIObserver,
-                              public nsSupportsWeakReference
+class mozPersonalDictionaryLoader;
+
+class mozPersonalDictionary final : public mozIPersonalDictionary,
+                                        public nsIObserver,
+                                        public nsSupportsWeakReference
 {
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -34,15 +37,41 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(mozPersonalDictionary, mozIPersonalDictionary)
 
   mozPersonalDictionary();
-  virtual ~mozPersonalDictionary();
 
   nsresult Init();
 
 protected:
-  bool           mDirty;       /* has the dictionary been modified */
+  virtual ~mozPersonalDictionary();
+
+  /* has the dictionary been modified */
+  bool mDirty;
+
+  /* true if the dictionary has been loaded from disk */
+  bool mIsLoaded;
+
+  nsCOMPtr<nsIFile> mFile;
+  mozilla::Monitor mMonitor;
   nsTHashtable<nsUnicharPtrHashKey> mDictionaryTable;
   nsTHashtable<nsUnicharPtrHashKey> mIgnoreTable;
-  nsCOMPtr<nsIUnicodeEncoder>  mEncoder; /*Encoder to use to compare with spellchecker word */
+
+  /*Encoder to use to compare with spellchecker word */
+  nsCOMPtr<nsIUnicodeEncoder>  mEncoder;
+
+private:
+  /* wait for the asynchronous load of the dictionary to be completed */
+  void WaitForLoad();
+
+  /* enter the monitor before starting a synchronous load off the main-thread */
+  void SyncLoad();
+
+  /* launch an asynchrounous load of the dictionary from the main-thread
+   * after successfully initializing mFile with the path of the dictionary */
+  nsresult LoadInternal();
+
+  /* perform a synchronous load of the dictionary from disk */
+  void SyncLoadInternal();
+
+  friend class mozPersonalDictionaryLoader;
 };
 
 #endif

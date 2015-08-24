@@ -19,7 +19,14 @@ nsHttpRequestHead::nsHttpRequestHead()
     : mMethod(NS_LITERAL_CSTRING("GET"))
     , mVersion(NS_HTTP_VERSION_1_1)
     , mParsedMethod(kMethod_Get)
+    , mHTTPS(false)
 {
+    MOZ_COUNT_CTOR(nsHttpRequestHead);
+}
+
+nsHttpRequestHead::~nsHttpRequestHead()
+{
+    MOZ_COUNT_DTOR(nsHttpRequestHead);
 }
 
 void
@@ -41,6 +48,18 @@ nsHttpRequestHead::SetMethod(const nsACString &method)
         mParsedMethod = kMethod_Put;
     } else if (!strcmp(mMethod.get(), "TRACE")) {
         mParsedMethod = kMethod_Trace;
+    }
+}
+
+void
+nsHttpRequestHead::SetOrigin(const nsACString &scheme, const nsACString &host, int32_t port)
+{
+    mOrigin.Assign(scheme);
+    mOrigin.Append(NS_LITERAL_CSTRING("://"));
+    mOrigin.Append(host);
+    if (port >= 0) {
+        mOrigin.Append(NS_LITERAL_CSTRING(":"));
+        mOrigin.AppendInt(port);
     }
 }
 

@@ -8,7 +8,7 @@
 
 #include <stdio.h>                      // for FILE
 #include "CompositableHost.h"           // for CompositableHost
-#include "mozilla/Attributes.h"         // for MOZ_OVERRIDE
+#include "mozilla/Attributes.h"         // for override
 #include "mozilla/RefPtr.h"             // for RefPtr
 #include "mozilla/gfx/Point.h"          // for Point
 #include "mozilla/gfx/Rect.h"           // for Rect
@@ -40,8 +40,68 @@ struct EffectChain;
 class ImageHost : public CompositableHost
 {
 public:
-  ImageHost(const TextureInfo& aTextureInfo);
+  explicit ImageHost(const TextureInfo& aTextureInfo);
   ~ImageHost();
+
+  virtual CompositableType GetType() override { return mTextureInfo.mCompositableType; }
+
+  virtual void Composite(EffectChain& aEffectChain,
+                         float aOpacity,
+                         const gfx::Matrix4x4& aTransform,
+                         const gfx::Filter& aFilter,
+                         const gfx::Rect& aClipRect,
+                         const nsIntRegion* aVisibleRegion = nullptr) override;
+
+  virtual void UseTextureHost(TextureHost* aTexture) override;
+
+  virtual void RemoveTextureHost(TextureHost* aTexture) override;
+
+  virtual TextureHost* GetAsTextureHost() override;
+
+  virtual void SetCompositor(Compositor* aCompositor) override;
+
+  virtual void SetPictureRect(const nsIntRect& aPictureRect) override
+  {
+    mPictureRect = aPictureRect;
+    mHasPictureRect = true;
+  }
+
+  gfx::IntSize GetImageSize() const override;
+
+  virtual LayerRenderState GetRenderState() override;
+
+  virtual void PrintInfo(std::stringstream& aStream, const char* aPrefix) override;
+
+  virtual void Dump(std::stringstream& aStream,
+                    const char* aPrefix = "",
+                    bool aDumpHtml = false) override;
+
+  virtual TemporaryRef<gfx::DataSourceSurface> GetAsSurface() override;
+
+  virtual bool Lock() override;
+
+  virtual void Unlock() override;
+
+  virtual TemporaryRef<TexturedEffect> GenEffect(const gfx::Filter& aFilter) override;
+
+protected:
+
+  CompositableTextureHostRef mFrontBuffer;
+  CompositableTextureSourceRef mTextureSource;
+  nsIntRect mPictureRect;
+  bool mHasPictureRect;
+  bool mLocked;
+};
+
+#ifdef MOZ_WIDGET_GONK
+
+/**
+ * ImageHostOverlay works with ImageClientOverlay
+ */
+class ImageHostOverlay : public CompositableHost {
+public:
+  ImageHostOverlay(const TextureInfo& aTextureInfo);
+  ~ImageHostOverlay();
 
   virtual CompositableType GetType() { return mTextureInfo.mCompositableType; }
 
@@ -50,41 +110,22 @@ public:
                          const gfx::Matrix4x4& aTransform,
                          const gfx::Filter& aFilter,
                          const gfx::Rect& aClipRect,
-                         const nsIntRegion* aVisibleRegion = nullptr,
-                         TiledLayerProperties* aLayerProperties = nullptr) MOZ_OVERRIDE;
-
-  virtual void UseTextureHost(TextureHost* aTexture) MOZ_OVERRIDE;
-
-  virtual void RemoveTextureHost(TextureHost* aTexture) MOZ_OVERRIDE;
-
-  virtual TextureHost* GetAsTextureHost() MOZ_OVERRIDE;
-
-  virtual void SetCompositor(Compositor* aCompositor) MOZ_OVERRIDE;
-
-  virtual void SetPictureRect(const nsIntRect& aPictureRect) MOZ_OVERRIDE
+                         const nsIntRegion* aVisibleRegion = nullptr) override;
+  virtual LayerRenderState GetRenderState() override;
+  virtual void UseOverlaySource(OverlaySource aOverlay) override;
+  virtual void SetPictureRect(const nsIntRect& aPictureRect) override
   {
     mPictureRect = aPictureRect;
     mHasPictureRect = true;
   }
-
-  virtual LayerRenderState GetRenderState() MOZ_OVERRIDE;
-
-  virtual void PrintInfo(nsACString& aTo, const char* aPrefix);
-
-#ifdef MOZ_DUMP_PAINTING
-  virtual void Dump(FILE* aFile = nullptr,
-                    const char* aPrefix = "",
-                    bool aDumpHtml = false) MOZ_OVERRIDE;
-
-  virtual TemporaryRef<gfx::DataSourceSurface> GetAsSurface() MOZ_OVERRIDE;
-#endif
-
+  virtual void PrintInfo(std::stringstream& aStream, const char* aPrefix);
 protected:
-
-  RefPtr<TextureHost> mFrontBuffer;
   nsIntRect mPictureRect;
   bool mHasPictureRect;
+  OverlaySource mOverlay;
 };
+
+#endif
 
 }
 }

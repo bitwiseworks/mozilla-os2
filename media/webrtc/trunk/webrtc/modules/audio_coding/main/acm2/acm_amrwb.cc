@@ -40,6 +40,8 @@
 
 namespace webrtc {
 
+namespace acm2 {
+
 #ifndef WEBRTC_CODEC_AMRWB
 ACMAMRwb::ACMAMRwb(int16_t /* codec_id */)
     : encoder_inst_ptr_(NULL),
@@ -70,8 +72,6 @@ int16_t ACMAMRwb::InternalCreateEncoder() { return -1; }
 void ACMAMRwb::DestructEncoderSafe() { return; }
 
 int16_t ACMAMRwb::SetBitRateSafe(const int32_t /* rate */) { return -1; }
-
-void ACMAMRwb::InternalDestructEncoderInst(void* /* ptr_inst */) { return; }
 
 int16_t ACMAMRwb::SetAMRwbEncoderPackingFormat(
     ACMAMRPackingFormat /* packing_format */) {
@@ -271,13 +271,6 @@ int16_t ACMAMRwb::SetBitRateSafe(const int32_t rate) {
   return 0;
 }
 
-void ACMAMRwb::InternalDestructEncoderInst(void* ptr_inst) {
-  if (ptr_inst != NULL) {
-    WebRtcAmrWb_FreeEnc(static_cast<AMRWB_encinst_t_*>(ptr_inst));
-  }
-  return;
-}
-
 int16_t ACMAMRwb::SetAMRwbEncoderPackingFormat(
     ACMAMRPackingFormat packing_format) {
   if ((packing_format != AMRBandwidthEfficient) &&
@@ -312,5 +305,7 @@ ACMAMRPackingFormat ACMAMRwb::AMRwbDecoderPackingFormat() const {
 }
 
 #endif
+
+}  // namespace acm2
 
 }  // namespace webrtc

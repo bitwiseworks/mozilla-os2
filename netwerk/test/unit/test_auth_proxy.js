@@ -1,4 +1,4 @@
-/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -11,6 +11,7 @@
  */
 
 Cu.import("resource://testing-common/httpd.js");
+Cu.import("resource://gre/modules/Services.jsm");
 
 const FLAG_RETURN_FALSE   = 1 << 0;
 const FLAG_WRONG_PASSWORD = 1 << 1;
@@ -214,7 +215,14 @@ function makeChan(url) {
     url = "http://somesite/";
   var ios = Cc["@mozilla.org/network/io-service;1"]
                       .getService(Ci.nsIIOService);
-  var chan = ios.newChannel(url, null, null)
+  var chan = ios.newChannel2(url,
+                             null,
+                             null,
+                             null,      // aLoadingNode
+                             Services.scriptSecurityManager.getSystemPrincipal(),
+                             null,      // aTriggeringPrincipal
+                             Ci.nsILoadInfo.SEC_NORMAL,
+                             Ci.nsIContentPolicy.TYPE_OTHER)
                 .QueryInterface(Ci.nsIHttpChannel);
 
   return chan;

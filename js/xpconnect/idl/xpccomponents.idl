@@ -10,6 +10,7 @@
 %}
 
 interface xpcIJSWeakReference;
+interface nsIAddonInterposition;
 interface nsIClassInfo;
 interface nsIComponentManager;
 interface nsIJSCID;
@@ -21,7 +22,7 @@ interface nsIStackFrame;
 * interface of Components.interfacesByID
 * (interesting stuff only reflected into JavaScript)
 */
-[scriptable, uuid(c99cffac-5aed-4267-ad2f-f4a4c9d4a081)]
+[scriptable, uuid(f235ef76-9919-478b-aa0f-282d994ddf76)]
 interface nsIXPCComponents_InterfacesByID : nsISupports
 {
 };
@@ -121,7 +122,7 @@ interface ScheduledGCCallback : nsISupports
 /**
 * interface of Components.utils
 */
-[scriptable, uuid(45b80e00-fb0d-439e-b7bf-54f24af0c4a6)]
+[scriptable, uuid(2617a800-63c1-11e4-9803-0800200c9a66)]
 interface nsIXPCComponents_Utils : nsISupports
 {
 
@@ -156,6 +157,19 @@ interface nsIXPCComponents_Utils : nsISupports
                         [optional] in jsval version,
                         [optional] in AUTF8String filename,
                         [optional] in long lineNo);
+
+    /*
+     * getSandboxAddonId is designed to be called from JavaScript only.
+     *
+     * getSandboxAddonId retrieves the add-on ID associated with
+     * a sandbox object. It will return undefined if there
+     * is no add-on ID attached to the sandbox.
+     *
+     * var s = C.u.Sandbox(..., { addonId: "123" });
+     * var id = C.u.getSandboxAddonId(s);
+     */
+    [implicit_jscontext]
+    jsval getSandboxAddonId(in jsval sandbox);
 
     /*
      * getSandboxMetadata is designed to be called from JavaScript only.
@@ -217,6 +231,18 @@ interface nsIXPCComponents_Utils : nsISupports
     [implicit_jscontext,optional_argc]
     jsval import(in AUTF8String aResourceURI, [optional] in jsval targetObj);
 
+    /**
+     * Returns true if the js file located at 'registryLocation' location has
+     * been loaded previously via the import method above. Returns false
+     * otherwise.
+     *
+     * @param resourceURI A resource:// URI string representing the location of
+     *        the js file to be checked if it is already loaded or not.
+     * @returns boolean, true if the js file has been loaded via import. false
+     *          otherwise
+     */
+    boolean isModuleLoaded(in AUTF8String aResourceURI);
+
     /*
      * Unloads the JS module at 'registryLocation'. Existing references to the
      * module will continue to work but any subsequent import of the module will
@@ -259,6 +285,38 @@ interface nsIXPCComponents_Utils : nsISupports
      * Force an immediate cycle collection cycle.
      */
     void forceCC();
+
+    /*
+     * To be called from JS only.
+     *
+     * If any incremental CC is in progress, finish it. For testing.
+     */
+    void finishCC();
+
+    /*
+     * To be called from JS only.
+     *
+     * Do some cycle collector work, with the given work budget.
+     * The cost of calling Traverse() on a single object is set as 1.
+     * For testing.
+     */
+    void ccSlice(in long long budget);
+
+    /*
+     * To be called from JS only.
+     *
+     * Return the longest cycle collector slice time since the last
+     * time clearMaxCCTime() was called.
+     */
+    long getMaxCCSliceTimeSinceClear();
+
+    /*
+     * To be called from JS only.
+     *
+     * Reset the internal max slice time value used for
+     * getMaxCCSliceTimeSinceClear().
+     */
+    void clearMaxCCTime();
 
     /*
      * To be called from JS only.
@@ -324,16 +382,6 @@ interface nsIXPCComponents_Utils : nsISupports
     boolean isProxy(in jsval vobject);
 
     /*
-     * Similar to evalInSandbox except this one is used to eval a script in the
-     * scope of a window. Also note, that the return value and the possible exceptions
-     * in the script are structured cloned, unless they are natives (then they are just
-     * wrapped).
-     * Principal of the caller must subsume the target's.
-     */
-    [implicit_jscontext]
-    jsval evalInWindow(in AString source, in jsval window);
-
-    /*
      * To be called from JS only.
      *
      * Instead of simply wrapping a function into another compartment,
@@ -382,6 +430,20 @@ interface nsIXPCComponents_Utils : nsISupports
      */
     bool isDeadWrapper(in jsval obj);
 
+    /**
+     * Determines whether this object is a cross-process wrapper.
+     */
+    bool isCrossProcessWrapper(in jsval obj);
+
+    /**
+     * CPOWs can have user data attached to them. This data originates
+     * in the local process via the
+     * nsIRemoteTagService.getRemoteObjectTag method. It's sent along
+     * with the CPOW to the remote process, where it can be fetched
+     * with this function, getCrossProcessWrapperTag.
+     */
+    ACString getCrossProcessWrapperTag(in jsval obj);
+
     /*
      * To be called from JS only. This is for Gecko internal use only, and may
      * disappear at any moment.
@@ -402,6 +464,24 @@ interface nsIXPCComponents_Utils : nsISupports
      */
     [implicit_jscontext]
     void setWantXrays(in jsval vscope);
+
+    /*
+     * For gecko internal automation use only. Calling this in production code
+     * would result in security vulnerabilities, so it will crash if used outside
+     * of automation.
+     */
+    [implicit_jscontext]
+    void forcePermissiveCOWs();
+
+    /*
+     * Disables the XPConnect security checks that deny access to callables and
+     * accessor descriptors on COWs. Do not use this unless you are bholley.
+     *
+     * For the benefit of his magesty TCPSocket while he takes his sweet time
+     * converting to WebIDL. See bug 885982.
+     */
+    [implicit_jscontext]
+    void skipCOWCallableChecks();
 
     /*
      * Forces the usage of a privileged |Components| object for a potentially-
@@ -546,9 +626,12 @@ interface nsIXPCComponents_Utils : nsISupports
     /*
      * Clone an object into a scope.
      * The 3rd argument is an optional options object:
-     * - cloneFunction: boolean. If true, any function in the value is are
+     * - cloneFunctions: boolean. If true, functions in the value are
      *   wrapped in a function forwarder that appears to be a native function in
-     *   the content scope.
+     *   the content scope. Defaults to false.
+     * - wrapReflectors: boolean. If true, DOM objects are passed through the
+     *   clone directly with cross-compartment wrappers. Otherwise, the clone
+     *   fails when such an object is encountered. Defaults to false.
      */
     [implicit_jscontext]
     jsval cloneInto(in jsval value, in jsval scope, [optional] in jsval options);
@@ -575,6 +658,27 @@ interface nsIXPCComponents_Utils : nsISupports
      */
     [implicit_jscontext]
     nsIPrincipal getObjectPrincipal(in jsval obj);
+
+    /*
+     * Gets the URI or identifier string associated with an object's
+     * compartment (the same one used by the memory reporter machinery).
+     *
+     * Unwraps cross-compartment wrappers first.
+     *
+     * The string formats and values may change at any time. Do not depend on
+     * this from addon code.
+     */
+    [implicit_jscontext]
+    ACString getCompartmentLocation(in jsval obj);
+
+    [implicit_jscontext]
+    void setAddonInterposition(in ACString addonId, in nsIAddonInterposition interposition);
+
+    /*
+     * Return a fractional number of milliseconds from process
+     * startup, measured with a monotonic clock.
+     */
+    double now();
 };
 
 /**
@@ -612,6 +716,8 @@ interface nsIXPCComponents : nsIXPCComponentsBase
     [implicit_jscontext]
     readonly attribute jsval                            lastResult;
     [implicit_jscontext]
+    // A javascript component can set |returnCode| to specify an nsresult to
+    // be returned without throwing an exception.
     attribute jsval                                     returnCode;
 
     /* @deprecated Use Components.utils.reportError instead. */

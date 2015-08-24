@@ -23,9 +23,10 @@
 #include "nsIDOMClientRect.h"
 #include "nsIDOMWakeLockListener.h"
 #include "nsIPowerManagerService.h"
-#include "nsFrameManager.h"
 #include "nsINetworkLinkService.h"
+#include "nsCategoryManagerUtils.h"
 
+#include "mozilla/BackgroundHangMonitor.h"
 #include "mozilla/Services.h"
 #include "mozilla/unused.h"
 #include "mozilla/Preferences.h"
@@ -39,6 +40,9 @@
 #include <wchar.h>
 
 #include "mozilla/dom/ScreenOrientation.h"
+#ifdef MOZ_GAMEPAD
+#include "mozilla/dom/GamepadService.h"
+#endif
 
 #include "GeckoProfiler.h"
 #ifdef MOZ_ANDROID_HISTORY
@@ -47,7 +51,6 @@
 #endif
 
 #ifdef MOZ_LOGGING
-#define FORCE_PR_LOG
 #include "prlog.h"
 #endif
 
@@ -77,25 +80,26 @@ public:
         mBrowserApp(aBrowserApp), mPoints(aPoints), mTabId(aTabId), mBuffer(aBuffer) {}
 
     virtual nsresult Run() {
-        jobject buffer = mBuffer->GetObject();
+        const auto& buffer = jni::Object::Ref::From(mBuffer->GetObject());
         nsCOMPtr<nsIDOMWindow> domWindow;
         nsCOMPtr<nsIBrowserTab> tab;
         mBrowserApp->GetBrowserTab(mTabId, getter_AddRefs(tab));
         if (!tab) {
-            mozilla::widget::android::ThumbnailHelper::SendThumbnail(buffer, mTabId, false);
+            widget::ThumbnailHelper::SendThumbnail(buffer, mTabId, false, false);
             return NS_ERROR_FAILURE;
         }
 
         tab->GetWindow(getter_AddRefs(domWindow));
         if (!domWindow) {
-            mozilla::widget::android::ThumbnailHelper::SendThumbnail(buffer, mTabId, false);
+            widget::ThumbnailHelper::SendThumbnail(buffer, mTabId, false, false);
             return NS_ERROR_FAILURE;
         }
 
         NS_ASSERTION(mPoints.Length() == 1, "Thumbnail event does not have enough coordinates");
 
-        nsresult rv = AndroidBridge::Bridge()->CaptureThumbnail(domWindow, mPoints[0].x, mPoints[0].y, mTabId, buffer);
-        mozilla::widget::android::ThumbnailHelper::SendThumbnail(buffer, mTabId, NS_SUCCEEDED(rv));
+        bool shouldStore = true;
+        nsresult rv = AndroidBridge::Bridge()->CaptureThumbnail(domWindow, mPoints[0].x, mPoints[0].y, mTabId, buffer, shouldStore);
+        widget::ThumbnailHelper::SendThumbnail(buffer, mTabId, NS_SUCCEEDED(rv), shouldStore);
         return rv;
     }
 private:
@@ -105,12 +109,15 @@ private:
     nsRefPtr<RefCountedJavaObject> mBuffer;
 };
 
-class WakeLockListener MOZ_FINAL : public nsIDOMMozWakeLockListener {
- public:
+class WakeLockListener final : public nsIDOMMozWakeLockListener {
+private:
+  ~WakeLockListener() {}
+
+public:
   NS_DECL_ISUPPORTS;
 
   nsresult Callback(const nsAString& topic, const nsAString& state) {
-    mozilla::widget::android::GeckoAppShell::NotifyWakeLockChanged(topic, state);
+    widget::GeckoAppShell::NotifyWakeLockChanged(topic, state);
     return NS_OK;
   }
 };
@@ -123,9 +130,7 @@ nsAppShell::nsAppShell()
     : mQueueLock("nsAppShell.mQueueLock"),
       mCondLock("nsAppShell.mCondLock"),
       mQueueCond(mCondLock, "nsAppShell.mQueueCond"),
-      mQueuedDrawEvent(nullptr),
-      mQueuedViewportEvent(nullptr),
-      mAllowCoalescingNextDraw(false)
+      mQueuedViewportEvent(nullptr)
 {
     gAppShell = this;
 
@@ -181,6 +186,7 @@ nsAppShell::Init()
         mozilla::services::GetObserverService();
     if (obsServ) {
         obsServ->AddObserver(this, "xpcom-shutdown", false);
+        obsServ->AddObserver(this, "browser-delayed-startup-finished", false);
     }
 
     if (sPowerManagerService)
@@ -206,6 +212,9 @@ nsAppShell::Observe(nsISupports* aSubject,
                nsDependentString(aData).Equals(NS_LITERAL_STRING(PREFNAME_COALESCE_TOUCHES))) {
         mAllowCoalescingTouches = Preferences::GetBool(PREFNAME_COALESCE_TOUCHES, true);
         return NS_OK;
+    } else if (!strcmp(aTopic, "browser-delayed-startup-finished")) {
+        NS_CreateServicesFromCategory("browser-delayed-startup-finished", nullptr,
+                                      "browser-delayed-startup-finished");
     }
     return NS_OK;
 }
@@ -224,14 +233,18 @@ nsAppShell::ProcessNextNativeEvent(bool mayWait)
 {
     EVLOG("nsAppShell::ProcessNextNativeEvent %d", mayWait);
 
-    PROFILER_LABEL("nsAppShell", "ProcessNextNativeEvent");
+    PROFILER_LABEL("nsAppShell", "ProcessNextNativeEvent",
+        js::ProfileEntry::Category::EVENTS);
+
     nsAutoPtr<AndroidGeckoEvent> curEvent;
     {
         MutexAutoLock lock(mCondLock);
 
         curEvent = PopNextEvent();
         if (!curEvent && mayWait) {
-            PROFILER_LABEL("nsAppShell::ProcessNextNativeEvent", "Wait");
+            PROFILER_LABEL("nsAppShell", "ProcessNextNativeEvent::Wait",
+                js::ProfileEntry::Category::EVENTS);
+
             // hmm, should we really hardcode this 10s?
 #if defined(DEBUG_ANDROID_EVENTS)
             PRTime t0, t1;
@@ -250,6 +263,8 @@ nsAppShell::ProcessNextNativeEvent(bool mayWait)
 
     if (!curEvent)
         return false;
+
+    mozilla::BackgroundHangMonitor().NotifyActivity();
 
     EVLOG("nsAppShell: event %p %d", (void*)curEvent.get(), curEvent->Type());
 
@@ -295,6 +310,17 @@ nsAppShell::ProcessNextNativeEvent(bool mayWait)
         hal::NotifySensorChange(sdata);
       }
       break;
+
+    case AndroidGeckoEvent::PROCESS_OBJECT: {
+
+      switch (curEvent->Action()) {
+      case AndroidGeckoEvent::ACTION_OBJECT_LAYER_CLIENT:
+        AndroidBridge::Bridge()->SetLayerClient(
+                widget::GeckoLayerClient::Ref::From(curEvent->Object().wrappedObject()));
+        break;
+      }
+      break;
+    }
 
     case AndroidGeckoEvent::LOCATION_EVENT: {
         if (!gLocationCallback)
@@ -364,6 +390,33 @@ nsAppShell::ProcessNextNativeEvent(bool mayWait)
         RefCountedJavaObject* buffer = curEvent->ByteBuffer();
         nsRefPtr<ThumbnailRunnable> sr = new ThumbnailRunnable(mBrowserApp, tabId, points, buffer);
         MessageLoop::current()->PostIdleTask(FROM_HERE, NewRunnableMethod(sr.get(), &ThumbnailRunnable::Run));
+        break;
+    }
+
+    case AndroidGeckoEvent::ZOOMEDVIEW: {
+        if (!mBrowserApp)
+            break;
+        int32_t tabId = curEvent->MetaState();
+        const nsTArray<nsIntPoint>& points = curEvent->Points();
+        float scaleFactor = (float) curEvent->X();
+        nsRefPtr<RefCountedJavaObject> javaBuffer = curEvent->ByteBuffer();
+        const auto& mBuffer = jni::Object::Ref::From(javaBuffer->GetObject());
+
+        nsCOMPtr<nsIDOMWindow> domWindow;
+        nsCOMPtr<nsIBrowserTab> tab;
+        mBrowserApp->GetBrowserTab(tabId, getter_AddRefs(tab));
+        if (!tab) {
+            NS_ERROR("Can't find tab!");
+            break;
+        }
+        tab->GetWindow(getter_AddRefs(domWindow));
+        if (!domWindow) {
+            NS_ERROR("Can't find dom window!");
+            break;
+        }
+        NS_ASSERTION(points.Length() == 2, "ZoomedView event does not have enough coordinates");
+        nsIntRect r(points[0].x, points[0].y, points[1].x, points[1].y);
+        AndroidBridge::Bridge()->CaptureZoomedView(domWindow, r, mBuffer, scaleFactor);
         break;
     }
 
@@ -590,6 +643,49 @@ nsAppShell::ProcessNextNativeEvent(bool mayWait)
                               curEvent->Count());
         break;
 
+    case AndroidGeckoEvent::GAMEPAD_ADDREMOVE: {
+#ifdef MOZ_GAMEPAD
+        nsRefPtr<mozilla::dom::GamepadService> svc =
+            mozilla::dom::GamepadService::GetService();
+        if (svc) {
+            if (curEvent->Action() == AndroidGeckoEvent::ACTION_GAMEPAD_ADDED) {
+                int svc_id = svc->AddGamepad("android",
+                                             mozilla::dom::GamepadMappingType::Standard,
+                                             mozilla::dom::kStandardGamepadButtons,
+                                             mozilla::dom::kStandardGamepadAxes);
+                widget::GeckoAppShell::GamepadAdded(curEvent->ID(),
+                                                    svc_id);
+            } else if (curEvent->Action() == AndroidGeckoEvent::ACTION_GAMEPAD_REMOVED) {
+                svc->RemoveGamepad(curEvent->ID());
+            }
+        }
+#endif
+        break;
+    }
+
+    case AndroidGeckoEvent::GAMEPAD_DATA: {
+#ifdef MOZ_GAMEPAD
+        nsRefPtr<mozilla::dom::GamepadService> svc =
+            mozilla::dom::GamepadService::GetService();
+        if (svc) {
+            int id = curEvent->ID();
+            if (curEvent->Action() == AndroidGeckoEvent::ACTION_GAMEPAD_BUTTON) {
+                 svc->NewButtonEvent(id, curEvent->GamepadButton(),
+                                     curEvent->GamepadButtonPressed(),
+                                     curEvent->GamepadButtonValue());
+            } else if (curEvent->Action() == AndroidGeckoEvent::ACTION_GAMEPAD_AXES) {
+                int valid = curEvent->Flags();
+                const nsTArray<float>& values = curEvent->GamepadValues();
+                for (unsigned i = 0; i < values.Length(); i++) {
+                    if (valid & (1<<i)) {
+                        svc->NewAxisMoveEvent(id, i, values[i]);
+                    }
+                }
+            }
+        }
+#endif
+        break;
+    }
     case AndroidGeckoEvent::NOOP:
         break;
 
@@ -599,7 +695,7 @@ nsAppShell::ProcessNextNativeEvent(bool mayWait)
     }
 
     if (curEvent->AckNeeded()) {
-        mozilla::widget::android::GeckoAppShell::AcknowledgeEvent();
+        widget::GeckoAppShell::AcknowledgeEvent();
     }
 
     EVLOG("nsAppShell: -- done event %p %d", (void*)curEvent.get(), curEvent->Type());
@@ -622,9 +718,7 @@ nsAppShell::PopNextEvent()
     if (mEventQueue.Length()) {
         ae = mEventQueue[0];
         mEventQueue.RemoveElementAt(0);
-        if (mQueuedDrawEvent == ae) {
-            mQueuedDrawEvent = nullptr;
-        } else if (mQueuedViewportEvent == ae) {
+        if (mQueuedViewportEvent == ae) {
             mQueuedViewportEvent = nullptr;
         }
     }
@@ -673,50 +767,6 @@ nsAppShell::PostEvent(AndroidGeckoEvent *ae)
             }
             break;
 
-        case AndroidGeckoEvent::DRAW:
-            if (mQueuedDrawEvent) {
-#if defined(DEBUG) || defined(FORCE_ALOG)
-                // coalesce this new draw event with the one already in the queue
-                const nsIntRect& oldRect = mQueuedDrawEvent->Rect();
-                const nsIntRect& newRect = ae->Rect();
-                nsIntRect combinedRect = oldRect.Union(newRect);
-
-                // XXX We may want to consider using regions instead of rectangles.
-                //     Print an error if we're upload a lot more than we would
-                //     if we handled this as two separate events.
-                int combinedArea = (oldRect.width * oldRect.height) +
-                                   (newRect.width * newRect.height);
-                int boundsArea = combinedRect.width * combinedRect.height;
-                if (boundsArea > combinedArea * 8)
-                    ALOG("nsAppShell: Area of bounds greatly exceeds combined area: %d > %d",
-                         boundsArea, combinedArea);
-#endif
-
-                // coalesce into the new draw event rather than the queued one because
-                // it is not always safe to move draws earlier in the queue; there may
-                // be events between the two draws that affect scroll position or something.
-                ae->UnionRect(mQueuedDrawEvent->Rect());
-
-                EVLOG("nsAppShell: Coalescing previous DRAW event at %p into new DRAW event %p", mQueuedDrawEvent, ae);
-                mEventQueue.RemoveElement(mQueuedDrawEvent);
-                delete mQueuedDrawEvent;
-            }
-
-            if (!mAllowCoalescingNextDraw) {
-                // if we're not allowing coalescing of this draw event, then
-                // don't set mQueuedDrawEvent to point to this; that way the
-                // next draw event that comes in won't kill this one.
-                mAllowCoalescingNextDraw = true;
-                mQueuedDrawEvent = nullptr;
-            } else {
-                mQueuedDrawEvent = ae;
-            }
-
-            allowCoalescingNextViewport = true;
-
-            mEventQueue.AppendElement(ae);
-            break;
-
         case AndroidGeckoEvent::VIEWPORT:
             if (mQueuedViewportEvent) {
                 // drop the previous viewport event now that we have a new one
@@ -725,25 +775,21 @@ nsAppShell::PostEvent(AndroidGeckoEvent *ae)
                 delete mQueuedViewportEvent;
             }
             mQueuedViewportEvent = ae;
-            // temporarily turn off draw-coalescing, so that we process a draw
-            // event as soon as possible after a viewport change
-            mAllowCoalescingNextDraw = false;
             allowCoalescingNextViewport = true;
 
             mEventQueue.AppendElement(ae);
             break;
 
         case AndroidGeckoEvent::MOTION_EVENT:
-            if (ae->Action() == AndroidMotionEvent::ACTION_MOVE && mAllowCoalescingTouches) {
+        case AndroidGeckoEvent::APZ_INPUT_EVENT:
+            if (mAllowCoalescingTouches && mEventQueue.Length() > 0) {
                 int len = mEventQueue.Length();
-                if (len > 0) {
-                    AndroidGeckoEvent* event = mEventQueue[len - 1];
-                    if (event->Type() == AndroidGeckoEvent::MOTION_EVENT && event->Action() == AndroidMotionEvent::ACTION_MOVE) {
-                        // consecutive motion-move events; drop the last one before adding the new one
-                        EVLOG("nsAppShell: Dropping old move event at %p in favour of new move event %p", event, ae);
-                        mEventQueue.RemoveElementAt(len - 1);
-                        delete event;
-                    }
+                AndroidGeckoEvent* event = mEventQueue[len - 1];
+                if (ae->CanCoalesceWith(event)) {
+                    // consecutive motion-move events; drop the last one before adding the new one
+                    EVLOG("nsAppShell: Dropping old move event at %p in favour of new move event %p", event, ae);
+                    mEventQueue.RemoveElementAt(len - 1);
+                    delete event;
                 }
             }
             mEventQueue.AppendElement(ae);
@@ -785,12 +831,18 @@ namespace mozilla {
 
 bool ProcessNextEvent()
 {
+    if (!nsAppShell::gAppShell) {
+        return false;
+    }
+
     return nsAppShell::gAppShell->ProcessNextNativeEvent(true) ? true : false;
 }
 
 void NotifyEvent()
 {
-    nsAppShell::gAppShell->NotifyNativeEvent();
+    if (nsAppShell::gAppShell) {
+        nsAppShell::gAppShell->NotifyNativeEvent();
+    }
 }
 
 }

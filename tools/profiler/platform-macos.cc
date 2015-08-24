@@ -29,11 +29,15 @@
 #include <errno.h>
 #include <math.h>
 
+#include "ThreadResponsiveness.h"
 #include "nsThreadUtils.h"
 
 #include "platform.h"
 #include "TableTicker.h"
 #include "UnwinderThread2.h"  /* uwt__register_thread_for_profiling */
+
+// Memory profile
+#include "nsMemoryReporterManager.h"
 
 // this port is based off of v8 svn revision 9837
 
@@ -52,9 +56,10 @@ struct SamplerRegistry {
 
 Sampler *SamplerRegistry::sampler = NULL;
 
-// 0 is never a valid thread id on MacOSX since a ptread_t is
-// a pointer.
+#ifdef DEBUG
+// 0 is never a valid thread id on MacOSX since a pthread_t is a pointer.
 static const pthread_t kNoThread = (pthread_t) 0;
+#endif
 
 void OS::Startup() {
 }
@@ -198,40 +203,55 @@ class SamplerThread : public Thread {
   // Implement Thread::Run().
   virtual void Run() {
     while (SamplerRegistry::sampler->IsActive()) {
+      SamplerRegistry::sampler->DeleteExpiredMarkers();
       if (!SamplerRegistry::sampler->IsPaused()) {
         mozilla::MutexAutoLock lock(*Sampler::sRegisteredThreadsMutex);
         std::vector<ThreadInfo*> threads =
           SamplerRegistry::sampler->GetRegisteredThreads();
+        bool isFirstProfiledThread = true;
         for (uint32_t i = 0; i < threads.size(); i++) {
           ThreadInfo* info = threads[i];
 
           // This will be null if we're not interested in profiling this thread.
-          if (!info->Profile())
+          if (!info->Profile() || info->IsPendingDelete())
             continue;
 
           PseudoStack::SleepState sleeping = info->Stack()->observeSleeping();
           if (sleeping == PseudoStack::SLEEPING_AGAIN) {
             info->Profile()->DuplicateLastSample();
-            //XXX: This causes flushes regardless of jank-only mode
-            info->Profile()->flush();
             continue;
           }
 
+          info->Profile()->GetThreadResponsiveness()->Update();
+
           ThreadProfile* thread_profile = info->Profile();
 
-          SampleContext(SamplerRegistry::sampler, thread_profile);
+          SampleContext(SamplerRegistry::sampler, thread_profile,
+                        isFirstProfiledThread);
+          isFirstProfiledThread = false;
         }
       }
       OS::SleepMicro(intervalMicro_);
     }
   }
 
-  void SampleContext(Sampler* sampler, ThreadProfile* thread_profile) {
+  void SampleContext(Sampler* sampler, ThreadProfile* thread_profile,
+                     bool isFirstProfiledThread)
+  {
     thread_act_t profiled_thread =
       thread_profile->GetPlatformData()->profiled_thread();
 
     TickSample sample_obj;
     TickSample* sample = &sample_obj;
+
+    if (isFirstProfiledThread && Sampler::GetActiveSampler()->ProfileMemory()) {
+      sample->rssMemory = nsMemoryReporterManager::ResidentFast();
+    } else {
+      sample->rssMemory = 0;
+    }
+
+    // Unique Set Size is not supported on Mac.
+    sample->ussMemory = 0;
 
     if (KERN_SUCCESS != thread_suspend(profiled_thread)) return;
 
@@ -266,6 +286,7 @@ class SamplerThread : public Thread {
       sample->fp = reinterpret_cast<Address>(state.REGISTER_FIELD(bp));
       sample->timestamp = mozilla::TimeStamp::Now();
       sample->threadProfile = thread_profile;
+
       sampler->Tick(sample);
     }
     thread_resume(profiled_thread);
@@ -343,7 +364,7 @@ bool Sampler::RegisterCurrentThread(const char* aName,
   int id = gettid();
   for (uint32_t i = 0; i < sRegisteredThreads->size(); i++) {
     ThreadInfo* info = sRegisteredThreads->at(i);
-    if (info->ThreadId() == id) {
+    if (info->ThreadId() == id && !info->IsPendingDelete()) {
       // Thread already registered. This means the first unregister will be
       // too early.
       ASSERT(false);
@@ -353,7 +374,7 @@ bool Sampler::RegisterCurrentThread(const char* aName,
 
   set_tls_stack_top(stackTop);
 
-  ThreadInfo* info = new ThreadInfo(aName, id,
+  ThreadInfo* info = new StackOwningThreadInfo(aName, id,
     aIsMainThread, aPseudoStack, stackTop);
 
   if (sActiveSampler) {
@@ -379,10 +400,18 @@ void Sampler::UnregisterCurrentThread()
 
   for (uint32_t i = 0; i < sRegisteredThreads->size(); i++) {
     ThreadInfo* info = sRegisteredThreads->at(i);
-    if (info->ThreadId() == id) {
-      delete info;
-      sRegisteredThreads->erase(sRegisteredThreads->begin() + i);
-      break;
+    if (info->ThreadId() == id && !info->IsPendingDelete()) {
+      if (profiler_is_active()) {
+        // We still want to show the results of this thread if you
+        // save the profile shortly after a thread is terminated.
+        // For now we will defer the delete to profile stop.
+        info->SetPendingDelete();
+        break;
+      } else {
+        delete info;
+        sRegisteredThreads->erase(sRegisteredThreads->begin() + i);
+        break;
+      }
     }
   }
 }

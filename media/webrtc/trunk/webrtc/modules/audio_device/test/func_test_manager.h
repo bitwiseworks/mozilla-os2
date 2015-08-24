@@ -13,13 +13,13 @@
 
 #include "webrtc/modules/audio_device/audio_device_utility.h"
 
+#include <list>
 #include <string>
 
 #include "webrtc/common_audio/resampler/include/resampler.h"
 #include "webrtc/modules/audio_device/include/audio_device.h"
 #include "webrtc/modules/audio_device/test/audio_device_test_defines.h"
 #include "webrtc/system_wrappers/interface/file_wrapper.h"
-#include "webrtc/system_wrappers/interface/list_wrapper.h"
 #include "webrtc/typedefs.h"
 
 #if defined(WEBRTC_IOS) || defined(ANDROID)
@@ -58,6 +58,15 @@ enum TestType
     TTDeviceRemoval = 13,
     TTMobileAPI = 14,
     TTTest = 66,
+};
+
+struct AudioPacket
+{
+    uint8_t dataBuffer[4 * 960];
+    uint16_t nSamples;
+    uint16_t nBytesPerSample;
+    uint8_t nChannels;
+    uint32_t samplesPerSec;
 };
 
 class ProcessThread;
@@ -109,7 +118,9 @@ public:
                                      const uint8_t nChannels,
                                      const uint32_t samplesPerSec,
                                      void* audioSamples,
-                                     uint32_t& nSamplesOut);
+                                     uint32_t& nSamplesOut,
+                                     int64_t* elapsed_time_ms,
+                                     int64_t* ntp_time_ms);
 
     virtual int OnDataAvailable(const int voe_channels[],
                                 int number_of_voe_channels,
@@ -121,6 +132,17 @@ public:
                                 int current_volume,
                                 bool key_pressed,
                                 bool need_audio_processing);
+
+    virtual void PushCaptureData(int voe_channel, const void* audio_data,
+                                 int bits_per_sample, int sample_rate,
+                                 int number_of_channels,
+                                 int number_of_frames);
+
+    virtual void PullRenderData(int bits_per_sample, int sample_rate,
+                                int number_of_channels, int number_of_frames,
+                                void* audio_data,
+                                int64_t* elapsed_time_ms,
+                                int64_t* ntp_time_ms);
 
     AudioTransportImpl(AudioDeviceModule* audioDevice);
     ~AudioTransportImpl();
@@ -165,6 +187,7 @@ public:
     ;
 
 private:
+    typedef std::list<AudioPacket*> AudioPacketList;
     AudioDeviceModule* _audioDevice;
 
     bool _playFromFile;
@@ -181,8 +204,7 @@ private:
 
     uint32_t _recCount;
     uint32_t _playCount;
-
-    ListWrapper _audioList;
+    AudioPacketList _audioList;
 
     Resampler _resampler;
 };

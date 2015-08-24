@@ -13,8 +13,9 @@
 #include "nsIException.h"
 
 class nsIStackFrame;
+class nsPIDOMWindow;
 template <class T>
-class already_AddRefed;
+struct already_AddRefed;
 
 namespace mozilla {
 namespace dom {
@@ -23,6 +24,11 @@ class Exception;
 
 bool
 Throw(JSContext* cx, nsresult rv, const char* sz = nullptr);
+
+// Create, throw and report an exception to a given window.
+void
+ThrowAndReport(nsPIDOMWindow* aWindow, nsresult aRv,
+               const char* aMessage = nullptr);
 
 bool
 ThrowExceptionObject(JSContext* aCx, Exception* aException);
@@ -37,6 +43,19 @@ CreateException(JSContext* aCx, nsresult aRv, const char* aMessage = nullptr);
 
 already_AddRefed<nsIStackFrame>
 GetCurrentJSStack();
+
+// Throwing a TypeError on an ErrorResult may result in SpiderMonkey using its
+// own error reporting mechanism instead of just setting the exception on the
+// context.  This happens if no script is running. Bug 1107777 adds a flag that
+// forcibly turns this behaviour off. This is a stack helper to set the flag.
+class MOZ_STACK_CLASS AutoForceSetExceptionOnContext {
+private:
+  JSContext* mCx;
+  bool mOldValue;
+public:
+  explicit AutoForceSetExceptionOnContext(JSContext* aCx);
+  ~AutoForceSetExceptionOnContext();
+};
 
 // Internal stuff not intended to be widely used.
 namespace exceptions {

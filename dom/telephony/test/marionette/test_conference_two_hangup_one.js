@@ -14,7 +14,7 @@ function testConferenceTwoAndHangupOne() {
   let inInfo = gInCallStrPool(inNumber);
 
   return Promise.resolve()
-    .then(() => gSetupConferenceTwoCalls(outNumber, inNumber))
+    .then(() => gSetupConference([outNumber, inNumber]))
     .then(calls => {
       [outCall, inCall] = calls;
     })
@@ -28,8 +28,6 @@ function testConferenceTwoAndHangupOne() {
 // Start the test
 startTest(function() {
   testConferenceTwoAndHangupOne()
-    .then(null, error => {
-      ok(false, 'promise rejects during test.');
-    })
+    .catch(error => ok(false, "Promise reject: " + error))
     .then(finish);
 });

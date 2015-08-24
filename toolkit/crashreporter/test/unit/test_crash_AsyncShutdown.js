@@ -20,15 +20,18 @@ function setup_crash() {
   });
 
   Services.obs.notifyObservers(null, TOPIC, null);
+  dump(new Error().stack + "\n");
   dump("Waiting for crash\n");
 }
 
 function after_crash(mdump, extra) {
   do_print("after crash: " + extra.AsyncShutdownTimeout);
   let info = JSON.parse(extra.AsyncShutdownTimeout);
-  do_check_eq(info.phase, "testing-async-shutdown-crash");
-  do_print("Condition: " + JSON.stringify(info.conditions));
-  do_check_true(JSON.stringify(info.conditions).indexOf("A blocker that is never satisfied") != -1);
+  Assert.equal(info.phase, "testing-async-shutdown-crash");
+  Assert.equal(info.conditions[0].name, "A blocker that is never satisfied");
+  // This test spawns subprocesses by using argument "-e" of xpcshell, so
+  // this is the filename known to xpcshell.
+  Assert.equal(info.conditions[0].filename, "-e");
 }
 
 // Test that AsyncShutdown + OS.File reports errors correctly, in a case in which
@@ -37,18 +40,20 @@ function after_crash(mdump, extra) {
 function setup_osfile_crash_noerror() {
   Components.utils.import("resource://gre/modules/Services.jsm", this);
   Components.utils.import("resource://gre/modules/osfile.jsm", this);
+  Components.utils.import("resource://gre/modules/Promise.jsm", this);
 
-  Services.prefs.setBoolPref("toolkit.osfile.debug.failshutdown", true);
   Services.prefs.setIntPref("toolkit.asyncshutdown.crash_timeout", 1);
   Services.prefs.setBoolPref("toolkit.osfile.native", false);
 
+  OS.File.profileBeforeChange.addBlocker("Adding a blocker that will never be resolved", () => Promise.defer().promise);
   OS.File.getCurrentDirectory();
+
   Services.obs.notifyObservers(null, "profile-before-change", null);
   dump("Waiting for crash\n");
 };
 
 function after_osfile_crash_noerror(mdump, extra) {
-  do_print("after OS.File crash: " + JSON.stringify(extra.AsyncShutdownTimeout));
+  do_print("after OS.File crash: " + extra.AsyncShutdownTimeout);
   let info = JSON.parse(extra.AsyncShutdownTimeout);
   let state = info.conditions[0].state;
   do_print("Keys: " + Object.keys(state).join(", "));
@@ -66,18 +71,20 @@ function after_osfile_crash_noerror(mdump, extra) {
 function setup_osfile_crash_exn() {
   Components.utils.import("resource://gre/modules/Services.jsm", this);
   Components.utils.import("resource://gre/modules/osfile.jsm", this);
+  Components.utils.import("resource://gre/modules/Promise.jsm", this);
 
-  Services.prefs.setBoolPref("toolkit.osfile.debug.failshutdown", true);
   Services.prefs.setIntPref("toolkit.asyncshutdown.crash_timeout", 1);
   Services.prefs.setBoolPref("toolkit.osfile.native", false);
 
+  OS.File.profileBeforeChange.addBlocker("Adding a blocker that will never be resolved", () => Promise.defer().promise);
   OS.File.read("I do not exist");
+
   Services.obs.notifyObservers(null, "profile-before-change", null);
   dump("Waiting for crash\n");
 };
 
 function after_osfile_crash_exn(mdump, extra) {
-  do_print("after OS.File crash: " + JSON.stringify(extra.AsyncShutdownTimeout));
+  do_print("after OS.File crash: " + extra.AsyncShutdownTimeout);
   let info = JSON.parse(extra.AsyncShutdownTimeout);
   let state = info.conditions[0].state;
   do_print("Keys: " + Object.keys(state).join(", "));

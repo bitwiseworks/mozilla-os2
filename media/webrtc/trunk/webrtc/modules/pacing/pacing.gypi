@@ -14,11 +14,10 @@
       'dependencies': [
         '<(webrtc_root)/system_wrappers/source/system_wrappers.gyp:system_wrappers',
       ],
-      'include_dirs': [
-        'include',
-      ],
       'sources': [
         'include/paced_sender.h',
+        'bitrate_prober.cc',
+        'bitrate_prober.h',
         'paced_sender.cc',
       ],
     },

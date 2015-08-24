@@ -4,21 +4,25 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-PARALLEL_DIRS += [
+DIRS += [
     'about',
     'customizableui',
     'dirprovider',
     'downloads',
     'feeds',
+    'loop',
+    'migration',
     'places',
     'preferences',
     'privatebrowsing',
+    'readinglist',
     'search',
     'sessionstore',
     'shell',
-    'sidebar',
+    'selfsupport',
     'tabview',
-    'migration',
+    'uitour',
+    'translation',
 ]
 
 DIRS += ['build']
@@ -30,10 +34,8 @@ XPIDL_SOURCES += [
 
 XPIDL_MODULE = 'browsercompsbase'
 
-EXTRA_COMPONENTS += [
-    'BrowserComponents.manifest',
-]
 EXTRA_PP_COMPONENTS += [
+    'BrowserComponents.manifest',
     'nsBrowserContentHandler.js',
     'nsBrowserGlue.js',
 ]

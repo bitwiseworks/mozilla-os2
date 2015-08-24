@@ -3,6 +3,7 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 from marionette_test import MarionetteTestCase
+from marionette_driver.errors import SessionNotCreatedException
 
 class TestCapabilities(MarionetteTestCase):
     def setUp(self):
@@ -25,18 +26,14 @@ class TestCapabilities(MarionetteTestCase):
                          self.appinfo["platformVersion"])
 
     def test_supported_features(self):
-        self.assertIn("cssSelectorsEnabled", self.caps)
         self.assertIn("handlesAlerts", self.caps)
-        self.assertIn("javascriptEnabled", self.caps)
         self.assertIn("nativeEvents", self.caps)
         self.assertIn("rotatable", self.caps)
         self.assertIn("secureSsl", self.caps)
         self.assertIn("takesElementScreenshot", self.caps)
         self.assertIn("takesScreenshot", self.caps)
 
-        self.assertTrue(self.caps["cssSelectorsEnabled"])
         self.assertFalse(self.caps["handlesAlerts"])
-        self.assertTrue(self.caps["javascriptEnabled"])
         self.assertFalse(self.caps["nativeEvents"])
         self.assertEqual(self.caps["rotatable"], self.appinfo["name"] == "B2G")
         self.assertFalse(self.caps["secureSsl"])
@@ -56,3 +53,31 @@ class TestCapabilities(MarionetteTestCase):
         self.assertEqual(self.caps["XULappId"], self.appinfo["ID"])
         self.assertEqual(self.caps["appBuildId"], self.appinfo["appBuildID"])
         self.assertEqual(self.caps["version"], self.appinfo["version"])
+
+    def test_we_can_pass_in_capabilities_on_session_start(self):
+        self.marionette.delete_session()
+        capabilities = { "desiredCapabilities": {"somethingAwesome": "cake"}}
+        self.marionette.start_session(capabilities)
+        caps = self.marionette.session_capabilities
+        self.assertIn("somethingAwesome", caps)
+
+    def test_we_can_pass_in_required_capabilities_on_session_start(self):
+        self.marionette.delete_session()
+        capabilities = { "requiredCapabilities": {"browserName": self.appinfo["name"]}}
+        self.marionette.start_session(capabilities)
+        caps = self.marionette.session_capabilities
+        self.assertIn("browserName", caps)
+
+    def test_we_pass_in_required_capability_we_cant_fulfil_raises_exception(self):
+        self.marionette.delete_session()
+        capabilities = { "requiredCapabilities": {"browserName": "CookiesAndCream"}}
+        try:
+            self.marionette.start_session(capabilities)
+            self.fail("Marionette Should have throw an exception")
+        except SessionNotCreatedException as e:
+            # We want an exception
+            self.assertIn("CookiesAndCream does not equal", str(e))
+
+        # Start a new session just to make sure we leave the browser in the
+        # same state it was before it started the test
+        self.marionette.start_session()

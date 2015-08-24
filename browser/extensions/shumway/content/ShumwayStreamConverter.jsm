@@ -1,5 +1,3 @@
-/* -*- Mode: js; js-indent-level: 2; indent-tabs-mode: nil; tab-width: 2 -*- */
-/* vim: set shiftwidth=2 tabstop=2 autoindent cindent expandtab: */
 /*
  * Copyright 2013 Mozilla Foundation
  *
@@ -33,6 +31,7 @@ const FIREFOX_ID = '{ec8030f7-c20a-464f-9b0e-13a3a9e97384}';
 const SEAMONKEY_ID = '{92650c4d-4b8e-4d2a-b7eb-24ecf4f6b63a}';
 
 const MAX_CLIPBOARD_DATA_SIZE = 8000;
+const MAX_USER_INPUT_TIMEOUT = 250; // ms
 
 Cu.import('resource://gre/modules/XPCOMUtils.jsm');
 Cu.import('resource://gre/modules/Services.jsm');
@@ -82,6 +81,22 @@ function getDOMWindow(aChannel) {
                   aChannel.loadGroup.notificationCallbacks;
   var win = requestor.getInterface(Components.interfaces.nsIDOMWindow);
   return win;
+}
+
+function makeContentReadable(obj, window) {
+  if (Cu.cloneInto) {
+    return Cu.cloneInto(obj, window);
+  }
+  // TODO remove for Firefox 32+
+  if (typeof obj !== 'object' || obj === null) {
+    return obj;
+  }
+  var expose = {};
+  for (let k in obj) {
+    expose[k] = "rw";
+  }
+  obj.__exposedProps__ = expose;
+  return obj;
 }
 
 function parseQueryString(qs) {
@@ -169,9 +184,17 @@ function fetchPolicyFile(url, cache, callback) {
   xhr.send(null);
 }
 
+function isContentWindowPrivate(win) {
+  if (!('isContentWindowPrivate' in PrivateBrowsingUtils)) {
+    return PrivateBrowsingUtils.isWindowPrivate(win);
+  }
+  return PrivateBrowsingUtils.isContentWindowPrivate(win);
+}
+
 function isShumwayEnabledFor(actions) {
   // disabled for PrivateBrowsing windows
-  if (PrivateBrowsingUtils.isWindowPrivate(actions.window)) {
+  if (isContentWindowPrivate(actions.window) &&
+      !getBoolPref('shumway.enableForPrivate', false)) {
     return false;
   }
   // disabled if embed tag specifies shumwaymode (for testing purpose)
@@ -197,26 +220,40 @@ function isShumwayEnabledFor(actions) {
 function getVersionInfo() {
   var deferred = Promise.defer();
   var versionInfo = {
-    geckoMstone : 'unknown',
+    geckoVersion: 'unknown',
     geckoBuildID: 'unknown',
     shumwayVersion: 'unknown'
   };
   try {
-    versionInfo.geckoMstone = Services.prefs.getCharPref('gecko.mstone');
-    versionInfo.geckoBuildID = Services.prefs.getCharPref('gecko.buildID');
+    var appInfo = Components.classes["@mozilla.org/xre/app-info;1"]
+        .getService(Components.interfaces.nsIXULAppInfo);
+    versionInfo.geckoVersion = appInfo.version;
+    versionInfo.geckoBuildID = appInfo.appBuildID;
   } catch (e) {
-    log('Error encountered while getting platform version info:', e);
+    log('Error encountered while getting platform version info: ' + e);
   }
-  try {
-    var addonId = "shumway@research.mozilla.org";
-    AddonManager.getAddonByID(addonId, function(addon) {
-      versionInfo.shumwayVersion = addon ? addon.version : 'n/a';
-      deferred.resolve(versionInfo);
-    });
-  } catch (e) {
-    log('Error encountered while getting Shumway version info:', e);
+  var xhr = Components.classes["@mozilla.org/xmlextras/xmlhttprequest;1"]
+    .createInstance(Ci.nsIXMLHttpRequest);
+  xhr.open('GET', 'resource://shumway/version.txt', true);
+  xhr.overrideMimeType('text/plain');
+  xhr.onload = function () {
+    try {
+      // Trying to merge version.txt lines into something like:
+      //   "version (sha) details"
+      var lines = xhr.responseText.split(/\n/g);
+      lines[1] = '(' + lines[1] + ')';
+      versionInfo.shumwayVersion = lines.join(' ');
+    } catch (e) {
+      log('Error while parsing version info: ' + e);
+    }
     deferred.resolve(versionInfo);
-  }
+  };
+  xhr.onerror = function () {
+    log('Error while reading version info: ' + xhr.error);
+    deferred.resolve(versionInfo);
+  };
+  xhr.send();
+
   return deferred.promise;
 }
 
@@ -242,6 +279,7 @@ function ChromeActions(url, window, document) {
   this.document = document;
   this.externalComInitialized = false;
   this.allowScriptAccess = false;
+  this.lastUserInput = 0;
   this.crossdomainRequestsCache = Object.create(null);
   this.telemetry = {
     startTime: Date.now(),
@@ -259,11 +297,11 @@ ChromeActions.prototype = {
     return getBoolPref(data.pref, data.def);
   },
   getCompilerSettings: function getCompilerSettings() {
-    return JSON.stringify({
+    return {
       appCompiler: getBoolPref('shumway.appCompiler', true),
       sysCompiler: getBoolPref('shumway.sysCompiler', false),
       verifier: getBoolPref('shumway.verifier', true)
-    });
+    };
   },
   addProfilerMarker: function (marker) {
     if ('nsIProfiler' in Ci) {
@@ -272,14 +310,14 @@ ChromeActions.prototype = {
     }
   },
   getPluginParams: function getPluginParams() {
-    return JSON.stringify({
+    return {
       url: this.url,
       baseUrl : this.baseUrl,
       movieParams: this.movieParams,
       objectParams: this.objectParams,
       isOverlay: this.isOverlay,
       isPausedAtStart: this.isPausedAtStart
-     });
+     };
   },
   _canDownloadFile: function canDownloadFile(data, callback) {
     var url = data.url, checkPolicyFile = data.checkPolicyFile;
@@ -336,6 +374,13 @@ ChromeActions.prototype = {
     }.bind(this));
   },
   loadFile: function loadFile(data) {
+    function notifyLoadFileListener(data) {
+      if (!win.wrappedJSObject.onLoadFileCallback) {
+        return;
+      }
+      win.wrappedJSObject.onLoadFileCallback(data);
+    }
+
     var url = data.url;
     var checkPolicyFile = data.checkPolicyFile;
     var sessionId = data.sessionId;
@@ -365,8 +410,8 @@ ChromeActions.prototype = {
       xhr.onprogress = function (e) {
         var position = e.loaded;
         var data = new Uint8Array(xhr.response);
-        win.postMessage({callback:"loadFile", sessionId: sessionId, topic: "progress",
-                         array: data, loaded: e.loaded, total: e.total}, "*");
+        notifyLoadFileListener({callback:"loadFile", sessionId: sessionId,
+             topic: "progress", array: data, loaded: e.loaded, total: e.total});
         lastPosition = position;
         if (limit && e.total >= limit) {
           xhr.abort();
@@ -375,16 +420,15 @@ ChromeActions.prototype = {
       xhr.onreadystatechange = function(event) {
         if (xhr.readyState === 4) {
           if (xhr.status !== 200 && xhr.status !== 0) {
-            win.postMessage({callback:"loadFile", sessionId: sessionId, topic: "error",
-                             error: xhr.statusText}, "*");
+            notifyLoadFileListener({callback:"loadFile", sessionId: sessionId, topic: "error", error: xhr.statusText});
           }
-          win.postMessage({callback:"loadFile", sessionId: sessionId, topic: "close"}, "*");
+          notifyLoadFileListener({callback:"loadFile", sessionId: sessionId, topic: "close"});
         }
       };
       if (mimeType)
         xhr.setRequestHeader("Content-Type", mimeType);
       xhr.send(postData);
-      win.postMessage({callback:"loadFile", sessionId: sessionId, topic: "open"}, "*");
+      notifyLoadFileListener({callback:"loadFile", sessionId: sessionId, topic: "open"});
     };
 
     this._canDownloadFile({url: url, checkPolicyFile: checkPolicyFile}, function (data) {
@@ -392,33 +436,64 @@ ChromeActions.prototype = {
         performXHR();
       } else {
         log("data access id prohibited to " + url + " from " + baseUrl);
-        win.postMessage({callback:"loadFile", sessionId: sessionId, topic: "error",
-          error: "only original swf file or file from the same origin loading supported"}, "*");
+        notifyLoadFileListener({callback:"loadFile", sessionId: sessionId, topic: "error",
+          error: "only original swf file or file from the same origin loading supported"});
       }
     });
+  },
+  navigateTo: function (data) {
+    var embedTag = this.embedTag.wrappedJSObject;
+    var window = embedTag ? embedTag.ownerDocument.defaultView : this.window;
+    window.open(data.url, data.target || '_self');
   },
   fallback: function(automatic) {
     automatic = !!automatic;
     fallbackToNativePlugin(this.window, !automatic, automatic);
   },
-  setClipboard: function (data) {
-    if (typeof data !== 'string' ||
-        data.length > MAX_CLIPBOARD_DATA_SIZE ||
-        !this.document.hasFocus()) {
-      return;
+  userInput: function() {
+    var win = this.window;
+    var winUtils = win.QueryInterface(Components.interfaces.nsIInterfaceRequestor).
+                       getInterface(Components.interfaces.nsIDOMWindowUtils);
+    if (winUtils.isHandlingUserInput) {
+      this.lastUserInput = Date.now();
+    }
+  },
+  isUserInputInProgress: function () {
+    // TODO userInput does not work for OOP
+    if (!getBoolPref('shumway.userInputSecurity', true)) {
+      return true;
+    }
+
+    // We don't trust our Shumway non-privileged code just yet to verify the
+    // user input -- using userInput function above to track that.
+    if ((Date.now() - this.lastUserInput) > MAX_USER_INPUT_TIMEOUT) {
+      return false;
     }
     // TODO other security checks?
+    return true;
+  },
+  setClipboard: function (data) {
+    if (typeof data !== 'string' || !this.isUserInputInProgress()) {
+      return;
+    }
 
     let clipboard = Cc["@mozilla.org/widget/clipboardhelper;1"]
                       .getService(Ci.nsIClipboardHelper);
     clipboard.copyString(data);
   },
-  unsafeSetClipboard: function (data) {
-    if (typeof data !== 'string') {
+  setFullscreen: function (enabled) {
+    enabled = !!enabled;
+
+    if (!this.isUserInputInProgress()) {
       return;
     }
-    let clipboard = Cc["@mozilla.org/widget/clipboardhelper;1"].getService(Ci.nsIClipboardHelper);
-    clipboard.copyString(data);
+
+    var target = this.embedTag || this.document.body;
+    if (enabled) {
+      target.mozRequestFullScreen();
+    } else {
+      target.ownerDocument.mozCancelFullScreen();
+    }
   },
   endActivation: function () {
     if (ActivationQueue.currentNonActive === this) {
@@ -465,25 +540,28 @@ ChromeActions.prototype = {
     }
   },
   reportIssue: function(exceptions) {
-    var base = "http://shumway-issue-reporter.paas.allizom.org/input?";
+    var urlTemplate = "https://bugzilla.mozilla.org/enter_bug.cgi?op_sys=All&priority=--" +
+                      "&rep_platform=All&target_milestone=---&version=Trunk&product=Firefox" +
+                      "&component=Shumway&short_desc=&comment={comment}" +
+                      "&bug_file_loc={url}";
     var windowUrl = this.window.parent.wrappedJSObject.location + '';
-    var params = 'url=' + encodeURIComponent(windowUrl);
-    params += '&swf=' + encodeURIComponent(this.url);
+    var url = urlTemplate.split('{url}').join(encodeURIComponent(windowUrl));
+    var params = {
+      swf: encodeURIComponent(this.url)
+    };
     getVersionInfo().then(function (versions) {
-      params += '&ffbuild=' + encodeURIComponent(versions.geckoMstone + ' (' +
-                                                 versions.geckoBuildID + ')');
-      params += '&shubuild=' + encodeURIComponent(versions.shumwayVersion);
+      params.versions = versions;
     }).then(function () {
-      var postDataStream = StringInputStream.
-                           createInstance(Ci.nsIStringInputStream);
-      postDataStream.data = 'exceptions=' + encodeURIComponent(exceptions);
-      var postData = MimeInputStream.createInstance(Ci.nsIMIMEInputStream);
-      postData.addHeader("Content-Type", "application/x-www-form-urlencoded");
-      postData.addContentLength = true;
-      postData.setData(postDataStream);
-      this.window.openDialog('chrome://browser/content', '_blank',
-                             'all,dialog=no', base + params, null, null,
-                             postData);
+      var ffbuild = params.versions.geckoVersion + ' (' + params.versions.geckoBuildID + ')';
+      //params.exceptions = encodeURIComponent(exceptions);
+      var comment = '+++ Initially filed via the problem reporting functionality in Shumway +++\n' +
+                    'Please add any further information that you deem helpful here:\n\n\n\n' +
+                    '----------------------\n\n' +
+                    'Technical Information:\n' +
+                    'Firefox version: ' + ffbuild + '\n' +
+                    'Shumway version: ' + params.versions.shumwayVersion;
+      url = url.split('{comment}').join(encodeURIComponent(comment));
+      this.window.open(url);
     }.bind(this));
   },
   externalCom: function (data) {
@@ -499,8 +577,7 @@ ChromeActions.prototype = {
         return;
 
       this.externalComInitialized = true;
-      var eventTarget = this.window.document;
-      initExternalCom(parentWindow, embedTag, eventTarget);
+      initExternalCom(parentWindow, embedTag, this.window);
       return;
     case 'getId':
       return embedTag.id;
@@ -524,11 +601,10 @@ function RequestListener(actions) {
   this.actions = actions;
 }
 // Receive an event and synchronously or asynchronously responds.
-RequestListener.prototype.receive = function(event) {
-  var message = event.target;
-  var action = event.detail.action;
-  var data = event.detail.data;
-  var sync = event.detail.sync;
+RequestListener.prototype.receive = function(detail) {
+  var action = detail.action;
+  var data = detail.data;
+  var sync = detail.sync;
   var actions = this.actions;
   if (!(action in actions)) {
     log('Unknown action: ' + action);
@@ -536,31 +612,23 @@ RequestListener.prototype.receive = function(event) {
   }
   if (sync) {
     var response = actions[action].call(this.actions, data);
-    var detail = event.detail;
-    detail.__exposedProps__ = {response: 'r'};
-    detail.response = response;
-  } else {
-    var response;
-    if (event.detail.callback) {
-      var cookie = event.detail.cookie;
-      response = function sendResponse(response) {
-        var doc = actions.document;
-        try {
-          var listener = doc.createEvent('CustomEvent');
-          listener.initCustomEvent('shumway.response', true, false,
-                                   {response: response,
-                                    cookie: cookie,
-                                    __exposedProps__: {response: 'r', cookie: 'r'}});
-
-          return message.dispatchEvent(listener);
-        } catch (e) {
-          // doc is no longer accessible because the requestor is already
-          // gone. unloaded content cannot receive the response anyway.
-        }
-      };
-    }
-    actions[action].call(this.actions, data, response);
+    return response === undefined ? undefined : JSON.stringify(response);
   }
+
+  var responseCallback;
+  if (detail.callback) {
+    var cookie = detail.cookie;
+    response = function sendResponse(response) {
+      var win = actions.window;
+      if (win.wrappedJSObject.onMessageCallback) {
+        win.wrappedJSObject.onMessageCallback({
+          response: response === undefined ? undefined : JSON.stringify(response),
+          cookie: cookie
+        });
+      }
+    };
+  }
+  actions[action].call(this.actions, data, responseCallback);
 };
 
 var ActivationQueue = {
@@ -662,40 +730,32 @@ var ActivationQueue = {
   }
 };
 
-function activateShumwayScripts(window, preview) {
+function activateShumwayScripts(window, requestListener) {
   function loadScripts(scripts, callback) {
-    function scriptLoaded() {
-      leftToLoad--;
-      if (leftToLoad === 0) {
+    function loadScript(i) {
+      if (i >= scripts.length) {
         callback();
+        return;
       }
-    }
-    var leftToLoad = scripts.length;
-    var document = window.document.wrappedJSObject;
-    var head = document.getElementsByTagName('head')[0];
-    for (var i = 0; i < scripts.length; i++) {
       var script = document.createElement('script');
       script.type = "text/javascript";
       script.src = scripts[i];
-      script.onload = scriptLoaded;
+      script.onload = function () {
+        loadScript(i + 1);
+      };
       head.appendChild(script);
     }
+    var document = window.document.wrappedJSObject;
+    var head = document.getElementsByTagName('head')[0];
+    loadScript(0);
   }
 
   function initScripts() {
-    if (preview) {
-      loadScripts(['resource://shumway/web/preview.js'], function () {
-        window.wrappedJSObject.runSniffer();
-      });
-    } else {
-      loadScripts(['resource://shumway/shumway.js',
-                   'resource://shumway/web/avm-sandbox.js'], function () {
-        window.wrappedJSObject.runViewer();
-      });
-    }
+    window.wrappedJSObject.notifyShumwayMessage = function () {
+      return requestListener.receive.apply(requestListener, arguments);
+    };
+    window.wrappedJSObject.runViewer();
   }
-
-  window.wrappedJSObject.SHUMWAY_ROOT = "resource://shumway/";
 
   if (window.document.readyState === "interactive" ||
       window.document.readyState === "complete") {
@@ -705,7 +765,8 @@ function activateShumwayScripts(window, preview) {
   }
 }
 
-function initExternalCom(wrappedWindow, wrappedObject, targetDocument) {
+function initExternalCom(wrappedWindow, wrappedObject, targetWindow) {
+  var traceExternalInterface = getBoolPref('shumway.externalInterface.trace', false);
   if (!wrappedWindow.__flash__initialized) {
     wrappedWindow.__flash__initialized = true;
     wrappedWindow.__flash__toXML = function __flash__toXML(obj) {
@@ -737,32 +798,33 @@ function initExternalCom(wrappedWindow, wrappedObject, targetDocument) {
         return '<undefined/>';
       }
     };
-    var sandbox = new Cu.Sandbox(wrappedWindow, {sandboxPrototype: wrappedWindow});
-    wrappedWindow.__flash__eval = function (evalInSandbox, sandbox, expr) {
-      this.console.log('__flash__eval: ' + expr);
-      return evalInSandbox(expr, sandbox);
-    }.bind(wrappedWindow, Cu.evalInSandbox, sandbox);
+    wrappedWindow.__flash__eval = function (expr) {
+      traceExternalInterface && this.console.log('__flash__eval: ' + expr);
+      // allowScriptAccess protects page from unwanted swf scripts,
+      // we can execute script in the page context without restrictions.
+      var result = this.eval(expr);
+      traceExternalInterface && this.console.log('__flash__eval (result): ' + result);
+      return result;
+    }.bind(wrappedWindow);
     wrappedWindow.__flash__call = function (expr) {
-      this.console.log('__flash__call (ignored): ' + expr);
+      traceExternalInterface && this.console.log('__flash__call (ignored): ' + expr);
     };
   }
   wrappedObject.__flash__registerCallback = function (functionName) {
-    wrappedWindow.console.log('__flash__registerCallback: ' + functionName);
-    this[functionName] = function () {
+    traceExternalInterface && wrappedWindow.console.log('__flash__registerCallback: ' + functionName);
+    Components.utils.exportFunction(function () {
       var args = Array.prototype.slice.call(arguments, 0);
-      wrappedWindow.console.log('__flash__callIn: ' + functionName);
-      var e = targetDocument.createEvent('CustomEvent');
-      e.initCustomEvent('shumway.remote', true, false, {
-        functionName: functionName,
-        args: args,
-        __exposedProps__: {args: 'r', functionName: 'r', result: 'rw'}
-      });
-      targetDocument.dispatchEvent(e);
-      return e.detail.result;
-    };
+      traceExternalInterface && wrappedWindow.console.log('__flash__callIn: ' + functionName);
+      var result;
+      if (targetWindow.wrappedJSObject.onExternalCallback) {
+        result = targetWindow.wrappedJSObject.onExternalCallback({functionName: functionName, args: args});
+        traceExternalInterface && wrappedWindow.console.log('__flash__callIn (result): ' + result);
+      }
+      return wrappedWindow.eval(result);
+    }, this, { defineAs: functionName });
   };
   wrappedObject.__flash__unregisterCallback = function (functionName) {
-    wrappedWindow.console.log('__flash__unregisterCallback: ' + functionName);
+    traceExternalInterface && wrappedWindow.console.log('__flash__unregisterCallback: ' + functionName);
     delete this[functionName];
   };
 }
@@ -820,6 +882,12 @@ ShumwayStreamConverterBase.prototype = {
       }
 
       if (isOverlay) {
+        // HACK For Facebook, CSS embed tag rescaling -- iframe (our overlay)
+        // has no styling in document. Shall removed with jsplugins.
+        for (var child = window.frameElement; child !== element; child = child.parentNode) {
+          child.setAttribute('style', 'max-width: 100%; max-height: 100%');
+        }
+
         // Checking if overlay is a proper PlayPreview overlay.
         for (var i = 0; i < element.children.length; i++) {
           if (element.children[i] === containerElement) {
@@ -831,7 +899,7 @@ ShumwayStreamConverterBase.prototype = {
 
     if (element) {
       // Getting absolute URL from the EMBED tag
-      url = element.srcURI.spec;
+      url = element.srcURI && element.srcURI.spec;
 
       pageUrl = element.ownerDocument.location.href; // proper page url?
 
@@ -857,7 +925,11 @@ ShumwayStreamConverterBase.prototype = {
       throw new Error('Movie url is not specified');
     }
 
-    baseUrl = objectParams.base || pageUrl;
+    if (objectParams.base) {
+        baseUrl = Services.io.newURI(objectParams.base, null, pageUrl).spec;
+    } else {
+        baseUrl = pageUrl;
+    }
 
     var movieParams = {};
     if (objectParams.flashvars) {
@@ -932,14 +1004,8 @@ ShumwayStreamConverterBase.prototype = {
 
     var originalURI = aRequest.URI;
 
-    // checking if the plug-in shall be run in simple mode
-    var isSimpleMode = originalURI.spec === EXPECTED_PLAYPREVIEW_URI_PREFIX &&
-                       getBoolPref('shumway.simpleMode', false);
-
-    // Create a new channel that loads the viewer as a resource.
-    var viewerUrl = isSimpleMode ?
-                    'resource://shumway/web/simple.html' :
-                    'resource://shumway/web/viewer.html';
+    // Create a new channel that loads the viewer as a chrome resource.
+    var viewerUrl = 'chrome://shumway/content/viewer.wrapper.html';
     var channel = Services.io.newChannel(viewerUrl, null, null);
 
     var converter = this;
@@ -979,16 +1045,13 @@ ShumwayStreamConverterBase.prototype = {
           ShumwayTelemetry.onPageIndex(0);
         }
 
-        actions.activationCallback = function(domWindow, isSimpleMode) {
-          delete this.activationCallback;
-          activateShumwayScripts(domWindow, isSimpleMode);
-        }.bind(actions, domWindow, isSimpleMode);
-        ActivationQueue.enqueue(actions);
-
         let requestListener = new RequestListener(actions);
-        domWindow.addEventListener('shumway.message', function(event) {
-          requestListener.receive(event);
-        }, false, true);
+
+        actions.activationCallback = function(domWindow, requestListener) {
+          delete this.activationCallback;
+          activateShumwayScripts(domWindow, requestListener);
+        }.bind(actions, domWindow, requestListener);
+        ActivationQueue.enqueue(actions);
 
         listener.onStopRequest(aRequest, context, statusCode);
       }
@@ -998,12 +1061,11 @@ ShumwayStreamConverterBase.prototype = {
     channel.originalURI = aRequest.URI;
     channel.loadGroup = aRequest.loadGroup;
 
-    // We can use resource principal when data is fetched by the chrome
-    // e.g. useful for NoScript
+    // We can use all powerful principal: we are opening chrome:// web page,
+    // which will need lots of permission.
     var securityManager = Cc['@mozilla.org/scriptsecuritymanager;1']
                           .getService(Ci.nsIScriptSecurityManager);
-    var uri = Services.io.newURI(viewerUrl, null, null);
-    var resourcePrincipal = securityManager.getNoAppCodebasePrincipal(uri);
+    var resourcePrincipal = securityManager.getSystemPrincipal();
     aRequest.owner = resourcePrincipal;
     channel.asyncOpen(proxy, aContext);
   },

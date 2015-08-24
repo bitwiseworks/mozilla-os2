@@ -4,6 +4,7 @@
 
 from __future__ import unicode_literals
 
+import argparse
 import collections
 import inspect
 import types
@@ -56,8 +57,8 @@ def CommandProvider(cls):
         if not isinstance(value, types.FunctionType):
             continue
 
-        command_name, category, description, allow_all, conditions, parser = getattr(
-            value, '_mach_command', (None, None, None, None, None, None))
+        command_name, category, description, conditions, parser = getattr(
+            value, '_mach_command', (None, None, None, None, None))
 
         if command_name is None:
             continue
@@ -81,18 +82,55 @@ def CommandProvider(cls):
 
         arguments = getattr(value, '_mach_command_args', None)
 
+        argument_group_names = getattr(value, '_mach_command_arg_group_names', None)
+
         handler = MethodHandler(cls, attr, command_name, category=category,
-            description=description, allow_all_arguments=allow_all,
-            conditions=conditions, parser=parser, arguments=arguments,
+            description=description, conditions=conditions, parser=parser,
+            arguments=arguments, argument_group_names=argument_group_names,
             pass_context=pass_context)
 
         Registrar.register_command_handler(handler)
+
+    # Now do another pass to get sub-commands. We do this in two passes so
+    # we can check the parent command existence without having to hold
+    # state and reconcile after traversal.
+    for attr in sorted(cls.__dict__.keys()):
+        value = cls.__dict__[attr]
+
+        if not isinstance(value, types.FunctionType):
+            continue
+
+        command, subcommand, description = getattr(value, '_mach_subcommand',
+            (None, None, None))
+
+        if not command:
+            continue
+
+        if command not in Registrar.command_handlers:
+            raise MachError('Command referenced by sub-command does not '
+                'exist: %s' % command)
+
+        arguments = getattr(value, '_mach_command_args', None)
+        argument_group_names = getattr(value, '_mach_command_arg_group_names', None)
+
+        handler = MethodHandler(cls, attr, subcommand, description=description,
+            arguments=arguments, argument_group_names=argument_group_names,
+            pass_context=pass_context)
+        parent = Registrar.command_handlers[command]
+
+        if parent.parser:
+            raise MachError('cannot declare sub commands against a command '
+                'that has a parser installed: %s' % command)
+        if subcommand in parent.subcommand_handlers:
+            raise MachError('sub-command already defined: %s' % subcommand)
+
+        parent.subcommand_handlers[subcommand] = handler
 
     return cls
 
 
 class Command(object):
-    """Decorator for functions or methods that provide a mach subcommand.
+    """Decorator for functions or methods that provide a mach command.
 
     The decorator accepts arguments that define basic attributes of the
     command. The following arguments are recognized:
@@ -101,9 +139,6 @@ class Command(object):
              help will group commands by category.
 
          description -- A brief description of what the command does.
-
-         allow_all_args -- Bool indicating whether to allow unknown arguments
-             through to the command.
 
          parser -- an optional argparse.ArgumentParser instance to use as
              the basis for the command arguments.
@@ -114,21 +149,47 @@ class Command(object):
         def foo(self):
             pass
     """
-    def __init__(self, name, category=None, description=None,
-                 allow_all_args=False, conditions=None, parser=None):
+    def __init__(self, name, category=None, description=None, conditions=None,
+                 parser=None):
         self._name = name
         self._category = category
         self._description = description
-        self._allow_all_args = allow_all_args
         self._conditions = conditions
         self._parser = parser
 
     def __call__(self, func):
         func._mach_command = (self._name, self._category, self._description,
-                              self._allow_all_args, self._conditions, self._parser)
+                              self._conditions, self._parser)
 
         return func
 
+class SubCommand(object):
+    """Decorator for functions or methods that provide a sub-command.
+
+    Mach commands can have sub-commands. e.g. ``mach command foo`` or
+    ``mach command bar``. Each sub-command has its own parser and is
+    effectively its own mach command.
+
+    The decorator accepts arguments that define basic attributes of the
+    sub command:
+
+        command -- The string of the command this sub command should be
+        attached to.
+
+        subcommand -- The string name of the sub command to register.
+
+        description -- A textual description for this sub command.
+    """
+    def __init__(self, command, subcommand, description=None):
+        self._command = command
+        self._subcommand = subcommand
+        self._description = description
+
+    def __call__(self, func):
+        func._mach_subcommand = (self._command, self._subcommand,
+            self._description)
+
+        return func
 
 class CommandArgument(object):
     """Decorator for additional arguments to mach subcommands.
@@ -145,6 +206,11 @@ class CommandArgument(object):
             pass
     """
     def __init__(self, *args, **kwargs):
+        if kwargs.get('nargs') == argparse.REMAINDER:
+            # These are the assertions we make in dispatcher.py about
+            # those types of CommandArguments.
+            assert len(args) == 1
+            assert all(k in ('default', 'nargs', 'help', 'group') for k in kwargs)
         self._command_args = (args, kwargs)
 
     def __call__(self, func):
@@ -153,6 +219,39 @@ class CommandArgument(object):
         command_args.insert(0, self._command_args)
 
         func._mach_command_args = command_args
+
+        return func
+
+
+class CommandArgumentGroup(object):
+    """Decorator for additional argument groups to mach commands.
+
+    This decorator should be used to add arguments groups to mach commands.
+    Arguments to the decorator are proxied to
+    ArgumentParser.add_argument_group().
+
+    For example:
+
+        @Command('foo', helps='Run the foo action')
+        @CommandArgumentGroup('group1')
+        @CommandArgument('-b', '--bar', group='group1', action='store_true',
+            default=False, help='Enable bar mode.')
+        def foo(self):
+            pass
+
+    The name should be chosen so that it makes sense as part of the phrase
+    'Command Arguments for <name>' because that's how it will be shown in the
+    help message.
+    """
+    def __init__(self, group_name):
+        self._group_name = group_name
+
+    def __call__(self, func):
+        command_arg_group_names = getattr(func, '_mach_command_arg_group_names', [])
+
+        command_arg_group_names.insert(0, self._group_name)
+
+        func._mach_command_arg_group_names = command_arg_group_names
 
         return func
 

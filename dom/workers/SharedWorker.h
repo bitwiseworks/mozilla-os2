@@ -25,7 +25,7 @@ class MessagePort;
 class RuntimeService;
 class WorkerPrivate;
 
-class SharedWorker MOZ_FINAL : public DOMEventTargetHelper
+class SharedWorker final : public DOMEventTargetHelper
 {
   friend class MessagePort;
   friend class RuntimeService;
@@ -45,7 +45,7 @@ public:
               const nsAString& aScriptURL, const Optional<nsAString>& aName,
               ErrorResult& aRv);
 
-  already_AddRefed<MessagePort>
+  already_AddRefed<mozilla::dom::workers::MessagePort>
   Port();
 
   uint64_t
@@ -78,10 +78,10 @@ public:
   IMPL_EVENT_HANDLER(error)
 
   virtual JSObject*
-  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  WrapObject(JSContext* aCx) override;
 
   virtual nsresult
-  PreHandleEvent(EventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
+  PreHandleEvent(EventChainPreVisitor& aVisitor) override;
 
   WorkerPrivate*
   GetWorkerPrivate() const

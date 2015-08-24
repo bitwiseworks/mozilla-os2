@@ -138,6 +138,11 @@ def gen_manifest(template_root_dir, target_cfg, jid,
         elem.appendChild(dom.createTextNode(translator))
         dom.documentElement.getElementsByTagName("Description")[0].appendChild(elem)
 
+    for developer in target_cfg.get("developers", [ ]):
+        elem = dom.createElement("em:developer");
+        elem.appendChild(dom.createTextNode(developer))
+        dom.documentElement.getElementsByTagName("Description")[0].appendChild(elem)
+
     for contributor in target_cfg.get("contributors", [ ]):
         elem = dom.createElement("em:contributor");
         elem.appendChild(dom.createTextNode(contributor))
@@ -150,8 +155,17 @@ def gen_manifest(template_root_dir, target_cfg, jid,
 
     if target_cfg.get("preferences"):
         manifest.set("em:optionsType", "2")
+
+        # workaround until bug 971249 is fixed
+        # https://bugzilla.mozilla.org/show_bug.cgi?id=971249
+        manifest.set("em:optionsURL", "data:text/xml,<placeholder/>")
+
+        # workaround for workaround, for testing simple-prefs-regression
+        if (os.path.exists(os.path.join(template_root_dir, "options.xul"))):
+            manifest.remove("em:optionsURL")
     else:
         manifest.remove("em:optionsType")
+        manifest.remove("em:optionsURL")
 
     if enable_mobile:
         target_app = dom.createElement("em:targetApplication")

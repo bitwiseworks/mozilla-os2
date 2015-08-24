@@ -14,6 +14,7 @@ namespace jit {
 
 class OutOfLineBailout;
 class OutOfLineUndoALUOperation;
+class OutOfLineLoadTypedArrayOutOfBounds;
 class MulNegativeZeroCheck;
 class ModOverflowCheck;
 class ReturnZero;
@@ -28,9 +29,28 @@ class CodeGeneratorX86Shared : public CodeGeneratorShared
     }
 
     template <typename T>
-    bool bailout(const T& t, LSnapshot* snapshot);
+    void bailout(const T& t, LSnapshot* snapshot);
 
   protected:
+
+    // Load a NaN or zero into a register for an out of bounds AsmJS or static
+    // typed array load.
+    class OutOfLineLoadTypedArrayOutOfBounds : public OutOfLineCodeBase<CodeGeneratorX86Shared>
+    {
+        AnyRegister dest_;
+        Scalar::Type viewType_;
+      public:
+        OutOfLineLoadTypedArrayOutOfBounds(AnyRegister dest, Scalar::Type viewType)
+          : dest_(dest), viewType_(viewType)
+        {}
+
+        AnyRegister dest() const { return dest_; }
+        Scalar::Type viewType() const { return viewType_; }
+        void accept(CodeGeneratorX86Shared* codegen) {
+            codegen->visitOutOfLineLoadTypedArrayOutOfBounds(this);
+        }
+    };
+
     // Label for the common return path.
     NonAssertingLabel returnLabel_;
     NonAssertingLabel deoptLabel_;
@@ -51,38 +71,54 @@ class CodeGeneratorX86Shared : public CodeGeneratorShared
 
     MoveOperand toMoveOperand(const LAllocation* a) const;
 
-    bool bailoutIf(Assembler::Condition condition, LSnapshot* snapshot);
-    bool bailoutIf(Assembler::DoubleCondition condition, LSnapshot* snapshot);
-    bool bailoutFrom(Label* label, LSnapshot* snapshot);
-    bool bailout(LSnapshot* snapshot);
+    void bailoutIf(Assembler::Condition condition, LSnapshot* snapshot);
+    void bailoutIf(Assembler::DoubleCondition condition, LSnapshot* snapshot);
+    void bailoutFrom(Label* label, LSnapshot* snapshot);
+    void bailout(LSnapshot* snapshot);
 
     template <typename T1, typename T2>
-    bool bailoutCmpPtr(Assembler::Condition c, T1 lhs, T2 rhs, LSnapshot* snapshot) {
+    void bailoutCmpPtr(Assembler::Condition c, T1 lhs, T2 rhs, LSnapshot* snapshot) {
         masm.cmpPtr(lhs, rhs);
-        return bailoutIf(c, snapshot);
+        bailoutIf(c, snapshot);
     }
-    bool bailoutTestPtr(Assembler::Condition c, Register lhs, Register rhs, LSnapshot* snapshot) {
+    void bailoutTestPtr(Assembler::Condition c, Register lhs, Register rhs, LSnapshot* snapshot) {
         masm.testPtr(lhs, rhs);
-        return bailoutIf(c, snapshot);
+        bailoutIf(c, snapshot);
     }
     template <typename T1, typename T2>
-    bool bailoutCmp32(Assembler::Condition c, T1 lhs, T2 rhs, LSnapshot* snapshot) {
+    void bailoutCmp32(Assembler::Condition c, T1 lhs, T2 rhs, LSnapshot* snapshot) {
         masm.cmp32(lhs, rhs);
-        return bailoutIf(c, snapshot);
+        bailoutIf(c, snapshot);
     }
     template <typename T1, typename T2>
-    bool bailoutTest32(Assembler::Condition c, T1 lhs, T2 rhs, LSnapshot* snapshot) {
+    void bailoutTest32(Assembler::Condition c, T1 lhs, T2 rhs, LSnapshot* snapshot) {
         masm.test32(lhs, rhs);
-        return bailoutIf(c, snapshot);
+        bailoutIf(c, snapshot);
+    }
+    void bailoutIfFalseBool(Register reg, LSnapshot* snapshot) {
+        masm.test32(reg, Imm32(0xFF));
+        bailoutIf(Assembler::Zero, snapshot);
+    }
+    void bailoutCvttsd2si(FloatRegister src, Register dest, LSnapshot* snapshot) {
+        // vcvttsd2si returns 0x80000000 on failure. Test for it by
+        // subtracting 1 and testing overflow. The other possibility is to test
+        // equality for INT_MIN after a comparison, but 1 costs fewer bytes to
+        // materialize.
+        masm.vcvttsd2si(src, dest);
+        masm.cmp32(dest, Imm32(1));
+        bailoutIf(Assembler::Overflow, snapshot);
+    }
+    void bailoutCvttss2si(FloatRegister src, Register dest, LSnapshot* snapshot) {
+        // Same trick as explained in the above comment.
+        masm.vcvttss2si(src, dest);
+        masm.cmp32(dest, Imm32(1));
+        bailoutIf(Assembler::Overflow, snapshot);
     }
 
   protected:
     bool generatePrologue();
-    bool generateAsmJSPrologue(Label* stackOverflowLabe);
     bool generateEpilogue();
     bool generateOutOfLineCode();
-
-    Operand createArrayElementOperand(Register elements, const LAllocation* index);
 
     void emitCompare(MCompare::CompareType type, const LAllocation* left, const LAllocation* right);
 
@@ -104,74 +140,119 @@ class CodeGeneratorX86Shared : public CodeGeneratorShared
         cond = masm.testUndefined(cond, value);
         emitBranch(cond, ifTrue, ifFalse);
     }
+    void testObjectEmitBranch(Assembler::Condition cond, const ValueOperand& value,
+                                 MBasicBlock* ifTrue, MBasicBlock* ifFalse)
+    {
+        cond = masm.testObject(cond, value);
+        emitBranch(cond, ifTrue, ifFalse);
+    }
 
-    bool emitTableSwitchDispatch(MTableSwitch* mir, const Register& index, const Register& base);
+    void testZeroEmitBranch(Assembler::Condition cond, Register reg,
+                            MBasicBlock* ifTrue, MBasicBlock* ifFalse)
+    {
+        MOZ_ASSERT(cond == Assembler::Equal || cond == Assembler::NotEqual);
+        masm.cmpPtr(reg, ImmWord(0));
+        emitBranch(cond, ifTrue, ifFalse);
+    }
+
+    void emitTableSwitchDispatch(MTableSwitch* mir, Register index, Register base);
 
   public:
     CodeGeneratorX86Shared(MIRGenerator* gen, LIRGraph* graph, MacroAssembler* masm);
 
   public:
     // Instruction visitors.
-    virtual bool visitDouble(LDouble* ins);
-    virtual bool visitFloat32(LFloat32* ins);
-    virtual bool visitMinMaxD(LMinMaxD* ins);
-    virtual bool visitAbsD(LAbsD* ins);
-    virtual bool visitAbsF(LAbsF* ins);
-    virtual bool visitSqrtD(LSqrtD* ins);
-    virtual bool visitSqrtF(LSqrtF* ins);
-    virtual bool visitPowHalfD(LPowHalfD* ins);
-    virtual bool visitAddI(LAddI* ins);
-    virtual bool visitSubI(LSubI* ins);
-    virtual bool visitMulI(LMulI* ins);
-    virtual bool visitDivI(LDivI* ins);
-    virtual bool visitDivPowTwoI(LDivPowTwoI* ins);
-    virtual bool visitDivOrModConstantI(LDivOrModConstantI* ins);
-    virtual bool visitModI(LModI* ins);
-    virtual bool visitModPowTwoI(LModPowTwoI* ins);
-    virtual bool visitBitNotI(LBitNotI* ins);
-    virtual bool visitBitOpI(LBitOpI* ins);
-    virtual bool visitShiftI(LShiftI* ins);
-    virtual bool visitUrshD(LUrshD* ins);
-    virtual bool visitTestIAndBranch(LTestIAndBranch* test);
-    virtual bool visitTestDAndBranch(LTestDAndBranch* test);
-    virtual bool visitTestFAndBranch(LTestFAndBranch* test);
-    virtual bool visitCompare(LCompare* comp);
-    virtual bool visitCompareAndBranch(LCompareAndBranch* comp);
-    virtual bool visitCompareD(LCompareD* comp);
-    virtual bool visitCompareDAndBranch(LCompareDAndBranch* comp);
-    virtual bool visitCompareF(LCompareF* comp);
-    virtual bool visitCompareFAndBranch(LCompareFAndBranch* comp);
-    virtual bool visitBitAndAndBranch(LBitAndAndBranch* baab);
-    virtual bool visitNotI(LNotI* comp);
-    virtual bool visitNotD(LNotD* comp);
-    virtual bool visitNotF(LNotF* comp);
-    virtual bool visitMathD(LMathD* math);
-    virtual bool visitMathF(LMathF* math);
-    virtual bool visitFloor(LFloor* lir);
-    virtual bool visitFloorF(LFloorF* lir);
-    virtual bool visitRound(LRound* lir);
-    virtual bool visitRoundF(LRoundF* lir);
-    virtual bool visitGuardShape(LGuardShape* guard);
-    virtual bool visitGuardObjectType(LGuardObjectType* guard);
-    virtual bool visitGuardClass(LGuardClass* guard);
-    virtual bool visitEffectiveAddress(LEffectiveAddress* ins);
-    virtual bool visitUDivOrMod(LUDivOrMod* ins);
-    virtual bool visitAsmJSPassStackArg(LAsmJSPassStackArg* ins);
+    virtual void visitDouble(LDouble* ins);
+    virtual void visitFloat32(LFloat32* ins);
+    virtual void visitMinMaxD(LMinMaxD* ins);
+    virtual void visitMinMaxF(LMinMaxF* ins);
+    virtual void visitAbsD(LAbsD* ins);
+    virtual void visitAbsF(LAbsF* ins);
+    virtual void visitClzI(LClzI* ins);
+    virtual void visitSqrtD(LSqrtD* ins);
+    virtual void visitSqrtF(LSqrtF* ins);
+    virtual void visitPowHalfD(LPowHalfD* ins);
+    virtual void visitAddI(LAddI* ins);
+    virtual void visitSubI(LSubI* ins);
+    virtual void visitMulI(LMulI* ins);
+    virtual void visitDivI(LDivI* ins);
+    virtual void visitDivPowTwoI(LDivPowTwoI* ins);
+    virtual void visitDivOrModConstantI(LDivOrModConstantI* ins);
+    virtual void visitModI(LModI* ins);
+    virtual void visitModPowTwoI(LModPowTwoI* ins);
+    virtual void visitBitNotI(LBitNotI* ins);
+    virtual void visitBitOpI(LBitOpI* ins);
+    virtual void visitShiftI(LShiftI* ins);
+    virtual void visitUrshD(LUrshD* ins);
+    virtual void visitTestIAndBranch(LTestIAndBranch* test);
+    virtual void visitTestDAndBranch(LTestDAndBranch* test);
+    virtual void visitTestFAndBranch(LTestFAndBranch* test);
+    virtual void visitCompare(LCompare* comp);
+    virtual void visitCompareAndBranch(LCompareAndBranch* comp);
+    virtual void visitCompareD(LCompareD* comp);
+    virtual void visitCompareDAndBranch(LCompareDAndBranch* comp);
+    virtual void visitCompareF(LCompareF* comp);
+    virtual void visitCompareFAndBranch(LCompareFAndBranch* comp);
+    virtual void visitBitAndAndBranch(LBitAndAndBranch* baab);
+    virtual void visitNotI(LNotI* comp);
+    virtual void visitNotD(LNotD* comp);
+    virtual void visitNotF(LNotF* comp);
+    virtual void visitMathD(LMathD* math);
+    virtual void visitMathF(LMathF* math);
+    virtual void visitFloor(LFloor* lir);
+    virtual void visitFloorF(LFloorF* lir);
+    virtual void visitCeil(LCeil* lir);
+    virtual void visitCeilF(LCeilF* lir);
+    virtual void visitRound(LRound* lir);
+    virtual void visitRoundF(LRoundF* lir);
+    virtual void visitGuardShape(LGuardShape* guard);
+    virtual void visitGuardObjectGroup(LGuardObjectGroup* guard);
+    virtual void visitGuardClass(LGuardClass* guard);
+    virtual void visitEffectiveAddress(LEffectiveAddress* ins);
+    virtual void visitUDivOrMod(LUDivOrMod* ins);
+    virtual void visitAsmJSPassStackArg(LAsmJSPassStackArg* ins);
+    virtual void visitMemoryBarrier(LMemoryBarrier* ins);
 
-    bool visitForkJoinGetSlice(LForkJoinGetSlice* ins);
+    void visitOutOfLineLoadTypedArrayOutOfBounds(OutOfLineLoadTypedArrayOutOfBounds* ool);
 
-    bool visitNegI(LNegI* lir);
-    bool visitNegD(LNegD* lir);
-    bool visitNegF(LNegF* lir);
+    void visitNegI(LNegI* lir);
+    void visitNegD(LNegD* lir);
+    void visitNegF(LNegF* lir);
+
+    // SIMD operators
+    void visitSimdValueInt32x4(LSimdValueInt32x4* lir);
+    void visitSimdValueFloat32x4(LSimdValueFloat32x4* lir);
+    void visitSimdSplatX4(LSimdSplatX4* lir);
+    void visitInt32x4(LInt32x4* ins);
+    void visitFloat32x4(LFloat32x4* ins);
+    void visitInt32x4ToFloat32x4(LInt32x4ToFloat32x4* ins);
+    void visitFloat32x4ToInt32x4(LFloat32x4ToInt32x4* ins);
+    void visitSimdExtractElementI(LSimdExtractElementI* lir);
+    void visitSimdExtractElementF(LSimdExtractElementF* lir);
+    void visitSimdInsertElementI(LSimdInsertElementI* lir);
+    void visitSimdInsertElementF(LSimdInsertElementF* lir);
+    void visitSimdSignMaskX4(LSimdSignMaskX4* ins);
+    void visitSimdSwizzleI(LSimdSwizzleI* lir);
+    void visitSimdSwizzleF(LSimdSwizzleF* lir);
+    void visitSimdShuffle(LSimdShuffle* lir);
+    void visitSimdUnaryArithIx4(LSimdUnaryArithIx4* lir);
+    void visitSimdUnaryArithFx4(LSimdUnaryArithFx4* lir);
+    void visitSimdBinaryCompIx4(LSimdBinaryCompIx4* lir);
+    void visitSimdBinaryCompFx4(LSimdBinaryCompFx4* lir);
+    void visitSimdBinaryArithIx4(LSimdBinaryArithIx4* lir);
+    void visitSimdBinaryArithFx4(LSimdBinaryArithFx4* lir);
+    void visitSimdBinaryBitwiseX4(LSimdBinaryBitwiseX4* lir);
+    void visitSimdShift(LSimdShift* lir);
+    void visitSimdSelect(LSimdSelect* ins);
 
     // Out of line visitors.
-    bool visitOutOfLineBailout(OutOfLineBailout* ool);
-    bool visitOutOfLineUndoALUOperation(OutOfLineUndoALUOperation* ool);
-    bool visitMulNegativeZeroCheck(MulNegativeZeroCheck* ool);
-    bool visitModOverflowCheck(ModOverflowCheck* ool);
-    bool visitReturnZero(ReturnZero* ool);
-    bool visitOutOfLineTableSwitch(OutOfLineTableSwitch* ool);
-    bool generateInvalidateEpilogue();
+    void visitOutOfLineBailout(OutOfLineBailout* ool);
+    void visitOutOfLineUndoALUOperation(OutOfLineUndoALUOperation* ool);
+    void visitMulNegativeZeroCheck(MulNegativeZeroCheck* ool);
+    void visitModOverflowCheck(ModOverflowCheck* ool);
+    void visitReturnZero(ReturnZero* ool);
+    void visitOutOfLineTableSwitch(OutOfLineTableSwitch* ool);
+    void generateInvalidateEpilogue();
 };
 
 // An out-of-line bailout thunk.
@@ -180,11 +261,11 @@ class OutOfLineBailout : public OutOfLineCodeBase<CodeGeneratorX86Shared>
     LSnapshot* snapshot_;
 
   public:
-    OutOfLineBailout(LSnapshot* snapshot)
+    explicit OutOfLineBailout(LSnapshot* snapshot)
       : snapshot_(snapshot)
     { }
 
-    bool accept(CodeGeneratorX86Shared* codegen);
+    void accept(CodeGeneratorX86Shared* codegen);
 
     LSnapshot* snapshot() const {
         return snapshot_;

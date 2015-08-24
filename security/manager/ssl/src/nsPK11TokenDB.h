@@ -23,9 +23,11 @@ public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIPK11TOKEN
 
-  nsPK11Token(PK11SlotInfo *slot);
-  virtual ~nsPK11Token();
+  explicit nsPK11Token(PK11SlotInfo *slot);
   /* additional members */
+
+protected:
+  virtual ~nsPK11Token();
 
 private:
   friend class nsPK11TokenDB;
@@ -37,7 +39,7 @@ private:
   PK11SlotInfo *mSlot;
   int mSeries;
   nsCOMPtr<nsIInterfaceRequestor> mUIContext;
-  virtual void virtualDestroyNSSReference();
+  virtual void virtualDestroyNSSReference() override;
   void destructorSafeDestroyNSSReference();
 };
 
@@ -48,6 +50,8 @@ public:
   NS_DECL_NSIPK11TOKENDB
 
   nsPK11TokenDB();
+
+protected:
   virtual ~nsPK11TokenDB();
   /* additional members */
 };

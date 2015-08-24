@@ -63,15 +63,7 @@ public:
     nsresult BeginPage();
     nsresult EndPage();
 
-    virtual int32_t GetDefaultContextFlags() const;
-
     const gfxIntSize GetSize() const;
-
-    void MovePixels(const nsIntRect& aSourceRect,
-                    const nsIntPoint& aDestTopLeft)
-    {
-        FastMovePixels(aSourceRect, aDestTopLeft);
-    }
 
     // The memory used by this surface lives in this process's address space,
     // but not in the heap.

@@ -37,7 +37,7 @@ public:
                                            const WheelEventInit& aParam,
                                            ErrorResult& aRv);
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE
+  virtual JSObject* WrapObjectInternal(JSContext* aCx) override
   {
     return WheelEventBinding::Wrap(aCx, this);
   }
@@ -49,6 +49,9 @@ public:
   double DeltaY();
   double DeltaZ();
   uint32_t DeltaMode();
+
+protected:
+  ~WheelEvent() {}
 
 private:
   int32_t mAppUnitsPerDevPixel;

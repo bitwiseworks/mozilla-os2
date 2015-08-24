@@ -21,14 +21,16 @@ public class PromptService implements GeckoEventListener {
     private final Context mContext;
 
     public PromptService(Context context) {
-        GeckoAppShell.getEventDispatcher().registerEventListener("Prompt:Show", this);
-        GeckoAppShell.getEventDispatcher().registerEventListener("Prompt:ShowTop", this);
+        EventDispatcher.getInstance().registerGeckoThreadListener(this,
+            "Prompt:Show",
+            "Prompt:ShowTop");
         mContext = context;
     }
 
     public void destroy() {
-        GeckoAppShell.getEventDispatcher().unregisterEventListener("Prompt:Show", this);
-        GeckoAppShell.getEventDispatcher().unregisterEventListener("Prompt:ShowTop", this);
+        EventDispatcher.getInstance().unregisterGeckoThreadListener(this,
+            "Prompt:Show",
+            "Prompt:ShowTop");
     }
 
     public void show(final String aTitle, final String aText, final PromptListItem[] aMenuList,
@@ -53,6 +55,7 @@ public class PromptService implements GeckoEventListener {
             public void run() {
                 Prompt p;
                 p = new Prompt(mContext, new Prompt.PromptCallback() {
+                    @Override
                     public void onPromptFinished(String jsonResult) {
                         try {
                             EventDispatcher.sendResponse(message, new JSONObject(jsonResult));

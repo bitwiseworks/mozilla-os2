@@ -11,22 +11,29 @@
 #include "ExtendedValidation.h"
 #include "OCSPRequestor.h"
 #include "certdb.h"
-#include "mozilla/Telemetry.h"
+#include "nsNSSCertificate.h"
 #include "nss.h"
-#include "ocsp.h"
+#include "NSSErrorsService.h"
+#include "nsServiceManagerUtils.h"
 #include "pk11pub.h"
 #include "pkix/pkix.h"
+#include "pkix/pkixnss.h"
+#include "pkix/ScopedPtr.h"
 #include "prerror.h"
 #include "prmem.h"
 #include "prprf.h"
+#include "ScopedNSSTypes.h"
 #include "secerr.h"
 #include "secmod.h"
 
+using namespace mozilla;
 using namespace mozilla::pkix;
 
 #ifdef PR_LOGGING
 extern PRLogModuleInfo* gCertVerifierLog;
 #endif
+
+static const uint64_t ServerFailureDelaySeconds = 5 * 60;
 
 namespace mozilla { namespace psm {
 
@@ -43,47 +50,186 @@ typedef ScopedPtr<SECMODModule, SECMOD_DestroyModule> ScopedSECMODModule;
 NSSCertDBTrustDomain::NSSCertDBTrustDomain(SECTrustType certDBTrustType,
                                            OCSPFetching ocspFetching,
                                            OCSPCache& ocspCache,
-                                           void* pinArg)
+             /*optional but shouldn't be*/ void* pinArg,
+                                           CertVerifier::OcspGetConfig ocspGETConfig,
+                                           CertVerifier::PinningMode pinningMode,
+                                           unsigned int minimumNonECCKeyBits,
+                              /*optional*/ const char* hostname,
+                              /*optional*/ ScopedCERTCertList* builtChain)
   : mCertDBTrustType(certDBTrustType)
   , mOCSPFetching(ocspFetching)
   , mOCSPCache(ocspCache)
   , mPinArg(pinArg)
+  , mOCSPGetConfig(ocspGETConfig)
+  , mPinningMode(pinningMode)
+  , mMinimumNonECCBits(minimumNonECCKeyBits)
+  , mHostname(hostname)
+  , mBuiltChain(builtChain)
+  , mCertBlocklist(do_GetService(NS_CERTBLOCKLIST_CONTRACTID))
+  , mOCSPStaplingStatus(CertVerifier::OCSP_STAPLING_NEVER_CHECKED)
 {
 }
 
-SECStatus
-NSSCertDBTrustDomain::FindPotentialIssuers(
-  const SECItem* encodedIssuerName, PRTime time,
-  /*out*/ mozilla::pkix::ScopedCERTCertList& results)
+// E=igca@sgdn.pm.gouv.fr,CN=IGC/A,OU=DCSSI,O=PM/SGDN,L=Paris,ST=France,C=FR
+static const uint8_t ANSSI_SUBJECT_DATA[] =
+                       "\x30\x81\x85\x31\x0B\x30\x09\x06\x03\x55\x04"
+                       "\x06\x13\x02\x46\x52\x31\x0F\x30\x0D\x06\x03"
+                       "\x55\x04\x08\x13\x06\x46\x72\x61\x6E\x63\x65"
+                       "\x31\x0E\x30\x0C\x06\x03\x55\x04\x07\x13\x05"
+                       "\x50\x61\x72\x69\x73\x31\x10\x30\x0E\x06\x03"
+                       "\x55\x04\x0A\x13\x07\x50\x4D\x2F\x53\x47\x44"
+                       "\x4E\x31\x0E\x30\x0C\x06\x03\x55\x04\x0B\x13"
+                       "\x05\x44\x43\x53\x53\x49\x31\x0E\x30\x0C\x06"
+                       "\x03\x55\x04\x03\x13\x05\x49\x47\x43\x2F\x41"
+                       "\x31\x23\x30\x21\x06\x09\x2A\x86\x48\x86\xF7"
+                       "\x0D\x01\x09\x01\x16\x14\x69\x67\x63\x61\x40"
+                       "\x73\x67\x64\x6E\x2E\x70\x6D\x2E\x67\x6F\x75"
+                       "\x76\x2E\x66\x72";
+
+static const uint8_t PERMIT_FRANCE_GOV_NAME_CONSTRAINTS_DATA[] =
+                       "\x30\x5D" // SEQUENCE (length=93)
+                       "\xA0\x5B" // permittedSubtrees (length=91)
+                       "\x30\x05\x82\x03" ".fr"
+                       "\x30\x05\x82\x03" ".gp"
+                       "\x30\x05\x82\x03" ".gf"
+                       "\x30\x05\x82\x03" ".mq"
+                       "\x30\x05\x82\x03" ".re"
+                       "\x30\x05\x82\x03" ".yt"
+                       "\x30\x05\x82\x03" ".pm"
+                       "\x30\x05\x82\x03" ".bl"
+                       "\x30\x05\x82\x03" ".mf"
+                       "\x30\x05\x82\x03" ".wf"
+                       "\x30\x05\x82\x03" ".pf"
+                       "\x30\x05\x82\x03" ".nc"
+                       "\x30\x05\x82\x03" ".tf";
+
+// If useRoots is true, we only use root certificates in the candidate list.
+// If useRoots is false, we only use non-root certificates in the list.
+static Result
+FindIssuerInner(ScopedCERTCertList& candidates, bool useRoots,
+                Input encodedIssuerName, TrustDomain::IssuerChecker& checker,
+                /*out*/ bool& keepGoing)
 {
-  // TODO: normalize encodedIssuerName
+  keepGoing = true;
+  for (CERTCertListNode* n = CERT_LIST_HEAD(candidates);
+       !CERT_LIST_END(n, candidates); n = CERT_LIST_NEXT(n)) {
+    bool candidateIsRoot = !!n->cert->isRoot;
+    if (candidateIsRoot != useRoots) {
+      continue;
+    }
+    Input certDER;
+    Result rv = certDER.Init(n->cert->derCert.data, n->cert->derCert.len);
+    if (rv != Success) {
+      continue; // probably too big
+    }
+
+    Input anssiSubject;
+    rv = anssiSubject.Init(ANSSI_SUBJECT_DATA, sizeof(ANSSI_SUBJECT_DATA) - 1);
+    if (rv != Success) {
+      return Result::FATAL_ERROR_LIBRARY_FAILURE;
+    }
+    // TODO: Use CERT_CompareName or equivalent
+    if (InputsAreEqual(encodedIssuerName, anssiSubject)) {
+      Input anssiNameConstraints;
+      if (anssiNameConstraints.Init(
+              PERMIT_FRANCE_GOV_NAME_CONSTRAINTS_DATA,
+              sizeof(PERMIT_FRANCE_GOV_NAME_CONSTRAINTS_DATA) - 1)
+            != Success) {
+        return Result::FATAL_ERROR_LIBRARY_FAILURE;
+      }
+      rv = checker.Check(certDER, &anssiNameConstraints, keepGoing);
+    } else {
+      rv = checker.Check(certDER, nullptr, keepGoing);
+    }
+    if (rv != Success) {
+      return rv;
+    }
+    if (!keepGoing) {
+      break;
+    }
+  }
+
+  return Success;
+}
+
+Result
+NSSCertDBTrustDomain::FindIssuer(Input encodedIssuerName,
+                                 IssuerChecker& checker, Time)
+{
   // TODO: NSS seems to be ambiguous between "no potential issuers found" and
   // "there was an error trying to retrieve the potential issuers."
-  results = CERT_CreateSubjectCertList(nullptr, CERT_GetDefaultCertDB(),
-                                       encodedIssuerName, time, true);
-  return SECSuccess;
+  SECItem encodedIssuerNameSECItem = UnsafeMapInputToSECItem(encodedIssuerName);
+  ScopedCERTCertList
+    candidates(CERT_CreateSubjectCertList(nullptr, CERT_GetDefaultCertDB(),
+                                          &encodedIssuerNameSECItem, 0,
+                                          false));
+  if (candidates) {
+    // First, try all the root certs; then try all the non-root certs.
+    bool keepGoing;
+    Result rv = FindIssuerInner(candidates, true, encodedIssuerName, checker,
+                                keepGoing);
+    if (rv != Success) {
+      return rv;
+    }
+    if (keepGoing) {
+      rv = FindIssuerInner(candidates, false, encodedIssuerName, checker,
+                           keepGoing);
+      if (rv != Success) {
+        return rv;
+      }
+    }
+  }
+
+  return Success;
 }
 
-SECStatus
+Result
 NSSCertDBTrustDomain::GetCertTrust(EndEntityOrCA endEntityOrCA,
-                                   SECOidTag policy,
-                                   const CERTCertificate* candidateCert,
-                                   /*out*/ TrustLevel* trustLevel)
+                                   const CertPolicyId& policy,
+                                   Input candidateCertDER,
+                                   /*out*/ TrustLevel& trustLevel)
 {
-  PR_ASSERT(candidateCert);
-  PR_ASSERT(trustLevel);
-
-  if (!candidateCert || !trustLevel) {
-    PR_SetError(SEC_ERROR_INVALID_ARGS, 0);
-    return SECFailure;
-  }
-
 #ifdef MOZ_NO_EV_CERTS
-  if (policy != SEC_OID_X509_ANY_POLICY) {
-    PR_SetError(SEC_ERROR_POLICY_VALIDATION_FAILED, 0);
-    return SECFailure;
+  if (!policy.IsAnyPolicy()) {
+    return Result::ERROR_POLICY_VALIDATION_FAILED;
   }
 #endif
+
+  // XXX: This would be cleaner and more efficient if we could get the trust
+  // information without constructing a CERTCertificate here, but NSS doesn't
+  // expose it in any other easy-to-use fashion. The use of
+  // CERT_NewTempCertificate to get a CERTCertificate shouldn't be a
+  // performance problem because NSS will just find the existing
+  // CERTCertificate in its in-memory cache and return it.
+  SECItem candidateCertDERSECItem = UnsafeMapInputToSECItem(candidateCertDER);
+  ScopedCERTCertificate candidateCert(
+    CERT_NewTempCertificate(CERT_GetDefaultCertDB(), &candidateCertDERSECItem,
+                            nullptr, false, true));
+  if (!candidateCert) {
+    return MapPRErrorCodeToResult(PR_GetError());
+  }
+
+  // Check the certificate against the OneCRL cert blocklist
+  if (!mCertBlocklist) {
+    return Result::FATAL_ERROR_LIBRARY_FAILURE;
+  }
+
+  bool isCertRevoked;
+  nsresult nsrv = mCertBlocklist->IsCertRevoked(
+                    candidateCert->derIssuer.data,
+                    candidateCert->derIssuer.len,
+                    candidateCert->serialNumber.data,
+                    candidateCert->serialNumber.len,
+                    &isCertRevoked);
+  if (NS_FAILED(nsrv)) {
+    return Result::FATAL_ERROR_LIBRARY_FAILURE;
+  }
+
+  if (isCertRevoked) {
+    PR_LOG(gCertVerifierLog, PR_LOG_DEBUG,
+           ("NSSCertDBTrustDomain: certificate is in blocklist"));
+    return Result::ERROR_REVOKED_CERTIFICATE;
+  }
 
   // XXX: CERT_GetCertTrust seems to be abusing SECStatus as a boolean, where
   // SECSuccess means that there is a trust record and SECFailure means there
@@ -91,49 +237,51 @@ NSSCertDBTrustDomain::GetCertTrust(EndEntityOrCA endEntityOrCA,
   // CERT_GetCertTrust, and all that code uses the result as a boolean meaning
   // "We have a trust record."
   CERTCertTrust trust;
-  if (CERT_GetCertTrust(candidateCert, &trust) == SECSuccess) {
-    PRUint32 flags = SEC_GET_TRUST_FLAGS(&trust, mCertDBTrustType);
+  if (CERT_GetCertTrust(candidateCert.get(), &trust) == SECSuccess) {
+    uint32_t flags = SEC_GET_TRUST_FLAGS(&trust, mCertDBTrustType);
 
     // For DISTRUST, we use the CERTDB_TRUSTED or CERTDB_TRUSTED_CA bit,
     // because we can have active distrust for either type of cert. Note that
     // CERTDB_TERMINAL_RECORD means "stop trying to inherit trust" so if the
     // relevant trust bit isn't set then that means the cert must be considered
     // distrusted.
-    PRUint32 relevantTrustBit = endEntityOrCA == MustBeCA ? CERTDB_TRUSTED_CA
-                                                          : CERTDB_TRUSTED;
+    uint32_t relevantTrustBit =
+      endEntityOrCA == EndEntityOrCA::MustBeCA ? CERTDB_TRUSTED_CA
+                                               : CERTDB_TRUSTED;
     if (((flags & (relevantTrustBit|CERTDB_TERMINAL_RECORD)))
             == CERTDB_TERMINAL_RECORD) {
-      *trustLevel = ActivelyDistrusted;
-      return SECSuccess;
+      trustLevel = TrustLevel::ActivelyDistrusted;
+      return Success;
     }
 
     // For TRUST, we only use the CERTDB_TRUSTED_CA bit, because Gecko hasn't
     // needed to consider end-entity certs to be their own trust anchors since
     // Gecko implemented nsICertOverrideService.
     if (flags & CERTDB_TRUSTED_CA) {
-      if (policy == SEC_OID_X509_ANY_POLICY) {
-        *trustLevel = TrustAnchor;
-        return SECSuccess;
+      if (policy.IsAnyPolicy()) {
+        trustLevel = TrustLevel::TrustAnchor;
+        return Success;
       }
 #ifndef MOZ_NO_EV_CERTS
-      if (CertIsAuthoritativeForEVPolicy(candidateCert, policy)) {
-        *trustLevel = TrustAnchor;
-        return SECSuccess;
+      if (CertIsAuthoritativeForEVPolicy(candidateCert.get(), policy)) {
+        trustLevel = TrustLevel::TrustAnchor;
+        return Success;
       }
 #endif
     }
   }
 
-  *trustLevel = InheritsTrust;
-  return SECSuccess;
+  trustLevel = TrustLevel::InheritsTrust;
+  return Success;
 }
 
-SECStatus
-NSSCertDBTrustDomain::VerifySignedData(const CERTSignedData* signedData,
-                                       const CERTCertificate* cert)
+Result
+NSSCertDBTrustDomain::DigestBuf(Input item, DigestAlgorithm digestAlg,
+                                /*out*/ uint8_t* digestBuf, size_t digestBufLen)
 {
-  return ::mozilla::pkix::VerifySignedData(signedData, cert, mPinArg);
+  return DigestBufNSS(item, digestAlg, digestBuf, digestBufLen);
 }
+
 
 static PRIntervalTime
 OCSPFetchingTypeToTimeoutTime(NSSCertDBTrustDomain::OCSPFetching ocspFetching)
@@ -155,13 +303,63 @@ OCSPFetchingTypeToTimeoutTime(NSSCertDBTrustDomain::OCSPFetching ocspFetching)
   return PR_SecondsToInterval(2);
 }
 
-SECStatus
-NSSCertDBTrustDomain::CheckRevocation(
-  mozilla::pkix::EndEntityOrCA endEntityOrCA,
-  const CERTCertificate* cert,
-  /*const*/ CERTCertificate* issuerCert,
-  PRTime time,
-  /*optional*/ const SECItem* stapledOCSPResponse)
+// Copied and modified from CERT_GetOCSPAuthorityInfoAccessLocation and
+// CERT_GetGeneralNameByType. Returns SECFailure on error, SECSuccess
+// with url == nullptr when an OCSP URI was not found, and SECSuccess with
+// url != nullptr when an OCSP URI was found. The output url will be owned
+// by the arena.
+static Result
+GetOCSPAuthorityInfoAccessLocation(PLArenaPool* arena,
+                                   Input aiaExtension,
+                                   /*out*/ char const*& url)
+{
+  url = nullptr;
+  SECItem aiaExtensionSECItem = UnsafeMapInputToSECItem(aiaExtension);
+  CERTAuthInfoAccess** aia =
+    CERT_DecodeAuthInfoAccessExtension(arena, &aiaExtensionSECItem);
+  if (!aia) {
+    return Result::ERROR_CERT_BAD_ACCESS_LOCATION;
+  }
+  for (size_t i = 0; aia[i]; ++i) {
+    if (SECOID_FindOIDTag(&aia[i]->method) == SEC_OID_PKIX_OCSP) {
+      // NSS chooses the **last** OCSP URL; we choose the **first**
+      CERTGeneralName* current = aia[i]->location;
+      if (!current) {
+        continue;
+      }
+      do {
+        if (current->type == certURI) {
+          const SECItem& location = current->name.other;
+          // (location.len + 1) must be small enough to fit into a uint32_t,
+          // but we limit it to a smaller bound to reduce OOM risk.
+          if (location.len > 1024 || memchr(location.data, 0, location.len)) {
+            // Reject embedded nulls. (NSS doesn't do this)
+            return Result::ERROR_CERT_BAD_ACCESS_LOCATION;
+          }
+          // Copy the non-null-terminated SECItem into a null-terminated string.
+          char* nullTerminatedURL(static_cast<char*>(
+                                    PORT_ArenaAlloc(arena, location.len + 1)));
+          if (!nullTerminatedURL) {
+            return Result::FATAL_ERROR_NO_MEMORY;
+          }
+          memcpy(nullTerminatedURL, location.data, location.len);
+          nullTerminatedURL[location.len] = 0;
+          url = nullTerminatedURL;
+          return Success;
+        }
+        current = CERT_GetNextGeneralName(current);
+      } while (current != aia[i]->location);
+    }
+  }
+
+  return Success;
+}
+
+Result
+NSSCertDBTrustDomain::CheckRevocation(EndEntityOrCA endEntityOrCA,
+                                      const CertID& certID, Time time,
+                         /*optional*/ const Input* stapledOCSPResponse,
+                         /*optional*/ const Input* aiaExtension)
 {
   // Actively distrusted certificates will have already been blocked by
   // GetCertTrust.
@@ -171,13 +369,6 @@ NSSCertDBTrustDomain::CheckRevocation(
 
   PR_LOG(gCertVerifierLog, PR_LOG_DEBUG,
          ("NSSCertDBTrustDomain: Top of CheckRevocation\n"));
-
-  PORT_Assert(cert);
-  PORT_Assert(issuerCert);
-  if (!cert || !issuerCert) {
-    PORT_SetError(SEC_ERROR_INVALID_ARGS);
-    return SECFailure;
-  }
 
   // Bug 991815: The BR allow OCSP for intermediates to be up to one year old.
   // Since this affects EV there is no reason why DV should be more strict
@@ -194,91 +385,92 @@ NSSCertDBTrustDomain::CheckRevocation(
   // are known to serve expired responses due to bugs.
   // We keep track of the result of verifying the stapled response but don't
   // immediately return failure if the response has expired.
-  PRErrorCode stapledOCSPResponseErrorCode = 0;
+  //
+  // We only set the OCSP stapling status if we're validating the end-entity
+  // certificate. Non-end-entity certificates would always be
+  // OCSP_STAPLING_NONE unless/until we implement multi-stapling.
+  Result stapledOCSPResponseResult = Success;
   if (stapledOCSPResponse) {
-    PR_ASSERT(endEntityOrCA == MustBeEndEntity);
+    PR_ASSERT(endEntityOrCA == EndEntityOrCA::MustBeEndEntity);
     bool expired;
-    SECStatus rv = VerifyAndMaybeCacheEncodedOCSPResponse(cert, issuerCert,
-                                                          time,
-                                                          maxOCSPLifetimeInDays,
-                                                          stapledOCSPResponse,
-                                                          ResponseWasStapled,
-                                                          expired);
-    if (rv == SECSuccess) {
+    stapledOCSPResponseResult =
+      VerifyAndMaybeCacheEncodedOCSPResponse(certID, time,
+                                             maxOCSPLifetimeInDays,
+                                             *stapledOCSPResponse,
+                                             ResponseWasStapled, expired);
+    if (stapledOCSPResponseResult == Success) {
       // stapled OCSP response present and good
-      Telemetry::Accumulate(Telemetry::SSL_OCSP_STAPLING, 1);
+      mOCSPStaplingStatus = CertVerifier::OCSP_STAPLING_GOOD;
       PR_LOG(gCertVerifierLog, PR_LOG_DEBUG,
              ("NSSCertDBTrustDomain: stapled OCSP response: good"));
-      return rv;
+      return Success;
     }
-    stapledOCSPResponseErrorCode = PR_GetError();
-    if (stapledOCSPResponseErrorCode == SEC_ERROR_OCSP_OLD_RESPONSE ||
+    if (stapledOCSPResponseResult == Result::ERROR_OCSP_OLD_RESPONSE ||
         expired) {
       // stapled OCSP response present but expired
-      Telemetry::Accumulate(Telemetry::SSL_OCSP_STAPLING, 3);
+      mOCSPStaplingStatus = CertVerifier::OCSP_STAPLING_EXPIRED;
       PR_LOG(gCertVerifierLog, PR_LOG_DEBUG,
              ("NSSCertDBTrustDomain: expired stapled OCSP response"));
     } else {
       // stapled OCSP response present but invalid for some reason
-      Telemetry::Accumulate(Telemetry::SSL_OCSP_STAPLING, 4);
+      mOCSPStaplingStatus = CertVerifier::OCSP_STAPLING_INVALID;
       PR_LOG(gCertVerifierLog, PR_LOG_DEBUG,
              ("NSSCertDBTrustDomain: stapled OCSP response: failure"));
-      return rv;
+      return stapledOCSPResponseResult;
     }
-  } else {
+  } else if (endEntityOrCA == EndEntityOrCA::MustBeEndEntity) {
     // no stapled OCSP response
-    Telemetry::Accumulate(Telemetry::SSL_OCSP_STAPLING, 2);
+    mOCSPStaplingStatus = CertVerifier::OCSP_STAPLING_NONE;
     PR_LOG(gCertVerifierLog, PR_LOG_DEBUG,
            ("NSSCertDBTrustDomain: no stapled OCSP response"));
   }
 
-  PRErrorCode cachedResponseErrorCode = 0;
-  PRTime cachedResponseValidThrough = 0;
-  bool cachedResponsePresent = mOCSPCache.Get(cert, issuerCert,
-                                              cachedResponseErrorCode,
+  Result cachedResponseResult = Success;
+  Time cachedResponseValidThrough(Time::uninitialized);
+  bool cachedResponsePresent = mOCSPCache.Get(certID,
+                                              cachedResponseResult,
                                               cachedResponseValidThrough);
   if (cachedResponsePresent) {
-    if (cachedResponseErrorCode == 0 && cachedResponseValidThrough >= time) {
+    if (cachedResponseResult == Success && cachedResponseValidThrough >= time) {
       PR_LOG(gCertVerifierLog, PR_LOG_DEBUG,
              ("NSSCertDBTrustDomain: cached OCSP response: good"));
-      return SECSuccess;
+      return Success;
     }
     // If we have a cached revoked response, use it.
-    if (cachedResponseErrorCode == SEC_ERROR_REVOKED_CERTIFICATE) {
+    if (cachedResponseResult == Result::ERROR_REVOKED_CERTIFICATE) {
       PR_LOG(gCertVerifierLog, PR_LOG_DEBUG,
              ("NSSCertDBTrustDomain: cached OCSP response: revoked"));
-      PR_SetError(SEC_ERROR_REVOKED_CERTIFICATE, 0);
-      return SECFailure;
+      return Result::ERROR_REVOKED_CERTIFICATE;
     }
     // The cached response may indicate an unknown certificate or it may be
     // expired. Don't return with either of these statuses yet - we may be
     // able to fetch a more recent one.
     PR_LOG(gCertVerifierLog, PR_LOG_DEBUG,
            ("NSSCertDBTrustDomain: cached OCSP response: error %ld valid "
-           "until %lld", cachedResponseErrorCode, cachedResponseValidThrough));
+           "until %lld", cachedResponseResult, cachedResponseValidThrough));
     // When a good cached response has expired, it is more convenient
     // to convert that to an error code and just deal with
-    // cachedResponseErrorCode from here on out.
-    if (cachedResponseErrorCode == 0 && cachedResponseValidThrough < time) {
-      cachedResponseErrorCode = SEC_ERROR_OCSP_OLD_RESPONSE;
+    // cachedResponseResult from here on out.
+    if (cachedResponseResult == Success && cachedResponseValidThrough < time) {
+      cachedResponseResult = Result::ERROR_OCSP_OLD_RESPONSE;
     }
     // We may have a cached indication of server failure. Ignore it if
     // it has expired.
-    if (cachedResponseErrorCode != 0 &&
-        cachedResponseErrorCode != SEC_ERROR_OCSP_UNKNOWN_CERT &&
-        cachedResponseErrorCode != SEC_ERROR_OCSP_OLD_RESPONSE &&
+    if (cachedResponseResult != Success &&
+        cachedResponseResult != Result::ERROR_OCSP_UNKNOWN_CERT &&
+        cachedResponseResult != Result::ERROR_OCSP_OLD_RESPONSE &&
         cachedResponseValidThrough < time) {
-      cachedResponseErrorCode = 0;
+      cachedResponseResult = Success;
       cachedResponsePresent = false;
     }
   } else {
     PR_LOG(gCertVerifierLog, PR_LOG_DEBUG,
            ("NSSCertDBTrustDomain: no cached OCSP response"));
   }
-  // At this point, if and only if cachedErrorResponseCode is 0, there was no
+  // At this point, if and only if cachedErrorResult is Success, there was no
   // cached response.
-  PR_ASSERT((!cachedResponsePresent && cachedResponseErrorCode == 0) ||
-            (cachedResponsePresent && cachedResponseErrorCode != 0));
+  PR_ASSERT((!cachedResponsePresent && cachedResponseResult == Success) ||
+            (cachedResponsePresent && cachedResponseResult != Success));
 
   // TODO: We still need to handle the fallback for expired responses. But,
   // if/when we disable OCSP fetching by default, it would be ambiguous whether
@@ -286,193 +478,277 @@ NSSCertDBTrustDomain::CheckRevocation(
   // you to ever fetch OCSP."
 
   if ((mOCSPFetching == NeverFetchOCSP) ||
-      (endEntityOrCA == MustBeCA && (mOCSPFetching == FetchOCSPForDVHardFail ||
-                                     mOCSPFetching == FetchOCSPForDVSoftFail))) {
+      (endEntityOrCA == EndEntityOrCA::MustBeCA &&
+       (mOCSPFetching == FetchOCSPForDVHardFail ||
+        mOCSPFetching == FetchOCSPForDVSoftFail))) {
     // We're not going to be doing any fetching, so if there was a cached
     // "unknown" response, say so.
-    if (cachedResponseErrorCode == SEC_ERROR_OCSP_UNKNOWN_CERT) {
-      PR_SetError(SEC_ERROR_OCSP_UNKNOWN_CERT, 0);
-      return SECFailure;
+    if (cachedResponseResult == Result::ERROR_OCSP_UNKNOWN_CERT) {
+      return Result::ERROR_OCSP_UNKNOWN_CERT;
     }
     // If we're doing hard-fail, we want to know if we have a cached response
     // that has expired.
     if (mOCSPFetching == FetchOCSPForDVHardFail &&
-        cachedResponseErrorCode == SEC_ERROR_OCSP_OLD_RESPONSE) {
-      PR_SetError(SEC_ERROR_OCSP_OLD_RESPONSE, 0);
-      return SECFailure;
+        cachedResponseResult == Result::ERROR_OCSP_OLD_RESPONSE) {
+      return Result::ERROR_OCSP_OLD_RESPONSE;
     }
 
-    return SECSuccess;
+    return Success;
   }
 
   if (mOCSPFetching == LocalOnlyOCSPForEV) {
-    PR_SetError(cachedResponseErrorCode != 0 ? cachedResponseErrorCode
-                                             : SEC_ERROR_OCSP_UNKNOWN_CERT, 0);
-    return SECFailure;
+    if (cachedResponseResult != Success) {
+      return cachedResponseResult;
+    }
+    return Result::ERROR_OCSP_UNKNOWN_CERT;
   }
 
-  ScopedPtr<char, PORT_Free_string>
-    url(CERT_GetOCSPAuthorityInfoAccessLocation(cert));
+  ScopedPLArenaPool arena(PORT_NewArena(DER_DEFAULT_CHUNKSIZE));
+  if (!arena) {
+    return Result::FATAL_ERROR_NO_MEMORY;
+  }
+
+  Result rv;
+  const char* url = nullptr; // owned by the arena
+
+  if (aiaExtension) {
+    rv = GetOCSPAuthorityInfoAccessLocation(arena.get(), *aiaExtension, url);
+    if (rv != Success) {
+      return rv;
+    }
+  }
 
   if (!url) {
     if (mOCSPFetching == FetchOCSPForEV ||
-        cachedResponseErrorCode == SEC_ERROR_OCSP_UNKNOWN_CERT) {
-      PR_SetError(SEC_ERROR_OCSP_UNKNOWN_CERT, 0);
-      return SECFailure;
+        cachedResponseResult == Result::ERROR_OCSP_UNKNOWN_CERT) {
+      return Result::ERROR_OCSP_UNKNOWN_CERT;
     }
-    if (cachedResponseErrorCode == SEC_ERROR_OCSP_OLD_RESPONSE) {
-      PR_SetError(SEC_ERROR_OCSP_OLD_RESPONSE, 0);
-      return SECFailure;
+    if (cachedResponseResult == Result::ERROR_OCSP_OLD_RESPONSE) {
+      return Result::ERROR_OCSP_OLD_RESPONSE;
     }
-    if (stapledOCSPResponseErrorCode != 0) {
-      PR_SetError(stapledOCSPResponseErrorCode, 0);
-      return SECFailure;
+    if (stapledOCSPResponseResult != Success) {
+      return stapledOCSPResponseResult;
     }
 
     // Nothing to do if we don't have an OCSP responder URI for the cert; just
     // assume it is good. Note that this is the confusing, but intended,
     // interpretation of "strict" revocation checking in the face of a
     // certificate that lacks an OCSP responder URI.
-    return SECSuccess;
-  }
-
-  ScopedPLArenaPool arena(PORT_NewArena(DER_DEFAULT_CHUNKSIZE));
-  if (!arena) {
-    return SECFailure;
+    return Success;
   }
 
   // Only request a response if we didn't have a cached indication of failure
   // (don't keep requesting responses from a failing server).
-  const SECItem* response = nullptr;
-  if (cachedResponseErrorCode == 0 ||
-      cachedResponseErrorCode == SEC_ERROR_OCSP_UNKNOWN_CERT ||
-      cachedResponseErrorCode == SEC_ERROR_OCSP_OLD_RESPONSE) {
-    const SECItem* request(CreateEncodedOCSPRequest(arena.get(), cert,
-                                                    issuerCert));
-    if (!request) {
-      return SECFailure;
+  Input response;
+  bool attemptedRequest;
+  if (cachedResponseResult == Success ||
+      cachedResponseResult == Result::ERROR_OCSP_UNKNOWN_CERT ||
+      cachedResponseResult == Result::ERROR_OCSP_OLD_RESPONSE) {
+    uint8_t ocspRequest[OCSP_REQUEST_MAX_LENGTH];
+    size_t ocspRequestLength;
+    rv = CreateEncodedOCSPRequest(*this, certID, ocspRequest,
+                                  ocspRequestLength);
+    if (rv != Success) {
+      return rv;
     }
-
-    response = DoOCSPRequest(arena.get(), url.get(), request,
-                             OCSPFetchingTypeToTimeoutTime(mOCSPFetching));
+    SECItem ocspRequestItem = {
+      siBuffer,
+      ocspRequest,
+      static_cast<unsigned int>(ocspRequestLength)
+    };
+    // Owned by arena
+    const SECItem* responseSECItem =
+      DoOCSPRequest(arena.get(), url, &ocspRequestItem,
+                    OCSPFetchingTypeToTimeoutTime(mOCSPFetching),
+                    mOCSPGetConfig == CertVerifier::ocspGetEnabled);
+    if (!responseSECItem) {
+      rv = MapPRErrorCodeToResult(PR_GetError());
+    } else if (response.Init(responseSECItem->data, responseSECItem->len)
+                 != Success) {
+      rv = Result::ERROR_OCSP_MALFORMED_RESPONSE; // too big
+    }
+    attemptedRequest = true;
+  } else {
+    rv = cachedResponseResult;
+    attemptedRequest = false;
   }
 
-  if (!response) {
-    PRErrorCode error = PR_GetError();
-    if (error == 0) {
-      error = cachedResponseErrorCode;
+  if (response.GetLength() == 0) {
+    Result error = rv;
+    if (attemptedRequest) {
+      Time timeout(time);
+      if (timeout.AddSeconds(ServerFailureDelaySeconds) != Success) {
+        return Result::FATAL_ERROR_LIBRARY_FAILURE; // integer overflow
+      }
+      rv = mOCSPCache.Put(certID, error, time, timeout);
+      if (rv != Success) {
+        return rv;
+      }
     }
-    PRTime timeout = time + ServerFailureDelay;
-    if (mOCSPCache.Put(cert, issuerCert, error, time, timeout) != SECSuccess) {
-      return SECFailure;
-    }
-    PR_SetError(error, 0);
     if (mOCSPFetching != FetchOCSPForDVSoftFail) {
       PR_LOG(gCertVerifierLog, PR_LOG_DEBUG,
              ("NSSCertDBTrustDomain: returning SECFailure after "
               "OCSP request failure"));
-      return SECFailure;
+      return error;
     }
-    if (cachedResponseErrorCode == SEC_ERROR_OCSP_UNKNOWN_CERT) {
+    if (cachedResponseResult == Result::ERROR_OCSP_UNKNOWN_CERT) {
       PR_LOG(gCertVerifierLog, PR_LOG_DEBUG,
              ("NSSCertDBTrustDomain: returning SECFailure from cached "
               "response after OCSP request failure"));
-      PR_SetError(cachedResponseErrorCode, 0);
-      return SECFailure;
+      return cachedResponseResult;
     }
-    if (stapledOCSPResponseErrorCode != 0) {
+    if (stapledOCSPResponseResult != Success) {
       PR_LOG(gCertVerifierLog, PR_LOG_DEBUG,
              ("NSSCertDBTrustDomain: returning SECFailure from expired "
               "stapled response after OCSP request failure"));
-      PR_SetError(stapledOCSPResponseErrorCode, 0);
-      return SECFailure;
+      return stapledOCSPResponseResult;
     }
 
     PR_LOG(gCertVerifierLog, PR_LOG_DEBUG,
            ("NSSCertDBTrustDomain: returning SECSuccess after "
             "OCSP request failure"));
-    return SECSuccess; // Soft fail -> success :(
+    return Success; // Soft fail -> success :(
   }
 
   // If the response from the network has expired but indicates a revoked
   // or unknown certificate, PR_GetError() will return the appropriate error.
   // We actually ignore expired here.
   bool expired;
-  SECStatus rv = VerifyAndMaybeCacheEncodedOCSPResponse(cert, issuerCert, time,
-                                                        maxOCSPLifetimeInDays,
-                                                        response,
-                                                        ResponseIsFromNetwork,
-                                                        expired);
-  if (rv == SECSuccess || mOCSPFetching != FetchOCSPForDVSoftFail) {
+  rv = VerifyAndMaybeCacheEncodedOCSPResponse(certID, time,
+                                              maxOCSPLifetimeInDays,
+                                              response, ResponseIsFromNetwork,
+                                              expired);
+  if (rv == Success || mOCSPFetching != FetchOCSPForDVSoftFail) {
     PR_LOG(gCertVerifierLog, PR_LOG_DEBUG,
       ("NSSCertDBTrustDomain: returning after VerifyEncodedOCSPResponse"));
     return rv;
   }
 
-  PRErrorCode error = PR_GetError();
-  if (error == SEC_ERROR_OCSP_UNKNOWN_CERT ||
-      error == SEC_ERROR_REVOKED_CERTIFICATE) {
+  if (rv == Result::ERROR_OCSP_UNKNOWN_CERT ||
+      rv == Result::ERROR_REVOKED_CERTIFICATE) {
     return rv;
   }
-
-  if (stapledOCSPResponseErrorCode != 0) {
+  if (stapledOCSPResponseResult != Success) {
     PR_LOG(gCertVerifierLog, PR_LOG_DEBUG,
            ("NSSCertDBTrustDomain: returning SECFailure from expired stapled "
             "response after OCSP request verification failure"));
-    PR_SetError(stapledOCSPResponseErrorCode, 0);
-    return SECFailure;
+    return stapledOCSPResponseResult;
   }
 
   PR_LOG(gCertVerifierLog, PR_LOG_DEBUG,
          ("NSSCertDBTrustDomain: end of CheckRevocation"));
 
-  return SECSuccess; // Soft fail -> success :(
+  return Success; // Soft fail -> success :(
 }
 
-SECStatus
+Result
 NSSCertDBTrustDomain::VerifyAndMaybeCacheEncodedOCSPResponse(
-  const CERTCertificate* cert, CERTCertificate* issuerCert, PRTime time,
-  uint16_t maxLifetimeInDays, const SECItem* encodedResponse,
-  EncodedResponseSource responseSource, /*out*/ bool& expired)
+  const CertID& certID, Time time, uint16_t maxLifetimeInDays,
+  Input encodedResponse, EncodedResponseSource responseSource,
+  /*out*/ bool& expired)
 {
-  PRTime thisUpdate = 0;
-  PRTime validThrough = 0;
-  SECStatus rv = VerifyEncodedOCSPResponse(*this, cert, issuerCert, time,
-                                           maxLifetimeInDays, encodedResponse,
-                                           expired, &thisUpdate, &validThrough);
-  PRErrorCode error = (rv == SECSuccess ? 0 : PR_GetError());
+  Time thisUpdate(Time::uninitialized);
+  Time validThrough(Time::uninitialized);
+  Result rv = VerifyEncodedOCSPResponse(*this, certID, time,
+                                        maxLifetimeInDays, encodedResponse,
+                                        expired, &thisUpdate, &validThrough);
   // If a response was stapled and expired, we don't want to cache it. Return
   // early to simplify the logic here.
   if (responseSource == ResponseWasStapled && expired) {
-    PR_ASSERT(rv != SECSuccess);
+    PR_ASSERT(rv != Success);
     return rv;
   }
   // validThrough is only trustworthy if the response successfully verifies
   // or it indicates a revoked or unknown certificate.
   // If this isn't the case, store an indication of failure (to prevent
   // repeatedly requesting a response from a failing server).
-  if (rv != SECSuccess && error != SEC_ERROR_REVOKED_CERTIFICATE &&
-      error != SEC_ERROR_OCSP_UNKNOWN_CERT) {
-    validThrough = time + ServerFailureDelay;
+  if (rv != Success && rv != Result::ERROR_REVOKED_CERTIFICATE &&
+      rv != Result::ERROR_OCSP_UNKNOWN_CERT) {
+    validThrough = time;
+    if (validThrough.AddSeconds(ServerFailureDelaySeconds) != Success) {
+      return Result::FATAL_ERROR_LIBRARY_FAILURE; // integer overflow
+    }
   }
   if (responseSource == ResponseIsFromNetwork ||
-      rv == SECSuccess ||
-      error == SEC_ERROR_REVOKED_CERTIFICATE ||
-      error == SEC_ERROR_OCSP_UNKNOWN_CERT) {
+      rv == Success ||
+      rv == Result::ERROR_REVOKED_CERTIFICATE ||
+      rv == Result::ERROR_OCSP_UNKNOWN_CERT) {
     PR_LOG(gCertVerifierLog, PR_LOG_DEBUG,
            ("NSSCertDBTrustDomain: caching OCSP response"));
-    if (mOCSPCache.Put(cert, issuerCert, error, thisUpdate, validThrough)
-          != SECSuccess) {
-      return SECFailure;
+    Result putRV = mOCSPCache.Put(certID, rv, thisUpdate, validThrough);
+    if (putRV != Success) {
+      return putRV;
     }
   }
 
-  // If the verification failed, re-set to that original error
-  // (the call to Put may have un-set it).
-  if (rv != SECSuccess) {
-    PR_SetError(error, 0);
-  }
   return rv;
+}
+
+Result
+NSSCertDBTrustDomain::IsChainValid(const DERArray& certArray, Time time)
+{
+  PR_LOG(gCertVerifierLog, PR_LOG_DEBUG,
+         ("NSSCertDBTrustDomain: IsChainValid"));
+
+  ScopedCERTCertList certList;
+  SECStatus srv = ConstructCERTCertListFromReversedDERArray(certArray,
+                                                            certList);
+  if (srv != SECSuccess) {
+    return MapPRErrorCodeToResult(PR_GetError());
+  }
+
+  Result result = CertListContainsExpectedKeys(certList, mHostname, time,
+                                               mPinningMode);
+  if (result != Success) {
+    return result;
+  }
+
+  if (mBuiltChain) {
+    *mBuiltChain = certList.forget();
+  }
+
+  return Success;
+}
+
+Result
+NSSCertDBTrustDomain::CheckRSAPublicKeyModulusSizeInBits(
+  EndEntityOrCA /*endEntityOrCA*/, unsigned int modulusSizeInBits)
+{
+  if (modulusSizeInBits < mMinimumNonECCBits) {
+    return Result::ERROR_INADEQUATE_KEY_SIZE;
+  }
+  return Success;
+}
+
+Result
+NSSCertDBTrustDomain::VerifyRSAPKCS1SignedDigest(
+  const SignedDigest& signedDigest,
+  Input subjectPublicKeyInfo)
+{
+  return VerifyRSAPKCS1SignedDigestNSS(signedDigest, subjectPublicKeyInfo,
+                                       mPinArg);
+}
+
+Result
+NSSCertDBTrustDomain::CheckECDSACurveIsAcceptable(
+  EndEntityOrCA /*endEntityOrCA*/, NamedCurve curve)
+{
+  switch (curve) {
+    case NamedCurve::secp256r1: // fall through
+    case NamedCurve::secp384r1: // fall through
+    case NamedCurve::secp521r1:
+      return Success;
+  }
+
+  return Result::ERROR_UNSUPPORTED_ELLIPTIC_CURVE;
+}
+
+Result
+NSSCertDBTrustDomain::VerifyECDSASignedDigest(const SignedDigest& signedDigest,
+                                              Input subjectPublicKeyInfo)
+{
+  return VerifyECDSASignedDigestNSS(signedDigest, subjectPublicKeyInfo,
+                                    mPinArg);
 }
 
 namespace {
@@ -481,7 +757,7 @@ static char*
 nss_addEscape(const char* string, char quote)
 {
   char* newString = 0;
-  int escapes = 0, size = 0;
+  size_t escapes = 0, size = 0;
   const char* src;
   char* dest;
 
@@ -492,7 +768,7 @@ nss_addEscape(const char* string, char quote)
   size++;
   }
 
-  newString = (char*) PORT_ZAlloc(escapes + size + 1);
+  newString = (char*) PORT_ZAlloc(escapes + size + 1u);
   if (!newString) {
     return nullptr;
   }
@@ -591,32 +867,6 @@ UnloadLoadableRoots(const char* modNameUTF8)
   if (rootsModule) {
     SECMOD_UnloadUserModule(rootsModule.get());
   }
-}
-
-void
-SetClassicOCSPBehavior(CertVerifier::ocsp_download_config enabled,
-                       CertVerifier::ocsp_strict_config strict,
-                       CertVerifier::ocsp_get_config get)
-{
-  CERT_DisableOCSPDefaultResponder(CERT_GetDefaultCertDB());
-  if (enabled == CertVerifier::ocsp_off) {
-    CERT_DisableOCSPChecking(CERT_GetDefaultCertDB());
-  } else {
-    CERT_EnableOCSPChecking(CERT_GetDefaultCertDB());
-  }
-
-  SEC_OcspFailureMode failureMode = strict == CertVerifier::ocsp_strict
-                                  ? ocspMode_FailureIsVerificationFailure
-                                  : ocspMode_FailureIsNotAVerificationFailure;
-  (void) CERT_SetOCSPFailureMode(failureMode);
-
-  CERT_ForcePostMethodForOCSP(get != CertVerifier::ocsp_get_enabled);
-
-  int OCSPTimeoutSeconds = 3;
-  if (strict == CertVerifier::ocsp_strict) {
-    OCSPTimeoutSeconds = 10;
-  }
-  CERT_SetOCSPTimeout(OCSPTimeoutSeconds);
 }
 
 char*

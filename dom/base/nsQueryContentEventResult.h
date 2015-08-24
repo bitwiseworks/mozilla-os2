@@ -14,11 +14,10 @@
 
 class nsIWidget;
 
-class nsQueryContentEventResult MOZ_FINAL : public nsIQueryContentEventResult
+class nsQueryContentEventResult final : public nsIQueryContentEventResult
 {
 public:
   nsQueryContentEventResult();
-  ~nsQueryContentEventResult();
   NS_DECL_ISUPPORTS
   NS_DECL_NSIQUERYCONTENTEVENTRESULT
 
@@ -26,11 +25,13 @@ public:
                       const mozilla::WidgetQueryContentEvent &aEvent);
 
 protected:
+  ~nsQueryContentEventResult();
+
   uint32_t mEventID;
 
   uint32_t mOffset;
   nsString mString;
-  nsIntRect mRect;
+  mozilla::LayoutDeviceIntRect mRect;
 
   bool mSucceeded;
   bool mReversed;

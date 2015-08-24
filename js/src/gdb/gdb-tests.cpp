@@ -15,9 +15,9 @@ using namespace JS;
 /* The class of the global object. */
 const JSClass global_class = {
     "global", JSCLASS_GLOBAL_FLAGS,
-    JS_PropertyStub,  JS_DeletePropertyStub, JS_PropertyStub,  JS_StrictPropertyStub,
-    JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub,
     nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr,
     JS_GlobalObjectTraceHook
 };
 
@@ -62,12 +62,12 @@ int
 main (int argc, const char** argv)
 {
     if (!JS_Init()) return 1;
-    JSRuntime* runtime = checkPtr(JS_NewRuntime(1024 * 1024, JS_USE_HELPER_THREADS));
+    JSRuntime* runtime = checkPtr(JS_NewRuntime(1024 * 1024));
     JS_SetGCParameter(runtime, JSGC_MAX_BYTES, 0xffffffff);
     JS_SetNativeStackQuota(runtime, 5000000);
 
     JSContext* cx = checkPtr(JS_NewContext(runtime, 8192));
-    JS_SetErrorReporter(cx, reportError);
+    JS_SetErrorReporter(runtime, reportError);
 
     JSAutoRequest ar(cx);
 
@@ -76,8 +76,6 @@ main (int argc, const char** argv)
     options.setVersion(JSVERSION_LATEST);
     RootedObject global(cx, checkPtr(JS_NewGlobalObject(cx, &global_class,
                         nullptr, JS::FireOnNewGlobalHook, options)));
-    js::SetDefaultObjectForContext(cx, global);
-
     JSAutoCompartment ac(cx, global);
 
     /* Populate the global object with the standard globals,

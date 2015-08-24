@@ -32,8 +32,7 @@ namespace nsStyleTransformMatrix {
                              nsStyleContext* aContext,
                              nsPresContext* aPresContext,
                              bool& aCanStoreInRuleTree,
-                             nscoord aSize,
-                             float aAppUnitsPerMatrixUnit);
+                             nscoord aSize);
 
   void
   ProcessInterpolateMatrix(gfx3DMatrix& aMatrix,
@@ -41,7 +40,7 @@ namespace nsStyleTransformMatrix {
                             nsStyleContext* aContext,
                             nsPresContext* aPresContext,
                             bool& aCanStoreInRuleTree,
-                            nsRect& aBounds, float aAppUnitsPerMatrixUnit);
+                            nsRect& aBounds);
 
   /**
    * Given an nsCSSValueList containing -moz-transform functions,
@@ -57,7 +56,7 @@ namespace nsStyleTransformMatrix {
    *
    * aContext and aPresContext may be null if all of the (non-percent)
    * length values in aData are already known to have been converted to
-   * eCSSUnit_Pixel (as they are in an nsStyleAnimation::Value)
+   * eCSSUnit_Pixel (as they are in an StyleAnimationValue)
    */
   gfx3DMatrix ReadTransforms(const nsCSSValueList* aList,
                              nsStyleContext* aContext,

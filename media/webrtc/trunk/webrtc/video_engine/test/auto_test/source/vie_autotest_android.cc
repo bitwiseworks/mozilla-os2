@@ -13,15 +13,18 @@
 #include <android/log.h>
 #include <stdio.h>
 
-#include "webrtc/video_engine/test/auto_test/interface/vie_autotest.h"
+#include "webrtc/modules/video_capture/video_capture_internal.h"
+#include "webrtc/modules/video_render/video_render_internal.h"
 #include "webrtc/video_engine/test/auto_test/interface/vie_autotest_defines.h"
+#include "webrtc/video_engine/test/auto_test/interface/vie_autotest.h"
 
 int ViEAutoTestAndroid::RunAutotest(int testSelection, int subTestSelection,
                                     void* window1, void* window2,
-                                    void* javaVM, void* env, void* context) {
+                                    JavaVM* javaVM, void* env, void* context) {
   ViEAutoTest vieAutoTest(window1, window2);
   ViETest::Log("RunAutoTest(%d, %d)", testSelection, subTestSelection);
-  webrtc::VideoEngine::SetAndroidObjects(javaVM, context);
+  webrtc::SetCaptureAndroidVM(javaVM, static_cast<jobject>(context));
+  webrtc::SetRenderAndroidVM(javaVM);
 #ifndef WEBRTC_ANDROID_OPENSLES
   // voice engine calls into ADM directly
   webrtc::VoiceEngine::SetAndroidObjects(javaVM, env, context);
@@ -62,17 +65,15 @@ int ViEAutoTestAndroid::RunAutotest(int testSelection, int subTestSelection,
           vieAutoTest.ViECodecStandardTest();
           break;
 
-        case 5: //encryption
-          vieAutoTest.ViEEncryptionStandardTest();
-          break;
-
         case 6: // image process
           vieAutoTest.ViEImageProcessStandardTest();
           break;
 
+#if 0  // vie_autotest_network.cc isn't actually pulled into the build at all!
         case 7: // network
           vieAutoTest.ViENetworkStandardTest();
           break;
+#endif
 
         case 8: // Render
           vieAutoTest.ViERenderStandardTest();
@@ -101,17 +102,15 @@ int ViEAutoTestAndroid::RunAutotest(int testSelection, int subTestSelection,
           vieAutoTest.ViECodecAPITest();
           break;
 
-        case 5: //encryption
-          vieAutoTest.ViEEncryptionAPITest();
-          break;
-
         case 6: // image process
           vieAutoTest.ViEImageProcessAPITest();
           break;
 
+#if 0  // vie_autotest_network.cc isn't actually pulled into the build at all!
         case 7: // network
           vieAutoTest.ViENetworkAPITest();
           break;
+#endif
 
         case 8: // Render
           vieAutoTest.ViERenderAPITest();
@@ -140,10 +139,6 @@ int ViEAutoTestAndroid::RunAutotest(int testSelection, int subTestSelection,
 
         case 3: // codec
           vieAutoTest.ViECodecExtendedTest();
-          break;
-
-        case 5: //encryption
-          vieAutoTest.ViEEncryptionExtendedTest();
           break;
 
         case 6: // image process

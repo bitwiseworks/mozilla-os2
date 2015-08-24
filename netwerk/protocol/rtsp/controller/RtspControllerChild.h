@@ -14,6 +14,8 @@
 #include "nsString.h"
 #include "nsTArray.h"
 #include "mozilla/net/RtspChannelChild.h"
+#include "mozilla/Mutex.h"
+#include "nsITimer.h"
 
 namespace mozilla {
 namespace net {
@@ -31,14 +33,14 @@ class RtspControllerChild : public nsIStreamingProtocolController
   ~RtspControllerChild();
 
   bool RecvOnConnected(const uint8_t& index,
-                       const InfallibleTArray<RtspMetadataParam>& meta);
+                       InfallibleTArray<RtspMetadataParam>&& meta);
 
   bool RecvOnMediaDataAvailable(
          const uint8_t& index,
          const nsCString& data,
          const uint32_t& length,
          const uint32_t& offset,
-         const InfallibleTArray<RtspMetadataParam>& meta);
+         InfallibleTArray<RtspMetadataParam>&& meta);
 
   bool RecvOnDisconnected(const uint8_t& index,
                           const nsresult& reason);
@@ -51,6 +53,10 @@ class RtspControllerChild : public nsIStreamingProtocolController
   bool OKToSendIPC();
   void AllowIPC();
   void DisallowIPC();
+
+  // These callbacks will be called when mPlayTimer/mPauseTimer fires.
+  static void PlayTimerCallback(nsITimer *aTimer, void *aClosure);
+  static void PauseTimerCallback(nsITimer *aTimer, void *aClosure);
 
  private:
   bool mIPCOpen;
@@ -73,6 +79,16 @@ class RtspControllerChild : public nsIStreamingProtocolController
   uint32_t mSuspendCount;
   // Detach channel-controller relationship.
   void ReleaseChannel();
+  // This lock protects mPlayTimer and mPauseTimer.
+  Mutex mTimerLock;
+  // Timers to delay the play and pause operations.
+  // They are used for optimization and to avoid sending unnecessary requests to
+  // the server.
+  nsCOMPtr<nsITimer> mPlayTimer;
+  nsCOMPtr<nsITimer> mPauseTimer;
+  // Timers should be stopped if we are going to terminate, such as when
+  // receiving Stop command or OnDisconnected event.
+  void StopPlayAndPauseTimer();
 };
 } // namespace net
 } // namespace mozilla

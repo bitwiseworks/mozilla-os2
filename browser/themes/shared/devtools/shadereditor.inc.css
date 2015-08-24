@@ -6,16 +6,8 @@
 
 .notice-container {
   margin-top: -50vh;
-}
-
-.theme-dark .notice-container {
-  background: url(background-noise-toolbar.png), #343c45; /* Toolbars */
-  color: #f5f7fa; /* Light foreground text */
-}
-
-.theme-light .notice-container {
-  background: url(background-noise-toolbar.png), #f0f1f2; /* Toolbars */
-  color: #585959; /* Grey foreground text */
+  background-color: var(--theme-toolbar-background);
+  color: var(--theme-body-color-alt);
 }
 
 #reload-notice {
@@ -24,19 +16,6 @@
 
 #waiting-notice {
   font-size: 110%;
-}
-
-#waiting-notice::before {
-  display: inline-block;
-  content: "";
-  background: url("chrome://global/skin/icons/loading_16.png") center no-repeat;
-  width: 16px;
-  height: 16px;
-  -moz-margin-end: 6px;
-}
-
-#requests-menu-reload-notice-button {
-  min-height: 2em;
 }
 
 /* Shaders pane */
@@ -70,7 +49,8 @@
 
 .side-menu-widget-item-checkbox .checkbox-check {
   -moz-appearance: none;
-  background: url(itemToggle.png);
+  background-image: url(itemToggle.png);
+  background-color: transparent;
   background-repeat: no-repeat;
   background-clip: content-box;
   background-size: 32px 16px;
@@ -80,8 +60,19 @@
   border: 0;
 }
 
+@media (min-resolution: 2dppx) {
+  .side-menu-widget-item-checkbox .checkbox-check {
+    background-image: url(itemToggle@2x.png);
+  }
+}
+
 .side-menu-widget-item-checkbox[checked] .checkbox-check {
   background-position: 0 0;
+}
+
+/* Invert all toggle icons but the one in the active row for light theme */
+.theme-light .side-menu-widget-item:not(.selected) .checkbox-check {
+  filter: url(filters.svg#invert);
 }
 
 /* Shader source editors */
@@ -91,26 +82,15 @@
   border-top: 1px solid;
 }
 
-.theme-dark .editor-label {
-  background: #343c45; /* Dark toolbars */
-  border-color: #000; /* Match the splitter color. */
-  color: #f5f7fa; /* Light foreground text */
+.editor-label {
+  background: var(--theme-toolbar-background);
+  border-color: var(--theme-splitter-color);
+  color: var(--theme-body-color-alt);
 }
 
-.theme-light .editor-label {
-  background: #f0f1f2; /* Light toolbars */
-  border-color: #aaa; /* Match the splitter color. */
-  color: #585959; /* Grey foreground text */
-}
-
-.theme-dark .editor-label[selected] {
-  background-color: #1d4f73; /* Select Highlight Blue */
-  color: #f5f7fa; /* Light foreground text */
-}
-
-.theme-light .editor-label[selected] {
-  background-color: #4c9ed9; /* Select Highlight Blue */
-  color: #f5f7fa; /* Light foreground text */
+.editor-label[selected] {
+  background-color: var(--theme-selection-background);
+  color: var(--theme-selection-color);
 }
 
 /* Responsive sidebar */

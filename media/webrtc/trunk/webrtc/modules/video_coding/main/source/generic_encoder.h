@@ -15,8 +15,10 @@
 
 #include <stdio.h>
 
-namespace webrtc
-{
+#include "webrtc/system_wrappers/interface/scoped_ptr.h"
+
+namespace webrtc {
+class CriticalSectionWrapper;
 
 namespace media_optimization {
 class MediaOptimization;
@@ -28,8 +30,10 @@ class MediaOptimization;
 class VCMEncodedFrameCallback : public EncodedImageCallback
 {
 public:
-    VCMEncodedFrameCallback();
+    VCMEncodedFrameCallback(EncodedImageCallback* post_encode_callback);
     virtual ~VCMEncodedFrameCallback();
+
+  void SetCritSect(CriticalSectionWrapper* critSect);
 
     /*
     * Callback implementation - codec encode complete
@@ -38,10 +42,6 @@ public:
         EncodedImage& encodedImage,
         const CodecSpecificInfo* codecSpecificInfo = NULL,
         const RTPFragmentationHeader* fragmentationHeader = NULL);
-    /*
-    * Get number of encoded bytes
-    */
-    uint32_t EncodedBytes();
     /*
     * Callback implementation - generic encoder encode complete
     */
@@ -52,23 +52,17 @@ public:
     void SetMediaOpt (media_optimization::MediaOptimization* mediaOpt);
 
     void SetPayloadType(uint8_t payloadType) { _payloadType = payloadType; };
-    void SetCodecType(VideoCodecType codecType) {_codecType = codecType;};
     void SetInternalSource(bool internalSource) { _internalSource = internalSource; };
 
 private:
-    /*
-     * Map information from info into rtp. If no relevant information is found
-     * in info, rtp is set to NULL.
-     */
-    static void CopyCodecSpecific(const CodecSpecificInfo& info,
-                                  RTPVideoHeader** rtp);
-
     VCMPacketizationCallback* _sendCallback;
+    CriticalSectionWrapper* _critSect;
     media_optimization::MediaOptimization* _mediaOpt;
-    uint32_t _encodedBytes;
     uint8_t _payloadType;
-    VideoCodecType _codecType;
     bool _internalSource;
+
+    EncodedImageCallback* post_encode_callback_;
+
 #ifdef DEBUG_ENCODER_BIT_STREAM
     FILE* _bitStreamAfterEncoder;
 #endif

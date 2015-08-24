@@ -46,6 +46,7 @@
  * calling Rollup.
  */
 
+class nsContainerFrame;
 class nsMenuFrame;
 class nsMenuPopupFrame;
 class nsMenuBarFrame;
@@ -188,7 +189,7 @@ public:
     NS_ASSERTION(aPopup, "null popup supplied to nsXULPopupShowingEvent constructor");
   }
 
-  NS_IMETHOD Run() MOZ_OVERRIDE;
+  NS_IMETHOD Run() override;
 
 private:
   nsCOMPtr<nsIContent> mPopup;
@@ -205,19 +206,19 @@ public:
                         nsIContent* aLastPopup,
                         nsPopupType aPopupType,
                         bool aDeselectMenu,
-                        bool aIsRollup)
+                        bool aIsCancel)
     : mPopup(aPopup),
       mNextPopup(aNextPopup),
       mLastPopup(aLastPopup),
       mPopupType(aPopupType),
       mDeselectMenu(aDeselectMenu),
-      mIsRollup(aIsRollup)
+      mIsRollup(aIsCancel)
   {
     NS_ASSERTION(aPopup, "null popup supplied to nsXULPopupHidingEvent constructor");
     // aNextPopup and aLastPopup may be null
   }
 
-  NS_IMETHOD Run() MOZ_OVERRIDE;
+  NS_IMETHOD Run() override;
 
 private:
   nsCOMPtr<nsIContent> mPopup;
@@ -253,7 +254,7 @@ public:
     NS_ASSERTION(aMenu, "null menu supplied to nsXULMenuCommandEvent constructor");
   }
 
-  NS_IMETHOD Run() MOZ_OVERRIDE;
+  NS_IMETHOD Run() override;
 
   void SetCloseMenuMode(CloseMenuMode aCloseMenuMode) { mCloseMenuMode = aCloseMenuMode; }
 
@@ -269,7 +270,7 @@ private:
   CloseMenuMode mCloseMenuMode;
 };
 
-class nsXULPopupManager MOZ_FINAL : public nsIDOMEventListener,
+class nsXULPopupManager final : public nsIDOMEventListener,
                                     public nsIRollupListener,
                                     public nsITimerCallback,
                                     public nsIObserver
@@ -287,13 +288,14 @@ public:
   NS_DECL_NSIDOMEVENTLISTENER
 
   // nsIRollupListener
-  virtual bool Rollup(uint32_t aCount, const nsIntPoint* pos, nsIContent** aLastRolledUp) MOZ_OVERRIDE;
-  virtual bool ShouldRollupOnMouseWheelEvent() MOZ_OVERRIDE;
-  virtual bool ShouldConsumeOnMouseWheelEvent() MOZ_OVERRIDE;
-  virtual bool ShouldRollupOnMouseActivate() MOZ_OVERRIDE;
-  virtual uint32_t GetSubmenuWidgetChain(nsTArray<nsIWidget*> *aWidgetChain) MOZ_OVERRIDE;
-  virtual void NotifyGeometryChange() MOZ_OVERRIDE {}
-  virtual nsIWidget* GetRollupWidget() MOZ_OVERRIDE;
+  virtual bool Rollup(uint32_t aCount, bool aFlush,
+                      const nsIntPoint* pos, nsIContent** aLastRolledUp) override;
+  virtual bool ShouldRollupOnMouseWheelEvent() override;
+  virtual bool ShouldConsumeOnMouseWheelEvent() override;
+  virtual bool ShouldRollupOnMouseActivate() override;
+  virtual uint32_t GetSubmenuWidgetChain(nsTArray<nsIWidget*> *aWidgetChain) override;
+  virtual void NotifyGeometryChange() override {}
+  virtual nsIWidget* GetRollupWidget() override;
 
   static nsXULPopupManager* sInstance;
 
@@ -329,10 +331,10 @@ public:
   //          returns the item before it, while GetNextMenuItem returns the
   //          item after it.
   // aIsPopup - true for menupopups, false for menubars
-  static nsMenuFrame* GetPreviousMenuItem(nsIFrame* aParent,
+  static nsMenuFrame* GetPreviousMenuItem(nsContainerFrame* aParent,
                                           nsMenuFrame* aStart,
                                           bool aIsPopup);
-  static nsMenuFrame* GetNextMenuItem(nsIFrame* aParent,
+  static nsMenuFrame* GetNextMenuItem(nsContainerFrame* aParent,
                                       nsMenuFrame* aStart,
                                       bool aIsPopup);
 
@@ -437,7 +439,7 @@ public:
    * aAsynchronous - true if the first popuphiding event should be sent
    *                 asynchrously. This should be true if HidePopup is called
    *                 from a frame.
-   * aIsRollup - true if this popup is hiding due to a rollup or escape keypress.
+   * aIsCancel - true if this popup is hiding due to being cancelled.
    * aLastPopup - optional popup to close last when hiding a chain of menus.
    *              If null, then all popups will be closed.
    */
@@ -445,7 +447,7 @@ public:
                  bool aHideChain,
                  bool aDeselectMenu,
                  bool aAsynchronous,
-                 bool aIsRollup,
+                 bool aIsCancel,
                  nsIContent* aLastPopup = nullptr);
 
   /**
@@ -670,7 +672,7 @@ protected:
    * aPresContext - nsPresContext for the popup's frame
    * aPopupType - the PopupType of the frame. 
    * aDeselectMenu - true to unhighlight the menu when hiding it
-   * aIsRollup - true if this popup is hiding due to a rollup or escape keypress
+   * aIsCancel - true if this popup is hiding due to being cancelled.
    */
   void FirePopupHidingEvent(nsIContent* aPopup,
                             nsIContent* aNextPopup,
@@ -678,7 +680,7 @@ protected:
                             nsPresContext *aPresContext,
                             nsPopupType aPopupType,
                             bool aDeselectMenu,
-                            bool aIsRollup);
+                            bool aIsCancel);
 
   /**
    * Handle keyboard navigation within a menu popup specified by aItem.
@@ -741,7 +743,7 @@ protected:
   int32_t mRangeOffset;
   // Device pixels relative to the showing popup's presshell's
   // root prescontext's root frame.
-  nsIntPoint mCachedMousePoint;
+  mozilla::LayoutDeviceIntPoint mCachedMousePoint;
 
   // cached modifiers
   mozilla::Modifiers mCachedModifiers;

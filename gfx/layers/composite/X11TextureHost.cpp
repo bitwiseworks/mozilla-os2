@@ -13,8 +13,9 @@
 #include "gfxXlibSurface.h"
 #include "gfx2DGlue.h"
 
-using namespace mozilla;
-using namespace mozilla::layers;
+namespace mozilla {
+namespace layers {
+
 using namespace mozilla::gfx;
 
 X11TextureHost::X11TextureHost(TextureFlags aFlags,
@@ -24,9 +25,9 @@ X11TextureHost::X11TextureHost(TextureFlags aFlags,
   nsRefPtr<gfxXlibSurface> surface = aDescriptor.OpenForeign();
   mSurface = surface.get();
 
-  // The host always frees the pixmap.
-  MOZ_ASSERT(!(aFlags & TEXTURE_DEALLOCATE_CLIENT));
-  mSurface->TakePixmap();
+  if (!(aFlags & TextureFlags::DEALLOCATE_CLIENT)) {
+    mSurface->TakePixmap();
+  }
 }
 
 bool
@@ -40,13 +41,13 @@ X11TextureHost::Lock()
     switch (mCompositor->GetBackendType()) {
       case LayersBackend::LAYERS_BASIC:
         mTextureSource =
-          new X11TextureSourceBasic(static_cast<BasicCompositor*>(mCompositor),
+          new X11TextureSourceBasic(static_cast<BasicCompositor*>(mCompositor.get()),
                                     mSurface);
         break;
 #ifdef GL_PROVIDER_GLX
       case LayersBackend::LAYERS_OPENGL:
         mTextureSource =
-          new X11TextureSourceOGL(static_cast<CompositorOGL*>(mCompositor),
+          new X11TextureSourceOGL(static_cast<CompositorOGL*>(mCompositor.get()),
                                   mSurface);
         break;
 #endif
@@ -83,4 +84,7 @@ IntSize
 X11TextureHost::GetSize() const
 {
   return ToIntSize(mSurface->GetSize());
+}
+
+}
 }

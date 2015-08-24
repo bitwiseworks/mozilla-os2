@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.mozilla.gecko.Actions;
+import org.mozilla.gecko.home.HomePager;
 
 import android.app.Activity;
 import android.content.Intent;
@@ -25,10 +26,10 @@ import com.jayway.android.robotium.solo.Condition;
  */
 public class testShareLink extends AboutHomeTest {
     String url;
-    String urlTitle = "Big Link";
+    String urlTitle = StringHelper.ROBOCOP_BIG_LINK_TITLE;
 
     public void testShareLink() {
-        url = getAbsoluteUrl("/robocop/robocop_big_link.html");
+        url = getAbsoluteUrl(StringHelper.ROBOCOP_BIG_LINK_URL);
         ArrayList<String> shareOptions;
         blockForGeckoReady();
 
@@ -36,9 +37,9 @@ public class testShareLink extends AboutHomeTest {
         openAboutHomeTab(AboutHomeTabs.READING_LIST);
 
         inputAndLoadUrl(url);
-        verifyPageTitle(urlTitle); // Waiting for page title to ensure the page is loaded
+        verifyUrlBarTitle(url); // Waiting for page title to ensure the page is loaded
 
-        selectMenuItem("Share");
+        selectMenuItem(StringHelper.SHARE_LABEL);
         if (Build.VERSION.SDK_INT >= 14) {
             // Check for our own sync in the submenu.
             waitForText("Sync$");
@@ -46,7 +47,7 @@ public class testShareLink extends AboutHomeTest {
             waitForText("Share via");
         }
 
-        // Get list of current avaliable share activities and verify them
+        // Get list of current available share activities and verify them
         shareOptions = getShareOptions();
         ArrayList<String> displayedOptions = getShareOptionsList();
         for (String option:shareOptions) {
@@ -68,7 +69,7 @@ public class testShareLink extends AboutHomeTest {
         // Test the share popup in the Bookmarks page
         openAboutHomeTab(AboutHomeTabs.BOOKMARKS);
 
-        final ListView bookmarksList = findListViewWithTag("bookmarks");
+        final ListView bookmarksList = findListViewWithTag(HomePager.LIST_TAG_BOOKMARKS);
         mAsserter.is(waitForNonEmptyListToLoad(bookmarksList), true, "list is properly loaded");
 
         int headerViewsCount = bookmarksList.getHeaderViewsCount();
@@ -93,16 +94,16 @@ public class testShareLink extends AboutHomeTest {
 
         // Prepopulate top sites with history items to overflow tiles.
         // We are trying to move away from using reflection and doing more black-box testing.
-        inputAndLoadUrl(getAbsoluteUrl("/robocop/robocop_blank_01.html"));
-        inputAndLoadUrl(getAbsoluteUrl("/robocop/robocop_blank_02.html"));
-        inputAndLoadUrl(getAbsoluteUrl("/robocop/robocop_blank_03.html"));
-        inputAndLoadUrl(getAbsoluteUrl("/robocop/robocop_blank_04.html"));
+        inputAndLoadUrl(getAbsoluteUrl(StringHelper.ROBOCOP_BLANK_PAGE_01_URL));
+        inputAndLoadUrl(getAbsoluteUrl(StringHelper.ROBOCOP_BLANK_PAGE_02_URL));
+        inputAndLoadUrl(getAbsoluteUrl(StringHelper.ROBOCOP_BLANK_PAGE_03_URL));
+        inputAndLoadUrl(getAbsoluteUrl(StringHelper.ROBOCOP_BLANK_PAGE_04_URL));
         if (mDevice.type.equals("tablet")) {
             // Tablets have more tile spaces to fill.
-            inputAndLoadUrl(getAbsoluteUrl("/robocop/robocop_blank_05.html"));
-            inputAndLoadUrl(getAbsoluteUrl("/robocop/robocop_boxes.html"));
-            inputAndLoadUrl(getAbsoluteUrl("/robocop/robocop_search.html"));
-            inputAndLoadUrl(getAbsoluteUrl("/robocop/robocop_text_page.html"));
+            inputAndLoadUrl(getAbsoluteUrl(StringHelper.ROBOCOP_BLANK_PAGE_05_URL));
+            inputAndLoadUrl(getAbsoluteUrl(StringHelper.ROBOCOP_BOXES_URL));
+            inputAndLoadUrl(getAbsoluteUrl(StringHelper.ROBOCOP_SEARCH_URL));
+            inputAndLoadUrl(getAbsoluteUrl(StringHelper.ROBOCOP_TEXT_PAGE_URL));
         }
 
         // Test the share popup in Top Sites.
@@ -113,16 +114,16 @@ public class testShareLink extends AboutHomeTest {
         int height = mDriver.getGeckoHeight();
         mActions.drag(width / 2, width / 2, height - 10, height / 2);
 
-        ListView topSitesList = findListViewWithTag("top_sites");
+        ListView topSitesList = findListViewWithTag(HomePager.LIST_TAG_TOP_SITES);
         mAsserter.is(waitForNonEmptyListToLoad(topSitesList), true, "list is properly loaded");
         View mostVisitedItem = topSitesList.getChildAt(topSitesList.getHeaderViewsCount());
         mSolo.clickLongOnView(mostVisitedItem);
         verifySharePopup(shareOptions,"top_sites");
 
-        // Test the share popup in the Most Recent tab
-        openAboutHomeTab(AboutHomeTabs.MOST_RECENT);
+        // Test the share popup in the history tab
+        openAboutHomeTab(AboutHomeTabs.HISTORY);
 
-        ListView mostRecentList = findListViewWithTag("most_recent");
+        ListView mostRecentList = findListViewWithTag(HomePager.LIST_TAG_HISTORY);
         mAsserter.is(waitForNonEmptyListToLoad(mostRecentList), true, "list is properly loaded");
 
         // Getting second child after header views because the first is the "Today" label
@@ -148,15 +149,15 @@ public class testShareLink extends AboutHomeTest {
         /**
          * Adding a wait for the page title to make sure the Awesomebar will be dismissed
          * Because of Bug 712370 the Awesomescreen will be dismissed when the Share Menu is closed
-         * so there is no need for handeling this different depending on where the share menu was invoced from
+         * so there is no need for handling this different depending on where the share menu was invoked from
          * TODO: Look more into why the delay is needed here now and it was working before
          */
         waitForText(urlTitle);
     }
 
     // Create a SEND intent and get the possible activities offered
-    public ArrayList getShareOptions() {
-        ArrayList<String> shareOptions = new ArrayList();
+    public ArrayList<String> getShareOptions() {
+        ArrayList<String> shareOptions = new ArrayList<>();
         Activity currentActivity = getActivity();
         final Intent shareIntent = new Intent(Intent.ACTION_SEND);
         shareIntent.putExtra(Intent.EXTRA_TEXT, url);
@@ -208,14 +209,14 @@ public class testShareLink extends AboutHomeTest {
     }
 
     public ArrayList<String> getSharePopupOption() {
-        ArrayList<String> displayedOptions = new ArrayList();
+        ArrayList<String> displayedOptions = new ArrayList<>();
         AbsListView shareMenu = getDisplayedShareList();
         getGroupTextViews(shareMenu, displayedOptions);
         return displayedOptions;
     }
 
     public ArrayList<String> getShareSubMenuOption() {
-        ArrayList<String> displayedOptions = new ArrayList();
+        ArrayList<String> displayedOptions = new ArrayList<>();
         AbsListView shareMenu = getDisplayedShareList();
         getGroupTextViews(shareMenu, displayedOptions);
         return displayedOptions;
@@ -242,12 +243,12 @@ public class testShareLink extends AboutHomeTest {
 
     private AbsListView getDisplayedShareList() {
         mViewGroup = null;
-        boolean success = waitForTest(new BooleanTest() {
+        boolean success = waitForCondition(new Condition() {
             @Override
-            public boolean test() {
+            public boolean isSatisfied() {
                 ArrayList<View> views = mSolo.getCurrentViews();
                 for (View view : views) {
-                    // List may be displayed in different view formats. 
+                    // List may be displayed in different view formats.
                     // On JB, GridView is common; on ICS-, ListView is common.
                     if (view instanceof ListView ||
                         view instanceof GridView) {

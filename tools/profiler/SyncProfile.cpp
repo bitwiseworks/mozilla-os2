@@ -7,22 +7,24 @@
 #include "SyncProfile.h"
 #include "UnwinderThread2.h"
 
-SyncProfile::SyncProfile(const char* aName, int aEntrySize, PseudoStack *aStack,
-                         Thread::tid_t aThreadId, bool aIsMainThread)
-  : ThreadProfile(aName, aEntrySize, aStack, aThreadId,
-                 Sampler::AllocPlatformData(aThreadId), aIsMainThread,
-                 tlsStackTop.get()),
-    mOwnerState(REFERENCED),
-    mUtb(nullptr)
+SyncProfile::SyncProfile(ThreadInfo* aInfo, int aEntrySize)
+  : ThreadProfile(aInfo, new ProfileBuffer(aEntrySize))
+  , mOwnerState(REFERENCED)
+  , mUtb(nullptr)
 {
+  MOZ_COUNT_CTOR(SyncProfile);
 }
 
 SyncProfile::~SyncProfile()
 {
+  MOZ_COUNT_DTOR(SyncProfile);
   if (mUtb) {
     utb__release_sync_buffer(mUtb);
   }
-  Sampler::FreePlatformData(GetPlatformData());
+
+  // SyncProfile owns the ThreadInfo; see NewSyncProfile.
+  ThreadInfo* info = GetThreadInfo();
+  delete info;
 }
 
 bool
@@ -51,8 +53,10 @@ SyncProfile::EndUnwind()
 {
   // Mutex must be held when this is called
   GetMutex()->AssertCurrentThreadOwns();
+  if (mUtb) {
+    utb__end_sync_buffer_unwind(mUtb);
+  }
   if (mOwnerState != ORPHANED) {
-    flush();
     mOwnerState = OWNED;
   }
   // Save mOwnerState before we release the mutex

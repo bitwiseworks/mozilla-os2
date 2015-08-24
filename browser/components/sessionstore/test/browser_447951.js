@@ -18,26 +18,27 @@ function test() {
   });
 
   let tab = gBrowser.addTab();
-  whenBrowserLoaded(tab.linkedBrowser, function() {
+  promiseBrowserLoaded(tab.linkedBrowser).then(() => {
     let tabState = { entries: [] };
     let max_entries = gPrefService.getIntPref("browser.sessionhistory.max_entries");
     for (let i = 0; i < max_entries; i++)
       tabState.entries.push({ url: baseURL + i });
 
-    ss.setTabState(tab, JSON.stringify(tabState));
-    whenTabRestored(tab, function() {
-      SyncHandlers.get(tab.linkedBrowser).flush();
+    promiseTabState(tab, tabState).then(() => {
+      TabState.flush(tab.linkedBrowser);
       tabState = JSON.parse(ss.getTabState(tab));
       is(tabState.entries.length, max_entries, "session history filled to the limit");
       is(tabState.entries[0].url, baseURL + 0, "... but not more");
 
       // visit yet another anchor (appending it to session history)
-      tab.linkedBrowser.contentDocument.querySelector("a").click();
+      runInContent(tab.linkedBrowser, function(win) {
+        win.document.querySelector("a").click();
+      }, null).then(check);
 
       function check() {
-        SyncHandlers.get(tab.linkedBrowser).flush();
+        TabState.flush(tab.linkedBrowser);
         tabState = JSON.parse(ss.getTabState(tab));
-        if (tabState.entries[tabState.entries.length - 1].url != baseURL + "end") {
+        if (tab.linkedBrowser.currentURI.spec != baseURL + "end") {
           // It may take a few passes through the event loop before we
           // get the right URL.
           executeSoon(check);
@@ -55,8 +56,6 @@ function test() {
         gBrowser.removeTab(tab);
         finish();
       }
-
-      check();
     });
   });
 }

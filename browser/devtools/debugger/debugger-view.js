@@ -1,4 +1,4 @@
-/* -*- Mode: javascript; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -27,7 +27,7 @@ const SEARCH_TOKEN_FLAG = "#";
 const SEARCH_LINE_FLAG = ":";
 const SEARCH_VARIABLE_FLAG = "*";
 const SEARCH_AUTOFILL = [SEARCH_GLOBAL_FLAG, SEARCH_FUNCTION_FLAG, SEARCH_TOKEN_FLAG];
-const EDITOR_VARIABLE_HOVER_DELAY = 350; // ms
+const EDITOR_VARIABLE_HOVER_DELAY = 750; // ms
 const EDITOR_VARIABLE_POPUP_POSITION = "topcenter bottomleft";
 const TOOLBAR_ORDER_POPUP_POSITION = "topcenter bottomleft";
 
@@ -213,11 +213,17 @@ let DebuggerView = {
     bindKey("_doGlobalSearch", "globalSearchKey", { alt: true });
     bindKey("_doFunctionSearch", "functionSearchKey");
     extraKeys[Editor.keyFor("jumpToLine")] = false;
+    extraKeys["Esc"] = false;
 
     function bindKey(func, key, modifiers = {}) {
-      let key = document.getElementById(key).getAttribute("key");
+      key = document.getElementById(key).getAttribute("key");
       let shortcut = Editor.accel(key, modifiers);
       extraKeys[shortcut] = () => DebuggerView.Filtering[func]();
+    }
+
+    let gutters = ["breakpoints"];
+    if (Services.prefs.getBoolPref("devtools.debugger.tracer")) {
+      gutters.unshift("hit-counts");
     }
 
     this.editor = new Editor({
@@ -225,9 +231,10 @@ let DebuggerView = {
       readOnly: true,
       lineNumbers: true,
       showAnnotationRuler: true,
-      gutters: [ "breakpoints" ],
+      gutters: gutters,
       extraKeys: extraKeys,
-      contextMenu: "sourceEditorContextMenu"
+      contextMenu: "sourceEditorContextMenu",
+      enableCodeFolding: false
     });
 
     this.editor.appendTo(document.getElementById("editor")).then(() => {
@@ -236,11 +243,18 @@ let DebuggerView = {
       this._onEditorLoad(aCallback);
     });
 
-    this.editor.on("gutterClick", (ev, line) => {
-      if (this.editor.hasBreakpoint(line)) {
-        this.editor.removeBreakpoint(line);
-      } else {
-        this.editor.addBreakpoint(line);
+    this.editor.on("gutterClick", (ev, line, button) => {
+      // A right-click shouldn't do anything but keep track of where
+      // it was clicked.
+      if (button == 2) {
+        this.clickedLine = line;
+      }
+      else {
+        if (this.editor.hasBreakpoint(line)) {
+          this.editor.removeBreakpoint(line);
+        } else {
+          this.editor.addBreakpoint(line);
+        }
       }
     });
   },
@@ -370,14 +384,13 @@ let DebuggerView = {
    *        The source object coming from the active thread.
    * @param object aFlags
    *        Additional options for setting the source. Supported options:
-   *          - force: boolean allowing whether we can get the selected url's
-   *                   text again.
+   *          - force: boolean forcing all text to be reshown in the editor
    * @return object
    *         A promise that is resolved after the source text has been set.
    */
   _setEditorSource: function(aSource, aFlags={}) {
     // Avoid setting the same source text in the editor again.
-    if (this._editorSource.url == aSource.url && !aFlags.force) {
+    if (this._editorSource.actor == aSource.actor && !aFlags.force) {
       return this._editorSource.promise;
     }
     let transportType = gClient.localTransport ? "_LOCAL" : "_REMOTE";
@@ -388,21 +401,23 @@ let DebuggerView = {
     let deferred = promise.defer();
 
     this._setEditorText(L10N.getStr("loadingText"));
-    this._editorSource = { url: aSource.url, promise: deferred.promise };
+    this._editorSource = { actor: aSource.actor, promise: deferred.promise };
 
     DebuggerController.SourceScripts.getText(aSource).then(([, aText, aContentType]) => {
       // Avoid setting an unexpected source. This may happen when switching
       // very fast between sources that haven't been fetched yet.
-      if (this._editorSource.url != aSource.url) {
+      if (this._editorSource.actor != aSource.actor) {
         return;
       }
 
       this._setEditorText(aText);
       this._setEditorMode(aSource.url, aContentType, aText);
 
-      // Synchronize any other components with the currently displayed source.
-      DebuggerView.Sources.selectedValue = aSource.url;
+      // Synchronize any other components with the currently displayed
+      // source.
+      DebuggerView.Sources.selectedValue = aSource.actor;
       DebuggerController.Breakpoints.updateEditorBreakpoints();
+      DebuggerController.HitCounts.updateEditorHitCounts();
 
       histogram.add(Date.now() - startTime);
 
@@ -428,8 +443,8 @@ let DebuggerView = {
    * Update the source editor's current caret and debug location based on
    * a requested url and line.
    *
-   * @param string aUrl
-   *        The target source url.
+   * @param string aActor
+   *        The target actor id.
    * @param number aLine [optional]
    *        The target line in the source.
    * @param object aFlags [optional]
@@ -441,14 +456,13 @@ let DebuggerView = {
    *          - noDebug: don't set the debug location at the specified line
    *          - align: string specifying whether to align the specified line
    *                   at the "top", "center" or "bottom" of the editor
-   *          - force: boolean allowing whether we can get the selected url's
-   *                   text again
+   *          - force: boolean forcing all text to be reshown in the editor
    * @return object
    *         A promise that is resolved after the source text has been set.
    */
-  setEditorLocation: function(aUrl, aLine = 0, aFlags = {}) {
+  setEditorLocation: function(aActor, aLine = 0, aFlags = {}) {
     // Avoid trying to set a source for a url that isn't known yet.
-    if (!this.Sources.containsValue(aUrl)) {
+    if (!this.Sources.containsValue(aActor)) {
       return promise.reject(new Error("Unknown source for the specified URL."));
     }
 
@@ -458,17 +472,23 @@ let DebuggerView = {
       let cachedFrames = DebuggerController.activeThread.cachedFrames;
       let currentDepth = DebuggerController.StackFrames.currentFrameDepth;
       let frame = cachedFrames[currentDepth];
-      if (frame && frame.where.url == aUrl) {
+      if (frame && frame.source.actor == aActor) {
         aLine = frame.where.line;
       }
     }
 
-    let sourceItem = this.Sources.getItemByValue(aUrl);
+    let sourceItem = this.Sources.getItemByValue(aActor);
     let sourceForm = sourceItem.attachment.source;
+
+    this._editorLoc = { actor: sourceForm.actor };
 
     // Make sure the requested source client is shown in the editor, then
     // update the source editor's caret position and debug location.
     return this._setEditorSource(sourceForm, aFlags).then(([,, aContentType]) => {
+      if (this._editorLoc.actor !== sourceForm.actor) {
+        return;
+      }
+
       // Record the contentType learned from fetching
       sourceForm.contentType = aContentType;
       // Line numbers in the source editor should start from 1. If invalid

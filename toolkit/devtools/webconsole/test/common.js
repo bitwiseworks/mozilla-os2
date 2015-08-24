@@ -120,6 +120,9 @@ function checkValue(aName, aValue, aExpected)
   else if (aValue === undefined) {
     ok(false, "'" + aName + "' is undefined");
   }
+  else if (aValue === null) {
+    ok(false, "'" + aName + "' is null");
+  }
   else if (typeof aExpected == "string" || typeof aExpected == "number" ||
            typeof aExpected == "boolean") {
     is(aValue, aExpected, "property '" + aName + "'");
@@ -155,6 +158,24 @@ function checkHeadersOrCookies(aArray, aExpected)
       ok(false, header + " was not found");
     }
   }
+}
+
+function checkRawHeaders(aText, aExpected)
+{
+  let headers = aText.split(/\r\n|\n|\r/);
+  let arr = [];
+  for (let header of headers) {
+    let index = header.indexOf(": ");
+    if (index < 0) {
+      continue;
+    }
+    arr.push({
+      name: header.substr(0, index),
+      value: header.substr(index + 2)
+    });
+  }
+
+  checkHeadersOrCookies(arr, aExpected);
 }
 
 var gTestState = {};

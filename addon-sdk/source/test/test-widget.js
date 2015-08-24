@@ -20,6 +20,7 @@ const tabs = require("sdk/tabs/utils");
 const { merge } = require("sdk/util/object");
 const unload = require("sdk/system/unload");
 const fixtures = require("./fixtures");
+const packaging = require("@loader/options");
 
 let jetpackID = "testID";
 try {
@@ -36,8 +37,6 @@ function openNewWindowTab(url, options) {
     if (options.onLoad) {
       options.onLoad({ target: { defaultView: window } })
     }
-
-    return newTab;
   });
 }
 
@@ -94,8 +93,8 @@ exports.testConstructor = function(assert, done) {
   // Test automatic widget destroy on unload
   let { loader } = LoaderWithHookedConsole(module);
   let widgetsFromLoader = loader.require("sdk/widget");
-  let widgetStartCount = widgetCount();
-  let w = widgetsFromLoader.Widget({ id: "destroy-on-unload", label: "foo", content: "bar" });
+  widgetStartCount = widgetCount();
+  w = widgetsFromLoader.Widget({ id: "destroy-on-unload", label: "foo", content: "bar" });
   assert.equal(widgetCount(), widgetStartCount + 1, "widget has been correctly added");
   loader.unload();
   assert.equal(widgetCount(), widgetStartCount, "widget has been destroyed on module unload");
@@ -164,8 +163,8 @@ exports.testConstructor = function(assert, done) {
 
   // Test position restore on create/destroy/create
   // Create 3 ordered widgets
-  let w1 = widgets.Widget({id: "position-first", label:"first", content: "bar"});
-  let w2 = widgets.Widget({id: "position-second", label:"second", content: "bar"});
+  w1 = widgets.Widget({id: "position-first", label:"first", content: "bar"});
+  w2 = widgets.Widget({id: "position-second", label:"second", content: "bar"});
   let w3 = widgets.Widget({id: "position-third", label:"third", content: "bar"});
   // Remove the middle widget
   assert.equal(widgetNode(1).getAttribute("label"), "second", "second widget is the second widget inserted");
@@ -538,7 +537,7 @@ exports.testConstructor = function(assert, done) {
       assert.equal(widgetCount2(), widgetStartCount2, "2nd window has correct number of child elements after second destroy");
 
       close(browserWindow).then(doneTest);
-    }});
+    }}).catch(assert.fail);
   });
 
   // test window closing
@@ -634,7 +633,7 @@ exports.testConstructor = function(assert, done) {
         browserWindow.setToolbarVisibility(container(), true);
 
         close(browserWindow2).then(doneTest);
-      }});
+      }}).catch(assert.fail);
     });
   }
 
@@ -1179,7 +1178,7 @@ exports.testReinsertion = function(assert, done) {
       loader.unload();
       done();
     });
-  }});
+  }}).catch(assert.fail);
 };
 
 exports.testWideWidget = function testWideWidget(assert) {
@@ -1209,5 +1208,11 @@ exports.testWideWidget = function testWideWidget(assert) {
   assert.notEqual(widgetNode, null,
     "regular size widget are in the UI");
 };
+
+if (packaging.isNative) {
+  module.exports = {
+    "test skip on jpm": (assert) => assert.pass("skipping this file with jpm")
+  };
+}
 
 require("sdk/test").run(exports);

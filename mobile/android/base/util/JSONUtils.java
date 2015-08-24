@@ -4,12 +4,20 @@
 
 package org.mozilla.gecko.util;
 
-import java.util.UUID;
-
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import android.os.Bundle;
+import android.util.Log;
+
+import java.util.HashSet;
+import java.util.Set;
+import java.util.UUID;
+
 public final class JSONUtils {
+    private static final String LOGTAG = "GeckoJSONUtils";
+
     private JSONUtils() {}
 
     public static UUID getUUID(String name, JSONObject json) {
@@ -25,4 +33,37 @@ public final class JSONUtils {
             throw new IllegalArgumentException(name + "=" + uuidString, e);
         }
     }
+
+    public static JSONObject bundleToJSON(Bundle bundle) {
+        if (bundle == null || bundle.isEmpty()) {
+            return null;
+        }
+
+        JSONObject json = new JSONObject();
+        for (String key : bundle.keySet()) {
+            try {
+                json.put(key, bundle.get(key));
+            } catch (JSONException e) {
+                Log.w(LOGTAG, "Error building JSON response.", e);
+            }
+        }
+
+        return json;
+    }
+
+    // Handles conversions between a JSONArray and a Set<String>
+    public static Set<String> parseStringSet(JSONArray json) {
+        final Set<String> ret = new HashSet<String>();
+
+        for (int i = 0; i < json.length(); i++) {
+            try {
+                ret.add(json.getString(i));
+            } catch(JSONException ex) {
+                Log.i(LOGTAG, "Error parsing json", ex);
+            }
+        }
+
+        return ret;
+    }
+
 }

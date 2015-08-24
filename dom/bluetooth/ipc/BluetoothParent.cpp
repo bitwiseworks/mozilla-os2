@@ -24,7 +24,7 @@ USING_BLUETOOTH_NAMESPACE
  * BluetoothRequestParent::ReplyRunnable
  ******************************************************************************/
 
-class BluetoothRequestParent::ReplyRunnable : public BluetoothReplyRunnable
+class BluetoothRequestParent::ReplyRunnable final : public BluetoothReplyRunnable
 {
   BluetoothRequestParent* mRequest;
 
@@ -37,7 +37,7 @@ public:
   }
 
   NS_IMETHOD
-  Run() MOZ_OVERRIDE
+  Run() override
   {
     MOZ_ASSERT(NS_IsMainThread());
     MOZ_ASSERT(mReply);
@@ -59,14 +59,21 @@ public:
   void
   Revoke()
   {
-    MOZ_ASSERT(NS_IsMainThread());
-    mRequest = nullptr;
+    ReleaseMembers();
   }
 
   virtual bool
-  ParseSuccessfulReply(JS::MutableHandle<JS::Value> aValue) MOZ_OVERRIDE
+  ParseSuccessfulReply(JS::MutableHandle<JS::Value> aValue) override
   {
     MOZ_CRASH("This should never be called!");
+  }
+
+  virtual void
+  ReleaseMembers() override
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+    mRequest = nullptr;
+    BluetoothReplyRunnable::ReleaseMembers();
   }
 };
 
@@ -211,6 +218,8 @@ BluetoothParent::RecvPBluetoothRequestConstructor(
       return actor->DoRequest(aRequest.get_ConnectRequest());
     case Request::TDisconnectRequest:
       return actor->DoRequest(aRequest.get_DisconnectRequest());
+    case Request::TIsConnectedRequest:
+      return actor->DoRequest(aRequest.get_IsConnectedRequest());
     case Request::TSendFileRequest:
       return actor->DoRequest(aRequest.get_SendFileRequest());
     case Request::TStopSendingFileRequest:
@@ -498,6 +507,18 @@ BluetoothRequestParent::DoRequest(const DisconnectRequest& aRequest)
   mService->Disconnect(aRequest.address(),
                        aRequest.serviceUuid(),
                        mReplyRunnable.get());
+
+  return true;
+}
+
+bool
+BluetoothRequestParent::DoRequest(const IsConnectedRequest& aRequest)
+{
+  MOZ_ASSERT(mService);
+  MOZ_ASSERT(mRequestType == Request::TIsConnectedRequest);
+
+  mService->IsConnected(aRequest.serviceUuid(),
+                        mReplyRunnable.get());
 
   return true;
 }

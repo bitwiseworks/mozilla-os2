@@ -31,12 +31,15 @@ public:
                                                   const InputEventInit& aParam,
                                                   ErrorResult& aRv);
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE
+  virtual JSObject* WrapObjectInternal(JSContext* aCx) override
   {
     return InputEventBinding::Wrap(aCx, this);
   }
 
   bool IsComposing();
+
+protected:
+  ~InputEvent() {}
 };
 
 } // namespace dom

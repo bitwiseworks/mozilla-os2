@@ -32,7 +32,7 @@ bool ots_prep_parse(OpenTypeFile *file, const uint8_t *data, size_t length) {
 
 bool ots_prep_should_serialise(OpenTypeFile *file) {
   if (!file->glyf) return false;  // this table is not for CFF fonts.
-  return g_transcode_hints && file->prep;
+  return file->prep;
 }
 
 bool ots_prep_serialise(OTSStream *out, OpenTypeFile *file) {
@@ -50,3 +50,5 @@ void ots_prep_free(OpenTypeFile *file) {
 }
 
 }  // namespace ots
+
+#undef TABLE_NAME

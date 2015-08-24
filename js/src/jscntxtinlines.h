@@ -11,13 +11,13 @@
 #include "jscompartment.h"
 
 #include "jsiter.h"
-#include "jsworkers.h"
 
 #include "builtin/Object.h"
-#include "jit/IonFrames.h"
-#include "vm/ForkJoin.h"
+#include "jit/JitFrames.h"
+#include "vm/HelperThreads.h"
 #include "vm/Interpreter.h"
 #include "vm/ProxyObject.h"
+#include "vm/Symbol.h"
 
 namespace js {
 
@@ -36,7 +36,7 @@ class CompartmentChecker
         JSContext* activeContext = nullptr;
         if (cx->isJSContext())
             activeContext = cx->asJSContext()->runtime()->activeContext;
-        JS_ASSERT_IF(activeContext, cx == activeContext);
+        MOZ_ASSERT_IF(activeContext, cx == activeContext);
 #endif
     }
 
@@ -56,8 +56,8 @@ class CompartmentChecker
 
     /* Note: should only be used when neither c1 nor c2 may be the atoms compartment. */
     static void check(JSCompartment* c1, JSCompartment* c2) {
-        JS_ASSERT(!c1->runtimeFromAnyThread()->isAtomsCompartment(c1));
-        JS_ASSERT(!c2->runtimeFromAnyThread()->isAtomsCompartment(c2));
+        MOZ_ASSERT(!c1->runtimeFromAnyThread()->isAtomsCompartment(c1));
+        MOZ_ASSERT(!c2->runtimeFromAnyThread()->isAtomsCompartment(c2));
         if (c1 != c2)
             fail(c1, c2);
     }
@@ -123,19 +123,7 @@ class CompartmentChecker
             check(*p);
     }
 
-    void check(jsid id) {
-        if (JSID_IS_OBJECT(id))
-            check(JSID_TO_OBJECT(id));
-    }
-
-    void check(JSIdArray* ida) {
-        if (ida) {
-            for (int i = 0; i < ida->length; i++) {
-                if (JSID_IS_OBJECT(ida->vector[i]))
-                    check(ida->vector[i]);
-            }
-        }
-    }
+    void check(jsid id) {}
 
     void check(JSScript* script) {
         if (script)
@@ -144,6 +132,7 @@ class CompartmentChecker
 
     void check(InterpreterFrame* fp);
     void check(AbstractFramePtr frame);
+    void check(SavedStacks* stacks);
 };
 #endif /* JS_CRASH_DIAGNOSTICS */
 
@@ -152,14 +141,12 @@ class CompartmentChecker
  * depends on other objects not having been swept yet.
  */
 #define START_ASSERT_SAME_COMPARTMENT()                                       \
-    if (!cx->isExclusiveContext())                                            \
-        return;                                                               \
     if (cx->isJSContext() && cx->asJSContext()->runtime()->isHeapBusy())      \
         return;                                                               \
-    CompartmentChecker c(cx->asExclusiveContext())
+    CompartmentChecker c(cx)
 
 template <class T1> inline void
-assertSameCompartment(ThreadSafeContext* cx, const T1& t1)
+assertSameCompartment(ExclusiveContext* cx, const T1& t1)
 {
 #ifdef JS_CRASH_DIAGNOSTICS
     START_ASSERT_SAME_COMPARTMENT();
@@ -168,16 +155,16 @@ assertSameCompartment(ThreadSafeContext* cx, const T1& t1)
 }
 
 template <class T1> inline void
-assertSameCompartmentDebugOnly(ThreadSafeContext* cx, const T1& t1)
+assertSameCompartmentDebugOnly(ExclusiveContext* cx, const T1& t1)
 {
-#ifdef DEBUG
+#if defined(DEBUG) && defined(JS_CRASH_DIAGNOSTICS)
     START_ASSERT_SAME_COMPARTMENT();
     c.check(t1);
 #endif
 }
 
 template <class T1, class T2> inline void
-assertSameCompartment(ThreadSafeContext* cx, const T1& t1, const T2& t2)
+assertSameCompartment(ExclusiveContext* cx, const T1& t1, const T2& t2)
 {
 #ifdef JS_CRASH_DIAGNOSTICS
     START_ASSERT_SAME_COMPARTMENT();
@@ -187,7 +174,7 @@ assertSameCompartment(ThreadSafeContext* cx, const T1& t1, const T2& t2)
 }
 
 template <class T1, class T2, class T3> inline void
-assertSameCompartment(ThreadSafeContext* cx, const T1& t1, const T2& t2, const T3& t3)
+assertSameCompartment(ExclusiveContext* cx, const T1& t1, const T2& t2, const T3& t3)
 {
 #ifdef JS_CRASH_DIAGNOSTICS
     START_ASSERT_SAME_COMPARTMENT();
@@ -198,7 +185,7 @@ assertSameCompartment(ThreadSafeContext* cx, const T1& t1, const T2& t2, const T
 }
 
 template <class T1, class T2, class T3, class T4> inline void
-assertSameCompartment(ThreadSafeContext* cx,
+assertSameCompartment(ExclusiveContext* cx,
                       const T1& t1, const T2& t2, const T3& t3, const T4& t4)
 {
 #ifdef JS_CRASH_DIAGNOSTICS
@@ -211,7 +198,7 @@ assertSameCompartment(ThreadSafeContext* cx,
 }
 
 template <class T1, class T2, class T3, class T4, class T5> inline void
-assertSameCompartment(ThreadSafeContext* cx,
+assertSameCompartment(ExclusiveContext* cx,
                       const T1& t1, const T2& t2, const T3& t3, const T4& t4, const T5& t5)
 {
 #ifdef JS_CRASH_DIAGNOSTICS
@@ -239,7 +226,7 @@ CallJSNative(JSContext* cx, Native native, const CallArgs& args)
     bool ok = native(cx, args.length(), args.base());
     if (ok) {
         assertSameCompartment(cx, args.rval());
-        JS_ASSERT_IF(!alreadyThrowing, !cx->isExceptionPending());
+        MOZ_ASSERT_IF(!alreadyThrowing, !cx->isExceptionPending());
     }
     return ok;
 }
@@ -255,7 +242,7 @@ CallNativeImpl(JSContext* cx, NativeImpl impl, const CallArgs& args)
     bool ok = impl(cx, args);
     if (ok) {
         assertSameCompartment(cx, args.rval());
-        JS_ASSERT_IF(!alreadyThrowing, !cx->isExceptionPending());
+        MOZ_ASSERT_IF(!alreadyThrowing, !cx->isExceptionPending());
     }
     return ok;
 }
@@ -268,7 +255,7 @@ CallJSNativeConstructor(JSContext* cx, Native native, const CallArgs& args)
     RootedObject callee(cx, &args.callee());
 #endif
 
-    JS_ASSERT(args.thisv().isMagic());
+    MOZ_ASSERT(args.thisv().isMagic());
     if (!CallJSNative(cx, native, args))
         return false;
 
@@ -292,11 +279,11 @@ CallJSNativeConstructor(JSContext* cx, Native native, const CallArgs& args)
      *
      * - (new Object(Object)) returns the callee.
      */
-    JS_ASSERT_IF(native != ProxyObject::callableClass_.construct &&
-                 native != js::CallOrConstructBoundFunction &&
-                 native != js::IteratorConstructor &&
-                 (!callee->is<JSFunction>() || callee->as<JSFunction>().native() != obj_construct),
-                 !args.rval().isPrimitive() && callee != &args.rval().toObject());
+    MOZ_ASSERT_IF(native != js::proxy_Construct &&
+                  native != js::CallOrConstructBoundFunction &&
+                  native != js::IteratorConstructor &&
+                  (!callee->is<JSFunction>() || callee->as<JSFunction>().native() != obj_construct),
+                  args.rval().isObject() && callee != &args.rval().toObject());
 
     return true;
 }
@@ -330,7 +317,10 @@ CallJSDeletePropertyOp(JSContext* cx, JSDeletePropertyOp op, HandleObject receiv
     JS_CHECK_RECURSION(cx, return false);
 
     assertSameCompartment(cx, receiver, id);
-    return op(cx, receiver, id, succeeded);
+    if (op)
+        return op(cx, receiver, id, succeeded);
+    *succeeded = true;
+    return true;
 }
 
 inline bool
@@ -345,11 +335,14 @@ CallSetter(JSContext* cx, HandleObject obj, HandleId id, StrictPropertyOp op, un
     if (attrs & JSPROP_GETTER)
         return js_ReportGetterOnlyAssignment(cx, strict);
 
+    if (!op)
+        return true;
+
     return CallJSPropertyOpSetter(cx, op, obj, id, strict, vp);
 }
 
 inline uintptr_t
-GetNativeStackLimit(ThreadSafeContext* cx)
+GetNativeStackLimit(ExclusiveContext* cx)
 {
     StackKind kind;
     if (cx->isJSContext()) {
@@ -374,29 +367,20 @@ ExclusiveContext::typeLifoAlloc()
 inline void
 JSContext::setPendingException(js::Value v)
 {
-    JS_ASSERT(!IsPoisonedValue(v));
+    MOZ_ASSERT(!IsPoisonedValue(v));
+    // overRecursed_ is set after the fact by js_ReportOverRecursed.
+    this->overRecursed_ = false;
     this->throwing = true;
     this->unwrappedException_ = v;
     // We don't use assertSameCompartment here to allow
     // js::SetPendingExceptionCrossContext to work.
-    JS_ASSERT_IF(v.isObject(), v.toObject().compartment() == compartment());
+    MOZ_ASSERT_IF(v.isObject(), v.toObject().compartment() == compartment());
 }
 
-inline void
-JSContext::setDefaultCompartmentObject(JSObject* obj)
+inline bool
+JSContext::runningWithTrustedPrincipals() const
 {
-    JS_ASSERT(!options().noDefaultCompartmentObject());
-    defaultCompartmentObject_ = obj;
-}
-
-inline void
-JSContext::setDefaultCompartmentObjectIfUnset(JSObject* obj)
-{
-    if (!options().noDefaultCompartmentObject() &&
-        !defaultCompartmentObject_)
-    {
-        setDefaultCompartmentObject(obj);
-    }
+    return !compartment() || compartment()->principals == runtime()->trustedPrincipals();
 }
 
 inline void
@@ -417,7 +401,7 @@ js::ExclusiveContext::enterNullCompartment()
 inline void
 js::ExclusiveContext::leaveCompartment(JSCompartment* oldCompartment)
 {
-    JS_ASSERT(hasEnteredCompartment());
+    MOZ_ASSERT(hasEnteredCompartment());
     enterCompartmentDepth_--;
 
     // Only call leave() after we've setCompartment()-ed away from the current
@@ -432,29 +416,29 @@ inline void
 js::ExclusiveContext::setCompartment(JSCompartment* comp)
 {
     // ExclusiveContexts can only be in the atoms zone or in exclusive zones.
-    JS_ASSERT_IF(!isJSContext() && !runtime_->isAtomsCompartment(comp),
-                 comp->zone()->usedByExclusiveThread);
+    MOZ_ASSERT_IF(!isJSContext() && !runtime_->isAtomsCompartment(comp),
+                  comp->zone()->usedByExclusiveThread);
 
     // Normal JSContexts cannot enter exclusive zones.
-    JS_ASSERT_IF(isJSContext() && comp,
-                 !comp->zone()->usedByExclusiveThread);
+    MOZ_ASSERT_IF(isJSContext() && comp,
+                  !comp->zone()->usedByExclusiveThread);
 
     // Only one thread can be in the atoms compartment at a time.
-    JS_ASSERT_IF(runtime_->isAtomsCompartment(comp),
-                 runtime_->currentThreadHasExclusiveAccess());
+    MOZ_ASSERT_IF(runtime_->isAtomsCompartment(comp),
+                  runtime_->currentThreadHasExclusiveAccess());
 
     // Make sure that the atoms compartment has its own zone.
-    JS_ASSERT_IF(comp && !runtime_->isAtomsCompartment(comp),
-                 !runtime_->isAtomsZone(comp->zone()));
+    MOZ_ASSERT_IF(comp && !runtime_->isAtomsCompartment(comp),
+                  !runtime_->isAtomsZone(comp->zone()));
 
     // Both the current and the new compartment should be properly marked as
     // entered at this point.
-    JS_ASSERT_IF(compartment_, compartment_->hasBeenEntered());
-    JS_ASSERT_IF(comp, comp->hasBeenEntered());
+    MOZ_ASSERT_IF(compartment_, compartment_->hasBeenEntered());
+    MOZ_ASSERT_IF(comp, comp->hasBeenEntered());
 
     compartment_ = comp;
     zone_ = comp ? comp->zone() : nullptr;
-    allocator_ = zone_ ? &zone_->allocator : nullptr;
+    arenas_ = zone_ ? &zone_->arenas : nullptr;
 }
 
 inline JSScript*
@@ -464,32 +448,33 @@ JSContext::currentScript(jsbytecode** ppc,
     if (ppc)
         *ppc = nullptr;
 
-    js::Activation* act = mainThread().activation();
+    js::Activation* act = runtime()->activation();
     while (act && (act->cx() != this || (act->isJit() && !act->asJit()->isActive())))
         act = act->prev();
 
     if (!act)
         return nullptr;
 
-    JS_ASSERT(act->cx() == this);
+    MOZ_ASSERT(act->cx() == this);
 
-#ifdef JS_ION
     if (act->isJit()) {
         JSScript* script = nullptr;
         js::jit::GetPcScript(const_cast<JSContext*>(this), &script, ppc);
-        if (!allowCrossCompartment && script->compartment() != compartment())
+        if (!allowCrossCompartment && script->compartment() != compartment()) {
+            if (ppc)
+                *ppc = nullptr;
             return nullptr;
+        }
         return script;
     }
 
     if (act->isAsmJS())
         return nullptr;
-#endif
 
-    JS_ASSERT(act->isInterpreter());
+    MOZ_ASSERT(act->isInterpreter());
 
     js::InterpreterFrame* fp = act->asInterpreter()->current();
-    JS_ASSERT(!fp->runningInJit());
+    MOZ_ASSERT(!fp->runningInJit());
 
     JSScript* script = fp->script();
     if (!allowCrossCompartment && script->compartment() != compartment())
@@ -497,29 +482,9 @@ JSContext::currentScript(jsbytecode** ppc,
 
     if (ppc) {
         *ppc = act->asInterpreter()->regs().pc;
-        JS_ASSERT(script->containsPC(*ppc));
+        MOZ_ASSERT(script->containsPC(*ppc));
     }
     return script;
-}
-
-template <JSThreadSafeNative threadSafeNative>
-inline bool
-JSNativeThreadSafeWrapper(JSContext* cx, unsigned argc, JS::Value* vp)
-{
-    return threadSafeNative(cx, argc, vp);
-}
-
-template <JSThreadSafeNative threadSafeNative>
-inline bool
-JSParallelNativeThreadSafeWrapper(js::ForkJoinContext* cx, unsigned argc, JS::Value* vp)
-{
-    return threadSafeNative(cx, argc, vp);
-}
-
-/* static */ inline JSContext*
-js::ExecutionModeTraits<js::SequentialExecution>::toContextType(ExclusiveContext* cx)
-{
-    return cx->asJSContext();
 }
 
 #endif /* jscntxtinlines_h */

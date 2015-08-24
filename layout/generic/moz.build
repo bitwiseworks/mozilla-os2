@@ -6,7 +6,9 @@
 
 EXPORTS += [
     'nsCanvasFrame.h',
+    'nsContainerFrame.h',
     'nsDirection.h',
+    'nsFrame.h',
     'nsFrameIdList.h',
     'nsFrameList.h',
     'nsFrameSelection.h',
@@ -23,12 +25,13 @@ EXPORTS += [
     'nsIObjectFrame.h',
     'nsIPageSequenceFrame.h',
     'nsIScrollableFrame.h',
-    'nsIScrollbarOwner.h',
     'nsIScrollPositionListener.h',
     'nsIStatefulFrame.h',
-    'nsObjectFrame.h',
+    'nsPluginFrame.h',
     'nsQueryFrame.h',
+    'nsSplittableFrame.h',
     'nsSubDocumentFrame.h',
+    'nsTextRunTransformations.h',
     'ScrollbarActivity.h',
     'Selection.h',
     'WritingModes.h',
@@ -77,6 +80,12 @@ UNIFIED_SOURCES += [
     'nsPageContentFrame.cpp',
     'nsPageFrame.cpp',
     'nsPlaceholderFrame.cpp',
+    'nsRubyBaseContainerFrame.cpp',
+    'nsRubyBaseFrame.cpp',
+    'nsRubyContentFrame.cpp',
+    'nsRubyFrame.cpp',
+    'nsRubyTextContainerFrame.cpp',
+    'nsRubyTextFrame.cpp',
     'nsSelection.cpp',
     'nsSimplePageSequenceFrame.cpp',
     'nsSplittableFrame.cpp',
@@ -86,22 +95,18 @@ UNIFIED_SOURCES += [
     'nsTextRunTransformations.cpp',
     'nsVideoFrame.cpp',
     'nsViewportFrame.cpp',
+    'RubyUtils.cpp',
     'ScrollbarActivity.cpp',
     'StickyScrollContainer.cpp',
     'TextOverflow.cpp',
 ]
 
 # nsLineLayout.cpp needs to be built separately because it uses plarena.h.
-# nsObjectFrame.cpp needs to be built separately because of name clashes in the OS X headers.
+# nsPluginFrame.cpp needs to be built separately because of name clashes in the OS X headers.
 SOURCES += [
     'nsLineLayout.cpp',
-    'nsObjectFrame.cpp',
+    'nsPluginFrame.cpp',
 ]
-
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
-    UNIFIED_SOURCES += [
-        'nsPluginUtilsOSX.mm',
-    ]
 
 FAIL_ON_WARNINGS = not CONFIG['_MSC_VER']
 
@@ -109,13 +114,9 @@ MSVC_ENABLE_PGO = True
 
 include('/ipc/chromium/chromium-config.mozbuild')
 
-FINAL_LIBRARY = 'gklayout'
+FINAL_LIBRARY = 'xul'
 
 LOCAL_INCLUDES += [
-    '../../content/base/src',
-    '../../content/html/content/src',
-    '../../content/xul/content/src',
-    '../../dom/base',
     '../../dom/plugins/base',
     '../base',
     '../forms',
@@ -123,6 +124,9 @@ LOCAL_INCLUDES += [
     '../svg',
     '../tables',
     '../xul',
+    '/dom/base',
+    '/dom/html',
+    '/dom/xul',
 ]
 
 JAR_MANIFESTS += ['jar.mn']
@@ -133,3 +137,11 @@ RESOURCE_FILES.html = [
 
 MOCHITEST_MANIFESTS += ['test/mochitest.ini']
 MOCHITEST_CHROME_MANIFESTS += ['test/chrome.ini']
+
+CXXFLAGS += CONFIG['MOZ_CAIRO_CFLAGS']
+
+if CONFIG['MOZ_WIDGET_GTK']:
+    CXXFLAGS += CONFIG['TK_CFLAGS']
+
+if CONFIG['MOZ_ENABLE_QT']:
+    CXXFLAGS += CONFIG['MOZ_QT_CFLAGS']

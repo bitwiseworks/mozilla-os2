@@ -37,14 +37,17 @@ function testSteps()
   is(db.objectStoreNames.length, 1, "Correct objectStoreNames list");
   is(db.objectStoreNames.item(0), objectStoreName, "Correct name");
 
+  event.target.transaction.oncomplete = grabEventAndContinueHandler;
+  event = yield undefined;
+
   db.close();
 
-  let request = indexedDB.open(name, 2);
+  request = indexedDB.open(name, 2);
   request.onerror = errorHandler;
   request.onupgradeneeded = grabEventAndContinueHandler;
-  let event = yield undefined;
+  event = yield undefined;
 
-  let db = event.target.result;
+  db = event.target.result;
   let trans = event.target.transaction;
 
   let oldObjectStore = trans.objectStore(objectStoreName);
@@ -81,14 +84,18 @@ function testSteps()
   continueToNextStep();
   yield undefined;
 
+  trans.oncomplete = grabEventAndContinueHandler;
+  event = yield undefined;
+
   db.close();
 
-  let request = indexedDB.open(name, 3);
+  request = indexedDB.open(name, 3);
   request.onerror = errorHandler;
   request.onupgradeneeded = grabEventAndContinueHandler;
-  let event = yield undefined;
+  event = yield undefined;
 
-  let db = event.target.result;
+  db = event.target.result;
+  trans = event.target.transaction;
 
   objectStore = db.createObjectStore(objectStoreName, { keyPath: "foo" });
 
@@ -98,6 +105,9 @@ function testSteps()
 
   db.deleteObjectStore(objectStoreName);
 
+  event = yield undefined;
+
+  trans.oncomplete = grabEventAndContinueHandler;
   event = yield undefined;
 
   finishTest();

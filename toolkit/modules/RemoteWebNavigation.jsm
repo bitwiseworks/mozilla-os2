@@ -1,13 +1,11 @@
-// -*- Mode: javascript; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+// -*- indent-tabs-mode: nil; js-indent-level: 2 -*-
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 this.EXPORTED_SYMBOLS = ["RemoteWebNavigation"];
 
-const Ci = Components.interfaces;
-const Cc = Components.classes;
-const Cu = Components.utils;
+const { interfaces: Ci, classes: Cc, utils: Cu, results: Cr } = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
@@ -60,8 +58,22 @@ RemoteWebNavigation.prototype = {
     this._sendMessage("WebNavigation:GotoIndex", {index: aIndex});
   },
   loadURI: function(aURI, aLoadFlags, aReferrer, aPostData, aHeaders) {
-    this._browser._contentTitle = "";
-    this._sendMessage("WebNavigation:LoadURI", {uri: aURI, flags: aLoadFlags});
+    this.loadURIWithOptions(aURI, aLoadFlags, aReferrer,
+                            Ci.nsIHttpChannel.REFERRER_POLICY_DEFAULT,
+                            aPostData, aHeaders, null);
+  },
+  loadURIWithOptions: function(aURI, aLoadFlags, aReferrer, aReferrerPolicy,
+                               aPostData, aHeaders, aBaseURI) {
+    if (aPostData || aHeaders)
+      throw Components.Exception("RemoteWebNavigation doesn't accept postdata or headers.", Cr.NS_ERROR_INVALID_ARGS);
+
+    this._sendMessage("WebNavigation:LoadURI", {
+      uri: aURI,
+      flags: aLoadFlags,
+      referrer: aReferrer ? aReferrer.spec : null,
+      referrerPolicy: aReferrerPolicy,
+      baseURI: aBaseURI ? aBaseURI.spec : null,
+    });
   },
   reload: function(aReloadFlags) {
     this._sendMessage("WebNavigation:Reload", {flags: aReloadFlags});

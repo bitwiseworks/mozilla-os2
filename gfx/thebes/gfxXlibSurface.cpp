@@ -8,7 +8,7 @@
 #include "cairo.h"
 #include "cairo-xlib.h"
 #include "cairo-xlib-xrender.h"
-#include <X11/Xlibint.h>	/* For XESetCloseDisplay */
+#include <X11/Xlibint.h>  /* For XESetCloseDisplay */
 #undef max // Xlibint.h defines this and it breaks std::max
 #undef min // Xlibint.h defines this and it breaks std::min
 
@@ -331,7 +331,7 @@ private:
 
     class DisplayInfo {
     public:
-        DisplayInfo(Display* display) : mDisplay(display) { }
+        explicit DisplayInfo(Display* display) : mDisplay(display) { }
         Display* mDisplay;
         nsTArray<ColormapEntry> mColormapEntries;
     };
@@ -404,7 +404,7 @@ DisplayTable::GetColormapAndVisual(Screen* aScreen, XRenderPictFormat* aFormat,
     }
 
     nsTArray<DisplayInfo>* displays = &sDisplayTable->mDisplays;
-    uint32_t d = displays->IndexOf(display, 0, FindDisplay());
+    size_t d = displays->IndexOf(display, 0, FindDisplay());
 
     if (d == displays->NoIndex) {
         d = displays->Length();

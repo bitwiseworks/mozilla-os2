@@ -14,7 +14,7 @@ constructHook(JSContext* cx, unsigned argc, jsval* vp)
 
     // Check that arguments were passed properly from JS_New.
 
-    JS::RootedObject obj(cx, JS_NewObject(cx, js::Jsvalify(&JSObject::class_), JS::NullPtr(), JS::NullPtr()));
+    JS::RootedObject obj(cx, JS_NewPlainObject(cx));
     if (!obj) {
         JS_ReportError(cx, "test failed, could not construct object");
         return false;
@@ -60,7 +60,7 @@ BEGIN_TEST(testNewObject_1)
 
     JS::RootedValue v(cx);
     EVAL("Array", &v);
-    JS::RootedObject Array(cx, JSVAL_TO_OBJECT(v));
+    JS::RootedObject Array(cx, v.toObjectOrNull());
 
     // With no arguments.
     JS::RootedObject obj(cx, JS_New(cx, Array, JS::HandleValueArray::empty()));
@@ -69,7 +69,7 @@ BEGIN_TEST(testNewObject_1)
     CHECK(JS_IsArrayObject(cx, obj));
     uint32_t len;
     CHECK(JS_GetArrayLength(cx, obj, &len));
-    CHECK_EQUAL(len, 0);
+    CHECK_EQUAL(len, 0u);
 
     // With one argument.
     argv[0].setInt32(4);
@@ -78,7 +78,7 @@ BEGIN_TEST(testNewObject_1)
     rt = OBJECT_TO_JSVAL(obj);
     CHECK(JS_IsArrayObject(cx, obj));
     CHECK(JS_GetArrayLength(cx, obj, &len));
-    CHECK_EQUAL(len, 4);
+    CHECK_EQUAL(len, 4u);
 
     // With N arguments.
     for (size_t i = 0; i < N; i++)
@@ -96,11 +96,11 @@ BEGIN_TEST(testNewObject_1)
     static const JSClass cls = {
         "testNewObject_1",
         0,
-        JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
-        JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub, nullptr,
+        nullptr, nullptr, nullptr, nullptr,
+        nullptr, nullptr, nullptr, nullptr,
         nullptr, nullptr, constructHook
     };
-    JS::RootedObject ctor(cx, JS_NewObject(cx, &cls, JS::NullPtr(), JS::NullPtr()));
+    JS::RootedObject ctor(cx, JS_NewObject(cx, &cls));
     CHECK(ctor);
     JS::RootedValue rt2(cx, OBJECT_TO_JSVAL(ctor));
     obj = JS_New(cx, ctor, JS::HandleValueArray::subarray(argv, 0, 3));

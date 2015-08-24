@@ -31,7 +31,7 @@ var RetVal = protocol.RetVal;
 /**
  * Manage remote connections that want to talk to GCLI
  */
-var GcliActor = protocol.ActorClass({
+var GcliActor = exports.GcliActor = protocol.ActorClass({
   typeName: "gcli",
 
   initialize: function(conn, tabActor) {
@@ -81,9 +81,9 @@ var GcliActor = protocol.ActorClass({
    * Get the state of an input string. i.e. requisition.getStateData()
    */
   state: method(function(typed, start, rank) {
-    return this.requisition.update(typed).then(function() {
+    return this.requisition.update(typed).then(() => {
       return this.requisition.getStateData(start, rank);
-    }.bind(this));
+    });
   }, {
     request: {
       typed: Arg(0, "string"), // The command string
@@ -202,18 +202,6 @@ exports.GcliFront = protocol.FrontClass(GcliActor, {
 
     // XXX: This is the first actor type in its hierarchy to use the protocol
     // library, so we're going to self-own on the client side for now.
-    client.addActorPool(this);
     this.manage(this);
   },
 });
-
-/**
- * Called the framework on DebuggerServer.registerModule()
- */
-exports.register = function(handle) {
-  handle.addTabActor(GcliActor, "gcliActor");
-};
-
-exports.unregister = function(handle) {
-  handle.removeTabActor(GcliActor);
-};

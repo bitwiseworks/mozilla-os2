@@ -7,11 +7,9 @@
 #define CODEC_CONFIG_H_
 
 #include <string>
-#include "ccsdp_rtcp_fb.h"
+#include <vector>
 
 namespace mozilla {
-
-class LoadManager;
 
 /**
  * Minimalistic Audio Codec Config Params
@@ -28,101 +26,134 @@ struct AudioCodecConfig
   int mPacSize;
   int mChannels;
   int mRate;
-  LoadManager* mLoadManager;
 
   /* Default constructor is not provided since as a consumer, we
    * can't decide the default configuration for the codec
    */
   explicit AudioCodecConfig(int type, std::string name,
                             int freq,int pacSize,
-                            int channels, int rate,
-                            LoadManager* load_manager = nullptr)
+                            int channels, int rate)
                                                    : mType(type),
                                                      mName(name),
                                                      mFreq(freq),
                                                      mPacSize(pacSize),
                                                      mChannels(channels),
-                                                     mRate(rate),
-                                                     mLoadManager(load_manager)
+                                                     mRate(rate)
 
   {
   }
 };
 
 /*
- * Minimalisitc video codec configuration
+ * Minimalistic video codec configuration
  * More to be added later depending on the use-case
  */
 
-struct VideoCodecConfig
+#define    MAX_SPROP_LEN    128
+
+// used for holding SDP negotiation results
+struct VideoCodecConfigH264
 {
+    char       sprop_parameter_sets[MAX_SPROP_LEN];
+    int        packetization_mode;
+    int        profile_level_id;
+    int        max_mbps;
+    int        max_fs;
+    int        max_cpb;
+    int        max_dpb;
+    int        max_br;
+    int        tias_bw;
+};
+
+
+// class so the std::strings can get freed more easily/reliably
+class VideoCodecConfig
+{
+public:
   /*
    * The data-types for these properties mimic the
    * corresponding webrtc::VideoCodec data-types.
    */
-  int mType;
+  int mType; // payload type
   std::string mName;
-  uint32_t mRtcpFbTypes;
+
+  std::vector<std::string> mAckFbTypes;
+  std::vector<std::string> mNackFbTypes;
+  std::vector<std::string> mCcmFbTypes;
+
   unsigned int mMaxFrameSize;
   unsigned int mMaxFrameRate;
-  LoadManager* mLoadManager;
+  unsigned int mMaxMBPS;    // in macroblocks-per-second
+  unsigned int mMaxBitrate;
+  // max_cpb & max_dpb would be streaming/mode-2 only
+  std::string mSpropParameterSets;
+  uint8_t mProfile;
+  uint8_t mConstraints;
+  uint8_t mLevel;
+  uint8_t mPacketizationMode;
+  // TODO: add external negotiated SPS/PPS
 
   VideoCodecConfig(int type,
                    std::string name,
-                   int rtcpFbTypes,
-                   LoadManager* load_manager = nullptr) :
-                                     mType(type),
-                                     mName(name),
-                                     mRtcpFbTypes(rtcpFbTypes),
-                                     mMaxFrameSize(0),
-                                     mMaxFrameRate(0),
-                                     mLoadManager(load_manager)
+                   unsigned int max_fs = 0,
+                   unsigned int max_fr = 0,
+                   const struct VideoCodecConfigH264 *h264 = nullptr) :
+    mType(type),
+    mName(name),
+    mMaxFrameSize(max_fs), // may be overridden
+    mMaxFrameRate(max_fr),
+    mMaxMBPS(0),
+    mMaxBitrate(0),
+    mProfile(0x42),
+    mConstraints(0xE0),
+    mLevel(0x0C),
+    mPacketizationMode(1)
   {
-    // Replace codec name here because  WebRTC.org code has a whitelist of
-    // supported video codec in |webrtc::ViECodecImpl::CodecValid()| and will
-    // reject registration of those not in it.
-    // TODO: bug 995884 to support H.264 in WebRTC.org code.
-    if (mName == "H264_P0")
-      mName = "I420";
+    if (h264) {
+      if (max_fs == 0 || (h264->max_fs != 0 && (unsigned int) h264->max_fs < max_fs)) {
+        mMaxFrameSize = h264->max_fs;
+      }
+      mMaxMBPS = h264->max_mbps;
+      mMaxBitrate = h264->max_br;
+      mProfile = (h264->profile_level_id & 0x00FF0000) >> 16;
+      mConstraints = (h264->profile_level_id & 0x0000FF00) >> 8;
+      mLevel = (h264->profile_level_id & 0x000000FF);
+      mPacketizationMode = h264->packetization_mode;
+      mSpropParameterSets = h264->sprop_parameter_sets;
+    }
   }
 
-  VideoCodecConfig(int type,
-                   std::string name,
-                   int rtcpFbTypes,
-                   unsigned int max_fs,
-                   unsigned int max_fr,
-                   LoadManager* load_manager = nullptr) :
-                                         mType(type),
-                                         mName(name),
-                                         mRtcpFbTypes(rtcpFbTypes),
-                                         mMaxFrameSize(max_fs),
-                                         mMaxFrameRate(max_fr),
-                                         mLoadManager(load_manager)
+  // Nothing seems to use this right now. Do we intend to support this
+  // someday?
+  bool RtcpFbAckIsSet(const std::string& type) const
   {
-    // Replace codec name here because  WebRTC.org code has a whitelist of
-    // supported video codec in |webrtc::ViECodecImpl::CodecValid()| and will
-    // reject registration of those not in it.
-    // TODO: bug 995884 to support H.264 in WebRTC.org code.
-    if (mName == "H264_P0")
-      mName = "I420";
+    for (auto i = mAckFbTypes.begin(); i != mAckFbTypes.end(); ++i) {
+      if (*i == type) {
+        return true;
+      }
+    }
+    return false;
   }
 
-
-  bool RtcpFbIsSet(sdp_rtcp_fb_nack_type_e type) const
+  bool RtcpFbNackIsSet(const std::string& type) const
   {
-    return mRtcpFbTypes & sdp_rtcp_fb_nack_to_bitmap(type);
+    for (auto i = mNackFbTypes.begin(); i != mNackFbTypes.end(); ++i) {
+      if (*i == type) {
+        return true;
+      }
+    }
+    return false;
   }
 
-  bool RtcpFbIsSet(sdp_rtcp_fb_ack_type_e type) const
+  bool RtcpFbCcmIsSet(const std::string& type) const
   {
-    return mRtcpFbTypes & sdp_rtcp_fb_ack_to_bitmap(type);
+    for (auto i = mCcmFbTypes.begin(); i != mCcmFbTypes.end(); ++i) {
+      if (*i == type) {
+        return true;
+      }
+    }
+    return false;
   }
-
-  bool RtcpFbIsSet(sdp_rtcp_fb_ccm_type_e type) const
-  {
-    return mRtcpFbTypes & sdp_rtcp_fb_ccm_to_bitmap(type);
-  }
-
 };
 }
 #endif

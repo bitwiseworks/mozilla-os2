@@ -2,6 +2,13 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+///////////////////
+//
+// Whitelisting this test.
+// As part of bug 1077403, the leaking uncaught rejection should be fixed. 
+//
+thisTestLeaksUncaughtRejectionsAndShouldBeFixed("Error: Unknown sheet source");
+
 const TESTCASE_URI = TEST_BASE + "autocomplete.html";
 const MAX_SUGGESTIONS = 15;
 
@@ -123,7 +130,7 @@ function testState() {
 
   if (key == 'Ctrl+Space') {
     key = " ";
-    mods.accelKey = true;
+    mods.ctrlKey = true;
   }
   else if (key == "VK_RETURN" && entered) {
     evt = "popup-hidden";
@@ -190,7 +197,9 @@ function testAutocompletionDisabled() {
 function testEditorAddedDisabled(panel) {
   info("Editor added, getting the source editor and starting tests");
   panel.UI.editors[0].getSourceEditor().then(editor => {
-    ok(!editor.sourceEditor.getAutocompletionPopup,
+    is(editor.sourceEditor.getOption("autocomplete"), false,
+       "Autocompletion option does not exist");
+    ok(!editor.sourceEditor.getAutocompletionPopup(),
        "Autocompletion popup does not exist");
     cleanup();
   });

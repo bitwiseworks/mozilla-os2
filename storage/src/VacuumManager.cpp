@@ -75,7 +75,7 @@ BaseCallback::HandleError(mozIStorageError *aError)
   nsAutoCString warnMsg;
   warnMsg.AppendLiteral("An error occured during async execution: ");
   warnMsg.AppendInt(result);
-  warnMsg.AppendLiteral(" ");
+  warnMsg.Append(' ');
   warnMsg.Append(message);
   NS_WARNING(warnMsg.get());
 #endif
@@ -109,7 +109,7 @@ class Vacuumer : public BaseCallback
 public:
   NS_DECL_MOZISTORAGESTATEMENTCALLBACK
 
-  Vacuumer(mozIStorageVacuumParticipant *aParticipant);
+  explicit Vacuumer(mozIStorageVacuumParticipant *aParticipant);
 
   bool execute();
   nsresult notifyCompletion(bool aSucceeded);
@@ -241,7 +241,7 @@ Vacuumer::HandleError(mozIStorageError *aError)
   warnMsg.Append(mDBFilename);
   warnMsg.AppendLiteral(" - ");
   warnMsg.AppendInt(result);
-  warnMsg.AppendLiteral(" ");
+  warnMsg.Append(' ');
   warnMsg.Append(message);
   NS_WARNING(warnMsg.get());
 #endif

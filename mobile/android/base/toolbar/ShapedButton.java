@@ -5,14 +5,16 @@
 package org.mozilla.gecko.toolbar;
 
 import org.mozilla.gecko.GeckoApplication;
-import org.mozilla.gecko.LightweightTheme;
-import org.mozilla.gecko.LightweightThemeDrawable;
 import org.mozilla.gecko.R;
+import org.mozilla.gecko.lwt.LightweightTheme;
+import org.mozilla.gecko.lwt.LightweightThemeDrawable;
+import org.mozilla.gecko.tabs.TabCurve;
 import org.mozilla.gecko.widget.ThemedImageButton;
 
 import android.content.Context;
 import android.content.res.TypedArray;
 import android.graphics.Canvas;
+import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PorterDuff.Mode;
 import android.graphics.drawable.Drawable;
@@ -21,71 +23,28 @@ import android.util.AttributeSet;
 
 public class ShapedButton extends ThemedImageButton
                           implements CanvasDelegate.DrawManager {
-    protected final LightweightTheme mTheme;
 
-    private final Path mPath;
-    private final CurveTowards mSide;
-
+    protected final Path mPath;
     protected final CanvasDelegate mCanvasDelegate;
-
-    private enum CurveTowards { NONE, LEFT, RIGHT };
 
     public ShapedButton(Context context, AttributeSet attrs) {
         super(context, attrs);
-        mTheme = ((GeckoApplication) context.getApplicationContext()).getLightweightTheme();
-
-        TypedArray a = context.obtainStyledAttributes(attrs, R.styleable.BrowserToolbarCurve);
-        int curveTowards = a.getInt(R.styleable.BrowserToolbarCurve_curveTowards, 0x00);
-        a.recycle();
-
-        if (curveTowards == 0x00)
-            mSide = CurveTowards.NONE;
-        else if (curveTowards == 0x01)
-            mSide = CurveTowards.LEFT;
-        else
-            mSide = CurveTowards.RIGHT;
 
         // Path is clipped.
         mPath = new Path();
-        mCanvasDelegate = new CanvasDelegate(this, Mode.DST_IN);
+
+        final Paint paint = new Paint();
+        paint.setAntiAlias(true);
+        paint.setColor(getResources().getColor(R.color.canvas_delegate_paint));
+        paint.setStrokeWidth(0.0f);
+        mCanvasDelegate = new CanvasDelegate(this, Mode.DST_IN, paint);
 
         setWillNotDraw(false);
     }
 
     @Override
-    public void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-        super.onMeasure(widthMeasureSpec, heightMeasureSpec);
-
-        if (mSide == CurveTowards.NONE)
-            return;
-
-        final int width = getMeasuredWidth();
-        final int height = getMeasuredHeight();
-        final int curve = (int) (height * 1.125f);
-
-        mPath.reset();
-
-        if (mSide == CurveTowards.RIGHT) {
-            mPath.moveTo(0, 0);
-            mPath.cubicTo(curve * 0.75f, 0,
-                          curve * 0.25f, height,
-                          curve, height);
-            mPath.lineTo(width, height);
-            mPath.lineTo(width, 0);
-            mPath.lineTo(0, 0);
-        } else if (mSide == CurveTowards.LEFT) {
-            mPath.moveTo(width, 0);
-            mPath.cubicTo((width - (curve * 0.75f)), 0,
-                          (width - (curve * 0.25f)), height,
-                          (width - curve), height);
-            mPath.lineTo(0, height);
-            mPath.lineTo(0, 0);
-        }
-    }
-
-    @Override
     public void draw(Canvas canvas) {
-        if (mCanvasDelegate != null && mSide != CurveTowards.NONE)
+        if (mCanvasDelegate != null)
             mCanvasDelegate.draw(canvas, mPath, getWidth(), getHeight());
         else
             defaultDraw(canvas);
@@ -100,7 +59,7 @@ public class ShapedButton extends ThemedImageButton
     @Override
     public void onLightweightThemeChanged() {
         final int background = getResources().getColor(R.color.background_tabs);
-        final LightweightThemeDrawable lightWeight = mTheme.getColorDrawable(this, background);
+        final LightweightThemeDrawable lightWeight = getTheme().getColorDrawable(this, background);
 
         if (lightWeight == null)
             return;

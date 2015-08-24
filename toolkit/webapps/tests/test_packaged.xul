@@ -50,181 +50,13 @@ let app = {
   installTime: Date.now(),
 };
 
-let profileDir;
-let profilesIni;
-let installPath;
-
-let installedFiles;
-let tempUpdatedFiles;
-let updatedFiles;
-
-let cleanup;
-
-if (LINUX) {
-  installPath = OS.Path.join(OS.Constants.Path.homeDir, "." + WebappOSUtils.getUniqueName(app));
-
-  let xdg_data_home = Cc["@mozilla.org/process/environment;1"].
-                      getService(Ci.nsIEnvironment).
-                      get("XDG_DATA_HOME");
-  if (!xdg_data_home) {
-    xdg_data_home = OS.Path.join(OS.Constants.Path.homeDir, ".local", "share");
-  }
-
-  let desktopINI = OS.Path.join(xdg_data_home, "applications",
-                                "owa-" + WebappOSUtils.getUniqueName(app) + ".desktop");
-
-  installedFiles = [
-    OS.Path.join(installPath, "icon.png"),
-    OS.Path.join(installPath, "webapprt-stub"),
-    OS.Path.join(installPath, "webapp.json"),
-    OS.Path.join(installPath, "webapp.ini"),
-    OS.Path.join(installPath, "application.zip"),
-    desktopINI,
-  ];
-  tempUpdatedFiles = [
-    OS.Path.join(installPath, "update", "icon.png"),
-    OS.Path.join(installPath, "update", "webapp.json"),
-    OS.Path.join(installPath, "update", "webapp.ini"),
-    OS.Path.join(installPath, "update", "application.zip"),
-  ];
-  updatedFiles = [
-    OS.Path.join(installPath, "icon.png"),
-    OS.Path.join(installPath, "webapp.json"),
-    OS.Path.join(installPath, "webapp.ini"),
-    OS.Path.join(installPath, "application.zip"),
-    desktopINI,
-  ];
-
-  profilesIni = OS.Path.join(installPath, "profiles.ini");
-
-  cleanup = function() {
-    return Task.spawn(function*() {
-      if (profileDir) {
-        yield OS.File.removeDir(profileDir.parent.path, { ignoreAbsent: true });
-      }
-
-      yield OS.File.removeDir(installPath, { ignoreAbsent: true });
-
-      yield OS.File.remove(desktopINI, { ignoreAbsent: true });
-    });
-  };
-} else if (WIN) {
-  installPath = OS.Path.join(OS.Constants.Path.winAppDataDir, WebappOSUtils.getUniqueName(app));
-
-  let desktopShortcut = OS.Path.join(OS.Constants.Path.desktopDir, "Sample packaged app.lnk");
-  let startMenuShortcut = OS.Path.join(OS.Constants.Path.winStartMenuProgsDir, "Sample packaged app.lnk");
-
-  installedFiles = [
-    OS.Path.join(installPath, "Sample packaged app.exe"),
-    OS.Path.join(installPath, "chrome", "icons", "default", "default.ico"),
-    OS.Path.join(installPath, "webapp.json"),
-    OS.Path.join(installPath, "webapp.ini"),
-    OS.Path.join(installPath, "application.zip"),
-    OS.Path.join(installPath, "uninstall", "shortcuts_log.ini"),
-    OS.Path.join(installPath, "uninstall", "uninstall.log"),
-    OS.Path.join(installPath, "uninstall", "webapp-uninstaller.exe"),
-    desktopShortcut,
-    startMenuShortcut,
-  ];
-  tempUpdatedFiles = [
-    OS.Path.join(installPath, "update", "chrome", "icons", "default", "default.ico"),
-    OS.Path.join(installPath, "update", "webapp.json"),
-    OS.Path.join(installPath, "update", "webapp.ini"),
-    OS.Path.join(installPath, "update", "application.zip"),
-    OS.Path.join(installPath, "update", "uninstall", "shortcuts_log.ini"),
-    OS.Path.join(installPath, "update", "uninstall", "uninstall.log"),
-    OS.Path.join(installPath, "update", "uninstall", "webapp-uninstaller.exe"),
-  ];
-  updatedFiles = [
-    OS.Path.join(installPath, "chrome", "icons", "default", "default.ico"),
-    OS.Path.join(installPath, "webapp.json"),
-    OS.Path.join(installPath, "webapp.ini"),
-    OS.Path.join(installPath, "application.zip"),
-    OS.Path.join(installPath, "uninstall", "shortcuts_log.ini"),
-    OS.Path.join(installPath, "uninstall", "uninstall.log"),
-    desktopShortcut,
-    startMenuShortcut,
-  ];
-
-  profilesIni = OS.Path.join(installPath, "profiles.ini");
-
-  cleanup = function() {
-    return Task.spawn(function*() {
-      let uninstallKey;
-      try {
-        uninstallKey = Cc["@mozilla.org/windows-registry-key;1"].
-                       createInstance(Ci.nsIWindowsRegKey);
-        uninstallKey.open(uninstallKey.ROOT_KEY_CURRENT_USER,
-                          "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
-                          uninstallKey.ACCESS_WRITE);
-        if (uninstallKey.hasChild(WebappOSUtils.getUniqueName(app))) {
-          uninstallKey.removeChild(WebappOSUtils.getUniqueName(app));
-        }
-      } catch (e) {
-      } finally {
-        if (uninstallKey) {
-          uninstallKey.close();
-        }
-      }
-
-      if (profileDir) {
-        yield OS.File.removeDir(profileDir.parent.parent.path, { ignoreAbsent: true });
-      }
-
-      yield OS.File.removeDir(installPath, { ignoreAbsent: true });
-
-      yield OS.File.remove(desktopShortcut, { ignoreAbsent: true });
-      yield OS.File.remove(startMenuShortcut, { ignoreAbsent: true });
-    });
-  };
-} else if (MAC) {
-  installPath = OS.Path.join(OS.Constants.Path.homeDir, "Applications", "Sample packaged app.app");
-  let appProfileDir = OS.Path.join(OS.Constants.Path.macUserLibDir, "Application Support",
-                                   WebappOSUtils.getUniqueName(app));
-
-  installedFiles = [
-    OS.Path.join(installPath, "Contents", "Info.plist"),
-    OS.Path.join(installPath, "Contents", "MacOS", "webapprt"),
-    OS.Path.join(installPath, "Contents", "MacOS", "webapp.ini"),
-    OS.Path.join(installPath, "Contents", "Resources", "appicon.icns"),
-    OS.Path.join(installPath, "Contents", "Resources", "application.zip"),
-    OS.Path.join(appProfileDir, "webapp.json"),
-  ];
-  tempUpdatedFiles = [
-    OS.Path.join(installPath, "update", "Contents", "Info.plist"),
-    OS.Path.join(installPath, "update", "Contents", "MacOS", "webapp.ini"),
-    OS.Path.join(installPath, "update", "Contents", "Resources", "appicon.icns"),
-    OS.Path.join(installPath, "update", "Contents", "Resources", "application.zip"),
-    OS.Path.join(installPath, "update", "webapp.json"),
-  ];
-  updatedFiles = [
-    OS.Path.join(installPath, "Contents", "Info.plist"),
-    OS.Path.join(installPath, "Contents", "MacOS", "webapp.ini"),
-    OS.Path.join(installPath, "Contents", "Resources", "appicon.icns"),
-    OS.Path.join(installPath, "Contents", "Resources", "application.zip"),
-    OS.Path.join(appProfileDir, "webapp.json"),
-  ];
-
-  profilesIni = OS.Path.join(appProfileDir, "profiles.ini");
-
-  cleanup = function() {
-    return Task.spawn(function*() {
-      if (profileDir) {
-        yield OS.File.removeDir(profileDir.parent.path, { ignoreAbsent: true });
-      }
-
-      yield OS.File.removeDir(installPath, { ignoreAbsent: true });
-
-      yield OS.File.removeDir(appProfileDir, { ignoreAbsent: true });
-    });
-  };
-}
+let testAppInfo = new TestAppInfo(app, true);
 
 let runTest = Task.async(function*() {
   // Get to a clean state before the test
-  yield cleanup();
+  yield testAppInfo.cleanup();
 
-  SimpleTest.registerCleanupFunction(cleanup);
+  SimpleTest.registerCleanupFunction(() => testAppInfo.cleanup());
 
   setDryRunPref();
 
@@ -236,34 +68,33 @@ let runTest = Task.async(function*() {
 
   info("Test update for an application that isn't installed");
   try {
-    yield nativeApp.prepareUpdate(manifest, zipPath);
+    yield nativeApp.prepareUpdate(app, manifest, zipPath);
     ok(false, "Didn't thrown");
   } catch (ex) {
     is(ex, "The application isn't installed", "Exception thrown");
   }
 
-  profileDir = nativeApp.createProfile();
-  ok(profileDir && profileDir.exists(), "Profile directory created");
-  ok((yield OS.File.exists(profilesIni)), "profiles.ini file created");
+  testAppInfo.profileDir = nativeApp.createProfile();
+  ok(testAppInfo.profileDir && testAppInfo.profileDir.exists(), "Profile directory created");
+  ok((yield OS.File.exists(testAppInfo.profilesIni)), "profiles.ini file created");
 
   // On Mac build servers, we don't have enough privileges to write to /Applications,
   // so we install apps in a user-owned directory.
   if (MAC) {
-    nativeApp._rootInstallDir = OS.Path.join(OS.Constants.Path.homeDir, "Applications");
-    yield OS.File.makeDir(nativeApp._rootInstallDir, { ignoreExisting: true });
+    yield setMacRootInstallDir(OS.Path.join(OS.Constants.Path.homeDir, "Applications"));
   }
 
   // Install application
   info("Test installation");
-  yield nativeApp.install(manifest, zipPath);
+  yield nativeApp.install(app, manifest, zipPath);
   while (!WebappOSUtils.isLaunchable(app)) {
     yield wait(1000);
   }
   ok(true, "App launchable");
-  ok((yield checkFiles(installedFiles)), "Files correctly written");
-  is(WebappOSUtils.getInstallPath(app), installPath, "getInstallPath == installPath");
+  ok((yield checkFiles(testAppInfo.installedFiles)), "Files correctly written");
+  is(WebappOSUtils.getInstallPath(app), testAppInfo.installPath, "getInstallPath == installPath");
 
-  let stat = yield OS.File.stat(installPath);
+  let stat = yield OS.File.stat(testAppInfo.installPath);
   let installTime = stat.lastModificationDate;
 
   // Wait one second, otherwise the last modification date is the same.
@@ -275,24 +106,33 @@ let runTest = Task.async(function*() {
   zipFile = yield OS.File.open(zipPath, { create: true });
   yield zipFile.close();
 
-  yield nativeApp.install(manifest, zipPath);
+  yield nativeApp.install(app, manifest, zipPath);
   while (!WebappOSUtils.isLaunchable(app)) {
     yield wait(1000);
   }
   ok(true, "App launchable");
-  ok((yield checkFiles(installedFiles)), "Installation not corrupted");
-  ok((yield checkFiles(tempUpdatedFiles)), "Files correctly written in the update subdirectory");
+  ok((yield checkFiles(testAppInfo.installedFiles)), "Installation not corrupted");
+  ok((yield checkFiles(testAppInfo.tempUpdatedFiles)), "Files correctly written in the update subdirectory");
 
-  yield nativeApp.applyUpdate();
+  yield nativeApp.applyUpdate(app);
   while (!WebappOSUtils.isLaunchable(app)) {
     yield wait(1000);
   }
   ok(true, "App launchable");
-  ok((yield checkFiles(installedFiles)), "Installation not corrupted");
-  ok(!(yield OS.File.exists(OS.Path.join(installPath, "update"))), "Update directory removed");
-  ok((yield checkDateHigherThan(updatedFiles, installTime)), "Modification date higher");
 
-  stat = yield OS.File.stat(installPath);
+  if (MAC) {
+    stat = yield OS.File.stat(testAppInfo.webappINI);
+    is(stat.unixMode, 0o644, "Configuration file permissions correct");
+  } else if (LINUX) {
+    stat = yield OS.File.stat(testAppInfo.desktopINI);
+    is(stat.unixMode, 0o744, "Configuration file permissions correct");
+  }
+
+  ok((yield checkFiles(testAppInfo.installedFiles)), "Installation not corrupted");
+  ok(!(yield OS.File.exists(OS.Path.join(testAppInfo.installPath, "update"))), "Update directory removed");
+  ok((yield checkDateHigherThan(testAppInfo.updatedFiles, installTime)), "Modification date higher");
+
+  stat = yield OS.File.stat(testAppInfo.installPath);
   installTime = stat.lastModificationDate;
 
   // Wait one second, otherwise the last modification date is the same.
@@ -304,37 +144,30 @@ let runTest = Task.async(function*() {
   zipFile = yield OS.File.open(zipPath, { create: true });
   yield zipFile.close();
 
-  yield nativeApp.prepareUpdate(manifest, zipPath);
+  yield nativeApp.prepareUpdate(app, manifest, zipPath);
   while (!WebappOSUtils.isLaunchable(app)) {
     yield wait(1000);
   }
   ok(true, "App launchable");
-  ok((yield checkFiles(installedFiles)), "Installation not corrupted");
-  ok((yield checkFiles(tempUpdatedFiles)), "Files correctly written in the update subdirectory");
+  ok((yield checkFiles(testAppInfo.installedFiles)), "Installation not corrupted");
+  ok((yield checkFiles(testAppInfo.tempUpdatedFiles)), "Files correctly written in the update subdirectory");
 
-  yield nativeApp.applyUpdate();
+  yield nativeApp.applyUpdate(app);
   while (!WebappOSUtils.isLaunchable(app)) {
     yield wait(1000);
   }
   ok(true, "App launchable");
-  ok((yield checkFiles(installedFiles)), "Installation not corrupted");
-  ok(!(yield OS.File.exists(OS.Path.join(installPath, "update"))), "Update directory removed");
-  ok((yield checkDateHigherThan(updatedFiles, installTime)), "Modification date higher");
+  ok((yield checkFiles(testAppInfo.installedFiles)), "Installation not corrupted");
+  ok(!(yield OS.File.exists(OS.Path.join(testAppInfo.installPath, "update"))), "Update directory removed");
+  ok((yield checkDateHigherThan(testAppInfo.updatedFiles, installTime)), "Modification date higher");
 
   SimpleTest.finish();
 });
 
-// The test doesn't work yet on Mac OS X 10.6 machines.
-// See bug 993690.
-if (MAC_106) {
-  todo(false, "The test doesn't work on Mac OS X 10.6 machines");
+runTest().catch((e) => {
+  ok(false, "Error during test: " + e);
   SimpleTest.finish();
-} else {
-  runTest().then(null, function(e) {
-    ok(false, "Error during test: " + e);
-    SimpleTest.finish();
-  });
-}
+});
 
 ]]>
 </script>

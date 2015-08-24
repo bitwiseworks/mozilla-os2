@@ -2,29 +2,11 @@
    - License, v. 2.0. If a copy of the MPL was not distributed with this file,
    - You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-%include ../../../shared/incontentprefs/preferences.css
+%include ../../../shared/incontentprefs/preferences.inc.css
 
-menulist:not([editable="true"]) > .menulist-dropmarker {
-  display: -moz-box;
-  margin-top: 1px;
-  margin-bottom: 1px;
-}
-
-checkbox:hover::before,
-checkbox[checked]::before {
-  -moz-margin-end: -20px;
-  -moz-margin-start: 5px;
-}
-
-radio:hover::before,
-radio[selected]::before {
-  -moz-margin-end: -18px;
-  -moz-margin-start: 7px;
-}
-
-.numberbox-input-box {
-  -moz-appearance: none;
-  border-width: 0;
+prefpane .groupbox-title {
+  background: none;
+  margin-bottom: 0;
 }
 
 spinbuttons {
@@ -56,7 +38,35 @@ spinbuttons {
   -moz-margin-end: 8px !important;
 }
 
-description {
-  font-size: 1.25rem;
-  line-height: 22px;
+#downloadFolder > .fileFieldContentBox {
+  -moz-padding-start: 3px;
+}
+
+textbox + button {
+  -moz-margin-start: -4px;
+}
+
+filefield + button {
+  -moz-margin-start: -8px;
+}
+
+#popupPolicyRow {
+  /* Override styles from
+     browser/themes/osx/preferences/preferences.css */
+  margin-bottom: 0 !important;
+  padding-bottom: 0 !important;
+  border-bottom: none;
+}
+
+#advancedPrefs {
+  margin-right: 0; /*override margin from normal preferences.css */
+  margin-left: 0;
+}
+
+/**
+ * Dialog
+ */
+
+#dialogTitle {
+  font-size: 1.1em;
 }

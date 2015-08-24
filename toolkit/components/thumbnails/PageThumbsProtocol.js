@@ -52,6 +52,7 @@ Protocol.prototype = {
    */
   get protocolFlags() {
     return Ci.nsIProtocolHandler.URI_DANGEROUS_TO_LOAD |
+           Ci.nsIProtocolHandler.URI_IS_LOCAL_RESOURCE |
            Ci.nsIProtocolHandler.URI_NORELATIVE |
            Ci.nsIProtocolHandler.URI_NOAUTH;
   },
@@ -77,7 +78,12 @@ Protocol.prototype = {
     let {url} = parseURI(aURI);
     let file = PageThumbsStorage.getFilePathForURL(url);
     let fileuri = Services.io.newFileURI(new FileUtils.File(file));
-    return Services.io.newChannelFromURI(fileuri);
+    return Services.io.newChannelFromURI2(fileuri,
+                                          null,      // aLoadingNode
+                                          Services.scriptSecurityManager.getSystemPrincipal(),
+                                          null,      // aTriggeringPrincipal
+                                          Ci.nsILoadInfo.SEC_NORMAL,
+                                          Ci.nsIContentPolicy.TYPE_IMAGE);
   },
 
   /**

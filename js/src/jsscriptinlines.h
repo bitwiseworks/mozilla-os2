@@ -9,7 +9,7 @@
 
 #include "jsscript.h"
 
-#include "jit/AsmJSLink.h"
+#include "asmjs/AsmJSLink.h"
 #include "jit/BaselineJIT.h"
 #include "jit/IonAnalysis.h"
 #include "vm/ScopeObject.h"
@@ -23,7 +23,9 @@ namespace js {
 inline
 Bindings::Bindings()
     : callObjShape_(nullptr), bindingArrayAndFlag_(TEMPORARY_STORAGE_BIT),
-      numArgs_(0), numBlockScoped_(0), numVars_(0)
+      numArgs_(0), numBlockScoped_(0),
+      numBodyLevelLexicals_(0), numUnaliasedBodyLevelLexicals_(0),
+      numVars_(0), numUnaliasedVars_(0)
 {}
 
 inline
@@ -73,7 +75,7 @@ JSScript::functionDelazifying() const
 inline void
 JSScript::setFunction(JSFunction* fun)
 {
-    JS_ASSERT(fun->isTenured());
+    MOZ_ASSERT(fun->isTenured());
     function_ = fun;
 }
 
@@ -89,14 +91,14 @@ inline JSFunction*
 JSScript::getFunction(size_t index)
 {
     JSFunction* fun = &getObject(index)->as<JSFunction>();
-    JS_ASSERT_IF(fun->isNative(), IsAsmJSModuleNative(fun->native()));
+    MOZ_ASSERT_IF(fun->isNative(), IsAsmJSModuleNative(fun->native()));
     return fun;
 }
 
 inline JSFunction*
 JSScript::getCallerFunction()
 {
-    JS_ASSERT(savedCallerFun());
+    MOZ_ASSERT(savedCallerFun());
     return getFunction(0);
 }
 
@@ -114,16 +116,16 @@ inline js::RegExpObject*
 JSScript::getRegExp(size_t index)
 {
     js::ObjectArray* arr = regexps();
-    JS_ASSERT(uint32_t(index) < arr->length);
+    MOZ_ASSERT(uint32_t(index) < arr->length);
     JSObject* obj = arr->vector[index];
-    JS_ASSERT(obj->is<js::RegExpObject>());
+    MOZ_ASSERT(obj->is<js::RegExpObject>());
     return (js::RegExpObject*) obj;
 }
 
 inline js::RegExpObject*
 JSScript::getRegExp(jsbytecode* pc)
 {
-    JS_ASSERT(containsPC(pc) && containsPC(pc + sizeof(uint32_t)));
+    MOZ_ASSERT(containsPC(pc) && containsPC(pc + sizeof(uint32_t)));
     return getRegExp(GET_UINT32_INDEX(pc));
 }
 
@@ -143,35 +145,14 @@ JSScript::principals()
     return compartment()->principals;
 }
 
-inline JSFunction*
-JSScript::donorFunction() const
-{
-    if (!isCallsiteClone())
-        return nullptr;
-    return &enclosingScopeOrOriginalFunction_->as<JSFunction>();
-}
-
-inline void
-JSScript::setIsCallsiteClone(JSObject* fun)
-{
-    JS_ASSERT(shouldCloneAtCallsite());
-    shouldCloneAtCallsite_ = false;
-    isCallsiteClone_ = true;
-    JS_ASSERT(isCallsiteClone());
-    JS_ASSERT(fun->is<JSFunction>());
-    enclosingScopeOrOriginalFunction_ = fun;
-}
-
 inline void
 JSScript::setBaselineScript(JSContext* maybecx, js::jit::BaselineScript* baselineScript)
 {
-#ifdef JS_ION
     if (hasBaselineScript())
-        js::jit::BaselineScript::writeBarrierPre(tenuredZone(), baseline);
-#endif
+        js::jit::BaselineScript::writeBarrierPre(zone(), baseline);
     MOZ_ASSERT(!hasIonScript());
     baseline = baselineScript;
-    updateBaselineOrIonRaw();
+    updateBaselineOrIonRaw(maybecx);
 }
 
 inline bool
@@ -179,11 +160,13 @@ JSScript::ensureHasAnalyzedArgsUsage(JSContext* cx)
 {
     if (analyzedArgsUsage())
         return true;
-#ifdef JS_ION
     return js::jit::AnalyzeArgumentsUsage(cx, this);
-#else
-    MOZ_CRASH();
-#endif
+}
+
+inline bool
+JSScript::isDebuggee() const
+{
+    return compartment_->debuggerObservesAllExecution() || hasDebugScript_;
 }
 
 #endif /* jsscriptinlines_h */

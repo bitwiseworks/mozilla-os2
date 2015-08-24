@@ -20,18 +20,19 @@
     {0x93, 0xb6, 0x00, 0x10, 0x4b, 0xa0, 0xfd, 0x40} \
 }
 
-typedef nsInterfaceHashtable<nsCharPtrHashKey, nsISupports>
-        nsProperties_HashBase;
+typedef nsInterfaceHashtable<nsCharPtrHashKey,
+                             nsISupports> nsProperties_HashBase;
 
-class nsProperties MOZ_FINAL : public nsIProperties,
-                               public nsProperties_HashBase {
+class nsProperties final
+  : public nsIProperties
+  , public nsProperties_HashBase
+{
 public:
-
   NS_DECL_AGGREGATED
   NS_DECL_NSIPROPERTIES
 
-  nsProperties(nsISupports *aOuter) { NS_INIT_AGGREGATED(aOuter); }
-  ~nsProperties() { }
+  explicit nsProperties(nsISupports *aOuter) { NS_INIT_AGGREGATED(aOuter); }
+  ~nsProperties() {}
 };
 
 #endif /* nsProperties_h___ */

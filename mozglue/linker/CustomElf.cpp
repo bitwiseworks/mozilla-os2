@@ -6,7 +6,10 @@
 #include <sys/mman.h>
 #include <vector>
 #include <dlfcn.h>
+#include <signal.h>
+#include <string.h>
 #include "CustomElf.h"
+#include "BaseElf.h"
 #include "Mappable.h"
 #include "Logging.h"
 
@@ -69,11 +72,6 @@ static int p_flags_to_mprot(Word flags)
   return ((flags & PF_X) ? PROT_EXEC : 0) |
          ((flags & PF_W) ? PROT_WRITE : 0) |
          ((flags & PF_R) ? PROT_READ : 0);
-}
-
-void
-__void_stub(void)
-{
 }
 
 } /* anonymous namespace */
@@ -149,14 +147,14 @@ CustomElf::Load(Mappable *mappable, const char *path, int flags)
         if (!dyn) {
           dyn = phdr;
         } else {
-          LOG("%s: Multiple PT_DYNAMIC segments detected", elf->GetPath());
+          ERROR("%s: Multiple PT_DYNAMIC segments detected", elf->GetPath());
           return nullptr;
         }
         break;
       case PT_TLS:
         debug_phdr("PT_TLS", phdr);
         if (phdr->p_memsz) {
-          LOG("%s: TLS is not supported", elf->GetPath());
+          ERROR("%s: TLS is not supported", elf->GetPath());
           return nullptr;
         }
         break;
@@ -165,7 +163,7 @@ CustomElf::Load(Mappable *mappable, const char *path, int flags)
 // Skip on Android until bug 706116 is fixed
 #ifndef ANDROID
         if (phdr->p_flags & PF_X) {
-          LOG("%s: Executable stack is not supported", elf->GetPath());
+          ERROR("%s: Executable stack is not supported", elf->GetPath());
           return nullptr;
         }
 #endif
@@ -178,18 +176,18 @@ CustomElf::Load(Mappable *mappable, const char *path, int flags)
         break;
 #endif
       default:
-        DEBUG_LOG("%s: Warning: program header type #%d not handled",
+        DEBUG_LOG("%s: Program header type #%d not handled",
                   elf->GetPath(), phdr->p_type);
     }
   }
 
   if (min_vaddr != 0) {
-    LOG("%s: Unsupported minimal virtual address: 0x%08" PRIxAddr,
+    ERROR("%s: Unsupported minimal virtual address: 0x%08" PRIxAddr,
         elf->GetPath(), min_vaddr);
     return nullptr;
   }
   if (!dyn) {
-    LOG("%s: No PT_DYNAMIC segment found", elf->GetPath());
+    ERROR("%s: No PT_DYNAMIC segment found", elf->GetPath());
     return nullptr;
   }
 
@@ -208,7 +206,7 @@ CustomElf::Load(Mappable *mappable, const char *path, int flags)
   if ((elf->base == MAP_FAILED) ||
       (mmap(elf->base, max_vaddr, PROT_NONE,
             MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0) != elf->base)) {
-    LOG("%s: Failed to mmap", elf->GetPath());
+    ERROR("%s: Failed to mmap", elf->GetPath());
     return nullptr;
   }
 
@@ -260,7 +258,9 @@ CustomElf::Load(Mappable *mappable, const char *path, int flags)
                             arm_exidx_phdr->p_memsz);
 #endif
 
-  elf->stats("oneLibLoaded");
+  if (MOZ_UNLIKELY(Logging::isVerbose())) {
+    elf->stats("oneLibLoaded");
+  }
   DEBUG_LOG("CustomElf::Load(\"%s\", 0x%x) = %p", path, flags,
             static_cast<void *>(elf));
   return elf;
@@ -276,45 +276,6 @@ CustomElf::~CustomElf()
    * calls destructors once, so call it in all cases. */
   ElfLoader::__wrap_cxa_finalize(this);
   ElfLoader::Singleton.Forget(this);
-}
-
-namespace {
-
-/**
- * Hash function for symbol lookup, as defined in ELF standard for System V
- */
-unsigned long
-ElfHash(const char *symbol)
-{
-  const unsigned char *sym = reinterpret_cast<const unsigned char *>(symbol);
-  unsigned long h = 0, g;
-  while (*sym) {
-    h = (h << 4) + *sym++;
-    if ((g = h & 0xf0000000))
-      h ^= g >> 24;
-    h &= ~g;
-  }
-  return h;
-}
-
-} /* anonymous namespace */
-
-void *
-CustomElf::GetSymbolPtr(const char *symbol) const
-{
-  return GetSymbolPtr(symbol, ElfHash(symbol));
-}
-
-void *
-CustomElf::GetSymbolPtr(const char *symbol, unsigned long hash) const
-{
-  const Sym *sym = GetSymbol(symbol, hash);
-  void *ptr = nullptr;
-  if (sym && sym->st_shndx != SHN_UNDEF)
-    ptr = GetPtr(sym->st_value);
-  DEBUG_LOG("CustomElf::GetSymbolPtr(%p [\"%s\"], \"%s\") = %p",
-            reinterpret_cast<const void *>(this), GetPath(), symbol, ptr);
-  return ptr;
 }
 
 void *
@@ -353,29 +314,26 @@ CustomElf::GetSymbolPtrInDeps(const char *symbol) const
     if (strcmp(symbol + 2, "gnu_Unwind_Find_exidx") == 0)
       return FunctionPtr(__wrap___gnu_Unwind_Find_exidx);
 #endif
-  }
-
-#define MISSING_FLASH_SYMNAME_START "_ZN7android10VectorImpl19reservedVectorImpl"
-
-  // Android changed some symbols that Flash depended on in 4.4,
-  // so stub those out here
-  if (strncmp(symbol,
-              MISSING_FLASH_SYMNAME_START,
-              sizeof(MISSING_FLASH_SYMNAME_START) - 1) == 0) {
-    return FunctionPtr(__void_stub);
+  } else if (symbol[0] == 's' && symbol[1] == 'i') {
+    if (strcmp(symbol + 2, "gnal") == 0)
+      return FunctionPtr(signal);
+    if (strcmp(symbol + 2, "gaction") == 0)
+      return FunctionPtr(sigaction);
   }
 
   void *sym;
-  /* Search the symbol in the main program. Note this also tries all libraries
-   * the system linker will have loaded RTLD_GLOBAL. Unfortunately, that doesn't
-   * work with bionic, but its linker doesn't normally search the main binary
-   * anyways. Moreover, on android, the main binary is dalvik. */
-#ifdef __GLIBC__
-  sym = dlsym(RTLD_DEFAULT, symbol);
-  DEBUG_LOG("dlsym(RTLD_DEFAULT, \"%s\") = %p", symbol, sym);
-  if (sym)
-    return sym;
-#endif
+
+  unsigned long hash = Hash(symbol);
+
+  /* self_elf should never be NULL, but better safe than sorry. */
+  if (ElfLoader::Singleton.self_elf) {
+    /* We consider the library containing this code a permanent LD_PRELOAD,
+     * so, check if the symbol exists here first. */
+    sym = static_cast<BaseElf *>(
+      ElfLoader::Singleton.self_elf.get())->GetSymbolPtr(symbol, hash);
+    if (sym)
+      return sym;
+  }
 
   /* Then search the symbol in our dependencies. Since we already searched in
    * libraries the system linker loaded, skip those (on glibc systems). We
@@ -383,60 +341,22 @@ CustomElf::GetSymbolPtrInDeps(const char *symbol) const
    * directly, not in their own dependent libraries. Building libraries with
    * --no-allow-shlib-undefined ensures such indirect symbol dependency don't
    * happen. */
-  unsigned long hash = ElfHash(symbol);
   for (std::vector<RefPtr<LibHandle> >::const_iterator it = dependencies.begin();
        it < dependencies.end(); ++it) {
-    if (!(*it)->IsSystemElf()) {
-      sym = reinterpret_cast<CustomElf *>((*it).get())->GetSymbolPtr(symbol, hash);
-#ifndef __GLIBC__
+    /* Skip if it's the library containing this code, since we've already
+     * looked at it above. */
+    if (*it == ElfLoader::Singleton.self_elf)
+      continue;
+    if (BaseElf *be = (*it)->AsBaseElf()) {
+      sym = be->GetSymbolPtr(symbol, hash);
     } else {
       sym = (*it)->GetSymbolPtr(symbol);
-#endif
     }
     if (sym)
       return sym;
   }
   return nullptr;
 }
-
-const Sym *
-CustomElf::GetSymbol(const char *symbol, unsigned long hash) const
-{
-  /* Search symbol with the buckets and chains tables.
-   * The hash computed from the symbol name gives an index in the buckets
-   * table. The corresponding value in the bucket table is an index in the
-   * symbols table and in the chains table.
-   * If the corresponding symbol in the symbols table matches, we're done.
-   * Otherwise, the corresponding value in the chains table is a new index
-   * in both tables, which corresponding symbol is tested and so on and so
-   * forth */
-  size_t bucket = hash % buckets.numElements();
-  for (size_t y = buckets[bucket]; y != STN_UNDEF; y = chains[y]) {
-    if (strcmp(symbol, strtab.GetStringAt(symtab[y].st_name)))
-      continue;
-    return &symtab[y];
-  }
-  return nullptr;
-}
-
-bool
-CustomElf::Contains(void *addr) const
-{
-  return base.Contains(addr);
-}
-
-#ifdef __ARM_EABI__
-const void *
-CustomElf::FindExidx(int *pcount) const
-{
-  if (arm_exidx) {
-    *pcount = arm_exidx.numElements();
-    return arm_exidx;
-  }
-  *pcount = 0;
-  return nullptr;
-}
-#endif
 
 void
 CustomElf::stats(const char *when) const
@@ -482,9 +402,9 @@ CustomElf::LoadSegment(const Phdr *pt_load) const
 
   if (mapped != where) {
     if (mapped == MAP_FAILED) {
-      LOG("%s: Failed to mmap", GetPath());
+      ERROR("%s: Failed to mmap", GetPath());
     } else {
-      LOG("%s: Didn't map at the expected location (wanted: %p, got: %p)",
+      ERROR("%s: Didn't map at the expected location (wanted: %p, got: %p)",
           GetPath(), where, mapped);
     }
     return false;
@@ -520,7 +440,7 @@ CustomElf::LoadSegment(const Phdr *pt_load) const
     }
     if (mem_end > next_page) {
       if (mprotect(GetPtr(next_page), mem_end - next_page, prot) < 0) {
-        LOG("%s: Failed to mprotect", GetPath());
+        ERROR("%s: Failed to mprotect", GetPath());
         return false;
       }
     }
@@ -571,7 +491,7 @@ CustomElf::InitDyn(const Phdr *pt_dyn)
       case DT_SYMENT:
         debug_dyn("DT_SYMENT", dyn);
         if (dyn->d_un.d_val != sizeof(Sym)) {
-          LOG("%s: Unsupported DT_SYMENT", GetPath());
+          ERROR("%s: Unsupported DT_SYMENT", GetPath());
           return false;
         }
         break;
@@ -579,7 +499,7 @@ CustomElf::InitDyn(const Phdr *pt_dyn)
         if (strcmp("libflashplayer.so", GetName()) == 0) {
           has_text_relocs = true;
         } else {
-          LOG("%s: Text relocations are not supported", GetPath());
+          ERROR("%s: Text relocations are not supported", GetPath());
           return false;
         }
         break;
@@ -589,7 +509,7 @@ CustomElf::InitDyn(const Phdr *pt_dyn)
       case UNSUPPORTED_RELOC():
       case UNSUPPORTED_RELOC(SZ):
       case UNSUPPORTED_RELOC(ENT):
-        LOG("%s: Unsupported relocations", GetPath());
+        ERROR("%s: Unsupported relocations", GetPath());
         return false;
       case RELOC():
         debug_dyn(STR_RELOC(), dyn);
@@ -602,7 +522,7 @@ CustomElf::InitDyn(const Phdr *pt_dyn)
       case RELOC(ENT):
         debug_dyn(STR_RELOC(ENT), dyn);
         if (dyn->d_un.d_val != sizeof(Reloc)) {
-          LOG("%s: Unsupported DT_RELENT", GetPath());
+          ERROR("%s: Unsupported DT_RELENT", GetPath());
           return false;
         }
         break;
@@ -643,7 +563,7 @@ CustomElf::InitDyn(const Phdr *pt_dyn)
         break;
       case DT_PLTREL:
         if (dyn->d_un.d_val != RELOC()) {
-          LOG("%s: Error: DT_PLTREL is not " STR_RELOC(), GetPath());
+          ERROR("%s: Error: DT_PLTREL is not " STR_RELOC(), GetPath());
           return false;
         }
         break;
@@ -655,14 +575,14 @@ CustomElf::InitDyn(const Phdr *pt_dyn)
              if (strcmp("libflashplayer.so", GetName()) == 0) {
                has_text_relocs = true;
              } else {
-               LOG("%s: Text relocations are not supported", GetPath());
+               ERROR("%s: Text relocations are not supported", GetPath());
                return false;
              }
            }
            /* we can treat this like having a DT_SYMBOLIC tag */
            flags &= ~DF_SYMBOLIC;
            if (flags)
-             LOG("%s: Warning: unhandled flags #%" PRIxAddr" not handled",
+             WARN("%s: unhandled flags #%" PRIxAddr" not handled",
                  GetPath(), flags);
         }
         break;
@@ -685,21 +605,21 @@ CustomElf::InitDyn(const Phdr *pt_dyn)
         /* Ignored */
         break;
       default:
-        LOG("%s: Warning: dynamic header type #%" PRIxAddr" not handled",
+        WARN("%s: dynamic header type #%" PRIxAddr" not handled",
             GetPath(), dyn->d_tag);
     }
   }
 
   if (!buckets || !symnum) {
-    LOG("%s: Missing or broken DT_HASH", GetPath());
+    ERROR("%s: Missing or broken DT_HASH", GetPath());
     return false;
   }
   if (!strtab) {
-    LOG("%s: Missing DT_STRTAB", GetPath());
+    ERROR("%s: Missing DT_STRTAB", GetPath());
     return false;
   }
   if (!symtab) {
-    LOG("%s: Missing DT_SYMTAB", GetPath());
+    ERROR("%s: Missing DT_SYMTAB", GetPath());
     return false;
   }
 
@@ -746,7 +666,7 @@ CustomElf::Relocate()
     }
 
     if (symptr == nullptr)
-      LOG("%s: Warning: relocation to NULL @0x%08" PRIxAddr,
+      WARN("%s: Relocation to NULL @0x%08" PRIxAddr,
           GetPath(), rel->r_offset);
 
     /* Apply relocation */
@@ -760,7 +680,7 @@ CustomElf::Relocate()
       *(const char **) ptr = (const char *)symptr + rel->GetAddend(base);
       break;
     default:
-      LOG("%s: Unsupported relocation type: 0x%" PRIxAddr,
+      ERROR("%s: Unsupported relocation type: 0x%" PRIxAddr,
           GetPath(), ELF_R_TYPE(rel->r_info));
       return false;
     }
@@ -779,7 +699,7 @@ CustomElf::RelocateJumps()
 
     /* Only R_*_JMP_SLOT relocations are expected */
     if (ELF_R_TYPE(rel->r_info) != R_JMP_SLOT) {
-      LOG("%s: Jump relocation type mismatch", GetPath());
+      ERROR("%s: Jump relocation type mismatch", GetPath());
       return false;
     }
 
@@ -792,12 +712,16 @@ CustomElf::RelocateJumps()
       symptr = GetSymbolPtrInDeps(strtab.GetStringAt(sym.st_name));
 
     if (symptr == nullptr) {
-      LOG("%s: %s: relocation to NULL @0x%08" PRIxAddr " for symbol \"%s\"",
-          GetPath(),
-          (ELF_ST_BIND(sym.st_info) == STB_WEAK) ? "Warning" : "Error",
-          rel->r_offset, strtab.GetStringAt(sym.st_name));
-      if (ELF_ST_BIND(sym.st_info) != STB_WEAK)
+      if (ELF_ST_BIND(sym.st_info) == STB_WEAK) {
+        WARN("%s: Relocation to NULL @0x%08" PRIxAddr " for symbol \"%s\"",
+            GetPath(),
+            rel->r_offset, strtab.GetStringAt(sym.st_name));
+      } else {
+        ERROR("%s: Relocation to NULL @0x%08" PRIxAddr " for symbol \"%s\"",
+            GetPath(),
+            rel->r_offset, strtab.GetStringAt(sym.st_name));
         return false;
+      }
     }
     /* Apply relocation */
     *(void **) ptr = symptr;

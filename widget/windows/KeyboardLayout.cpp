@@ -3,32 +3,34 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "prlog.h"
+
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/MouseEvents.h"
+#include "mozilla/MiscEvents.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/WindowsVersion.h"
 
-#include "KeyboardLayout.h"
-#include "nsIMM32Handler.h"
-
-#include "nsMemory.h"
-#include "nsToolkit.h"
-#include "nsQuickSort.h"
 #include "nsAlgorithm.h"
-#include "nsUnicharUtils.h"
-#include "WidgetUtils.h"
-#include "WinUtils.h"
-#include "nsWindowDbg.h"
-#include "nsServiceManagerUtils.h"
-#include "nsPrintfCString.h"
-
-#include "nsIDOMKeyEvent.h"
-#include "nsIIdleServiceInternal.h"
-
 #ifdef MOZ_CRASHREPORTER
 #include "nsExceptionHandler.h"
 #endif
+#include "nsGkAtoms.h"
+#include "nsIDOMKeyEvent.h"
+#include "nsIIdleServiceInternal.h"
+#include "nsIMM32Handler.h"
+#include "nsMemory.h"
+#include "nsPrintfCString.h"
+#include "nsQuickSort.h"
+#include "nsServiceManagerUtils.h"
+#include "nsToolkit.h"
+#include "nsUnicharUtils.h"
+#include "nsWindowDbg.h"
+
+#include "KeyboardLayout.h"
+#include "WidgetUtils.h"
+#include "WinUtils.h"
 
 #include "npapi.h"
 
@@ -40,8 +42,105 @@
 #include <winable.h>
 #endif
 
+// In WinUser.h, MAPVK_VK_TO_VSC_EX is defined only when WINVER >= 0x0600
+#ifndef MAPVK_VK_TO_VSC_EX
+#define MAPVK_VK_TO_VSC_EX (4)
+#endif
+
 namespace mozilla {
 namespace widget {
+
+#ifdef PR_LOGGING
+static const char* kVirtualKeyName[] = {
+  "NULL", "VK_LBUTTON", "VK_RBUTTON", "VK_CANCEL",
+  "VK_MBUTTON", "VK_XBUTTON1", "VK_XBUTTON2", "0x07",
+  "VK_BACK", "VK_TAB", "0x0A", "0x0B",
+  "VK_CLEAR", "VK_RETURN", "0x0E", "0x0F",
+
+  "VK_SHIFT", "VK_CONTROL", "VK_MENU", "VK_PAUSE",
+  "VK_CAPITAL", "VK_KANA, VK_HANGUL", "0x16", "VK_JUNJA",
+  "VK_FINAL", "VK_HANJA, VK_KANJI", "0x1A", "VK_ESCAPE",
+  "VK_CONVERT", "VK_NONCONVERT", "VK_ACCEPT", "VK_MODECHANGE",
+
+  "VK_SPACE", "VK_PRIOR", "VK_NEXT", "VK_END",
+  "VK_HOME", "VK_LEFT", "VK_UP", "VK_RIGHT",
+  "VK_DOWN", "VK_SELECT", "VK_PRINT", "VK_EXECUTE",
+  "VK_SNAPSHOT", "VK_INSERT", "VK_DELETE", "VK_HELP",
+
+  "VK_0", "VK_1", "VK_2", "VK_3",
+  "VK_4", "VK_5", "VK_6", "VK_7",
+  "VK_8", "VK_9", "0x3A", "0x3B",
+  "0x3C", "0x3D", "0x3E", "0x3F",
+
+  "0x40", "VK_A", "VK_B", "VK_C",
+  "VK_D", "VK_E", "VK_F", "VK_G",
+  "VK_H", "VK_I", "VK_J", "VK_K",
+  "VK_L", "VK_M", "VK_N", "VK_O",
+
+  "VK_P", "VK_Q", "VK_R", "VK_S",
+  "VK_T", "VK_U", "VK_V", "VK_W",
+  "VK_X", "VK_Y", "VK_Z", "VK_LWIN",
+  "VK_RWIN", "VK_APPS", "0x5E", "VK_SLEEP",
+
+  "VK_NUMPAD0", "VK_NUMPAD1", "VK_NUMPAD2", "VK_NUMPAD3",
+  "VK_NUMPAD4", "VK_NUMPAD5", "VK_NUMPAD6", "VK_NUMPAD7",
+  "VK_NUMPAD8", "VK_NUMPAD9", "VK_MULTIPLY", "VK_ADD",
+  "VK_SEPARATOR", "VK_SUBTRACT", "VK_DECIMAL", "VK_DIVIDE",
+
+  "VK_F1", "VK_F2", "VK_F3", "VK_F4",
+  "VK_F5", "VK_F6", "VK_F7", "VK_F8",
+  "VK_F9", "VK_F10", "VK_F11", "VK_F12",
+  "VK_F13", "VK_F14", "VK_F15", "VK_F16",
+
+  "VK_F17", "VK_F18", "VK_F19", "VK_F20",
+  "VK_F21", "VK_F22", "VK_F23", "VK_F24",
+  "0x88", "0x89", "0x8A", "0x8B",
+  "0x8C", "0x8D", "0x8E", "0x8F",
+
+  "VK_NUMLOCK", "VK_SCROLL", "VK_OEM_NEC_EQUAL, VK_OEM_FJ_JISHO",
+    "VK_OEM_FJ_MASSHOU",
+  "VK_OEM_FJ_TOUROKU", "VK_OEM_FJ_LOYA", "VK_OEM_FJ_ROYA", "0x97",
+  "0x98", "0x99", "0x9A", "0x9B",
+  "0x9C", "0x9D", "0x9E", "0x9F",
+
+  "VK_LSHIFT", "VK_RSHIFT", "VK_LCONTROL", "VK_RCONTROL",
+  "VK_LMENU", "VK_RMENU", "VK_BROWSER_BACK", "VK_BROWSER_FORWARD",
+  "VK_BROWSER_REFRESH", "VK_BROWSER_STOP", "VK_BROWSER_SEARCH",
+    "VK_BROWSER_FAVORITES",
+  "VK_BROWSER_HOME", "VK_VOLUME_MUTE", "VK_VOLUME_DOWN", "VK_VOLUME_UP",
+
+  "VK_MEDIA_NEXT_TRACK", "VK_MEDIA_PREV_TRACK", "VK_MEDIA_STOP",
+    "VK_MEDIA_PLAY_PAUSE",
+  "VK_LAUNCH_MAIL", "VK_LAUNCH_MEDIA_SELECT", "VK_LAUNCH_APP1",
+    "VK_LAUNCH_APP2",
+  "0xB8", "0xB9", "VK_OEM_1", "VK_OEM_PLUS",
+  "VK_OEM_COMMA", "VK_OEM_MINUS", "VK_OEM_PERIOD", "VK_OEM_2",
+
+  "VK_OEM_3", "VK_ABNT_C1", "VK_ABNT_C2", "0xC3",
+  "0xC4", "0xC5", "0xC6", "0xC7",
+  "0xC8", "0xC9", "0xCA", "0xCB",
+  "0xCC", "0xCD", "0xCE", "0xCF",
+
+  "0xD0", "0xD1", "0xD2", "0xD3",
+  "0xD4", "0xD5", "0xD6", "0xD7",
+  "0xD8", "0xD9", "0xDA", "VK_OEM_4",
+  "VK_OEM_5", "VK_OEM_6", "VK_OEM_7", "VK_OEM_8",
+
+  "0xE0", "VK_OEM_AX", "VK_OEM_102", "VK_ICO_HELP",
+  "VK_ICO_00", "VK_PROCESSKEY", "VK_ICO_CLEAR", "VK_PACKET",
+  "0xE8", "VK_OEM_RESET", "VK_OEM_JUMP", "VK_OEM_PA1",
+  "VK_OEM_PA2", "VK_OEM_PA3", "VK_OEM_WSCTRL", "VK_OEM_CUSEL",
+
+  "VK_OEM_ATTN", "VK_OEM_FINISH", "VK_OEM_COPY", "VK_OEM_AUTO",
+  "VK_OEM_ENLW", "VK_OEM_BACKTAB", "VK_ATTN", "VK_CRSEL",
+  "VK_EXSEL", "VK_EREOF", "VK_PLAY", "VK_ZOOM",
+  "VK_NONAME", "VK_PA1", "VK_OEM_CLEAR", "0xFF"
+};
+
+static_assert(sizeof(kVirtualKeyName) / sizeof(const char*) == 0x100,
+  "The virtual key name must be defined just 256 keys");
+
+#endif // #ifdef PR_LOGGING
 
 // Unique id counter associated with a keydown / keypress events. Used in
 // identifing keypress events for removal from async event dispatch queue
@@ -178,12 +277,12 @@ ModifierKeyState::InitInputEvent(WidgetInputEvent& aInputEvent) const
 {
   aInputEvent.modifiers = mModifiers;
 
-  switch(aInputEvent.eventStructType) {
-    case NS_MOUSE_EVENT:
-    case NS_MOUSE_SCROLL_EVENT:
-    case NS_WHEEL_EVENT:
-    case NS_DRAG_EVENT:
-    case NS_SIMPLE_GESTURE_EVENT:
+  switch(aInputEvent.mClass) {
+    case eMouseEventClass:
+    case eMouseScrollEventClass:
+    case eWheelEventClass:
+    case eDragEventClass:
+    case eSimpleGestureEventClass:
       InitMouseEvent(aInputEvent);
       break;
     default:
@@ -194,10 +293,10 @@ ModifierKeyState::InitInputEvent(WidgetInputEvent& aInputEvent) const
 void
 ModifierKeyState::InitMouseEvent(WidgetInputEvent& aMouseEvent) const
 {
-  NS_ASSERTION(aMouseEvent.eventStructType == NS_MOUSE_EVENT ||
-               aMouseEvent.eventStructType == NS_WHEEL_EVENT ||
-               aMouseEvent.eventStructType == NS_DRAG_EVENT ||
-               aMouseEvent.eventStructType == NS_SIMPLE_GESTURE_EVENT,
+  NS_ASSERTION(aMouseEvent.mClass == eMouseEventClass ||
+               aMouseEvent.mClass == eWheelEventClass ||
+               aMouseEvent.mClass == eDragEventClass ||
+               aMouseEvent.mClass == eSimpleGestureEventClass,
                "called with non-mouse event");
 
   if (XRE_GetWindowsEnvironment() == WindowsEnvironmentType_Metro) {
@@ -504,7 +603,7 @@ UniCharsAndModifiers
 VirtualKey::GetNativeUniChars(ShiftState aShiftState) const
 {
 #ifdef DEBUG
-  if (aShiftState < 0 || aShiftState >= ArrayLength(mShiftStates)) {
+  if (aShiftState >= ArrayLength(mShiftStates)) {
     nsPrintfCString warning("Shift state is out of range: "
                             "aShiftState=%d, ArrayLength(mShiftState)=%d",
                             aShiftState, ArrayLength(mShiftStates));
@@ -570,29 +669,56 @@ VirtualKey::FillKbdState(PBYTE aKbdState,
  * mozilla::widget::NativeKey
  *****************************************************************************/
 
+uint8_t NativeKey::sDispatchedKeyOfAppCommand = 0;
+
 NativeKey::NativeKey(nsWindowBase* aWidget,
-                     const MSG& aKeyOrCharMessage,
+                     const MSG& aMessage,
                      const ModifierKeyState& aModKeyState,
-                     nsTArray<FakeCharMsg>* aFakeCharMsgs) :
-  mWidget(aWidget), mMsg(aKeyOrCharMessage), mDOMKeyCode(0),
-  mModKeyState(aModKeyState), mVirtualKeyCode(0), mOriginalVirtualKeyCode(0),
-  mFakeCharMsgs(aFakeCharMsgs && aFakeCharMsgs->Length() ?
-                  aFakeCharMsgs : nullptr)
+                     nsTArray<FakeCharMsg>* aFakeCharMsgs)
+  : mWidget(aWidget)
+  , mMsg(aMessage)
+  , mDOMKeyCode(0)
+  , mKeyNameIndex(KEY_NAME_INDEX_Unidentified)
+  , mCodeNameIndex(CODE_NAME_INDEX_UNKNOWN)
+  , mModKeyState(aModKeyState)
+  , mVirtualKeyCode(0)
+  , mOriginalVirtualKeyCode(0)
+  , mScanCode(0)
+  , mIsExtended(false)
+  , mIsDeadKey(false)
+  , mFakeCharMsgs(aFakeCharMsgs && aFakeCharMsgs->Length() ?
+                    aFakeCharMsgs : nullptr)
 {
   MOZ_ASSERT(aWidget);
   KeyboardLayout* keyboardLayout = KeyboardLayout::GetInstance();
   mKeyboardLayout = keyboardLayout->GetLayout();
+
+  if (mMsg.message == WM_APPCOMMAND) {
+    InitWithAppCommand();
+    return;
+  }
+
   mScanCode = WinUtils::GetScanCode(mMsg.lParam);
   mIsExtended = WinUtils::IsExtendedScanCode(mMsg.lParam);
-  // On WinXP and WinServer2003, we cannot compute the virtual keycode for
-  // extended keys due to the API limitation.
-  bool canComputeVirtualKeyCodeFromScanCode =
-    (!mIsExtended || IsVistaOrLater());
   switch (mMsg.message) {
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN:
     case WM_KEYUP:
     case WM_SYSKEYUP: {
+      // If the key message is sent from other application like a11y tools, the
+      // scancode value might not be set proper value.  Then, probably the value
+      // is 0.
+      // NOTE: If the virtual keycode can be caused by both non-extended key
+      //       and extended key, the API returns the non-extended key's
+      //       scancode.  E.g., VK_LEFT causes "4" key on numpad.
+      if (!mScanCode) {
+        uint16_t scanCodeEx = ComputeScanCodeExFromVirtualKeyCode(mMsg.wParam);
+        if (scanCodeEx) {
+          mScanCode = static_cast<uint8_t>(scanCodeEx & 0xFF);
+          uint8_t extended = static_cast<uint8_t>((scanCodeEx & 0xFF00) >> 8);
+          mIsExtended = (extended == 0xE0) || (extended == 0xE1);
+        }
+      }
       // First, resolve the IME converted virtual keycode to its original
       // keycode.
       if (mMsg.wParam == VK_PROCESSKEY) {
@@ -648,7 +774,7 @@ NativeKey::NativeKey(nsWindowBase* aWidget,
         break;
       }
 
-      if (!canComputeVirtualKeyCodeFromScanCode) {
+      if (!CanComputeVirtualKeyCodeFromScanCode()) {
         // The right control key and the right alt key are extended keys.
         // Therefore, we never get VK_RCONTRL and VK_RMENU for the result of
         // MapVirtualKeyEx() on WinXP or WinServer2003.
@@ -679,11 +805,9 @@ NativeKey::NativeKey(nsWindowBase* aWidget,
       // Otherwise, compute the virtual keycode with MapVirtualKeyEx().
       mVirtualKeyCode = ComputeVirtualKeyCodeFromScanCodeEx();
 
-      // The result might be unexpected value due to the scan code is
-      // wrong.  For example, any key messages can be generated by
-      // SendMessage() or PostMessage() from applications.  So, it's possible
-      // failure.  Then, let's respect the extended flag even if it might be
-      // set intentionally.
+      // Following code shouldn't be used now because we compute scancode value
+      // if we detect that the sender doesn't set proper scancode.
+      // However, the detection might fail. Therefore, let's keep using this.
       switch (mOriginalVirtualKeyCode) {
         case VK_CONTROL:
           if (mVirtualKeyCode != VK_LCONTROL &&
@@ -711,9 +835,13 @@ NativeKey::NativeKey(nsWindowBase* aWidget,
     case WM_CHAR:
     case WM_UNICHAR:
     case WM_SYSCHAR:
+      // NOTE: If other applications like a11y tools sends WM_*CHAR without
+      //       scancode, we cannot compute virtual keycode.  I.e., with such
+      //       applications, we cannot generate proper KeyboardEvent.code value.
+
       // We cannot compute the virtual key code from WM_CHAR message on WinXP
       // if it's caused by an extended key.
-      if (!canComputeVirtualKeyCodeFromScanCode) {
+      if (!CanComputeVirtualKeyCodeFromScanCode()) {
         break;
       }
       mVirtualKeyCode = mOriginalVirtualKeyCode =
@@ -732,6 +860,9 @@ NativeKey::NativeKey(nsWindowBase* aWidget,
     keyboardLayout->ConvertNativeKeyCodeToDOMKeyCode(mOriginalVirtualKeyCode);
   mKeyNameIndex =
     keyboardLayout->ConvertNativeKeyCodeToKeyNameIndex(mOriginalVirtualKeyCode);
+  mCodeNameIndex =
+    KeyboardLayout::ConvertScanCodeToCodeNameIndex(
+      GetScanCodeWithExtendedFlag());
 
   keyboardLayout->InitNativeKey(*this, mModKeyState);
 
@@ -739,6 +870,102 @@ NativeKey::NativeKey(nsWindowBase* aWidget,
     (IsFollowedByDeadCharMessage() ||
      keyboardLayout->IsDeadKey(mOriginalVirtualKeyCode, mModKeyState));
   mIsPrintableKey = KeyboardLayout::IsPrintableCharKey(mOriginalVirtualKeyCode);
+}
+
+void
+NativeKey::InitWithAppCommand()
+{
+  if (GET_DEVICE_LPARAM(mMsg.lParam) != FAPPCOMMAND_KEY) {
+    return;
+  }
+
+  uint32_t appCommand = GET_APPCOMMAND_LPARAM(mMsg.lParam);
+  switch (GET_APPCOMMAND_LPARAM(mMsg.lParam)) {
+
+#undef NS_APPCOMMAND_TO_DOM_KEY_NAME_INDEX
+#define NS_APPCOMMAND_TO_DOM_KEY_NAME_INDEX(aAppCommand, aKeyNameIndex) \
+    case aAppCommand: \
+      mKeyNameIndex = aKeyNameIndex; \
+      break;
+
+#include "NativeKeyToDOMKeyName.h"
+
+#undef NS_APPCOMMAND_TO_DOM_KEY_NAME_INDEX
+
+    default:
+      mKeyNameIndex = KEY_NAME_INDEX_Unidentified;
+  }
+
+  // Guess the virtual keycode which caused this message.
+  switch (appCommand) {
+    case APPCOMMAND_BROWSER_BACKWARD:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_BROWSER_BACK;
+      break;
+    case APPCOMMAND_BROWSER_FORWARD:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_BROWSER_FORWARD;
+      break;
+    case APPCOMMAND_BROWSER_REFRESH:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_BROWSER_REFRESH;
+      break;
+    case APPCOMMAND_BROWSER_STOP:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_BROWSER_STOP;
+      break;
+    case APPCOMMAND_BROWSER_SEARCH:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_BROWSER_SEARCH;
+      break;
+    case APPCOMMAND_BROWSER_FAVORITES:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_BROWSER_FAVORITES;
+      break;
+    case APPCOMMAND_BROWSER_HOME:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_BROWSER_HOME;
+      break;
+    case APPCOMMAND_VOLUME_MUTE:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_VOLUME_MUTE;
+      break;
+    case APPCOMMAND_VOLUME_DOWN:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_VOLUME_DOWN;
+      break;
+    case APPCOMMAND_VOLUME_UP:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_VOLUME_UP;
+      break;
+    case APPCOMMAND_MEDIA_NEXTTRACK:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_MEDIA_NEXT_TRACK;
+      break;
+    case APPCOMMAND_MEDIA_PREVIOUSTRACK:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_MEDIA_PREV_TRACK;
+      break;
+    case APPCOMMAND_MEDIA_STOP:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_MEDIA_STOP;
+      break;
+    case APPCOMMAND_MEDIA_PLAY_PAUSE:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_MEDIA_PLAY_PAUSE;
+      break;
+    case APPCOMMAND_LAUNCH_MAIL:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_LAUNCH_MAIL;
+      break;
+    case APPCOMMAND_LAUNCH_MEDIA_SELECT:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_LAUNCH_MEDIA_SELECT;
+      break;
+    case APPCOMMAND_LAUNCH_APP1:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_LAUNCH_APP1;
+      break;
+    case APPCOMMAND_LAUNCH_APP2:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_LAUNCH_APP2;
+      break;
+    default:
+      return;
+  }
+
+  uint16_t scanCodeEx = ComputeScanCodeExFromVirtualKeyCode(mVirtualKeyCode);
+  mScanCode = static_cast<uint8_t>(scanCodeEx & 0xFF);
+  uint8_t extended = static_cast<uint8_t>((scanCodeEx & 0xFF00) >> 8);
+  mIsExtended = (extended == 0xE0) || (extended == 0xE1);
+  mDOMKeyCode =
+    KeyboardLayout::GetInstance()->
+      ConvertNativeKeyCodeToDOMKeyCode(mOriginalVirtualKeyCode);
+  mCodeNameIndex =
+    KeyboardLayout::ConvertScanCodeToCodeNameIndex(
+      GetScanCodeWithExtendedFlag());
 }
 
 bool
@@ -870,6 +1097,18 @@ NativeKey::GetKeyLocation() const
   }
 }
 
+bool
+NativeKey::CanComputeVirtualKeyCodeFromScanCode() const
+{
+  // Vista or later supports ScanCodeEx.
+  if (IsVistaOrLater()) {
+    return true;
+  }
+  // Otherwise, MapVirtualKeyEx() can compute virtual keycode only with
+  // non-extended key.
+  return !mIsExtended;
+}
+
 uint8_t
 NativeKey::ComputeVirtualKeyCodeFromScanCode() const
 {
@@ -880,11 +1119,21 @@ NativeKey::ComputeVirtualKeyCodeFromScanCode() const
 uint8_t
 NativeKey::ComputeVirtualKeyCodeFromScanCodeEx() const
 {
-  // NOTE: WinXP doesn't support mapping scan code to virtual keycode of
-  //       extended keys.
-  NS_ENSURE_TRUE(!mIsExtended || IsVistaOrLater(), 0);
+  if (NS_WARN_IF(!CanComputeVirtualKeyCodeFromScanCode())) {
+    return 0;
+  }
   return static_cast<uint8_t>(
            ::MapVirtualKeyEx(GetScanCodeWithExtendedFlag(), MAPVK_VSC_TO_VK_EX,
+                             mKeyboardLayout));
+}
+
+uint16_t
+NativeKey::ComputeScanCodeExFromVirtualKeyCode(UINT aVirtualKeyCode) const
+{
+  return static_cast<uint16_t>(
+           ::MapVirtualKeyEx(aVirtualKeyCode,
+                             IsVistaOrLater() ? MAPVK_VK_TO_VSC_EX :
+                                                MAPVK_VK_TO_VSC,
                              mKeyboardLayout));
 }
 
@@ -938,6 +1187,8 @@ NativeKey::InitKeyEvent(WidgetKeyboardEvent& aKeyEvent,
   if (mKeyNameIndex == KEY_NAME_INDEX_USE_STRING) {
     aKeyEvent.mKeyValue = mCommittedCharsAndModifiers.ToString();
   }
+  aKeyEvent.mCodeNameIndex = mCodeNameIndex;
+  MOZ_ASSERT(mCodeNameIndex != CODE_NAME_INDEX_USE_STRING);
   aKeyEvent.location = GetKeyLocation();
   aModKeyState.InitInputEvent(aKeyEvent);
 }
@@ -958,10 +1209,200 @@ NativeKey::DispatchKeyEvent(WidgetKeyboardEvent& aKeyEvent,
     pluginEvent.event = aMsgSentToPlugin->message;
     pluginEvent.wParam = aMsgSentToPlugin->wParam;
     pluginEvent.lParam = aMsgSentToPlugin->lParam;
-    aKeyEvent.pluginEvent = static_cast<void*>(&pluginEvent);
+    aKeyEvent.mPluginEvent.Copy(pluginEvent);
   }
 
   return (mWidget->DispatchKeyboardEvent(&aKeyEvent) || mWidget->Destroyed());
+}
+
+bool
+NativeKey::DispatchCommandEvent(uint32_t aEventCommand) const
+{
+  nsCOMPtr<nsIAtom> command;
+  switch (aEventCommand) {
+    case APPCOMMAND_BROWSER_BACKWARD:
+      command = nsGkAtoms::Back;
+      break;
+    case APPCOMMAND_BROWSER_FORWARD:
+      command = nsGkAtoms::Forward;
+      break;
+    case APPCOMMAND_BROWSER_REFRESH:
+      command = nsGkAtoms::Reload;
+      break;
+    case APPCOMMAND_BROWSER_STOP:
+      command = nsGkAtoms::Stop;
+      break;
+    case APPCOMMAND_BROWSER_SEARCH:
+      command = nsGkAtoms::Search;
+      break;
+    case APPCOMMAND_BROWSER_FAVORITES:
+      command = nsGkAtoms::Bookmarks;
+      break;
+    case APPCOMMAND_BROWSER_HOME:
+      command = nsGkAtoms::Home;
+      break;
+    case APPCOMMAND_CLOSE:
+      command = nsGkAtoms::Close;
+      break;
+    case APPCOMMAND_FIND:
+      command = nsGkAtoms::Find;
+      break;
+    case APPCOMMAND_HELP:
+      command = nsGkAtoms::Help;
+      break;
+    case APPCOMMAND_NEW:
+      command = nsGkAtoms::New;
+      break;
+    case APPCOMMAND_OPEN:
+      command = nsGkAtoms::Open;
+      break;
+    case APPCOMMAND_PRINT:
+      command = nsGkAtoms::Print;
+      break;
+    case APPCOMMAND_SAVE:
+      command = nsGkAtoms::Save;
+      break;
+    case APPCOMMAND_FORWARD_MAIL:
+      command = nsGkAtoms::ForwardMail;
+      break;
+    case APPCOMMAND_REPLY_TO_MAIL:
+      command = nsGkAtoms::ReplyToMail;
+      break;
+    case APPCOMMAND_SEND_MAIL:
+      command = nsGkAtoms::SendMail;
+      break;
+    case APPCOMMAND_MEDIA_NEXTTRACK:
+      command = nsGkAtoms::NextTrack;
+      break;
+    case APPCOMMAND_MEDIA_PREVIOUSTRACK:
+      command = nsGkAtoms::PreviousTrack;
+      break;
+    case APPCOMMAND_MEDIA_STOP:
+      command = nsGkAtoms::MediaStop;
+      break;
+    case APPCOMMAND_MEDIA_PLAY_PAUSE:
+      command = nsGkAtoms::PlayPause;
+      break;
+    default:
+      return false;
+  }
+  WidgetCommandEvent commandEvent(true, nsGkAtoms::onAppCommand,
+                                  command, mWidget);
+
+  mWidget->InitEvent(commandEvent);
+  return (mWidget->DispatchWindowEvent(&commandEvent) || mWidget->Destroyed());
+}
+
+bool
+NativeKey::HandleAppCommandMessage() const
+{
+  // NOTE: Typical behavior of WM_APPCOMMAND caused by key is, WM_APPCOMMAND
+  //       message is _sent_ first.  Then, the DefaultWndProc will _post_
+  //       WM_KEYDOWN message and WM_KEYUP message if the keycode for the
+  //       command is available (i.e., mVirtualKeyCode is not 0).
+
+  // NOTE: IntelliType (Microsoft's keyboard utility software) always consumes
+  //       WM_KEYDOWN and WM_KEYUP.
+
+  // Let's dispatch keydown message before our chrome handles the command
+  // when the message is caused by a keypress.  This behavior makes handling
+  // WM_APPCOMMAND be a default action of the keydown event.  This means that
+  // web applications can handle multimedia keys and prevent our default action.
+  // This allow web applications to provide better UX for multimedia keyboard
+  // users.
+  bool dispatchKeyEvent = (GET_DEVICE_LPARAM(mMsg.lParam) == FAPPCOMMAND_KEY);
+
+  bool consumed = false;
+
+  if (dispatchKeyEvent) {
+    WidgetKeyboardEvent keydownEvent(true, NS_KEY_DOWN, mWidget);
+    InitKeyEvent(keydownEvent, mModKeyState);
+    // NOTE: If the keydown event is consumed by web contents, we shouldn't
+    //       continue to handle the command.
+    consumed = DispatchKeyEvent(keydownEvent, &mMsg);
+    sDispatchedKeyOfAppCommand = mVirtualKeyCode;
+    if (mWidget->Destroyed()) {
+      return true;
+    }
+  }
+
+  // Dispatch a command event or a content command event if the command is
+  // supported.
+  if (!consumed) {
+    uint32_t appCommand = GET_APPCOMMAND_LPARAM(mMsg.lParam);
+    uint32_t contentCommandMessage = NS_EVENT_NULL;
+    switch (appCommand) {
+      case APPCOMMAND_BROWSER_BACKWARD:
+      case APPCOMMAND_BROWSER_FORWARD:
+      case APPCOMMAND_BROWSER_REFRESH:
+      case APPCOMMAND_BROWSER_STOP:
+      case APPCOMMAND_BROWSER_SEARCH:
+      case APPCOMMAND_BROWSER_FAVORITES:
+      case APPCOMMAND_BROWSER_HOME:
+      case APPCOMMAND_CLOSE:
+      case APPCOMMAND_FIND:
+      case APPCOMMAND_HELP:
+      case APPCOMMAND_NEW:
+      case APPCOMMAND_OPEN:
+      case APPCOMMAND_PRINT:
+      case APPCOMMAND_SAVE:
+      case APPCOMMAND_FORWARD_MAIL:
+      case APPCOMMAND_REPLY_TO_MAIL:
+      case APPCOMMAND_SEND_MAIL:
+      case APPCOMMAND_MEDIA_NEXTTRACK:
+      case APPCOMMAND_MEDIA_PREVIOUSTRACK:
+      case APPCOMMAND_MEDIA_STOP:
+      case APPCOMMAND_MEDIA_PLAY_PAUSE:
+        // We shouldn't consume the message always because if we don't handle
+        // the message, the sender (typically, utility of keyboard or mouse)
+        // may send other key messages which indicate well known shortcut key.
+        consumed = DispatchCommandEvent(appCommand);
+        break;
+
+      // Use content command for following commands:
+      case APPCOMMAND_COPY:
+        contentCommandMessage = NS_CONTENT_COMMAND_COPY;
+        break;
+      case APPCOMMAND_CUT:
+        contentCommandMessage = NS_CONTENT_COMMAND_CUT;
+        break;
+      case APPCOMMAND_PASTE:
+        contentCommandMessage = NS_CONTENT_COMMAND_PASTE;
+        break;
+      case APPCOMMAND_REDO:
+        contentCommandMessage = NS_CONTENT_COMMAND_REDO;
+        break;
+      case APPCOMMAND_UNDO:
+        contentCommandMessage = NS_CONTENT_COMMAND_UNDO;
+        break;
+    }
+
+    if (contentCommandMessage) {
+      WidgetContentCommandEvent contentCommandEvent(true, contentCommandMessage,
+                                                    mWidget);
+      mWidget->DispatchWindowEvent(&contentCommandEvent);
+      consumed = true;
+    }
+
+    if (mWidget->Destroyed()) {
+      return true;
+    }
+  }
+
+  // Dispatch a keyup event if the command is caused by pressing a key and
+  // the key isn't mapped to a virtual keycode.
+  if (dispatchKeyEvent && !mVirtualKeyCode) {
+    WidgetKeyboardEvent keyupEvent(true, NS_KEY_UP, mWidget);
+    InitKeyEvent(keyupEvent, mModKeyState);
+    // NOTE: Ignore if the keyup event is consumed because keyup event
+    //       represents just a physical key event state change.
+    DispatchKeyEvent(keyupEvent, &mMsg);
+    if (mWidget->Destroyed()) {
+      return true;
+    }
+  }
+
+  return consumed;
 }
 
 bool
@@ -971,6 +1412,14 @@ NativeKey::HandleKeyDownMessage(bool* aEventDispatched) const
 
   if (aEventDispatched) {
     *aEventDispatched = false;
+  }
+
+  if (sDispatchedKeyOfAppCommand &&
+      sDispatchedKeyOfAppCommand == mOriginalVirtualKeyCode) {
+    // The multimedia key event has already been dispatch from
+    // HandleAppCommandMessage().
+    sDispatchedKeyOfAppCommand = 0;
+    return true;
   }
 
   bool defaultPrevented = false;
@@ -1809,11 +2258,20 @@ NativeKey::DispatchKeyPressEventForFollowingCharMessage(
 KeyboardLayout* KeyboardLayout::sInstance = nullptr;
 nsIIdleServiceInternal* KeyboardLayout::sIdleService = nullptr;
 
+#ifdef PR_LOGGING
+PRLogModuleInfo* sKeyboardLayoutLogger = nullptr;
+#endif // #ifdef PR_LOGGING
+
 // static
 KeyboardLayout*
 KeyboardLayout::GetInstance()
 {
   if (!sInstance) {
+#ifdef PR_LOGGING
+    if (!sKeyboardLayoutLogger) {
+      sKeyboardLayoutLogger = PR_NewLogModule("KeyboardLayoutWidgets");
+    }
+#endif // #ifdef PR_LOGGING
     sInstance = new KeyboardLayout();
     nsCOMPtr<nsIIdleServiceInternal> idleService =
       do_GetService("@mozilla.org/widget/idleservice;1");
@@ -1916,8 +2374,7 @@ KeyboardLayout::InitNativeKey(NativeKey& aNativeKey,
         mVirtualKeys[virtualKeyIndex].GetNativeUniChars(shiftState);
       NS_ASSERTION(deadChars.mLength == 1,
                    "dead key must generate only one character");
-      aNativeKey.mKeyNameIndex =
-        WidgetUtils::GetDeadKeyNameIndex(deadChars.mChars[0]);
+      aNativeKey.mKeyNameIndex = KEY_NAME_INDEX_Dead;
       return;
     }
 
@@ -2102,6 +2559,31 @@ KeyboardLayout::LoadLayout(HKL aLayout)
   }
 
   ::SetKeyboardState(originalKbdState);
+
+#ifdef PR_LOGGING
+  if (PR_LOG_TEST(sKeyboardLayoutLogger, PR_LOG_DEBUG)) {
+    static const UINT kExtendedScanCode[] = { 0x0000, 0xE000 };
+    static const UINT kMapType =
+      IsVistaOrLater() ? MAPVK_VSC_TO_VK_EX : MAPVK_VSC_TO_VK;
+    PR_LOG(sKeyboardLayoutLogger, PR_LOG_DEBUG,
+           ("Logging virtual keycode values for scancode (0x%p)...",
+            mKeyboardLayout));
+    for (uint32_t i = 0; i < ArrayLength(kExtendedScanCode); i++) {
+      for (uint32_t j = 1; j <= 0xFF; j++) {
+        UINT scanCode = kExtendedScanCode[i] + j;
+        UINT virtualKeyCode =
+          ::MapVirtualKeyEx(scanCode, kMapType, mKeyboardLayout);
+        PR_LOG(sKeyboardLayoutLogger, PR_LOG_DEBUG,
+               ("0x%04X, %s", scanCode, kVirtualKeyName[virtualKeyCode]));
+      }
+      // XP and Server 2003 don't support 0xE0 prefix of the scancode.
+      // Therefore, we don't need to continue on them.
+      if (!IsVistaOrLater()) {
+        break;
+      }
+    }
+  }
+#endif // #ifdef PR_LOGGING
 }
 
 inline int32_t
@@ -2426,6 +2908,7 @@ KeyboardLayout::ConvertNativeKeyCodeToDOMKeyCode(UINT aNativeKeyCode) const
     case VK_BROWSER_FAVORITES:
     case VK_BROWSER_HOME:
     case VK_MEDIA_NEXT_TRACK:
+    case VK_MEDIA_PREV_TRACK:
     case VK_MEDIA_STOP:
     case VK_MEDIA_PLAY_PAUSE:
     case VK_LAUNCH_MAIL:
@@ -2546,11 +3029,6 @@ KeyboardLayout::ConvertNativeKeyCodeToKeyNameIndex(uint8_t aVirtualKey) const
     return KEY_NAME_INDEX_USE_STRING;
   }
 
-#define NS_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX(aNativeKey, aKeyNameIndex)
-#define NS_JAPANESE_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX(aNativeKey, aKeyNameIndex)
-#define NS_KOREAN_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX(aNativeKey, aKeyNameIndex)
-#define NS_OTHER_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX(aNativeKey, aKeyNameIndex)
-
   switch (aVirtualKey) {
 
 #undef NS_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX
@@ -2560,7 +3038,6 @@ KeyboardLayout::ConvertNativeKeyCodeToKeyNameIndex(uint8_t aVirtualKey) const
 #include "NativeKeyToDOMKeyName.h"
 
 #undef NS_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX
-#define NS_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX(aNativeKey, aKeyNameIndex)
 
     default:
       break;
@@ -2580,7 +3057,6 @@ KeyboardLayout::ConvertNativeKeyCodeToKeyNameIndex(uint8_t aVirtualKey) const
 #include "NativeKeyToDOMKeyName.h"
 
 #undef NS_JAPANESE_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX
-#define NS_JAPANESE_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX(aNativeKey, aKeyNameIndex)
 
       default:
         break;
@@ -2595,7 +3071,6 @@ KeyboardLayout::ConvertNativeKeyCodeToKeyNameIndex(uint8_t aVirtualKey) const
 #include "NativeKeyToDOMKeyName.h"
 
 #undef NS_KOREAN_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX
-#define NS_KOREAN_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX(aNativeKey, aKeyNameIndex)
 
       default:
         return KEY_NAME_INDEX_Unidentified;
@@ -2610,13 +3085,28 @@ KeyboardLayout::ConvertNativeKeyCodeToKeyNameIndex(uint8_t aVirtualKey) const
 
 #include "NativeKeyToDOMKeyName.h"
 
-#undef NS_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX
-#undef NS_JAPANESE_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX
-#undef NS_KOREAN_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX
 #undef NS_OTHER_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX
 
     default:
       return KEY_NAME_INDEX_Unidentified;
+  }
+}
+
+// static
+CodeNameIndex
+KeyboardLayout::ConvertScanCodeToCodeNameIndex(UINT aScanCode)
+{
+  switch (aScanCode) {
+
+#define NS_NATIVE_KEY_TO_DOM_CODE_NAME_INDEX(aNativeKey, aCodeNameIndex) \
+    case aNativeKey: return aCodeNameIndex;
+
+#include "NativeKeyToDOMCodeName.h"
+
+#undef NS_NATIVE_KEY_TO_DOM_CODE_NAME_INDEX
+
+    default:
+      return CODE_NAME_INDEX_UNKNOWN;
   }
 }
 

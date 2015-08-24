@@ -11,20 +11,35 @@
 #include "nsTArray.h"
 #include "Units.h"
 #include "mozilla/EventForwards.h"
+#include "mozilla/TimeStamp.h"
+
+template<class E> struct already_AddRefed;
+class nsIWidget;
 
 namespace mozilla {
 
+namespace dom {
+class Touch;
+}
+
+namespace gfx {
+class Matrix4x4;
+}
 
 enum InputType
 {
   MULTITOUCH_INPUT,
+  PANGESTURE_INPUT,
   PINCHGESTURE_INPUT,
-  TAPGESTURE_INPUT
+  TAPGESTURE_INPUT,
+  SCROLLWHEEL_INPUT
 };
 
 class MultiTouchInput;
+class PanGestureInput;
 class PinchGestureInput;
 class TapGestureInput;
+class ScrollWheelInput;
 
 // This looks unnecessary now, but as we add more and more classes that derive
 // from InputType (eventually probably almost as many as *Events.h has), it
@@ -33,8 +48,13 @@ class TapGestureInput;
 #define INPUTDATA_AS_CHILD_TYPE(type, enumID) \
   const type& As##type() const \
   { \
-    NS_ABORT_IF_FALSE(mInputType == enumID, "Invalid cast of InputData."); \
+    MOZ_ASSERT(mInputType == enumID, "Invalid cast of InputData."); \
     return (const type&) *this; \
+  } \
+  type& As##type() \
+  { \
+    MOZ_ASSERT(mInputType == enumID, "Invalid cast of InputData."); \
+    return (type&) *this; \
   }
 
 /** Base input data class. Should never be instantiated. */
@@ -48,21 +68,28 @@ public:
   // is platform-specific but it in the case of B2G and Fennec it is since
   // startup.
   uint32_t mTime;
+  // Set in parallel to mTime until we determine it is safe to drop
+  // platform-specific event times (see bug 77992).
+  TimeStamp mTimeStamp;
 
   Modifiers modifiers;
 
   INPUTDATA_AS_CHILD_TYPE(MultiTouchInput, MULTITOUCH_INPUT)
+  INPUTDATA_AS_CHILD_TYPE(PanGestureInput, PANGESTURE_INPUT)
   INPUTDATA_AS_CHILD_TYPE(PinchGestureInput, PINCHGESTURE_INPUT)
   INPUTDATA_AS_CHILD_TYPE(TapGestureInput, TAPGESTURE_INPUT)
+  INPUTDATA_AS_CHILD_TYPE(ScrollWheelInput, SCROLLWHEEL_INPUT)
 
   InputData()
   {
   }
 
 protected:
-  InputData(InputType aInputType, uint32_t aTime, Modifiers aModifiers)
+  InputData(InputType aInputType, uint32_t aTime, TimeStamp aTimeStamp,
+            Modifiers aModifiers)
     : mInputType(aInputType),
       mTime(aTime),
+      mTimeStamp(aTimeStamp),
       modifiers(aModifiers)
   {
 
@@ -88,6 +115,8 @@ protected:
 class SingleTouchData
 {
 public:
+  // Construct a SingleTouchData from a Screen point.
+  // mLocalScreenPoint remains (0,0) unless it's set later.
   SingleTouchData(int32_t aIdentifier,
                   ScreenIntPoint aScreenPoint,
                   ScreenSize aRadius,
@@ -99,13 +128,30 @@ public:
       mRotationAngle(aRotationAngle),
       mForce(aForce)
   {
+  }
 
-
+  // Construct a SingleTouchData from a ParentLayer point.
+  // mScreenPoint remains (0,0) unless it's set later.
+  // Note: if APZ starts using the radius for anything, we should add a local
+  // version of that too, and have this constructor take it as a ParentLayerSize.
+  SingleTouchData(int32_t aIdentifier,
+                  ParentLayerPoint aLocalScreenPoint,
+                  ScreenSize aRadius,
+                  float aRotationAngle,
+                  float aForce)
+    : mIdentifier(aIdentifier),
+      mLocalScreenPoint(aLocalScreenPoint),
+      mRadius(aRadius),
+      mRotationAngle(aRotationAngle),
+      mForce(aForce)
+  {
   }
 
   SingleTouchData()
   {
   }
+
+  already_AddRefed<dom::Touch> ToNewDOMTouch() const;
 
   // A unique number assigned to each SingleTouchData within a MultiTouchInput so
   // that they can be easily distinguished when handling a touch start/move/end.
@@ -114,6 +160,10 @@ public:
   // Point on the screen that the touch hit, in device pixels. They are
   // coordinates on the screen.
   ScreenIntPoint mScreenPoint;
+
+  // |mScreenPoint| transformed to the local coordinates of the APZC targeted
+  // by the hit. This is set and used by APZ.
+  ParentLayerPoint mLocalScreenPoint;
 
   // Radius that the touch covers, i.e. if you're using your thumb it will
   // probably be larger than using your pinky, even with the same force.
@@ -146,24 +196,35 @@ public:
     MULTITOUCH_START,
     MULTITOUCH_MOVE,
     MULTITOUCH_END,
-    MULTITOUCH_ENTER,
-    MULTITOUCH_LEAVE,
     MULTITOUCH_CANCEL
   };
 
-  MultiTouchInput(MultiTouchType aType, uint32_t aTime, Modifiers aModifiers)
-    : InputData(MULTITOUCH_INPUT, aTime, aModifiers),
+  MultiTouchInput(MultiTouchType aType, uint32_t aTime, TimeStamp aTimeStamp,
+                  Modifiers aModifiers)
+    : InputData(MULTITOUCH_INPUT, aTime, aTimeStamp, aModifiers),
       mType(aType)
   {
-
-
   }
 
   MultiTouchInput()
   {
   }
 
-  MultiTouchInput(const WidgetTouchEvent& aTouchEvent);
+  MultiTouchInput(const MultiTouchInput& aOther)
+    : InputData(MULTITOUCH_INPUT, aOther.mTime,
+                aOther.mTimeStamp, aOther.modifiers)
+    , mType(aOther.mType)
+  {
+    mTouches.AppendElements(aOther.mTouches);
+  }
+
+  explicit MultiTouchInput(const WidgetTouchEvent& aTouchEvent);
+  WidgetTouchEvent ToWidgetTouchEvent(nsIWidget* aWidget) const;
+  WidgetMouseEvent ToWidgetMouseEvent(nsIWidget* aWidget) const;
+
+  // Return the index into mTouches of the SingleTouchData with the given
+  // identifier, or -1 if there is no such SingleTouchData.
+  int32_t IndexOfTouch(int32_t aTouchIdentifier);
 
   // This conversion from WidgetMouseEvent to MultiTouchInput is needed because
   // on the B2G emulator we can only receive mouse events, but we need to be
@@ -171,10 +232,92 @@ public:
   // the panning code can handle. This code is very limited and only supports
   // SingleTouchData. It also sends garbage for the identifier, radius, force
   // and rotation angle.
-  MultiTouchInput(const WidgetMouseEvent& aMouseEvent);
+  explicit MultiTouchInput(const WidgetMouseEvent& aMouseEvent);
+
+  void TransformToLocal(const gfx::Matrix4x4& aTransform);
 
   MultiTouchType mType;
   nsTArray<SingleTouchData> mTouches;
+};
+
+/**
+ * Encapsulation class for pan events, can be used off-main-thread.
+ * These events are currently only used for scrolling on desktop.
+ */
+class PanGestureInput : public InputData
+{
+public:
+  enum PanGestureType
+  {
+    // MayStart: Dispatched before any actual panning has occurred but when a
+    // pan gesture is probably about to start, for example when the user
+    // starts touching the touchpad. Should interrupt any ongoing APZ
+    // animation and can be used to trigger scrollability indicators (e.g.
+    // flashing overlay scrollbars).
+    PANGESTURE_MAYSTART,
+
+    // Cancelled: Dispatched after MayStart when no pan gesture is going to
+    // happen after all, for example when the user lifts their fingers from a
+    // touchpad without having done any scrolling.
+    PANGESTURE_CANCELLED,
+
+    // Start: A pan gesture is starting.
+    // For devices that do not support the MayStart event type, this event can
+    // be used to interrupt ongoing APZ animations.
+    PANGESTURE_START,
+
+    // Pan: The actual pan motion by mPanDisplacement.
+    PANGESTURE_PAN,
+
+    // End: The pan gesture has ended, for example because the user has lifted
+    // their fingers from a touchpad after scrolling.
+    // Any potential momentum events fire after this event.
+    PANGESTURE_END,
+
+    // The following momentum event types are used in order to control the pan
+    // momentum animation. Using these instead of our own animation ensures
+    // that the animation curve is OS native and that the animation stops
+    // reliably if it is cancelled by the user.
+
+    // MomentumStart: Dispatched between the End event of the actual
+    // user-controlled pan, and the first MomentumPan event of the momentum
+    // animation.
+    PANGESTURE_MOMENTUMSTART,
+
+    // MomentumPan: The actual momentum motion by mPanDisplacement.
+    PANGESTURE_MOMENTUMPAN,
+
+    // MomentumEnd: The momentum animation has ended, for example because the
+    // momentum velocity has gone below the stopping threshold, or because the
+    // user has stopped the animation by putting their fingers on a touchpad.
+    PANGESTURE_MOMENTUMEND
+  };
+
+  PanGestureInput(PanGestureType aType,
+                  uint32_t aTime,
+                  TimeStamp aTimeStamp,
+                  const ScreenPoint& aPanStartPoint,
+                  const ScreenPoint& aPanDisplacement,
+                  Modifiers aModifiers)
+    : InputData(PANGESTURE_INPUT, aTime, aTimeStamp, aModifiers),
+      mType(aType),
+      mPanStartPoint(aPanStartPoint),
+      mPanDisplacement(aPanDisplacement)
+  {
+  }
+
+  void TransformToLocal(const gfx::Matrix4x4& aTransform);
+
+  PanGestureType mType;
+  ScreenPoint mPanStartPoint;
+
+  // Only non-zero if mType is PANGESTURE_PAN or PANGESTURE_MOMENTUMPAN.
+  ScreenPoint mPanDisplacement;
+
+  // Versions of |mPanStartPoint| and |mPanDisplacement| in the local
+  // coordinates of the APZC receiving the pan. These are set and used by APZ.
+  ParentLayerPoint mLocalPanStartPoint;
+  ParentLayerPoint mLocalPanDisplacement;
 };
 
 /**
@@ -192,21 +335,41 @@ public:
     PINCHGESTURE_END
   };
 
+  // Construct a tap gesture from a Screen point.
+  // mLocalFocusPoint remains (0,0) unless it's set later.
   PinchGestureInput(PinchGestureType aType,
                     uint32_t aTime,
+                    TimeStamp aTimeStamp,
                     const ScreenPoint& aFocusPoint,
                     float aCurrentSpan,
                     float aPreviousSpan,
                     Modifiers aModifiers)
-    : InputData(PINCHGESTURE_INPUT, aTime, aModifiers),
+    : InputData(PINCHGESTURE_INPUT, aTime, aTimeStamp, aModifiers),
       mType(aType),
       mFocusPoint(aFocusPoint),
       mCurrentSpan(aCurrentSpan),
       mPreviousSpan(aPreviousSpan)
   {
-
-
   }
+
+  // Construct a tap gesture from a ParentLayer point.
+  // mFocusPoint remains (0,0) unless it's set later.
+  PinchGestureInput(PinchGestureType aType,
+                    uint32_t aTime,
+                    TimeStamp aTimeStamp,
+                    const ParentLayerPoint& aLocalFocusPoint,
+                    float aCurrentSpan,
+                    float aPreviousSpan,
+                    Modifiers aModifiers)
+    : InputData(PINCHGESTURE_INPUT, aTime, aTimeStamp, aModifiers),
+      mType(aType),
+      mLocalFocusPoint(aLocalFocusPoint),
+      mCurrentSpan(aCurrentSpan),
+      mPreviousSpan(aPreviousSpan)
+  {
+  }
+
+  void TransformToLocal(const gfx::Matrix4x4& aTransform);
 
   PinchGestureType mType;
 
@@ -216,6 +379,10 @@ public:
   // between the very first and very last touch. This is in device pixels and
   // are the coordinates on the screen of this midpoint.
   ScreenPoint mFocusPoint;
+
+  // |mFocusPoint| transformed to the local coordinates of the APZC targeted
+  // by the hit. This is set and used by APZ.
+  ParentLayerPoint mLocalFocusPoint;
 
   // The distance in device pixels (though as a float for increased precision
   // and because it is the distance along both the x and y axis) between the
@@ -246,20 +413,98 @@ public:
     TAPGESTURE_CANCEL
   };
 
+  // Construct a tap gesture from a Screen point.
+  // mLocalPoint remains (0,0) unless it's set later.
   TapGestureInput(TapGestureType aType,
                   uint32_t aTime,
+                  TimeStamp aTimeStamp,
                   const ScreenIntPoint& aPoint,
                   Modifiers aModifiers)
-    : InputData(TAPGESTURE_INPUT, aTime, aModifiers),
+    : InputData(TAPGESTURE_INPUT, aTime, aTimeStamp, aModifiers),
       mType(aType),
       mPoint(aPoint)
   {
-
-
   }
 
+  // Construct a tap gesture from a ParentLayer point.
+  // mPoint remains (0,0) unless it's set later.
+  TapGestureInput(TapGestureType aType,
+                  uint32_t aTime,
+                  TimeStamp aTimeStamp,
+                  const ParentLayerPoint& aLocalPoint,
+                  Modifiers aModifiers)
+    : InputData(TAPGESTURE_INPUT, aTime, aTimeStamp, aModifiers),
+      mType(aType),
+      mLocalPoint(aLocalPoint)
+  {
+  }
+
+  void TransformToLocal(const gfx::Matrix4x4& aTransform);
+
   TapGestureType mType;
+
+  // The location of the tap in screen pixels.
   ScreenIntPoint mPoint;
+
+  // The location of the tap in the local coordinates of the APZC receiving it.
+  // This is set and used by APZ.
+  ParentLayerPoint mLocalPoint;
+};
+
+// Encapsulation class for scroll-wheel events. These are generated by mice
+// with physical scroll wheels, and on Windows by most touchpads when using
+// scroll gestures.
+class ScrollWheelInput : public InputData
+{
+public:
+  enum ScrollDeltaType
+  {
+    // There are three kinds of scroll delta modes in Gecko: "page", "line" and
+    // "pixel". For apz, we currently only support "line" mode.
+    SCROLLDELTA_LINE
+  };
+
+  enum ScrollMode
+  {
+    SCROLLMODE_INSTANT,
+    SCROLLMODE_SMOOTH
+  };
+
+  ScrollWheelInput(uint32_t aTime,
+                   TimeStamp aTimeStamp,
+                   Modifiers aModifiers,
+                   ScrollMode aScrollMode,
+                   ScrollDeltaType aDeltaType,
+                   const ScreenPoint& aOrigin,
+                   double aDeltaX,
+                   double aDeltaY)
+   : InputData(SCROLLWHEEL_INPUT, aTime, aTimeStamp, aModifiers),
+     mDeltaType(aDeltaType),
+     mScrollMode(aScrollMode),
+     mOrigin(aOrigin),
+     mDeltaX(aDeltaX),
+     mDeltaY(aDeltaY)
+  {}
+
+  void TransformToLocal(const gfx::Matrix4x4& aTransform);
+
+  ScrollDeltaType mDeltaType;
+  ScrollMode mScrollMode;
+  ScreenPoint mOrigin;
+
+  // Deltas are in units corresponding to the delta type. For line deltas, they
+  // are the number of line units to scroll. The number of device pixels for a
+  // horizontal and vertical line unit are in FrameMetrics::mLineScrollAmount.
+  //
+  // The horizontal (X) delta is > 0 for scrolling right and < 0 for scrolling
+  // left. The vertical (Y) delta is < 0 for scrolling up and > 0 for
+  // scrolling down.
+  double mDeltaX;
+  double mDeltaY;
+
+  // The location of the scroll in local coordinates. This is set and used by
+  // APZ.
+  ParentLayerPoint mLocalOrigin;
 };
 
 }

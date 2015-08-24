@@ -10,7 +10,7 @@ const TEST_URI = TEST_URL_ROOT + "doc_urls_clickable.html";
 const TEST_IMAGE = TEST_URL_ROOT + "doc_test_image.png";
 const BASE_64_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUAAAAFCAYAAACNbyblAAAAHElEQVQI12P4//8/w38GIAXDIBKE0DHxgljNBAAO9TXL0Y4OHwAAAABJRU5ErkJggg==";
 
-let test = asyncTest(function*() {
+add_task(function*() {
   yield addTab(TEST_URI);
   let {toolbox, inspector, view} = yield openRuleView();
   yield selectNodes(inspector, view);
@@ -31,7 +31,7 @@ function* selectNodes(inspector, ruleView) {
   is(relativeLink.getAttribute("href"), TEST_IMAGE, "href matches");
 
   yield selectNode(relative2, inspector);
-  let relativeLink = ruleView.doc.querySelector(".ruleview-propertycontainer a");
+  relativeLink = ruleView.doc.querySelector(".ruleview-propertycontainer a");
   ok(relativeLink, "Link exists for relative2 node");
   is(relativeLink.getAttribute("href"), TEST_IMAGE, "href matches");
 

@@ -14,19 +14,18 @@
 
 #include "webrtc/common_types.h"
 #include "webrtc/engine_configurations.h"
+#include "webrtc/modules/audio_coding/main/acm2/acm_common_defs.h"
 #include "webrtc/modules/audio_coding/main/interface/audio_coding_module_typedefs.h"
 #include "webrtc/modules/audio_coding/main/test/utility.h"
-#include "webrtc/modules/audio_coding/main/acm2/acm_common_defs.h"
-#include "webrtc/test/testsupport/fileutils.h"
 #include "webrtc/system_wrappers/interface/trace.h"
+#include "webrtc/test/testsupport/fileutils.h"
 
 namespace webrtc {
 
 TestVADDTX::TestVADDTX()
     : _acmA(AudioCodingModule::Create(0)),
       _acmB(AudioCodingModule::Create(1)),
-      _channelA2B(NULL) {
-}
+      _channelA2B(NULL) {}
 
 TestVADDTX::~TestVADDTX() {
   if (_channelA2B != NULL) {

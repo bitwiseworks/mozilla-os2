@@ -5,11 +5,14 @@
 
 "use strict";
 
+let WebConsoleUtils = require("devtools/toolkit/webconsole/utils").Utils;
+let DEVTOOLS_CHROME_ENABLED = "devtools.chrome.enabled";
+
 function test()
 {
   waitForExplicitFinish();
-
   gBrowser.selectedTab = gBrowser.addTab();
+  Services.prefs.setBoolPref(DEVTOOLS_CHROME_ENABLED, false);
   gBrowser.selectedBrowser.addEventListener("load", function onLoad() {
     gBrowser.selectedBrowser.removeEventListener("load", onLoad, true);
     openScratchpad(runTests);
@@ -55,6 +58,21 @@ function runTests()
 
   let anchor = doc.documentElement;
   let isContextMenu = false;
+
+  let oldVal = sp.editor.getText();
+
+  let testSelfXss = function (oldVal) {
+    // Self xss prevention tests (bug 994134)
+    info("Self xss paste tests")
+    is(WebConsoleUtils.usageCount, 0, "Test for usage count getter")
+    let notificationbox = doc.getElementById("scratchpad-notificationbox");
+    let notification = notificationbox.getNotificationWithValue('selfxss-notification');
+    ok(notification, "Self-xss notification shown");
+    is(oldVal, sp.editor.getText(), "Paste blocked by self-xss prevention");
+    Services.prefs.setIntPref("devtools.selfxss.count", 10);
+    notificationbox.removeAllNotifications(true);
+    openMenu(10, 10, firstShow);
+  };
 
   let openMenu = function(aX, aY, aCallback) {
     if (!editMenu || OS != "Darwin") {
@@ -137,8 +155,8 @@ function runTests()
   };
 
   let hideAfterCut = function() {
-    sp.editor.on("change", onPaste);
     waitForFocus(function () {
+      sp.editor.on("change", onPaste);
       EventUtils.synthesizeKey("v", {accelKey: true}, gScratchpadWindow);
     }, gScratchpadWindow);
   };
@@ -159,6 +177,7 @@ function runTests()
       pass++;
       testContextMenu();
     } else {
+      Services.prefs.clearUserPref(DEVTOOLS_CHROME_ENABLED);
       finish();
     }
   };
@@ -179,6 +198,9 @@ function runTests()
     sp.setText("bug 699130: hello world! (context menu)");
     openMenu(10, 10, firstShow);
   };
-
-  openMenu(10, 10, firstShow);
+  waitForFocus(function(){
+    WebConsoleUtils.usageCount = 0;
+    EventUtils.synthesizeKey("v", {accelKey: true}, gScratchpadWindow);
+    testSelfXss(oldVal);
+  }, gScratchpadWindow)
 }

@@ -13,14 +13,19 @@ namespace layers {
 class TargetConfig;
 class LayerTransactionParent;
 class AsyncCompositionManager;
+class APZTestData;
 
 class ShadowLayersManager
 {
 public:
     virtual void ShadowLayersUpdated(LayerTransactionParent* aLayerTree,
+                                     const uint64_t& aTransactionId,
                                      const TargetConfig& aTargetConfig,
+                                     const InfallibleTArray<PluginWindowData>& aPlugins,
                                      bool aIsFirstPaint,
-                                     bool aScheduleComposite) = 0;
+                                     bool aScheduleComposite,
+                                     uint32_t aPaintSequenceNumber,
+                                     bool aIsRepeatTransaction) = 0;
 
     virtual AsyncCompositionManager* GetCompositionManager(LayerTransactionParent* aLayerTree) { return nullptr; }
 
@@ -28,6 +33,8 @@ public:
     virtual bool SetTestSampleTime(LayerTransactionParent* aLayerTree,
                                    const TimeStamp& aTime) { return true; }
     virtual void LeaveTestMode(LayerTransactionParent* aLayerTree) { }
+    virtual void GetAPZTestData(const LayerTransactionParent* aLayerTree,
+                                APZTestData* aOutData) { }
 };
 
 } // layers

@@ -58,40 +58,40 @@ Java_org_mozilla_gecko_ANRReporter_releaseNativeStack(JNIEnv * arg0, jclass arg1
 
 #ifdef JNI_STUBS
 
-typedef void (*Java_org_mozilla_gecko_GeckoAppShell_nativeInit_t)(JNIEnv *, jclass);
+typedef void (*Java_org_mozilla_gecko_GeckoAppShell_registerJavaUiThread_t)(JNIEnv *, jclass);
+static Java_org_mozilla_gecko_GeckoAppShell_registerJavaUiThread_t f_Java_org_mozilla_gecko_GeckoAppShell_registerJavaUiThread;
+extern "C" NS_EXPORT void JNICALL
+Java_org_mozilla_gecko_GeckoAppShell_registerJavaUiThread(JNIEnv * arg0, jclass arg1) {
+    if (!f_Java_org_mozilla_gecko_GeckoAppShell_registerJavaUiThread) {
+        arg0->ThrowNew(arg0->FindClass("java/lang/UnsupportedOperationException"),
+                       "JNI Function called before it was loaded");
+        return ;
+    }
+     f_Java_org_mozilla_gecko_GeckoAppShell_registerJavaUiThread(arg0, arg1);
+}
+#endif
+
+#ifdef JNI_BINDINGS
+  xul_dlsym("Java_org_mozilla_gecko_GeckoAppShell_registerJavaUiThread", &f_Java_org_mozilla_gecko_GeckoAppShell_registerJavaUiThread);
+#endif
+
+#ifdef JNI_STUBS
+
+typedef void (*Java_org_mozilla_gecko_GeckoAppShell_nativeInit_t)(JNIEnv *, jclass, jobject);
 static Java_org_mozilla_gecko_GeckoAppShell_nativeInit_t f_Java_org_mozilla_gecko_GeckoAppShell_nativeInit;
 extern "C" NS_EXPORT void JNICALL
-Java_org_mozilla_gecko_GeckoAppShell_nativeInit(JNIEnv * arg0, jclass arg1) {
+Java_org_mozilla_gecko_GeckoAppShell_nativeInit(JNIEnv * arg0, jclass arg1, jobject arg2) {
     if (!f_Java_org_mozilla_gecko_GeckoAppShell_nativeInit) {
         arg0->ThrowNew(arg0->FindClass("java/lang/UnsupportedOperationException"),
                        "JNI Function called before it was loaded");
         return ;
     }
-     f_Java_org_mozilla_gecko_GeckoAppShell_nativeInit(arg0, arg1);
+     f_Java_org_mozilla_gecko_GeckoAppShell_nativeInit(arg0, arg1, arg2);
 }
 #endif
 
 #ifdef JNI_BINDINGS
   xul_dlsym("Java_org_mozilla_gecko_GeckoAppShell_nativeInit", &f_Java_org_mozilla_gecko_GeckoAppShell_nativeInit);
-#endif
-
-#ifdef JNI_STUBS
-
-typedef void (*Java_org_mozilla_gecko_GeckoAppShell_setLayerClient_t)(JNIEnv *, jclass, jobject);
-static Java_org_mozilla_gecko_GeckoAppShell_setLayerClient_t f_Java_org_mozilla_gecko_GeckoAppShell_setLayerClient;
-extern "C" NS_EXPORT void JNICALL
-Java_org_mozilla_gecko_GeckoAppShell_setLayerClient(JNIEnv * arg0, jclass arg1, jobject arg2) {
-    if (!f_Java_org_mozilla_gecko_GeckoAppShell_setLayerClient) {
-        arg0->ThrowNew(arg0->FindClass("java/lang/UnsupportedOperationException"),
-                       "JNI Function called before it was loaded");
-        return ;
-    }
-     f_Java_org_mozilla_gecko_GeckoAppShell_setLayerClient(arg0, arg1, arg2);
-}
-#endif
-
-#ifdef JNI_BINDINGS
-  xul_dlsym("Java_org_mozilla_gecko_GeckoAppShell_setLayerClient", &f_Java_org_mozilla_gecko_GeckoAppShell_setLayerClient);
 #endif
 
 #ifdef JNI_STUBS
@@ -343,6 +343,44 @@ Java_org_mozilla_gecko_GeckoAppShell_notifyGeckoOfEvent(JNIEnv * arg0, jclass ar
 
 #ifdef JNI_STUBS
 
+typedef void (*Java_org_mozilla_gecko_GeckoAppShell_notifyGeckoObservers_t)(JNIEnv *, jclass, jstring, jstring);
+static Java_org_mozilla_gecko_GeckoAppShell_notifyGeckoObservers_t f_Java_org_mozilla_gecko_GeckoAppShell_notifyGeckoObservers;
+extern "C" NS_EXPORT void JNICALL
+Java_org_mozilla_gecko_GeckoAppShell_notifyGeckoObservers(JNIEnv * arg0, jclass arg1, jstring arg2, jstring arg3) {
+    if (!f_Java_org_mozilla_gecko_GeckoAppShell_notifyGeckoObservers) {
+        arg0->ThrowNew(arg0->FindClass("java/lang/UnsupportedOperationException"),
+                       "JNI Function called before it was loaded");
+        return ;
+    }
+     f_Java_org_mozilla_gecko_GeckoAppShell_notifyGeckoObservers(arg0, arg1, arg2, arg3);
+}
+#endif
+
+#ifdef JNI_BINDINGS
+  xul_dlsym("Java_org_mozilla_gecko_GeckoAppShell_notifyGeckoObservers", &f_Java_org_mozilla_gecko_GeckoAppShell_notifyGeckoObservers);
+#endif
+
+#ifdef JNI_STUBS
+
+typedef jlong (*Java_org_mozilla_gecko_GeckoAppShell_runUiThreadCallback_t)(JNIEnv *, jclass);
+static Java_org_mozilla_gecko_GeckoAppShell_runUiThreadCallback_t f_Java_org_mozilla_gecko_GeckoAppShell_runUiThreadCallback;
+extern "C" NS_EXPORT jlong JNICALL
+Java_org_mozilla_gecko_GeckoAppShell_runUiThreadCallback(JNIEnv * arg0, jclass arg1) {
+    if (!f_Java_org_mozilla_gecko_GeckoAppShell_runUiThreadCallback) {
+        arg0->ThrowNew(arg0->FindClass("java/lang/UnsupportedOperationException"),
+                       "JNI Function called before it was loaded");
+        return 0;
+    }
+    return f_Java_org_mozilla_gecko_GeckoAppShell_runUiThreadCallback(arg0, arg1);
+}
+#endif
+
+#ifdef JNI_BINDINGS
+  xul_dlsym("Java_org_mozilla_gecko_GeckoAppShell_runUiThreadCallback", &f_Java_org_mozilla_gecko_GeckoAppShell_runUiThreadCallback);
+#endif
+
+#ifdef JNI_STUBS
+
 typedef void (*Java_org_mozilla_gecko_GeckoAppShell_cameraCallbackBridge_t)(JNIEnv *, jclass, jbyteArray);
 static Java_org_mozilla_gecko_GeckoAppShell_cameraCallbackBridge_t f_Java_org_mozilla_gecko_GeckoAppShell_cameraCallbackBridge;
 extern "C" NS_EXPORT void JNICALL
@@ -419,16 +457,16 @@ Java_org_mozilla_gecko_gfx_NativePanZoomController_init(JNIEnv * arg0, jobject a
 
 #ifdef JNI_STUBS
 
-typedef void (*Java_org_mozilla_gecko_gfx_NativePanZoomController_handleTouchEvent_t)(JNIEnv *, jobject, jobject);
+typedef jboolean (*Java_org_mozilla_gecko_gfx_NativePanZoomController_handleTouchEvent_t)(JNIEnv *, jobject, jobject);
 static Java_org_mozilla_gecko_gfx_NativePanZoomController_handleTouchEvent_t f_Java_org_mozilla_gecko_gfx_NativePanZoomController_handleTouchEvent;
-extern "C" NS_EXPORT void JNICALL
+extern "C" NS_EXPORT jboolean JNICALL
 Java_org_mozilla_gecko_gfx_NativePanZoomController_handleTouchEvent(JNIEnv * arg0, jobject arg1, jobject arg2) {
     if (!f_Java_org_mozilla_gecko_gfx_NativePanZoomController_handleTouchEvent) {
         arg0->ThrowNew(arg0->FindClass("java/lang/UnsupportedOperationException"),
                        "JNI Function called before it was loaded");
-        return ;
+        return false;
     }
-     f_Java_org_mozilla_gecko_gfx_NativePanZoomController_handleTouchEvent(arg0, arg1, arg2);
+    return f_Java_org_mozilla_gecko_gfx_NativePanZoomController_handleTouchEvent(arg0, arg1, arg2);
 }
 #endif
 
@@ -457,25 +495,6 @@ Java_org_mozilla_gecko_gfx_NativePanZoomController_handleMotionEvent(JNIEnv * ar
 
 #ifdef JNI_STUBS
 
-typedef jlong (*Java_org_mozilla_gecko_gfx_NativePanZoomController_runDelayedCallback_t)(JNIEnv *, jobject);
-static Java_org_mozilla_gecko_gfx_NativePanZoomController_runDelayedCallback_t f_Java_org_mozilla_gecko_gfx_NativePanZoomController_runDelayedCallback;
-extern "C" NS_EXPORT jlong JNICALL
-Java_org_mozilla_gecko_gfx_NativePanZoomController_runDelayedCallback(JNIEnv * arg0, jobject arg1) {
-    if (!f_Java_org_mozilla_gecko_gfx_NativePanZoomController_runDelayedCallback) {
-        arg0->ThrowNew(arg0->FindClass("java/lang/UnsupportedOperationException"),
-                       "JNI Function called before it was loaded");
-        return 0;
-    }
-    return f_Java_org_mozilla_gecko_gfx_NativePanZoomController_runDelayedCallback(arg0, arg1);
-}
-#endif
-
-#ifdef JNI_BINDINGS
-  xul_dlsym("Java_org_mozilla_gecko_gfx_NativePanZoomController_runDelayedCallback", &f_Java_org_mozilla_gecko_gfx_NativePanZoomController_runDelayedCallback);
-#endif
-
-#ifdef JNI_STUBS
-
 typedef void (*Java_org_mozilla_gecko_gfx_NativePanZoomController_destroy_t)(JNIEnv *, jobject);
 static Java_org_mozilla_gecko_gfx_NativePanZoomController_destroy_t f_Java_org_mozilla_gecko_gfx_NativePanZoomController_destroy;
 extern "C" NS_EXPORT void JNICALL
@@ -491,25 +510,6 @@ Java_org_mozilla_gecko_gfx_NativePanZoomController_destroy(JNIEnv * arg0, jobjec
 
 #ifdef JNI_BINDINGS
   xul_dlsym("Java_org_mozilla_gecko_gfx_NativePanZoomController_destroy", &f_Java_org_mozilla_gecko_gfx_NativePanZoomController_destroy);
-#endif
-
-#ifdef JNI_STUBS
-
-typedef void (*Java_org_mozilla_gecko_gfx_NativePanZoomController_notifyDefaultActionPrevented_t)(JNIEnv *, jobject, jboolean);
-static Java_org_mozilla_gecko_gfx_NativePanZoomController_notifyDefaultActionPrevented_t f_Java_org_mozilla_gecko_gfx_NativePanZoomController_notifyDefaultActionPrevented;
-extern "C" NS_EXPORT void JNICALL
-Java_org_mozilla_gecko_gfx_NativePanZoomController_notifyDefaultActionPrevented(JNIEnv * arg0, jobject arg1, jboolean arg2) {
-    if (!f_Java_org_mozilla_gecko_gfx_NativePanZoomController_notifyDefaultActionPrevented) {
-        arg0->ThrowNew(arg0->FindClass("java/lang/UnsupportedOperationException"),
-                       "JNI Function called before it was loaded");
-        return ;
-    }
-     f_Java_org_mozilla_gecko_gfx_NativePanZoomController_notifyDefaultActionPrevented(arg0, arg1, arg2);
-}
-#endif
-
-#ifdef JNI_BINDINGS
-  xul_dlsym("Java_org_mozilla_gecko_gfx_NativePanZoomController_notifyDefaultActionPrevented", &f_Java_org_mozilla_gecko_gfx_NativePanZoomController_notifyDefaultActionPrevented);
 #endif
 
 #ifdef JNI_STUBS
@@ -647,6 +647,120 @@ Java_org_mozilla_gecko_util_NativeJSObject_optBoolean(JNIEnv * arg0, jobject arg
 
 #ifdef JNI_STUBS
 
+typedef jbooleanArray (*Java_org_mozilla_gecko_util_NativeJSObject_getBooleanArray_t)(JNIEnv *, jobject, jstring);
+static Java_org_mozilla_gecko_util_NativeJSObject_getBooleanArray_t f_Java_org_mozilla_gecko_util_NativeJSObject_getBooleanArray;
+extern "C" NS_EXPORT jbooleanArray JNICALL
+Java_org_mozilla_gecko_util_NativeJSObject_getBooleanArray(JNIEnv * arg0, jobject arg1, jstring arg2) {
+    if (!f_Java_org_mozilla_gecko_util_NativeJSObject_getBooleanArray) {
+        arg0->ThrowNew(arg0->FindClass("java/lang/UnsupportedOperationException"),
+                       "JNI Function called before it was loaded");
+        return nullptr;
+    }
+    return f_Java_org_mozilla_gecko_util_NativeJSObject_getBooleanArray(arg0, arg1, arg2);
+}
+#endif
+
+#ifdef JNI_BINDINGS
+  xul_dlsym("Java_org_mozilla_gecko_util_NativeJSObject_getBooleanArray", &f_Java_org_mozilla_gecko_util_NativeJSObject_getBooleanArray);
+#endif
+
+#ifdef JNI_STUBS
+
+typedef jbooleanArray (*Java_org_mozilla_gecko_util_NativeJSObject_optBooleanArray_t)(JNIEnv *, jobject, jstring, jbooleanArray);
+static Java_org_mozilla_gecko_util_NativeJSObject_optBooleanArray_t f_Java_org_mozilla_gecko_util_NativeJSObject_optBooleanArray;
+extern "C" NS_EXPORT jbooleanArray JNICALL
+Java_org_mozilla_gecko_util_NativeJSObject_optBooleanArray(JNIEnv * arg0, jobject arg1, jstring arg2, jbooleanArray arg3) {
+    if (!f_Java_org_mozilla_gecko_util_NativeJSObject_optBooleanArray) {
+        arg0->ThrowNew(arg0->FindClass("java/lang/UnsupportedOperationException"),
+                       "JNI Function called before it was loaded");
+        return nullptr;
+    }
+    return f_Java_org_mozilla_gecko_util_NativeJSObject_optBooleanArray(arg0, arg1, arg2, arg3);
+}
+#endif
+
+#ifdef JNI_BINDINGS
+  xul_dlsym("Java_org_mozilla_gecko_util_NativeJSObject_optBooleanArray", &f_Java_org_mozilla_gecko_util_NativeJSObject_optBooleanArray);
+#endif
+
+#ifdef JNI_STUBS
+
+typedef jobject (*Java_org_mozilla_gecko_util_NativeJSObject_getBundle_t)(JNIEnv *, jobject, jstring);
+static Java_org_mozilla_gecko_util_NativeJSObject_getBundle_t f_Java_org_mozilla_gecko_util_NativeJSObject_getBundle;
+extern "C" NS_EXPORT jobject JNICALL
+Java_org_mozilla_gecko_util_NativeJSObject_getBundle(JNIEnv * arg0, jobject arg1, jstring arg2) {
+    if (!f_Java_org_mozilla_gecko_util_NativeJSObject_getBundle) {
+        arg0->ThrowNew(arg0->FindClass("java/lang/UnsupportedOperationException"),
+                       "JNI Function called before it was loaded");
+        return nullptr;
+    }
+    return f_Java_org_mozilla_gecko_util_NativeJSObject_getBundle(arg0, arg1, arg2);
+}
+#endif
+
+#ifdef JNI_BINDINGS
+  xul_dlsym("Java_org_mozilla_gecko_util_NativeJSObject_getBundle", &f_Java_org_mozilla_gecko_util_NativeJSObject_getBundle);
+#endif
+
+#ifdef JNI_STUBS
+
+typedef jobject (*Java_org_mozilla_gecko_util_NativeJSObject_optBundle_t)(JNIEnv *, jobject, jstring, jobject);
+static Java_org_mozilla_gecko_util_NativeJSObject_optBundle_t f_Java_org_mozilla_gecko_util_NativeJSObject_optBundle;
+extern "C" NS_EXPORT jobject JNICALL
+Java_org_mozilla_gecko_util_NativeJSObject_optBundle(JNIEnv * arg0, jobject arg1, jstring arg2, jobject arg3) {
+    if (!f_Java_org_mozilla_gecko_util_NativeJSObject_optBundle) {
+        arg0->ThrowNew(arg0->FindClass("java/lang/UnsupportedOperationException"),
+                       "JNI Function called before it was loaded");
+        return nullptr;
+    }
+    return f_Java_org_mozilla_gecko_util_NativeJSObject_optBundle(arg0, arg1, arg2, arg3);
+}
+#endif
+
+#ifdef JNI_BINDINGS
+  xul_dlsym("Java_org_mozilla_gecko_util_NativeJSObject_optBundle", &f_Java_org_mozilla_gecko_util_NativeJSObject_optBundle);
+#endif
+
+#ifdef JNI_STUBS
+
+typedef jobjectArray (*Java_org_mozilla_gecko_util_NativeJSObject_getBundleArray_t)(JNIEnv *, jobject, jstring);
+static Java_org_mozilla_gecko_util_NativeJSObject_getBundleArray_t f_Java_org_mozilla_gecko_util_NativeJSObject_getBundleArray;
+extern "C" NS_EXPORT jobjectArray JNICALL
+Java_org_mozilla_gecko_util_NativeJSObject_getBundleArray(JNIEnv * arg0, jobject arg1, jstring arg2) {
+    if (!f_Java_org_mozilla_gecko_util_NativeJSObject_getBundleArray) {
+        arg0->ThrowNew(arg0->FindClass("java/lang/UnsupportedOperationException"),
+                       "JNI Function called before it was loaded");
+        return nullptr;
+    }
+    return f_Java_org_mozilla_gecko_util_NativeJSObject_getBundleArray(arg0, arg1, arg2);
+}
+#endif
+
+#ifdef JNI_BINDINGS
+  xul_dlsym("Java_org_mozilla_gecko_util_NativeJSObject_getBundleArray", &f_Java_org_mozilla_gecko_util_NativeJSObject_getBundleArray);
+#endif
+
+#ifdef JNI_STUBS
+
+typedef jobjectArray (*Java_org_mozilla_gecko_util_NativeJSObject_optBundleArray_t)(JNIEnv *, jobject, jstring, jobjectArray);
+static Java_org_mozilla_gecko_util_NativeJSObject_optBundleArray_t f_Java_org_mozilla_gecko_util_NativeJSObject_optBundleArray;
+extern "C" NS_EXPORT jobjectArray JNICALL
+Java_org_mozilla_gecko_util_NativeJSObject_optBundleArray(JNIEnv * arg0, jobject arg1, jstring arg2, jobjectArray arg3) {
+    if (!f_Java_org_mozilla_gecko_util_NativeJSObject_optBundleArray) {
+        arg0->ThrowNew(arg0->FindClass("java/lang/UnsupportedOperationException"),
+                       "JNI Function called before it was loaded");
+        return nullptr;
+    }
+    return f_Java_org_mozilla_gecko_util_NativeJSObject_optBundleArray(arg0, arg1, arg2, arg3);
+}
+#endif
+
+#ifdef JNI_BINDINGS
+  xul_dlsym("Java_org_mozilla_gecko_util_NativeJSObject_optBundleArray", &f_Java_org_mozilla_gecko_util_NativeJSObject_optBundleArray);
+#endif
+
+#ifdef JNI_STUBS
+
 typedef jdouble (*Java_org_mozilla_gecko_util_NativeJSObject_getDouble_t)(JNIEnv *, jobject, jstring);
 static Java_org_mozilla_gecko_util_NativeJSObject_getDouble_t f_Java_org_mozilla_gecko_util_NativeJSObject_getDouble;
 extern "C" NS_EXPORT jdouble JNICALL
@@ -681,6 +795,44 @@ Java_org_mozilla_gecko_util_NativeJSObject_optDouble(JNIEnv * arg0, jobject arg1
 
 #ifdef JNI_BINDINGS
   xul_dlsym("Java_org_mozilla_gecko_util_NativeJSObject_optDouble", &f_Java_org_mozilla_gecko_util_NativeJSObject_optDouble);
+#endif
+
+#ifdef JNI_STUBS
+
+typedef jdoubleArray (*Java_org_mozilla_gecko_util_NativeJSObject_getDoubleArray_t)(JNIEnv *, jobject, jstring);
+static Java_org_mozilla_gecko_util_NativeJSObject_getDoubleArray_t f_Java_org_mozilla_gecko_util_NativeJSObject_getDoubleArray;
+extern "C" NS_EXPORT jdoubleArray JNICALL
+Java_org_mozilla_gecko_util_NativeJSObject_getDoubleArray(JNIEnv * arg0, jobject arg1, jstring arg2) {
+    if (!f_Java_org_mozilla_gecko_util_NativeJSObject_getDoubleArray) {
+        arg0->ThrowNew(arg0->FindClass("java/lang/UnsupportedOperationException"),
+                       "JNI Function called before it was loaded");
+        return nullptr;
+    }
+    return f_Java_org_mozilla_gecko_util_NativeJSObject_getDoubleArray(arg0, arg1, arg2);
+}
+#endif
+
+#ifdef JNI_BINDINGS
+  xul_dlsym("Java_org_mozilla_gecko_util_NativeJSObject_getDoubleArray", &f_Java_org_mozilla_gecko_util_NativeJSObject_getDoubleArray);
+#endif
+
+#ifdef JNI_STUBS
+
+typedef jdoubleArray (*Java_org_mozilla_gecko_util_NativeJSObject_optDoubleArray_t)(JNIEnv *, jobject, jstring, jdoubleArray);
+static Java_org_mozilla_gecko_util_NativeJSObject_optDoubleArray_t f_Java_org_mozilla_gecko_util_NativeJSObject_optDoubleArray;
+extern "C" NS_EXPORT jdoubleArray JNICALL
+Java_org_mozilla_gecko_util_NativeJSObject_optDoubleArray(JNIEnv * arg0, jobject arg1, jstring arg2, jdoubleArray arg3) {
+    if (!f_Java_org_mozilla_gecko_util_NativeJSObject_optDoubleArray) {
+        arg0->ThrowNew(arg0->FindClass("java/lang/UnsupportedOperationException"),
+                       "JNI Function called before it was loaded");
+        return nullptr;
+    }
+    return f_Java_org_mozilla_gecko_util_NativeJSObject_optDoubleArray(arg0, arg1, arg2, arg3);
+}
+#endif
+
+#ifdef JNI_BINDINGS
+  xul_dlsym("Java_org_mozilla_gecko_util_NativeJSObject_optDoubleArray", &f_Java_org_mozilla_gecko_util_NativeJSObject_optDoubleArray);
 #endif
 
 #ifdef JNI_STUBS
@@ -723,6 +875,44 @@ Java_org_mozilla_gecko_util_NativeJSObject_optInt(JNIEnv * arg0, jobject arg1, j
 
 #ifdef JNI_STUBS
 
+typedef jintArray (*Java_org_mozilla_gecko_util_NativeJSObject_getIntArray_t)(JNIEnv *, jobject, jstring);
+static Java_org_mozilla_gecko_util_NativeJSObject_getIntArray_t f_Java_org_mozilla_gecko_util_NativeJSObject_getIntArray;
+extern "C" NS_EXPORT jintArray JNICALL
+Java_org_mozilla_gecko_util_NativeJSObject_getIntArray(JNIEnv * arg0, jobject arg1, jstring arg2) {
+    if (!f_Java_org_mozilla_gecko_util_NativeJSObject_getIntArray) {
+        arg0->ThrowNew(arg0->FindClass("java/lang/UnsupportedOperationException"),
+                       "JNI Function called before it was loaded");
+        return nullptr;
+    }
+    return f_Java_org_mozilla_gecko_util_NativeJSObject_getIntArray(arg0, arg1, arg2);
+}
+#endif
+
+#ifdef JNI_BINDINGS
+  xul_dlsym("Java_org_mozilla_gecko_util_NativeJSObject_getIntArray", &f_Java_org_mozilla_gecko_util_NativeJSObject_getIntArray);
+#endif
+
+#ifdef JNI_STUBS
+
+typedef jintArray (*Java_org_mozilla_gecko_util_NativeJSObject_optIntArray_t)(JNIEnv *, jobject, jstring, jintArray);
+static Java_org_mozilla_gecko_util_NativeJSObject_optIntArray_t f_Java_org_mozilla_gecko_util_NativeJSObject_optIntArray;
+extern "C" NS_EXPORT jintArray JNICALL
+Java_org_mozilla_gecko_util_NativeJSObject_optIntArray(JNIEnv * arg0, jobject arg1, jstring arg2, jintArray arg3) {
+    if (!f_Java_org_mozilla_gecko_util_NativeJSObject_optIntArray) {
+        arg0->ThrowNew(arg0->FindClass("java/lang/UnsupportedOperationException"),
+                       "JNI Function called before it was loaded");
+        return nullptr;
+    }
+    return f_Java_org_mozilla_gecko_util_NativeJSObject_optIntArray(arg0, arg1, arg2, arg3);
+}
+#endif
+
+#ifdef JNI_BINDINGS
+  xul_dlsym("Java_org_mozilla_gecko_util_NativeJSObject_optIntArray", &f_Java_org_mozilla_gecko_util_NativeJSObject_optIntArray);
+#endif
+
+#ifdef JNI_STUBS
+
 typedef jobject (*Java_org_mozilla_gecko_util_NativeJSObject_getObject_t)(JNIEnv *, jobject, jstring);
 static Java_org_mozilla_gecko_util_NativeJSObject_getObject_t f_Java_org_mozilla_gecko_util_NativeJSObject_getObject;
 extern "C" NS_EXPORT jobject JNICALL
@@ -757,6 +947,44 @@ Java_org_mozilla_gecko_util_NativeJSObject_optObject(JNIEnv * arg0, jobject arg1
 
 #ifdef JNI_BINDINGS
   xul_dlsym("Java_org_mozilla_gecko_util_NativeJSObject_optObject", &f_Java_org_mozilla_gecko_util_NativeJSObject_optObject);
+#endif
+
+#ifdef JNI_STUBS
+
+typedef jobjectArray (*Java_org_mozilla_gecko_util_NativeJSObject_getObjectArray_t)(JNIEnv *, jobject, jstring);
+static Java_org_mozilla_gecko_util_NativeJSObject_getObjectArray_t f_Java_org_mozilla_gecko_util_NativeJSObject_getObjectArray;
+extern "C" NS_EXPORT jobjectArray JNICALL
+Java_org_mozilla_gecko_util_NativeJSObject_getObjectArray(JNIEnv * arg0, jobject arg1, jstring arg2) {
+    if (!f_Java_org_mozilla_gecko_util_NativeJSObject_getObjectArray) {
+        arg0->ThrowNew(arg0->FindClass("java/lang/UnsupportedOperationException"),
+                       "JNI Function called before it was loaded");
+        return nullptr;
+    }
+    return f_Java_org_mozilla_gecko_util_NativeJSObject_getObjectArray(arg0, arg1, arg2);
+}
+#endif
+
+#ifdef JNI_BINDINGS
+  xul_dlsym("Java_org_mozilla_gecko_util_NativeJSObject_getObjectArray", &f_Java_org_mozilla_gecko_util_NativeJSObject_getObjectArray);
+#endif
+
+#ifdef JNI_STUBS
+
+typedef jobjectArray (*Java_org_mozilla_gecko_util_NativeJSObject_optObjectArray_t)(JNIEnv *, jobject, jstring, jobjectArray);
+static Java_org_mozilla_gecko_util_NativeJSObject_optObjectArray_t f_Java_org_mozilla_gecko_util_NativeJSObject_optObjectArray;
+extern "C" NS_EXPORT jobjectArray JNICALL
+Java_org_mozilla_gecko_util_NativeJSObject_optObjectArray(JNIEnv * arg0, jobject arg1, jstring arg2, jobjectArray arg3) {
+    if (!f_Java_org_mozilla_gecko_util_NativeJSObject_optObjectArray) {
+        arg0->ThrowNew(arg0->FindClass("java/lang/UnsupportedOperationException"),
+                       "JNI Function called before it was loaded");
+        return nullptr;
+    }
+    return f_Java_org_mozilla_gecko_util_NativeJSObject_optObjectArray(arg0, arg1, arg2, arg3);
+}
+#endif
+
+#ifdef JNI_BINDINGS
+  xul_dlsym("Java_org_mozilla_gecko_util_NativeJSObject_optObjectArray", &f_Java_org_mozilla_gecko_util_NativeJSObject_optObjectArray);
 #endif
 
 #ifdef JNI_STUBS
@@ -799,6 +1027,44 @@ Java_org_mozilla_gecko_util_NativeJSObject_optString(JNIEnv * arg0, jobject arg1
 
 #ifdef JNI_STUBS
 
+typedef jobjectArray (*Java_org_mozilla_gecko_util_NativeJSObject_getStringArray_t)(JNIEnv *, jobject, jstring);
+static Java_org_mozilla_gecko_util_NativeJSObject_getStringArray_t f_Java_org_mozilla_gecko_util_NativeJSObject_getStringArray;
+extern "C" NS_EXPORT jobjectArray JNICALL
+Java_org_mozilla_gecko_util_NativeJSObject_getStringArray(JNIEnv * arg0, jobject arg1, jstring arg2) {
+    if (!f_Java_org_mozilla_gecko_util_NativeJSObject_getStringArray) {
+        arg0->ThrowNew(arg0->FindClass("java/lang/UnsupportedOperationException"),
+                       "JNI Function called before it was loaded");
+        return nullptr;
+    }
+    return f_Java_org_mozilla_gecko_util_NativeJSObject_getStringArray(arg0, arg1, arg2);
+}
+#endif
+
+#ifdef JNI_BINDINGS
+  xul_dlsym("Java_org_mozilla_gecko_util_NativeJSObject_getStringArray", &f_Java_org_mozilla_gecko_util_NativeJSObject_getStringArray);
+#endif
+
+#ifdef JNI_STUBS
+
+typedef jobjectArray (*Java_org_mozilla_gecko_util_NativeJSObject_optStringArray_t)(JNIEnv *, jobject, jstring, jobjectArray);
+static Java_org_mozilla_gecko_util_NativeJSObject_optStringArray_t f_Java_org_mozilla_gecko_util_NativeJSObject_optStringArray;
+extern "C" NS_EXPORT jobjectArray JNICALL
+Java_org_mozilla_gecko_util_NativeJSObject_optStringArray(JNIEnv * arg0, jobject arg1, jstring arg2, jobjectArray arg3) {
+    if (!f_Java_org_mozilla_gecko_util_NativeJSObject_optStringArray) {
+        arg0->ThrowNew(arg0->FindClass("java/lang/UnsupportedOperationException"),
+                       "JNI Function called before it was loaded");
+        return nullptr;
+    }
+    return f_Java_org_mozilla_gecko_util_NativeJSObject_optStringArray(arg0, arg1, arg2, arg3);
+}
+#endif
+
+#ifdef JNI_BINDINGS
+  xul_dlsym("Java_org_mozilla_gecko_util_NativeJSObject_optStringArray", &f_Java_org_mozilla_gecko_util_NativeJSObject_optStringArray);
+#endif
+
+#ifdef JNI_STUBS
+
 typedef jboolean (*Java_org_mozilla_gecko_util_NativeJSObject_has_t)(JNIEnv *, jobject, jstring);
 static Java_org_mozilla_gecko_util_NativeJSObject_has_t f_Java_org_mozilla_gecko_util_NativeJSObject_has;
 extern "C" NS_EXPORT jboolean JNICALL
@@ -814,6 +1080,25 @@ Java_org_mozilla_gecko_util_NativeJSObject_has(JNIEnv * arg0, jobject arg1, jstr
 
 #ifdef JNI_BINDINGS
   xul_dlsym("Java_org_mozilla_gecko_util_NativeJSObject_has", &f_Java_org_mozilla_gecko_util_NativeJSObject_has);
+#endif
+
+#ifdef JNI_STUBS
+
+typedef jobject (*Java_org_mozilla_gecko_util_NativeJSObject_toBundle_t)(JNIEnv *, jobject);
+static Java_org_mozilla_gecko_util_NativeJSObject_toBundle_t f_Java_org_mozilla_gecko_util_NativeJSObject_toBundle;
+extern "C" NS_EXPORT jobject JNICALL
+Java_org_mozilla_gecko_util_NativeJSObject_toBundle(JNIEnv * arg0, jobject arg1) {
+    if (!f_Java_org_mozilla_gecko_util_NativeJSObject_toBundle) {
+        arg0->ThrowNew(arg0->FindClass("java/lang/UnsupportedOperationException"),
+                       "JNI Function called before it was loaded");
+        return nullptr;
+    }
+    return f_Java_org_mozilla_gecko_util_NativeJSObject_toBundle(arg0, arg1);
+}
+#endif
+
+#ifdef JNI_BINDINGS
+  xul_dlsym("Java_org_mozilla_gecko_util_NativeJSObject_toBundle", &f_Java_org_mozilla_gecko_util_NativeJSObject_toBundle);
 #endif
 
 #ifdef JNI_STUBS

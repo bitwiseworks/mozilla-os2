@@ -5,7 +5,11 @@ var gConfig;
 
 if (Cc === undefined) {
   var Cc = Components.classes;
+}
+if (Ci === undefined) {
   var Ci = Components.interfaces;
+}
+if (Cu === undefined) {
   var Cu = Components.utils;
 }
 
@@ -15,20 +19,36 @@ Cu.import("resource://gre/modules/Task.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Services",
   "resource://gre/modules/Services.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "BrowserNewTabPreloader",
-  "resource:///modules/BrowserNewTabPreloader.jsm", "BrowserNewTabPreloader");
-
 XPCOMUtils.defineLazyModuleGetter(this, "CustomizationTabPreloader",
-  "resource:///modules/CustomizationTabPreloader.jsm", "CustomizationTabPreloader");
+  "resource:///modules/CustomizationTabPreloader.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "ContentSearch",
+  "resource:///modules/ContentSearch.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "SelfSupportBackend",
+  "resource:///modules/SelfSupportBackend.jsm");
 
 const SIMPLETEST_OVERRIDES =
-  ["ok", "is", "isnot", "ise", "todo", "todo_is", "todo_isnot", "info", "expectAssertions"];
+  ["ok", "is", "isnot", "ise", "todo", "todo_is", "todo_isnot", "info", "expectAssertions", "requestCompleteLog"];
 
-window.addEventListener("load", testOnLoad, false);
+window.addEventListener("load", function testOnLoad() {
+  window.removeEventListener("load", testOnLoad);
+  window.addEventListener("MozAfterPaint", function testOnMozAfterPaint() {
+    window.removeEventListener("MozAfterPaint", testOnMozAfterPaint);
+    setTimeout(testInit, 0);
+  });
+});
 
-function testOnLoad() {
-  window.removeEventListener("load", testOnLoad, false);
+function b2gStart() {
+  let homescreen = document.getElementById('systemapp');
+  var webNav = homescreen.contentWindow.QueryInterface(Ci.nsIInterfaceRequestor)
+                                   .getInterface(Ci.nsIWebNavigation);
+  var url = "chrome://mochikit/content/harness.xul?manifestFile=tests.json";
 
+  webNav.loadURI(url, null, null, null, null);
+}
+
+function testInit() {
   gConfig = readConfig();
   if (gConfig.testRoot == "browser" ||
       gConfig.testRoot == "metro" ||
@@ -55,7 +75,7 @@ function testOnLoad() {
       messageManager.removeMessageListener("chromeEvent", messageHandler);
       var url = m.json.data;
 
-      // Window is the [ChromeWindow] for messageManager, so we need content.window 
+      // Window is the [ChromeWindow] for messageManager, so we need content.window
       // Currently chrome tests are run in a content window instead of a ChromeWindow
       var webNav = content.window.QueryInterface(Components.interfaces.nsIInterfaceRequestor)
                          .getInterface(Components.interfaces.nsIWebNavigation);
@@ -88,8 +108,15 @@ function Tester(aTests, aDumper, aCallback) {
   this._scriptLoader.loadSubScript("chrome://mochikit/content/tests/SimpleTest/MemoryStats.js", simpleTestScope);
   this._scriptLoader.loadSubScript("chrome://mochikit/content/chrome-harness.js", simpleTestScope);
   this.SimpleTest = simpleTestScope.SimpleTest;
+
+  this.SimpleTest.harnessParameters = gConfig;
+
   this.MemoryStats = simpleTestScope.MemoryStats;
   this.Task = Task;
+  this.ContentTask = Components.utils.import("resource://testing-common/ContentTask.jsm", null).ContentTask;
+  this.BrowserTestUtils = Components.utils.import("resource://testing-common/BrowserTestUtils.jsm", null).BrowserTestUtils;
+  this.TestUtils = Components.utils.import("resource://testing-common/TestUtils.jsm", null).TestUtils;
+  this.Task.Debugging.maintainStack = true;
   this.Promise = Components.utils.import("resource://gre/modules/Promise.jsm", null).Promise;
   this.Assert = Components.utils.import("resource://testing-common/Assert.jsm", null).Assert;
 
@@ -98,25 +125,34 @@ function Tester(aTests, aDumper, aCallback) {
     this.SimpleTestOriginal[m] = this.SimpleTest[m];
   });
 
+  this._toleratedUncaughtRejections = null;
   this._uncaughtErrorObserver = function({message, date, fileName, stack, lineNumber}) {
-    let text = "Once bug 991040 has landed, THIS ERROR WILL CAUSE A TEST FAILURE.\n" + message;
-    let error = text;
+    let error = message;
     if (fileName || lineNumber) {
       error = {
         fileName: fileName,
         lineNumber: lineNumber,
-        message: text,
+        message: message,
         toString: function() {
-          return text;
+          return message;
         }
       };
     }
+
+    // We may have a whitelist of rejections we wish to tolerate.
+    let tolerate = this._toleratedUncaughtRejections &&
+      this._toleratedUncaughtRejections.indexOf(message) != -1;
+    let name = "A promise chain failed to handle a rejection: ";
+    if (tolerate) {
+      name = "WARNING: (PLEASE FIX THIS AS PART OF BUG 1077403) " + name;
+    }
+
     this.currentTest.addResult(
       new testResult(
-	/*success*/ true,
-        /*name*/"A promise chain failed to handle a rejection",
+	      /*success*/tolerate,
+        /*name*/name,
         /*error*/error,
-        /*known*/true,
+        /*known*/tolerate,
         /*stack*/stack));
     }.bind(this);
 }
@@ -124,7 +160,7 @@ Tester.prototype = {
   EventUtils: {},
   SimpleTest: {},
   Task: null,
-  Promise: null,
+  ContentTask: null,
   Assert: null,
 
   repeat: 0,
@@ -143,15 +179,6 @@ Tester.prototype = {
   },
 
   start: function Tester_start() {
-    // Check whether this window is ready to run tests.
-    if (window.BrowserChromeTest) {
-      BrowserChromeTest.runWhenReady(this.actuallyStart.bind(this));
-      return;
-    }
-    this.actuallyStart();
-  },
-
-  actuallyStart: function Tester_actuallyStart() {
     //if testOnLoad was not called, then gConfig is not defined
     if (!gConfig)
       gConfig = readConfig();
@@ -162,7 +189,7 @@ Tester.prototype = {
     if (gConfig.repeat)
       this.repeat = gConfig.repeat;
 
-    this.dumper.dump("*** Start BrowserChrome Test Results ***\n");
+    this.dumper.structuredLogger.info("*** Start BrowserChrome Test Results ***");
     Services.console.registerListener(this);
     Services.obs.addObserver(this, "chrome-document-global-created", false);
     Services.obs.addObserver(this, "content-document-global-created", false);
@@ -208,7 +235,7 @@ Tester.prototype = {
     }
 
     // Remove stale windows
-    this.dumper.dump("TEST-INFO | checking window state\n");
+    this.dumper.structuredLogger.info("checking window state");
     let windowsEnum = Services.wm.getEnumerator(null);
     while (windowsEnum.hasMoreElements()) {
       let win = windowsEnum.getNext();
@@ -227,7 +254,10 @@ Tester.prototype = {
         if (this.currentTest)
           this.currentTest.addResult(new testResult(false, msg, "", false));
         else
-          this.dumper.dump("TEST-UNEXPECTED-FAIL | (browser-test.js) | " + msg + "\n");
+          this.dumper.structuredLogger.testEnd("browser-test.js",
+                                               "FAIL",
+                                               "PASS",
+                                               msg);
 
         win.close();
       }
@@ -254,22 +284,24 @@ Tester.prototype = {
       Services.obs.removeObserver(this, "chrome-document-global-created");
       Services.obs.removeObserver(this, "content-document-global-created");
       this.Promise.Debugging.clearUncaughtErrorObservers();
-      this.dumper.dump("\nINFO TEST-START | Shutdown\n");
+      this._treatUncaughtRejectionsAsFailures = false;
+      this.dumper.structuredLogger.info("TEST-START | Shutdown");
 
       if (this.tests.length) {
-        this.dumper.dump("Browser Chrome Test Summary\n");
-  
-        this.dumper.dump("\tPassed: " + passCount + "\n" +
-                         "\tFailed: " + failCount + "\n" +
-                         "\tTodo: " + todoCount + "\n");
+        this.dumper.structuredLogger.info("Browser Chrome Test Summary");
+        this.dumper.structuredLogger.info("Passed:  " + passCount);
+        this.dumper.structuredLogger.info("Failed:  " + failCount);
+        this.dumper.structuredLogger.info("Todo:    " + todoCount);
       } else {
-        this.dumper.dump("TEST-UNEXPECTED-FAIL | (browser-test.js) | " +
-                         "No tests to run. Did you pass an invalid --test-path?\n");
+        this.dumper.structuredLogger.testEnd("browser-test.js",
+                                             "FAIL",
+                                             "PASS",
+                                             "No tests to run. Did you pass an invalid --test-path?");
       }
-      this.dumper.dump("\n*** End BrowserChrome Test Results ***\n");
-  
+      this.dumper.structuredLogger.info("*** End BrowserChrome Test Results ***");
+
       this.dumper.done();
-  
+
       // Tests complete, notify the callback and return
       this.callback(this.tests);
       this.callback = null;
@@ -326,6 +358,8 @@ Tester.prototype = {
 
   nextTest: Task.async(function*() {
     if (this.currentTest) {
+      this.Promise.Debugging.flushUncaughtErrors();
+
       // Run cleanup functions for the current test before moving on to the
       // next one.
       let testScope = this.currentTest.scope;
@@ -337,7 +371,17 @@ Tester.prototype = {
         catch (ex) {
           this.currentTest.addResult(new testResult(false, "Cleanup function threw an exception", ex, false));
         }
-      };
+      }
+
+      if (this.currentTest.passCount === 0 &&
+          this.currentTest.failCount === 0 &&
+          this.currentTest.todoCount === 0) {
+        this.currentTest.addResult(new testResult(false, "This test contains no passes, no fails and no todos. Maybe it threw a silent exception? Make sure you use waitForExplicitFinish() if you need it.", "", false));
+      }
+
+      if (testScope.__expected == 'fail' && testScope.__num_failed <= 0) {
+        this.currentTest.addResult(new testResult(false, "We expected at least one assertion to fail because this test file was marked as fail-if in the manifest!", "", true));
+      }
 
       this.Promise.Debugging.flushUncaughtErrors();
 
@@ -418,8 +462,7 @@ Tester.prototype = {
           .getService(Ci.nsIXULRuntime)
           .processType == Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT)
       {
-        this.MemoryStats.dump((l) => { this.dumper.dump(l + "\n"); },
-                              this.currentTestIndex,
+        this.MemoryStats.dump(this.currentTestIndex,
                               this.currentTest.path,
                               gConfig.dumpOutputDirectory,
                               gConfig.dumpAboutMemoryAfterTest,
@@ -428,7 +471,10 @@ Tester.prototype = {
 
       // Note the test run time
       let time = Date.now() - this.lastStartTime;
-      this.dumper.dump("INFO TEST-END | " + this.currentTest.path + " | finished in " + time + "ms\n");
+      this.dumper.structuredLogger.testEnd(this.currentTest.path,
+                                           "OK",
+                                           undefined,
+                                           "finished in " + time + "ms");
       this.currentTest.setDuration(time);
 
       if (this.runUntilFailure && this.currentTest.failCount > 0) {
@@ -449,6 +495,7 @@ Tester.prototype = {
     // is invoked to start the tests.
     this.waitForWindowsState((function () {
       if (this.done) {
+
         // Uninitialize a few things explicitly so that they can clean up
         // frames and browser intentionally kept alive until shutdown to
         // eliminate false positives.
@@ -473,16 +520,19 @@ Tester.prototype = {
             Cu.import("resource://gre/modules/BackgroundPageThumbs.jsm", {});
           BackgroundPageThumbs._destroy();
 
-          BrowserNewTabPreloader.uninit();
+          // Destroy preloaded browsers.
+          if (gBrowser._preloadedBrowser) {
+            let browser = gBrowser._preloadedBrowser;
+            gBrowser._preloadedBrowser = null;
+            gBrowser.getNotificationBox(browser).remove();
+          }
+
+          SelfSupportBackend.uninit();
           CustomizationTabPreloader.uninit();
           SocialFlyout.unload();
           SocialShare.uninit();
           TabView.uninit();
         }
-
-        // Simulate memory pressure so that we're forced to free more resources
-        // and thus get rid of more false leaks like already terminated workers.
-        Services.obs.notifyObservers(null, "memory-pressure", "heap-minimize");
 
         // Schedule GC and CC runs before finishing in order to detect
         // DOM windows leaked by our tests or the tested code. Note that we
@@ -513,20 +563,34 @@ Tester.prototype = {
           }
         };
 
-        checkForLeakedGlobalWindows(aResults => {
-          if (aResults.length == 0) {
-            this.finish();
-            return;
-          }
-          // After the first check, if there are reported leaked windows, sleep
-          // for a while, to allow off-main-thread work to complete and free up
-          // main-thread objects.  Then check again.
-          setTimeout(() => {
-            checkForLeakedGlobalWindows(aResults => {
-              reportLeaks(aResults);
+        let {AsyncShutdown} =
+          Cu.import("resource://gre/modules/AsyncShutdown.jsm", {});
+
+        let barrier = new AsyncShutdown.Barrier(
+          "ShutdownLeaks: Wait for cleanup to be finished before checking for leaks");
+        Services.obs.notifyObservers({wrappedJSObject: barrier},
+          "shutdown-leaks-before-check", null);
+
+        barrier.wait().then(() => {
+          // Simulate memory pressure so that we're forced to free more resources
+          // and thus get rid of more false leaks like already terminated workers.
+          Services.obs.notifyObservers(null, "memory-pressure", "heap-minimize");
+
+          checkForLeakedGlobalWindows(aResults => {
+            if (aResults.length == 0) {
               this.finish();
-            });
-          }, 1000);
+              return;
+            }
+            // After the first check, if there are reported leaked windows, sleep
+            // for a while, to allow off-main-thread work to complete and free up
+            // main-thread objects.  Then check again.
+            setTimeout(() => {
+              checkForLeakedGlobalWindows(aResults => {
+                reportLeaks(aResults);
+                this.finish();
+              });
+            }, 1000);
+          });
         });
 
         return;
@@ -538,12 +602,12 @@ Tester.prototype = {
   }),
 
   execTest: function Tester_execTest() {
-    this.dumper.dump("TEST-START | " + this.currentTest.path + "\n");
+    this.dumper.structuredLogger.testStart(this.currentTest.path);
 
     this.SimpleTest.reset();
 
     // Load the tests into a testscope
-    let currentScope = this.currentTest.scope = new testScope(this, this.currentTest);
+    let currentScope = this.currentTest.scope = new testScope(this, this.currentTest, this.currentTest.expected);
     let currentTest = this.currentTest;
 
     // Import utils in the test scope.
@@ -551,7 +615,9 @@ Tester.prototype = {
     this.currentTest.scope.SimpleTest = this.SimpleTest;
     this.currentTest.scope.gTestPath = this.currentTest.path;
     this.currentTest.scope.Task = this.Task;
-    this.currentTest.scope.Promise = this.Promise;
+    this.currentTest.scope.ContentTask = this.ContentTask;
+    this.currentTest.scope.BrowserTestUtils = this.BrowserTestUtils;
+    this.currentTest.scope.TestUtils = this.TestUtils;
     // Pass a custom report function for mochitest style reporting.
     this.currentTest.scope.Assert = new this.Assert(function(err, message, stack) {
       let res;
@@ -590,7 +656,7 @@ Tester.prototype = {
       // Ignore if no head.js exists, but report all other errors.  Note this
       // will also ignore an existing head.js attempting to import a missing
       // module - see bug 755558 for why this strategy is preferred anyway.
-      if (ex.toString() != 'Error opening input stream (invalid filename?)') {
+      if (!/^Error opening input stream/.test(ex.toString())) {
        this.currentTest.addResult(new testResult(false, "head.js import threw an exception", ex, false));
       }
     }
@@ -607,7 +673,8 @@ Tester.prototype = {
         if ("test" in this.currentTest.scope) {
           throw "Cannot run both a add_task test and a normal test at the same time.";
         }
-        this.Task.spawn(function() {
+        let Promise = this.Promise;
+        this.Task.spawn(function*() {
           let task;
           while ((task = this.__tasks.shift())) {
             this.SimpleTest.info("Entering test " + task.name);
@@ -620,7 +687,7 @@ Tester.prototype = {
               let result = new testResult(isExpected, name, ex, false, stack);
               currentTest.addResult(result);
             }
-            this.Promise.Debugging.flushUncaughtErrors();
+            Promise.Debugging.flushUncaughtErrors();
             this.SimpleTest.info("Leaving test " + task.name);
           }
           this.finish();
@@ -656,7 +723,19 @@ Tester.prototype = {
     }
     else {
       var self = this;
-      this.currentTest.scope.__waitTimer = setTimeout(function timeoutFn() {
+      var timeoutExpires = Date.now() + gTimeoutSeconds * 1000;
+      var waitUntilAtLeast = timeoutExpires - 1000;
+      this.currentTest.scope.__waitTimer =
+        this.SimpleTest._originalSetTimeout.apply(window, [function timeoutFn() {
+        // We sometimes get woken up long before the gTimeoutSeconds
+        // have elapsed (when running in chaos mode for example). This
+        // code ensures that we don't wrongly time out in that case.
+        if (Date.now() < waitUntilAtLeast) {
+          self.currentTest.scope.__waitTimer =
+            setTimeout(timeoutFn, timeoutExpires - Date.now());
+          return;
+        }
+
         if (--self.currentTest.scope.__timeoutFactor > 0) {
           // We were asked to wait a bit longer.
           self.currentTest.scope.info(
@@ -682,11 +761,11 @@ Tester.prototype = {
           return;
         }
 
-        self.currentTest.addResult(new testResult(false, "Test timed out", "", false));
+        self.currentTest.addResult(new testResult(false, "Test timed out", null, false));
         self.currentTest.timedOut = true;
         self.currentTest.scope.__waitTimer = null;
         self.nextTest();
-      }, gTimeoutSeconds * 1000);
+      }, gTimeoutSeconds * 1000]);
     }
   },
 
@@ -700,37 +779,51 @@ Tester.prototype = {
 };
 
 function testResult(aCondition, aName, aDiag, aIsTodo, aStack) {
-  this.msg = aName || "";
+  this.name = aName;
+  this.msg = "";
 
   this.info = false;
   this.pass = !!aCondition;
   this.todo = aIsTodo;
 
   if (this.pass) {
-    if (aIsTodo)
-      this.result = "TEST-KNOWN-FAIL";
-    else
-      this.result = "TEST-PASS";
+    if (aIsTodo) {
+      this.status = "FAIL";
+      this.expected = "FAIL";
+    } else {
+      this.status = "PASS";
+      this.expected = "PASS";
+    }
+
   } else {
     if (aDiag) {
       if (typeof aDiag == "object" && "fileName" in aDiag) {
         // we have an exception - print filename and linenumber information
-        this.msg += " at " + aDiag.fileName + ":" + aDiag.lineNumber;
+        this.msg += "at " + aDiag.fileName + ":" + aDiag.lineNumber + " - ";
       }
-      this.msg += " - " + aDiag;
+      this.msg += String(aDiag);
     }
     if (aStack) {
       this.msg += "\nStack trace:\n";
-      var frame = aStack;
-      while (frame) {
-        this.msg += "    " + frame + "\n";
-        frame = frame.caller;
+      let normalized;
+      if (aStack instanceof Components.interfaces.nsIStackFrame) {
+        let frames = [];
+        for (let frame = aStack; frame; frame = frame.caller) {
+          frames.push(frame.filename + ":" + frame.name + ":" + frame.lineNumber);
+        }
+        normalized = frames.join("\n");
+      } else {
+        normalized = "" + aStack;
       }
+      this.msg += Task.Debugging.generateReadableStack(normalized, "    ");
     }
-    if (aIsTodo)
-      this.result = "TEST-UNEXPECTED-PASS";
-    else
-      this.result = "TEST-UNEXPECTED-FAIL";
+    if (aIsTodo) {
+      this.status = "PASS";
+      this.expected = "FAIL";
+    } else {
+      this.status = "FAIL";
+      this.expected = "PASS";
+    }
 
     if (gConfig.debugOnFailure) {
       // You've hit this line because you requested to break into the
@@ -743,16 +836,24 @@ function testResult(aCondition, aName, aDiag, aIsTodo, aStack) {
 function testMessage(aName) {
   this.msg = aName || "";
   this.info = true;
-  this.result = "TEST-INFO";
 }
 
 // Need to be careful adding properties to this object, since its properties
 // cannot conflict with global variables used in tests.
-function testScope(aTester, aTest) {
+function testScope(aTester, aTest, expected) {
   this.__tester = aTester;
+  this.__expected = expected;
+  this.__num_failed = 0;
 
   var self = this;
   this.ok = function test_ok(condition, name, diag, stack) {
+    if (this.__expected == 'fail') {
+        if (!condition) {
+          this.__num_failed++;
+          condition = true;
+        }
+    }
+
     aTest.addResult(new testResult(condition, name, diag, false,
                                    stack ? stack : Components.stack.caller));
   };
@@ -853,6 +954,13 @@ function testScope(aTester, aTest) {
     self.SimpleTest.ignoreAllUncaughtExceptions(aIgnoring);
   };
 
+  this.thisTestLeaksUncaughtRejectionsAndShouldBeFixed = function(...rejections) {
+    if (!aTester._toleratedUncaughtRejections) {
+      aTester._toleratedUncaughtRejections = [];
+    }
+    aTester._toleratedUncaughtRejections.push(...rejections);
+  };
+
   this.expectAssertions = function test_expectAssertions(aMin, aMax) {
     let min = aMin;
     let max = aMax;
@@ -867,6 +975,10 @@ function testScope(aTester, aTest) {
     self.__expectedMaxAsserts = max;
   };
 
+  this.setExpected = function test_setExpected() {
+    self.__expected = 'fail';
+  };
+
   this.finish = function test_finish() {
     self.__done = true;
     if (self.__waitTimer) {
@@ -879,6 +991,13 @@ function testScope(aTester, aTest) {
       });
     }
   };
+
+  this.requestCompleteLog = function test_requestCompleteLog() {
+    self.__tester.dumper.structuredLogger.deactivateBuffering();
+    self.registerCleanupFunction(function() {
+      self.__tester.dumper.structuredLogger.activateBuffering();
+    })
+  };
 }
 testScope.prototype = {
   __done: true,
@@ -889,11 +1008,14 @@ testScope.prototype = {
   __timeoutFactor: 1,
   __expectedMinAsserts: 0,
   __expectedMaxAsserts: 0,
+  __expected: 'pass',
 
   EventUtils: {},
   SimpleTest: {},
   Task: null,
-  Promise: null,
+  ContentTask: null,
+  BrowserTestUtils: null,
+  TestUtils: null,
   Assert: null,
 
   /**

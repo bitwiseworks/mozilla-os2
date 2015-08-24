@@ -490,7 +490,7 @@ class SegArray {
 
 class PriMap {
  public:
-  PriMap(void (*aLog)(const char*))
+  explicit PriMap(void (*aLog)(const char*))
     : mLog(aLog)
   {}
 
@@ -838,7 +838,7 @@ class PriMap {
 class CFICache {
  public:
 
-  CFICache(PriMap* aPriMap) {
+  explicit CFICache(PriMap* aPriMap) {
     Invalidate();
     mPriMap = aPriMap;
   }
@@ -974,12 +974,12 @@ LUL::NotifyAfterMap(uintptr_t aRXavma, size_t aSize,
     if (!aMappedImage) {
       (void)lul::ReadSymbolData(
               string(aFileName), std::vector<string>(), smap,
-              (void*)aRXavma, mLog);
+              (void*)aRXavma, aSize, mLog);
     } else {
       (void)lul::ReadSymbolDataInternal(
               (const uint8_t*)aMappedImage,
               string(aFileName), std::vector<string>(), smap,
-              (void*)aRXavma, mLog);
+              (void*)aRXavma, aSize, mLog);
     }
 
     mLog("NotifyMap .. preparing entries\n");

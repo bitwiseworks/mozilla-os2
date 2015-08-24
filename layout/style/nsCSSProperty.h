@@ -21,7 +21,9 @@ enum nsCSSProperty {
   #define CSS_PROP(name_, id_, method_, flags_, pref_, parsevariant_, \
                    kwtable_, stylestruct_, stylestructoffset_, animtype_) \
     eCSSProperty_##id_,
+  #define CSS_PROP_LIST_INCLUDE_LOGICAL
   #include "nsCSSPropList.h"
+  #undef CSS_PROP_LIST_INCLUDE_LOGICAL
   #undef CSS_PROP
 
   eCSSProperty_COUNT_no_shorthands,
@@ -70,6 +72,31 @@ enum nsCSSFontDesc {
 #include "nsCSSFontDescList.h"
 #undef CSS_FONT_DESC
   eCSSFontDesc_COUNT
+};
+
+// The "descriptors" that can appear in a @counter-style rule.
+// They have the syntax of properties but different value rules.
+enum nsCSSCounterDesc {
+  eCSSCounterDesc_UNKNOWN = -1,
+#define CSS_COUNTER_DESC(name_, method_) eCSSCounterDesc_##method_,
+#include "nsCSSCounterDescList.h"
+#undef CSS_COUNTER_DESC
+  eCSSCounterDesc_COUNT
+};
+
+enum nsCSSPropertyLogicalGroup {
+  eCSSPropertyLogicalGroup_UNKNOWN = -1,
+#define CSS_PROP_LOGICAL_GROUP_AXIS(name_) \
+  eCSSPropertyLogicalGroup_##name_,
+#define CSS_PROP_LOGICAL_GROUP_BOX(name_) \
+  eCSSPropertyLogicalGroup_##name_,
+#define CSS_PROP_LOGICAL_GROUP_SHORTHAND(name_) \
+  eCSSPropertyLogicalGroup_##name_,
+#include "nsCSSPropLogicalGroupList.h"
+#undef CSS_PROP_LOGICAL_GROUP_SHORTHAND
+#undef CSS_PROP_LOGICAL_GROUP_BOX
+#undef CSS_PROP_LOGICAL_GROUP_AXIS
+  eCSSPropertyLogicalGroup_COUNT
 };
 
 #endif /* nsCSSProperty_h___ */

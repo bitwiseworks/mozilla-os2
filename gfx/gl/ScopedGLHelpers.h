@@ -6,10 +6,17 @@
 #ifndef SCOPEDGLHELPERS_H_
 #define SCOPEDGLHELPERS_H_
 
-#include "GLContext.h"
+#include "GLDefs.h"
+#include "mozilla/UniquePtr.h"
 
 namespace mozilla {
 namespace gl {
+
+class GLContext;
+
+#ifdef DEBUG
+bool IsContextCurrent(GLContext* gl);
+#endif
 
 //RAII via CRTP!
 template <class Derived>
@@ -21,13 +28,13 @@ private:
 protected:
     GLContext* const mGL;
 
-    ScopedGLWrapper(GLContext* gl)
+    explicit ScopedGLWrapper(GLContext* gl)
         : mIsUnwrapped(false)
         , mGL(gl)
     {
         MOZ_ASSERT(&ScopedGLWrapper<Derived>::Unwrap == &Derived::Unwrap);
         MOZ_ASSERT(&Derived::UnwrapImpl);
-        MOZ_ASSERT(mGL->IsCurrent());
+        MOZ_ASSERT(IsContextCurrent(mGL));
     }
 
     virtual ~ScopedGLWrapper() {
@@ -74,7 +81,8 @@ struct ScopedBindFramebuffer
     friend struct ScopedGLWrapper<ScopedBindFramebuffer>;
 
 protected:
-    GLuint mOldFB;
+    GLuint mOldReadFB;
+    GLuint mOldDrawFB;
 
 private:
     void Init();
@@ -112,8 +120,42 @@ protected:
     GLuint mTexture;
 
 public:
-    ScopedTexture(GLContext* aGL);
+    explicit ScopedTexture(GLContext* aGL);
     GLuint Texture() { return mTexture; }
+
+protected:
+    void UnwrapImpl();
+};
+
+
+struct ScopedFramebuffer
+    : public ScopedGLWrapper<ScopedFramebuffer>
+{
+    friend struct ScopedGLWrapper<ScopedFramebuffer>;
+
+protected:
+    GLuint mFB;
+
+public:
+    explicit ScopedFramebuffer(GLContext* aGL);
+    GLuint FB() { return mFB; }
+
+protected:
+    void UnwrapImpl();
+};
+
+
+struct ScopedRenderbuffer
+    : public ScopedGLWrapper<ScopedRenderbuffer>
+{
+    friend struct ScopedGLWrapper<ScopedRenderbuffer>;
+
+protected:
+    GLuint mRB;
+
+public:
+    explicit ScopedRenderbuffer(GLContext* aGL);
+    GLuint RB() { return mRB; }
 
 protected:
     void UnwrapImpl();
@@ -243,6 +285,79 @@ protected:
     void UnwrapImpl();
 };
 
+struct ScopedVertexAttribPointer
+    : public ScopedGLWrapper<ScopedVertexAttribPointer>
+{
+    friend struct ScopedGLWrapper<ScopedVertexAttribPointer>;
+
+protected:
+    GLuint mAttribIndex;
+    GLint mAttribEnabled;
+    GLint mAttribSize;
+    GLint mAttribStride;
+    GLint mAttribType;
+    GLint mAttribNormalized;
+    GLint mAttribBufferBinding;
+    void* mAttribPointer;
+    GLuint mBoundBuffer;
+
+public:
+    ScopedVertexAttribPointer(GLContext* aGL, GLuint index, GLint size, GLenum type, realGLboolean normalized,
+                              GLsizei stride, GLuint buffer, const GLvoid* pointer);
+    explicit ScopedVertexAttribPointer(GLContext* aGL, GLuint index);
+
+protected:
+    void WrapImpl(GLuint index);
+    void UnwrapImpl();
+};
+
+struct ScopedGLDrawState {
+    explicit ScopedGLDrawState(GLContext* gl);
+    ~ScopedGLDrawState();
+
+    GLuint boundProgram;
+    GLuint boundBuffer;
+
+    ScopedGLState blend;
+    ScopedGLState cullFace;
+    ScopedGLState depthTest;
+    ScopedGLState dither;
+    ScopedGLState polyOffsFill;
+    ScopedGLState sampleAToC;
+    ScopedGLState sampleCover;
+    ScopedGLState scissor;
+    ScopedGLState stencil;
+
+    GLuint maxAttrib;
+    UniquePtr<GLint[]> attrib_enabled;
+    GLint attrib0_size;
+    GLint attrib0_stride;
+    GLint attrib0_type;
+    GLint attrib0_normalized;
+    GLint attrib0_bufferBinding;
+    void* attrib0_pointer;
+
+    realGLboolean colorMask[4];
+    GLint viewport[4];
+    GLint scissorBox[4];
+    GLContext* const mGL;
+    GLuint packAlign;
+};
+
+struct ScopedPackAlignment
+    : public ScopedGLWrapper<ScopedPackAlignment>
+{
+    friend struct ScopedGLWrapper<ScopedPackAlignment>;
+
+protected:
+    GLint mOldVal;
+
+public:
+    ScopedPackAlignment(GLContext* aGL, GLint scopedVal);
+
+protected:
+    void UnwrapImpl();
+};
 } /* namespace gl */
 } /* namespace mozilla */
 

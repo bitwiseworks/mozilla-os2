@@ -5,32 +5,21 @@
 
 package org.mozilla.gecko.home;
 
-import org.json.JSONException;
-import org.json.JSONObject;
-
-import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.db.BrowserContract;
 import org.mozilla.gecko.db.BrowserContract.HomeItems;
-import org.mozilla.gecko.db.DBUtils;
-import org.mozilla.gecko.db.HomeProvider;
 import org.mozilla.gecko.home.HomeConfig.PanelConfig;
-import org.mozilla.gecko.home.HomePager.OnUrlOpenListener;
 import org.mozilla.gecko.home.PanelLayout.ContextMenuRegistry;
 import org.mozilla.gecko.home.PanelLayout.DatasetHandler;
 import org.mozilla.gecko.home.PanelLayout.DatasetRequest;
-import org.mozilla.gecko.util.GeckoEventListener;
 import org.mozilla.gecko.util.ThreadUtils;
-import org.mozilla.gecko.util.UiAsyncTask;
+import org.mozilla.gecko.util.UIAsyncTask;
 
-import android.app.Activity;
 import android.content.ContentResolver;
 import android.content.Context;
-import android.content.res.Configuration;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
 import android.support.v4.app.LoaderManager;
-import android.support.v4.app.LoaderManager.LoaderCallbacks;
 import android.support.v4.content.Loader;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -63,6 +52,9 @@ public class DynamicPanel extends HomeFragment {
     // Dataset ID to be used by the loader
     private static final String DATASET_REQUEST = "dataset_request";
 
+    // Max number of items to display in the panel
+    private static final int RESULT_LIMIT = 100;
+
     // The main view for this fragment. This contains the PanelLayout and PanelAuthLayout.
     private FrameLayout mView;
 
@@ -77,16 +69,13 @@ public class DynamicPanel extends HomeFragment {
 
     // Hold a reference to the UiAsyncTask we use to check the state of the
     // PanelAuthCache, so that we can cancel it if necessary.
-    private UiAsyncTask<Void, Void, Boolean> mAuthStateTask;
+    private UIAsyncTask.WithoutParams<Boolean> mAuthStateTask;
 
     // The configuration associated with this panel
     private PanelConfig mPanelConfig;
 
     // Callbacks used for the loader
     private PanelLoaderCallbacks mLoaderCallbacks;
-
-    // On URL open listener
-    private OnUrlOpenListener mUrlOpenListener;
 
     // The current UI mode in the fragment
     private UIMode mUIMode;
@@ -100,25 +89,6 @@ public class DynamicPanel extends HomeFragment {
     private enum UIMode {
         PANEL,
         AUTH
-    }
-
-    @Override
-    public void onAttach(Activity activity) {
-        super.onAttach(activity);
-
-        try {
-            mUrlOpenListener = (OnUrlOpenListener) activity;
-        } catch (ClassCastException e) {
-            throw new ClassCastException(activity.toString()
-                    + " must implement HomePager.OnUrlOpenListener");
-        }
-    }
-
-    @Override
-    public void onDetach() {
-        super.onDetach();
-
-        mUrlOpenListener = null;
     }
 
     @Override
@@ -166,21 +136,8 @@ public class DynamicPanel extends HomeFragment {
         mPanelAuthCache.setOnChangeListener(null);
 
         if (mAuthStateTask != null) {
-            mAuthStateTask.cancel(true);
+            mAuthStateTask.cancel();
             mAuthStateTask = null;
-        }
-    }
-
-    @Override
-    public void onConfigurationChanged(Configuration newConfig) {
-        super.onConfigurationChanged(newConfig);
-
-        // Detach and reattach the fragment as the layout changes.
-        if (isVisible()) {
-            getFragmentManager().beginTransaction()
-                                .detach(this)
-                                .attach(this)
-                                .commitAllowingStateLoss();
         }
     }
 
@@ -198,9 +155,9 @@ public class DynamicPanel extends HomeFragment {
         Log.d(LOGTAG, "Loading layout");
 
         if (requiresAuth()) {
-            mAuthStateTask = new UiAsyncTask<Void, Void, Boolean>(ThreadUtils.getBackgroundHandler()) {
+            mAuthStateTask = new UIAsyncTask.WithoutParams<Boolean>(ThreadUtils.getBackgroundHandler()) {
                 @Override
-                public synchronized Boolean doInBackground(Void... params) {
+                public synchronized Boolean doInBackground() {
                     return mPanelAuthCache.isAuthenticated(mPanelConfig.getId());
                 }
 
@@ -304,12 +261,6 @@ public class DynamicPanel extends HomeFragment {
         public void requestDataset(DatasetRequest request) {
             Log.d(LOGTAG, "Requesting request: " + request);
 
-            // Ignore dataset requests while the fragment is not
-            // allowed to load its content.
-            if (!getCanLoadHint()) {
-                return;
-            }
-
             final Bundle bundle = new Bundle();
             bundle.putParcelable(DATASET_REQUEST, request);
 
@@ -381,6 +332,8 @@ public class DynamicPanel extends HomeFragment {
             final Uri queryUri = HomeItems.CONTENT_URI.buildUpon()
                                                       .appendQueryParameter(BrowserContract.PARAM_DATASET_ID,
                                                                             mRequest.getDatasetId())
+                                                      .appendQueryParameter(BrowserContract.PARAM_LIMIT,
+                                                                            String.valueOf(RESULT_LIMIT))
                                                       .build();
 
             // XXX: You can use HomeItems.CONTENT_FAKE_URI for development
@@ -392,7 +345,7 @@ public class DynamicPanel extends HomeFragment {
     /**
      * LoaderCallbacks implementation that interacts with the LoaderManager.
      */
-    private class PanelLoaderCallbacks implements LoaderCallbacks<Cursor> {
+    private class PanelLoaderCallbacks extends TransitionAwareCursorLoaderCallbacks {
         @Override
         public Loader<Cursor> onCreateLoader(int id, Bundle args) {
             final DatasetRequest request = (DatasetRequest) args.getParcelable(DATASET_REQUEST);
@@ -402,7 +355,7 @@ public class DynamicPanel extends HomeFragment {
         }
 
         @Override
-        public void onLoadFinished(Loader<Cursor> loader, Cursor cursor) {
+        public void onLoadFinishedAfterTransitions(Loader<Cursor> loader, Cursor cursor) {
             final DatasetRequest request = getRequestFromLoader(loader);
             Log.d(LOGTAG, "Finished loader for request: " + request);
 
@@ -413,6 +366,8 @@ public class DynamicPanel extends HomeFragment {
 
         @Override
         public void onLoaderReset(Loader<Cursor> loader) {
+            super.onLoaderReset(loader);
+
             final DatasetRequest request = getRequestFromLoader(loader);
             Log.d(LOGTAG, "Resetting loader for request: " + request);
 

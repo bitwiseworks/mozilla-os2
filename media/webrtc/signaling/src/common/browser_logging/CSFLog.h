@@ -5,16 +5,6 @@
 #ifndef CSFLOG_H
 #define CSFLOG_H
 
-// In order for FORCE_PR_LOG below to work, we have to define it before the
-// first time prlog is #included.
-#if defined(PR_LOG)
-#error "Must #include CSFLog.h before before any IPDL-generated files or other files that #include prlog.h."
-#endif
-
-#if defined(MOZ_LOGGING)
-#define FORCE_PR_LOG
-#endif
-
 #include <stdarg.h>
 #include "prlog.h"
 
@@ -27,8 +17,6 @@ typedef enum{
     CSF_LOG_DEBUG,
     CSF_LOG_OBNOXIOUS
 } CSFLogLevel;
-
-
 
 #define CSFLogError(tag , format, ...) CSFLog( CSF_LOG_ERROR, __FILE__ , __LINE__ , tag , format , ## __VA_ARGS__ )
 #define CSFLogErrorV(tag , format, va_list_arg) CSFLogV(CSF_LOG_ERROR, __FILE__ , __LINE__ , tag , format , va_list_arg )
@@ -52,11 +40,11 @@ void CSFLog( CSFLogLevel priority, const char* sourceFile, int sourceLine, const
   __attribute__ ((format (printf, 5, 6)))
 #endif
 ;
+
 void CSFLogV( CSFLogLevel priority, const char* sourceFile, int sourceLine, const char* tag , const char* format, va_list args);
 
 PRLogModuleInfo *GetSignalingLogInfo();
 PRLogModuleInfo *GetWebRTCLogInfo();
-extern int gWebrtcTraceLoggingOn;
 
 #ifdef __cplusplus
 }

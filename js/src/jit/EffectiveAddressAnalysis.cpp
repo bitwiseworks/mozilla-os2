@@ -18,13 +18,13 @@ AnalyzeLsh(TempAllocator& alloc, MLsh* lsh)
         return;
 
     MDefinition* index = lsh->lhs();
-    JS_ASSERT(index->type() == MIRType_Int32);
+    MOZ_ASSERT(index->type() == MIRType_Int32);
 
     MDefinition* shift = lsh->rhs();
-    if (!shift->isConstant())
+    if (!shift->isConstantValue())
         return;
 
-    Value shiftValue = shift->toConstant()->value();
+    Value shiftValue = shift->constantValue();
     if (!shiftValue.isInt32() || !IsShiftInScaleRange(shiftValue.toInt32()))
         return;
 
@@ -45,10 +45,10 @@ AnalyzeLsh(TempAllocator& alloc, MLsh* lsh)
         if (add->specialization() != MIRType_Int32 || !add->isTruncated())
             break;
 
-        MDefinition* other = add->getOperand(1 - use->index());
+        MDefinition* other = add->getOperand(1 - add->indexOf(*use));
 
-        if (other->isConstant()) {
-            displacement += other->toConstant()->value().toInt32();
+        if (other->isConstantValue()) {
+            displacement += other->constantValue().toInt32();
         } else {
             if (base)
                 break;
@@ -71,12 +71,12 @@ AnalyzeLsh(TempAllocator& alloc, MLsh* lsh)
             return;
 
         MBitAnd* bitAnd = use->consumer()->toDefinition()->toBitAnd();
-        MDefinition* other = bitAnd->getOperand(1 - use->index());
-        if (!other->isConstant() || !other->toConstant()->value().isInt32())
+        MDefinition* other = bitAnd->getOperand(1 - bitAnd->indexOf(*use));
+        if (!other->isConstantValue() || !other->constantValue().isInt32())
             return;
 
         uint32_t bitsClearedByShift = elemSize - 1;
-        uint32_t bitsClearedByMask = ~uint32_t(other->toConstant()->value().toInt32());
+        uint32_t bitsClearedByMask = ~uint32_t(other->constantValue().toInt32());
         if ((bitsClearedByShift & bitsClearedByMask) != bitsClearedByMask)
             return;
 

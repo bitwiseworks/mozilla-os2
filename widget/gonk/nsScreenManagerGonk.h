@@ -31,6 +31,7 @@ public:
     nsScreenGonk(void* nativeScreen);
     ~nsScreenGonk();
 
+    NS_IMETHOD GetId(uint32_t* aId);
     NS_IMETHOD GetRect(int32_t* aLeft, int32_t* aTop, int32_t* aWidth, int32_t* aHeight);
     NS_IMETHOD GetAvailRect(int32_t* aLeft, int32_t* aTop, int32_t* aWidth, int32_t* aHeight);
     NS_IMETHOD GetPixelDepth(int32_t* aPixelDepth);
@@ -42,7 +43,7 @@ public:
     static ScreenConfiguration GetConfiguration();
 };
 
-class nsScreenManagerGonk MOZ_FINAL : public nsIScreenManager
+class nsScreenManagerGonk final : public nsIScreenManager
 {
 public:
     nsScreenManagerGonk();

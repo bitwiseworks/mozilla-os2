@@ -12,7 +12,6 @@
 #include "nsContainerFrame.h"
 #include "nsNameSpaceManager.h"
 #include "nsGkAtoms.h"
-#include "nsFrameManager.h"
 #include "nsIDOMNode.h"
 #include "nsIDOMMozNamedAttrMap.h"
 #include "nsIDOMAttr.h"
@@ -60,7 +59,7 @@ nsBox::ListBox(nsAutoString& aResult)
 
     aResult.AppendASCII(addr);
     aResult.Append(name);
-    aResult.AppendLiteral(" ");
+    aResult.Append(' ');
 
     nsIContent* content = GetContent();
 
@@ -139,7 +138,7 @@ nsBox::BeginLayout(nsBoxLayoutState& aState)
     // If the parent is dirty, all the children are dirty (nsHTMLReflowState
     // does this too).
     nsIFrame* box;
-    for (box = GetChildBox(); box; box = box->GetNextBox())
+    for (box = GetChildBox(this); box; box = GetNextBox(box))
       box->AddStateBits(NS_FRAME_IS_DIRTY);
   }
 
@@ -683,18 +682,15 @@ nsIFrame::AddCSSMinSize(nsBoxLayoutState& aState, nsIFrame* aBox, nsSize& aSize,
       nsITheme *theme = aState.PresContext()->GetTheme();
       if (theme && theme->ThemeSupportsWidget(aState.PresContext(), aBox, display->mAppearance)) {
         nsIntSize size;
-        nsRenderingContext* rendContext = aState.GetRenderingContext();
-        if (rendContext) {
-          theme->GetMinimumWidgetSize(rendContext, aBox,
-                                      display->mAppearance, &size, &canOverride);
-          if (size.width) {
-            aSize.width = aState.PresContext()->DevPixelsToAppUnits(size.width);
-            aWidthSet = true;
-          }
-          if (size.height) {
-            aSize.height = aState.PresContext()->DevPixelsToAppUnits(size.height);
-            aHeightSet = true;
-          }
+        theme->GetMinimumWidgetSize(aState.PresContext(), aBox,
+                                    display->mAppearance, &size, &canOverride);
+        if (size.width) {
+          aSize.width = aState.PresContext()->DevPixelsToAppUnits(size.width);
+          aWidthSet = true;
+        }
+        if (size.height) {
+          aSize.height = aState.PresContext()->DevPixelsToAppUnits(size.height);
+          aHeightSet = true;
         }
       }
     }
@@ -925,6 +921,28 @@ nsBox::BoundsCheck(const nsSize& aMinSize, const nsSize& aPrefSize, const nsSize
                 BoundsCheck(aMinSize.height, aPrefSize.height, aMaxSize.height));
 }
 
+/*static*/ nsIFrame*
+nsBox::GetChildBox(const nsIFrame* aFrame)
+{
+  // box layout ends at box-wrapped frames, so don't allow these frames
+  // to report child boxes.
+  return aFrame->IsBoxFrame() ? aFrame->GetFirstPrincipalChild() : nullptr;
+}
+
+/*static*/ nsIFrame*
+nsBox::GetNextBox(const nsIFrame* aFrame)
+{
+  return aFrame->GetParent() &&
+    aFrame->GetParent()->IsBoxFrame() ? aFrame->GetNextSibling() : nullptr;
+}
+
+/*static*/ nsIFrame*
+nsBox::GetParentBox(const nsIFrame* aFrame)
+{
+  return aFrame->GetParent() &&
+    aFrame->GetParent()->IsBoxFrame() ? aFrame->GetParent() : nullptr;
+}
+
 #ifdef DEBUG_LAYOUT
 nsresult
 nsBox::SetDebug(nsBoxLayoutState& aState, bool aDebug)
@@ -940,7 +958,7 @@ nsBox::GetDebugBoxAt( const nsPoint& aPoint,
   if (!thisRect.Contains(aPoint))
     return NS_ERROR_FAILURE;
 
-  nsIFrame* child = GetChildBox();
+  nsIFrame* child = nsBox::GetChildBox(this);
   nsIFrame* hit = nullptr;
 
   *aBox = nullptr;
@@ -950,7 +968,7 @@ nsBox::GetDebugBoxAt( const nsPoint& aPoint,
     if (NS_SUCCEEDED(rv) && hit) {
       *aBox = hit;
     }
-    child = child->GetNextBox();
+    child = GetNextBox(child);
   }
 
   // found a child

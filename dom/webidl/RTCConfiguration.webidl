@@ -8,11 +8,13 @@
  */
 
 dictionary RTCIceServer {
-    DOMString  url;
+    (DOMString or sequence<DOMString>) urls;
+    DOMString  url; //deprecated
     DOMString? credential = null;
     DOMString? username = null;
 };
 
 dictionary RTCConfiguration {
     sequence<RTCIceServer> iceServers;
+    DOMString? peerIdentity = null;
 };

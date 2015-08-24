@@ -18,9 +18,11 @@
 namespace mozilla {
 namespace dom {
 
-class MessagePortList MOZ_FINAL : public nsISupports
+class MessagePortList final : public nsISupports
                                 , public nsWrapperCache
 {
+  ~MessagePortList() {}
+
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(MessagePortList)
@@ -30,7 +32,6 @@ public:
     : mOwner(aOwner)
     , mPorts(aPorts)
   {
-    SetIsDOMBinding();
   }
 
   nsISupports*
@@ -40,7 +41,7 @@ public:
   }
 
   virtual JSObject*
-  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  WrapObject(JSContext* aCx) override;
 
   uint32_t
   Length() const

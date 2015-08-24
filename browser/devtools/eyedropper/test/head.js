@@ -6,6 +6,7 @@ const TEST_HOST = 'mochi.test:8888';
 
 let { devtools } = Components.utils.import("resource://gre/modules/devtools/Loader.jsm", {});
 const { Eyedropper, EyedropperManager } = devtools.require("devtools/eyedropper/eyedropper");
+const { Promise: promise } = devtools.require("resource://gre/modules/Promise.jsm");
 
 let testDir = gTestPath.substr(0, gTestPath.lastIndexOf("/"));
 Services.scriptloader.loadSubScript(testDir + "../../../commandline/test/helpers.js", this);
@@ -35,6 +36,19 @@ function addTab(uri) {
   content.location = uri;
 
   return deferred.promise;
+}
+
+function waitForClipboard(setup, expected) {
+  let deferred = promise.defer();
+  SimpleTest.waitForClipboard(expected, setup, deferred.resolve, deferred.reject);
+  return deferred.promise;
+}
+
+function dropperStarted(dropper) {
+  if (dropper.isStarted) {
+    return promise.resolve();
+  }
+  return dropper.once("started");
 }
 
 function dropperLoaded(dropper) {

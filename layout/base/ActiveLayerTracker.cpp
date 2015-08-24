@@ -5,13 +5,14 @@
 #include "ActiveLayerTracker.h"
 
 #include "nsExpirationTracker.h"
-#include "nsIFrame.h"
+#include "nsContainerFrame.h"
 #include "nsIContent.h"
 #include "nsRefreshDriver.h"
 #include "nsPIDOMWindow.h"
 #include "nsIDocument.h"
 #include "nsAnimationManager.h"
 #include "nsTransitionManager.h"
+#include "nsDisplayList.h"
 
 namespace mozilla {
 
@@ -27,8 +28,9 @@ namespace mozilla {
  */
 class LayerActivity {
 public:
-  LayerActivity(nsIFrame* aFrame)
+  explicit LayerActivity(nsIFrame* aFrame)
     : mFrame(aFrame)
+    , mContent(nullptr)
     , mOpacityRestyleCount(0)
     , mTransformRestyleCount(0)
     , mLeftRestyleCount(0)
@@ -60,7 +62,13 @@ public:
     }
   }
 
+  // While tracked, exactly one of mFrame or mContent is non-null, depending
+  // on whether this property is stored on a frame or on a content node.
+  // When this property is expired by the layer activity tracker, both mFrame
+  // and mContent are nulled-out and the property is deleted.
   nsIFrame* mFrame;
+  nsIContent* mContent;
+
   nsExpirationState mState;
   // Number of restyle operations detected
   uint8_t mOpacityRestyleCount;
@@ -76,7 +84,7 @@ public:
   bool mContentActive;
 };
 
-class LayerActivityTracker MOZ_FINAL : public nsExpirationTracker<LayerActivity,4> {
+class LayerActivityTracker final : public nsExpirationTracker<LayerActivity,4> {
 public:
   // 75-100ms is a good timeout period. We use 4 generations of 25ms each.
   enum { GENERATION_MS = 100 };
@@ -93,19 +101,14 @@ static LayerActivityTracker* gLayerActivityTracker = nullptr;
 
 LayerActivity::~LayerActivity()
 {
-  if (mFrame) {
+  if (mFrame || mContent) {
     NS_ASSERTION(gLayerActivityTracker, "Should still have a tracker");
     gLayerActivityTracker->RemoveObject(this);
   }
 }
 
-static void DestroyLayerActivity(void* aPropertyValue)
-{
-  delete static_cast<LayerActivity*>(aPropertyValue);
-}
-
 // Frames with this property have NS_FRAME_HAS_LAYER_ACTIVITY_PROPERTY set
-NS_DECLARE_FRAME_PROPERTY(LayerActivityProperty, DestroyLayerActivity)
+NS_DECLARE_FRAME_PROPERTY(LayerActivityProperty, DeleteValue<LayerActivity>)
 
 void
 LayerActivityTracker::NotifyExpired(LayerActivity* aObject)
@@ -113,15 +116,24 @@ LayerActivityTracker::NotifyExpired(LayerActivity* aObject)
   RemoveObject(aObject);
 
   nsIFrame* f = aObject->mFrame;
+  nsIContent* c = aObject->mContent;
   aObject->mFrame = nullptr;
+  aObject->mContent = nullptr;
 
-  // The pres context might have been detached during the delay -
-  // that's fine, just skip the paint.
-  if (f->PresContext()->GetContainerWeak()) {
-    f->SchedulePaint();
+  MOZ_ASSERT((f == nullptr) != (c == nullptr),
+             "A LayerActivity object should always have a reference to either its frame or its content");
+
+  if (f) {
+    // The pres context might have been detached during the delay -
+    // that's fine, just skip the paint.
+    if (f->PresContext()->GetContainerWeak()) {
+      f->SchedulePaint();
+    }
+    f->RemoveStateBits(NS_FRAME_HAS_LAYER_ACTIVITY_PROPERTY);
+    f->Properties().Delete(LayerActivityProperty());
+  } else {
+    c->DeleteProperty(nsGkAtoms::LayerActivity);
   }
-  f->RemoveStateBits(NS_FRAME_HAS_LAYER_ACTIVITY_PROPERTY);
-  f->Properties().Delete(LayerActivityProperty());
 }
 
 static LayerActivity*
@@ -158,6 +170,39 @@ static void
 IncrementMutationCount(uint8_t* aCount)
 {
   *aCount = uint8_t(std::min(0xFF, *aCount + 1));
+}
+
+/* static */ void
+ActiveLayerTracker::TransferActivityToContent(nsIFrame* aFrame, nsIContent* aContent)
+{
+  if (!aFrame->HasAnyStateBits(NS_FRAME_HAS_LAYER_ACTIVITY_PROPERTY)) {
+    return;
+  }
+  FrameProperties properties = aFrame->Properties();
+  LayerActivity* layerActivity =
+    static_cast<LayerActivity*>(properties.Remove(LayerActivityProperty()));
+  aFrame->RemoveStateBits(NS_FRAME_HAS_LAYER_ACTIVITY_PROPERTY);
+  if (!layerActivity) {
+    return;
+  }
+  layerActivity->mFrame = nullptr;
+  layerActivity->mContent = aContent;
+  aContent->SetProperty(nsGkAtoms::LayerActivity, layerActivity,
+                        nsINode::DeleteProperty<LayerActivity>, true);
+}
+
+/* static */ void
+ActiveLayerTracker::TransferActivityToFrame(nsIContent* aContent, nsIFrame* aFrame)
+{
+  LayerActivity* layerActivity = static_cast<LayerActivity*>(
+    aContent->UnsetProperty(nsGkAtoms::LayerActivity));
+  if (!layerActivity) {
+    return;
+  }
+  layerActivity->mContent = nullptr;
+  layerActivity->mFrame = aFrame;
+  aFrame->AddStateBits(NS_FRAME_HAS_LAYER_ACTIVITY_PROPERTY);
+  aFrame->Properties().Set(LayerActivityProperty(), layerActivity);
 }
 
 /* static */ void
@@ -210,15 +255,24 @@ ActiveLayerTracker::NotifyInlineStyleRuleModified(nsIFrame* aFrame,
 }
 
 /* static */ bool
-ActiveLayerTracker::IsStyleAnimated(nsIFrame* aFrame, nsCSSProperty aProperty)
+ActiveLayerTracker::IsStyleMaybeAnimated(nsIFrame* aFrame, nsCSSProperty aProperty)
+{
+  return IsStyleAnimated(nullptr, aFrame, aProperty);
+}
+
+/* static */ bool
+ActiveLayerTracker::IsStyleAnimated(nsDisplayListBuilder* aBuilder,
+                                    nsIFrame* aFrame, nsCSSProperty aProperty)
 {
   // TODO: Add some abuse restrictions
   if ((aFrame->StyleDisplay()->mWillChangeBitField & NS_STYLE_WILL_CHANGE_TRANSFORM) &&
-      aProperty == eCSSProperty_transform) {
+      aProperty == eCSSProperty_transform &&
+      (!aBuilder || aBuilder->IsInWillChangeBudget(aFrame))) {
     return true;
   }
   if ((aFrame->StyleDisplay()->mWillChangeBitField & NS_STYLE_WILL_CHANGE_OPACITY) &&
-      aProperty == eCSSProperty_opacity) {
+      aProperty == eCSSProperty_opacity &&
+      (!aBuilder || aBuilder->IsInWillChangeBudget(aFrame))) {
     return true;
   }
 
@@ -229,18 +283,11 @@ ActiveLayerTracker::IsStyleAnimated(nsIFrame* aFrame, nsCSSProperty aProperty)
     }
   }
   if (aProperty == eCSSProperty_transform && aFrame->Preserves3D()) {
-    return IsStyleAnimated(aFrame->GetParent(), aProperty);
+    return IsStyleAnimated(aBuilder, aFrame->GetParent(), aProperty);
   }
   nsIContent* content = aFrame->GetContent();
   if (content) {
-    if (mozilla::HasAnimationOrTransition<ElementAnimations>(
-          content, nsGkAtoms::animationsProperty, aProperty)) {
-      return true;
-    }
-    if (mozilla::HasAnimationOrTransition<ElementTransitions>(
-          content, nsGkAtoms::transitionsProperty, aProperty)) {
-      return true;
-    }
+    return nsLayoutUtils::HasCurrentAnimationsForProperty(content, aProperty);
   }
 
   return false;

@@ -4,6 +4,9 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+if CONFIG['ENABLE_TESTS']:
+    MOCHITEST_MANIFESTS += ['tests/mochitest.ini']
+
 UNIFIED_SOURCES += [
     'nsMathMLChar.cpp',
     'nsMathMLContainerFrame.cpp',
@@ -15,7 +18,6 @@ UNIFIED_SOURCES += [
     'nsMathMLmmultiscriptsFrame.cpp',
     'nsMathMLmoFrame.cpp',
     'nsMathMLmpaddedFrame.cpp',
-    'nsMathMLmphantomFrame.cpp',
     'nsMathMLmrootFrame.cpp',
     'nsMathMLmrowFrame.cpp',
     'nsMathMLmspaceFrame.cpp',
@@ -35,21 +37,16 @@ EXPORTS += [
 
 FAIL_ON_WARNINGS = True
 
-FINAL_LIBRARY = 'gklayout'
+FINAL_LIBRARY = 'xul'
 LOCAL_INCLUDES += [
     '../base',
     '../generic',
     '../style',
     '../tables',
     '../xul',
-    '/content/base/src',
-    '/content/mathml/content/src',
+    '/dom/base',
+    '/dom/mathml',
 ]
-
-if CONFIG['ENABLE_TESTS']:
-    PARALLEL_DIRS += [
-        'tests',
-    ]
 
 JAR_MANIFESTS += ['jar.mn']
 
@@ -57,8 +54,7 @@ RESOURCE_FILES.fonts += [
     'mathfont.properties',
     'mathfontMathJax_Main.properties',
     'mathfontStandardSymbolsL.properties',
-    'mathfontSTIXNonUnicode.properties',
-    'mathfontSTIXSizeOneSym.properties',
+    'mathfontSTIXGeneral.properties',
     'mathfontUnicode.properties',
 ]
 

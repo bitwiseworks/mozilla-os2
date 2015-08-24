@@ -5,7 +5,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "ContentHelper.h"
-#include "LayerManagerD3D10.h"
 #include "MetroWidget.h"
 #include "MetroApp.h"
 #include "mozilla/Preferences.h"
@@ -39,6 +38,7 @@
 #include "mozilla/TextEvents.h"
 #include "mozilla/TouchEvents.h"
 #include "mozilla/MiscEvents.h"
+#include "gfxPrefs.h"
 
 using namespace Microsoft::WRL;
 using namespace Microsoft::WRL::Wrappers;
@@ -77,7 +77,7 @@ UINT sDefaultBrowserMsgId = RegisterWindowMessageW(L"DefaultBrowserClosing");
 } }
 
 // WM_GETOBJECT id pulled from uia headers
-#define UiaRootObjectId -25
+#define MOZOBJID_UIAROOT -25
 
 namespace mozilla {
 namespace widget {
@@ -205,7 +205,6 @@ NS_IMETHODIMP
 MetroWidget::Create(nsIWidget *aParent,
                     nsNativeWidget aNativeParent,
                     const nsIntRect &aRect,
-                    nsDeviceContext *aContext,
                     nsWidgetInitData *aInitData)
 {
   LogFunction();
@@ -219,7 +218,7 @@ MetroWidget::Create(nsIWidget *aParent,
   // Ensure that the toolkit is created.
   nsToolkit::GetToolkit();
 
-  BaseCreate(aParent, aRect, aContext, aInitData);
+  BaseCreate(aParent, aRect, aInitData);
 
   if (mWindowType != eWindowType_toplevel) {
     switch(mWindowType) {
@@ -593,7 +592,7 @@ MetroWidget::SynthesizeNativeKeyEvent(int32_t aNativeKeyboardLayout,
 }
 
 nsresult
-MetroWidget::SynthesizeNativeMouseEvent(nsIntPoint aPoint,
+MetroWidget::SynthesizeNativeMouseEvent(LayoutDeviceIntPoint aPoint,
                                         uint32_t aNativeMessage,
                                         uint32_t aModifierFlags)
 {
@@ -617,7 +616,7 @@ MetroWidget::SynthesizeNativeMouseEvent(nsIntPoint aPoint,
 }
 
 nsresult
-MetroWidget::SynthesizeNativeMouseScrollEvent(nsIntPoint aPoint,
+MetroWidget::SynthesizeNativeMouseScrollEvent(LayoutDeviceIntPoint aPoint,
                                               uint32_t aNativeMessage,
                                               double aDeltaX,
                                               double aDeltaY,
@@ -650,8 +649,8 @@ bool
 MetroWidget::DispatchScrollEvent(mozilla::WidgetGUIEvent* aEvent)
 {
   WidgetGUIEvent* newEvent = nullptr;
-  switch(aEvent->eventStructType) {
-    case NS_WHEEL_EVENT:
+  switch(aEvent->mClass) {
+    case eWheelEventClass:
     {
       WidgetWheelEvent* oldEvent = aEvent->AsWheelEvent();
       WidgetWheelEvent* wheelEvent =
@@ -660,7 +659,7 @@ MetroWidget::DispatchScrollEvent(mozilla::WidgetGUIEvent* aEvent)
       newEvent = static_cast<WidgetGUIEvent*>(wheelEvent);
     }
     break;
-    case NS_CONTENT_COMMAND_EVENT:
+    case eContentCommandEventClass:
     {
       WidgetContentCommandEvent* oldEvent = aEvent->AsContentCommandEvent();
       WidgetContentCommandEvent* cmdEvent =
@@ -879,8 +878,11 @@ MetroWidget::WindowProcedure(HWND aWnd, UINT aMsg, WPARAM aWParam, LPARAM aLPara
     }
 
     case WM_APPCOMMAND:
-      processDefault = HandleAppCommandMsg(aWParam, aLParam, &processResult);
+    {
+      MSG msg = WinUtils::InitMSG(aMsg, aWParam, aLParam, aWnd);
+      processDefault = HandleAppCommandMsg(msg, &processResult);
       break;
+    }
 
     case WM_GETOBJECT:
     {
@@ -892,7 +894,7 @@ MetroWidget::WindowProcedure(HWND aWnd, UINT aMsg, WPARAM aWParam, LPARAM aLPara
       // UiaReturnRawElementProvider passing the return result from FrameworkView
       // OnAutomationProviderRequested as the hwnd (me scratches head) which results in
       // GetLastError always being set to invalid handle (6) after CallWindowProc returns.
-      if (dwObjId == UiaRootObjectId && gProviderRoot) {
+      if (dwObjId == MOZOBJID_UIAROOT && gProviderRoot) {
         ComPtr<IRawElementProviderSimple> simple;
         gProviderRoot.As(&simple);
         if (simple) {
@@ -997,17 +999,8 @@ MetroWidget::ShouldUseOffMainThreadCompositing()
     return false;
   }
   // toolkit or test widgets can't use omtc, they don't have ICoreWindow.
-  return (CompositorParent::CompositorLoop() && mWindowType == eWindowType_toplevel);
-}
-
-bool
-MetroWidget::ShouldUseMainThreadD3D10Manager()
-{
-  // Either we're not initialized yet, or this is the toolkit widget
-  if (!mView) {
-    return false;
-  }
-  return (!CompositorParent::CompositorLoop() && mWindowType == eWindowType_toplevel);
+  return gfxPlatform::UsesOffMainThreadCompositing() &&
+         mWindowType == eWindowType_toplevel;
 }
 
 bool
@@ -1020,45 +1013,36 @@ MetroWidget::ShouldUseBasicManager()
 bool
 MetroWidget::ShouldUseAPZC()
 {
-  const char* kPrefName = "layers.async-pan-zoom.enabled";
-  return ShouldUseOffMainThreadCompositing() &&
-         Preferences::GetBool(kPrefName, false);
+  return gfxPrefs::AsyncPanZoomEnabled();
 }
 
 void
 MetroWidget::SetWidgetListener(nsIWidgetListener* aWidgetListener)
 {
   mWidgetListener = aWidgetListener;
-  if (mController) {
-    mController->SetWidgetListener(aWidgetListener);
+}
+
+void
+MetroWidget::ConfigureAPZCTreeManager()
+{
+  nsBaseWidget::ConfigureAPZCTreeManager();
+
+  nsresult rv;
+  nsCOMPtr<nsIObserverService> observerService = do_GetService("@mozilla.org/observer-service;1", &rv);
+  if (NS_SUCCEEDED(rv)) {
+    observerService->AddObserver(this, "apzc-scroll-offset-changed", false);
+    observerService->AddObserver(this, "apzc-zoom-to-rect", false);
+    observerService->AddObserver(this, "apzc-disable-zoom", false);
   }
 }
 
-CompositorParent* MetroWidget::NewCompositorParent(int aSurfaceWidth, int aSurfaceHeight)
+already_AddRefed<GeckoContentController>
+MetroWidget::CreateRootContentController()
 {
-  CompositorParent *compositor = nsBaseWidget::NewCompositorParent(aSurfaceWidth, aSurfaceHeight);
+  MOZ_ASSERT(!mController);
 
-  if (ShouldUseAPZC()) {
-    mRootLayerTreeId = compositor->RootLayerTreeId();
-
-    mController = new APZController();
-    mController->SetWidgetListener(mWidgetListener);
-
-    CompositorParent::SetControllerForLayerTree(mRootLayerTreeId, mController);
-
-    APZController::sAPZC = CompositorParent::GetAPZCTreeManager(compositor->RootLayerTreeId());
-    APZController::sAPZC->SetDPI(GetDPI());
-
-    nsresult rv;
-    nsCOMPtr<nsIObserverService> observerService = do_GetService("@mozilla.org/observer-service;1", &rv);
-    if (NS_SUCCEEDED(rv)) {
-      observerService->AddObserver(this, "apzc-scroll-offset-changed", false);
-      observerService->AddObserver(this, "apzc-zoom-to-rect", false);
-      observerService->AddObserver(this, "apzc-disable-zoom", false);
-    }
-  }
-
-  return compositor;
+  mController = new APZController();
+  return mController;
 }
 
 MetroWidget::TouchBehaviorFlags
@@ -1076,34 +1060,34 @@ MetroWidget::ApzcGetAllowedTouchBehavior(WidgetInputEvent* aTransformedEvent,
 }
 
 void
-MetroWidget::ApzcSetAllowedTouchBehavior(const ScrollableLayerGuid& aGuid,
+MetroWidget::ApzcSetAllowedTouchBehavior(uint64_t aInputBlockId,
                                          nsTArray<TouchBehaviorFlags>& aBehaviors)
 {
   LogFunction();
   if (!APZController::sAPZC) {
     return;
   }
-  APZController::sAPZC->SetAllowedTouchBehavior(aGuid, aBehaviors);
+  APZController::sAPZC->SetAllowedTouchBehavior(aInputBlockId, aBehaviors);
 }
 
 void
-MetroWidget::ApzContentConsumingTouch(const ScrollableLayerGuid& aGuid)
+MetroWidget::ApzContentConsumingTouch(uint64_t aInputBlockId)
 {
   LogFunction();
   if (!mController) {
     return;
   }
-  mController->ContentReceivedTouch(aGuid, true);
+  mController->ContentReceivedInputBlock(aInputBlockId, true);
 }
 
 void
-MetroWidget::ApzContentIgnoringTouch(const ScrollableLayerGuid& aGuid)
+MetroWidget::ApzContentIgnoringTouch(uint64_t aInputBlockId)
 {
   LogFunction();
   if (!mController) {
     return;
   }
-  mController->ContentReceivedTouch(aGuid, false);
+  mController->ContentReceivedInputBlock(aInputBlockId, false);
 }
 
 bool
@@ -1127,14 +1111,21 @@ MetroWidget::ApzTransformGeckoCoordinate(const ScreenIntPoint& aPoint,
 
 nsEventStatus
 MetroWidget::ApzReceiveInputEvent(WidgetInputEvent* aEvent,
-                                  ScrollableLayerGuid* aOutTargetGuid)
+                                  ScrollableLayerGuid* aOutTargetGuid,
+                                  uint64_t* aOutInputBlockId)
 {
   MOZ_ASSERT(aEvent);
 
   if (!mController) {
     return nsEventStatus_eIgnore;
   }
-  return mController->ReceiveInputEvent(aEvent, aOutTargetGuid);
+  return mController->ReceiveInputEvent(aEvent, aOutTargetGuid, aOutInputBlockId);
+}
+
+void
+MetroWidget::SetApzPendingResponseFlusher(APZPendingResponseFlusher* aFlusher)
+{
+  mController->SetPendingResponseFlusher(aFlusher);
 }
 
 LayerManager*
@@ -1154,22 +1145,6 @@ MetroWidget::GetLayerManager(PLayerTransactionChild* aShadowManager,
     retaining = false;
   }
 
-  // If the backend device has changed, create a new manager (pulled from nswindow)
-  if (mLayerManager) {
-    if (mLayerManager->GetBackendType() == LayersBackend::LAYERS_D3D10) {
-      LayerManagerD3D10 *layerManagerD3D10 =
-        static_cast<LayerManagerD3D10*>(mLayerManager.get());
-      if (layerManagerD3D10->device() !=
-          gfxWindowsPlatform::GetPlatform()->GetD3D10Device()) {
-        MOZ_ASSERT(!mLayerManager->IsInTransaction());
-
-        mLayerManager->Destroy();
-        mLayerManager = nullptr;
-        retaining = false;
-      }
-    }
-  }
-
   HRESULT hr = S_OK;
 
   // Create a layer manager: try to use an async compositor first, if enabled.
@@ -1178,13 +1153,7 @@ MetroWidget::GetLayerManager(PLayerTransactionChild* aShadowManager,
     if (ShouldUseOffMainThreadCompositing()) {
       NS_ASSERTION(aShadowManager == nullptr, "Async Compositor not supported with e10s");
       CreateCompositor();
-    } else if (ShouldUseMainThreadD3D10Manager()) {
-      nsRefPtr<mozilla::layers::LayerManagerD3D10> layerManager =
-        new mozilla::layers::LayerManagerD3D10(this);
-      if (layerManager->Initialize(true, &hr)) {
-        mLayerManager = layerManager;
-      }
-    } else if (ShouldUseBasicManager()) {
+    } else {
       mLayerManager = CreateBasicLayerManager();
     }
     // Either we're not ready to initialize yet due to a missing view pointer,
@@ -1522,10 +1491,10 @@ MetroWidget::SetTitle(const nsAString& aTitle)
   return NS_OK;
 }
 
-nsIntPoint
+LayoutDeviceIntPoint
 MetroWidget::WidgetToScreenOffset()
 {
-  return nsIntPoint(0,0);
+  return LayoutDeviceIntPoint(0,0);
 }
 
 NS_IMETHODIMP
@@ -1539,6 +1508,7 @@ NS_IMETHODIMP_(void)
 MetroWidget::SetInputContext(const InputContext& aContext,
                              const InputContextAction& aAction)
 {
+  // XXX This should set mInputContext.mNativeIMEContext properly
   mInputContext = aContext;
   nsTextStore::SetInputContext(this, mInputContext, aAction);
   bool enable = (mInputContext.mIMEState.mEnabled == IMEState::ENABLED ||
@@ -1556,8 +1526,8 @@ MetroWidget::GetInputContext()
   return mInputContext;
 }
 
-NS_IMETHODIMP
-MetroWidget::NotifyIME(const IMENotification& aIMENotification)
+nsresult
+MetroWidget::NotifyIMEInternal(const IMENotification& aIMENotification)
 {
   switch (aIMENotification.mMessage) {
     case REQUEST_TO_COMMIT_COMPOSITION:
@@ -1567,17 +1537,17 @@ MetroWidget::NotifyIME(const IMENotification& aIMENotification)
       nsTextStore::CommitComposition(true);
       return NS_OK;
     case NOTIFY_IME_OF_FOCUS:
-      return nsTextStore::OnFocusChange(true, this,
-                                        mInputContext.mIMEState.mEnabled);
+      return nsTextStore::OnFocusChange(true, this, mInputContext);
     case NOTIFY_IME_OF_BLUR:
-      return nsTextStore::OnFocusChange(false, this,
-                                        mInputContext.mIMEState.mEnabled);
+      return nsTextStore::OnFocusChange(false, this, mInputContext);
     case NOTIFY_IME_OF_SELECTION_CHANGE:
       return nsTextStore::OnSelectionChange();
     case NOTIFY_IME_OF_TEXT_CHANGE:
       return nsTextStore::OnTextChange(aIMENotification);
     case NOTIFY_IME_OF_POSITION_CHANGE:
       return nsTextStore::OnLayoutChange();
+    case NOTIFY_IME_OF_MOUSE_BUTTON_EVENT:
+      return nsTextStore::OnMouseButtonEvent(aIMENotification);
     default:
       return NS_ERROR_NOT_IMPLEMENTED;
   }

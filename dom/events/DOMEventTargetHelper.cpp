@@ -91,7 +91,7 @@ DOMEventTargetHelper::~DOMEventTargetHelper()
 void
 DOMEventTargetHelper::BindToOwner(nsPIDOMWindow* aOwner)
 {
-  MOZ_ASSERT(!aOwner || aOwner->IsInnerWindow());
+  MOZ_ASSERT_IF(aOwner, aOwner->IsInnerWindow());
   nsCOMPtr<nsIGlobalObject> glob = do_QueryInterface(aOwner);
   BindToOwner(glob);
 }
@@ -99,7 +99,8 @@ DOMEventTargetHelper::BindToOwner(nsPIDOMWindow* aOwner)
 void
 DOMEventTargetHelper::BindToOwner(nsIGlobalObject* aOwner)
 {
-  if (mParentObject) {
+  nsCOMPtr<nsIGlobalObject> parentObject = do_QueryReferent(mParentObject);
+  if (parentObject) {
     if (mOwnerWindow) {
       static_cast<nsGlobalWindow*>(mOwnerWindow)->RemoveEventTargetObject(this);
       mOwnerWindow = nullptr;
@@ -108,10 +109,12 @@ DOMEventTargetHelper::BindToOwner(nsIGlobalObject* aOwner)
     mHasOrHasHadOwnerWindow = false;
   }
   if (aOwner) {
-    mParentObject = aOwner;
+    mParentObject = do_GetWeakReference(aOwner);
+    MOZ_ASSERT(mParentObject, "All nsIGlobalObjects must support nsISupportsWeakReference");
     // Let's cache the result of this QI for fast access and off main thread usage
     mOwnerWindow = nsCOMPtr<nsPIDOMWindow>(do_QueryInterface(aOwner)).get();
     if (mOwnerWindow) {
+      MOZ_ASSERT(mOwnerWindow->IsInnerWindow());
       mHasOrHasHadOwnerWindow = true;
       static_cast<nsGlobalWindow*>(mOwnerWindow)->AddEventTargetObject(this);
     }
@@ -130,10 +133,12 @@ DOMEventTargetHelper::BindToOwner(DOMEventTargetHelper* aOther)
   if (aOther) {
     mHasOrHasHadOwnerWindow = aOther->HasOrHasHadOwner();
     if (aOther->GetParentObject()) {
-      mParentObject = aOther->GetParentObject();
+      mParentObject = do_GetWeakReference(aOther->GetParentObject());
+      MOZ_ASSERT(mParentObject, "All nsIGlobalObjects must support nsISupportsWeakReference");
       // Let's cache the result of this QI for fast access and off main thread usage
-      mOwnerWindow = nsCOMPtr<nsPIDOMWindow>(do_QueryInterface(mParentObject)).get();
+      mOwnerWindow = nsCOMPtr<nsPIDOMWindow>(do_QueryInterface(aOther->GetParentObject())).get();
       if (mOwnerWindow) {
+        MOZ_ASSERT(mOwnerWindow->IsInnerWindow());
         mHasOrHasHadOwnerWindow = true;
         static_cast<nsGlobalWindow*>(mOwnerWindow)->AddEventTargetObject(this);
       }
@@ -276,8 +281,7 @@ DOMEventTargetHelper::SetEventHandler(nsIAtom* aType,
 {
   nsRefPtr<EventHandlerNonNull> handler;
   JS::Rooted<JSObject*> callable(aCx);
-  if (aValue.isObject() &&
-      JS_ObjectIsCallable(aCx, callable = &aValue.toObject())) {
+  if (aValue.isObject() && JS::IsCallable(callable = &aValue.toObject())) {
     handler = new EventHandlerNonNull(callable, dom::GetIncumbentGlobal());
   }
   SetEventHandler(aType, EmptyString(), handler);

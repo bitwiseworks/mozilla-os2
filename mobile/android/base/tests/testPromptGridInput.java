@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 package org.mozilla.gecko.tests;
 
 import org.mozilla.gecko.Actions;
@@ -36,8 +40,9 @@ public class testPromptGridInput extends BaseTest {
 
     public void test(final int num) {
         // Load about:blank between each test to ensure we reset state
-        loadUrl("about:blank");
-        mAsserter.ok(waitForText("about:blank"), "Loaded blank page", "page title match");
+        loadUrl(StringHelper.ABOUT_BLANK_URL);
+        mAsserter.ok(waitForText(StringHelper.ABOUT_BLANK_URL), "Loaded blank page",
+                StringHelper.ABOUT_BLANK_URL);
 
         loadUrl("chrome://roboextender/content/robocop_prompt_gridinput.html#test" + num);
     }

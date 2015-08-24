@@ -12,7 +12,6 @@ var EXPORTED_SYMBOLS = ["PlacesItem", "Bookmark", "Separator", "Livemark",
 
 const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
-Cu.import("resource://gre/modules/BookmarkJSONUtils.jsm");
 Cu.import("resource://gre/modules/PlacesBackups.jsm");
 Cu.import("resource://gre/modules/PlacesUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
@@ -777,7 +776,7 @@ Livemark.prototype = {
 
     let [status, livemark] = spinningCb.wait();
     if (!Components.isSuccessCode(status)) {
-      throw status;
+      throw new Error(status);
     }
 
     this.props.item_id = livemark.id;

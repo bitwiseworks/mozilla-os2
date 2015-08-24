@@ -15,15 +15,30 @@ endif
 
 ifeq (browser,$(MOZ_BUILD_APP))
 ifdef COMPILE_ENVIRONMENT
-ifneq (1,$(SKIP_GTEST_DURING_MAKE_CHECK))
-check gtest::
+gtest::
 	$(MAKE) -C $(DEPTH)/toolkit/library gtestxul
 ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
 	$(MAKE) -C $(DEPTH)/browser/app repackage
 endif
-	$(PYTHON) $(topsrcdir)/testing/gtest/rungtests.py --xre-path=$(DIST)/bin --symbols-path=$(DIST)/crashreporter-symbols $(DIST)/bin/$(MOZ_APP_NAME)$(BIN_SUFFIX)
+ifneq (1,$(SKIP_GTEST_DURING_MAKE_CHECK))
+check::
+	$(MAKE) -C $(DEPTH)/toolkit/library gtestxul
+ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
+	$(MAKE) -C $(DEPTH)/browser/app repackage
+	$(PYTHON) $(topsrcdir)/testing/gtest/rungtests.py \
+		--cwd=$(DEPTH)/_tests/gtest \
+		--xre-path=$(DIST)/$(MOZ_MACBUNDLE_NAME)/Contents/Resources \
+		--symbols-path=$(DIST)/crashreporter-symbols \
+		$(DIST)/$(MOZ_MACBUNDLE_NAME)/Contents/MacOS/$(MOZ_APP_NAME)$(BIN_SUFFIX)
 else
-check gtest::
+	$(PYTHON) $(topsrcdir)/testing/gtest/rungtests.py \
+		--cwd=$(DEPTH)/_tests/gtest \
+		--xre-path=$(DIST)/bin \
+		--symbols-path=$(DIST)/crashreporter-symbols \
+		$(DIST)/bin/$(MOZ_APP_NAME)$(BIN_SUFFIX)
+endif
+else
+check::
 	echo GTest skipped during make check
 endif
 endif

@@ -7,11 +7,12 @@
 #ifndef jit_BaselineDebugModeOSR_h
 #define jit_BaselineDebugModeOSR_h
 
-#ifdef JS_ION
-
 #include "jit/BaselineFrame.h"
 #include "jit/BaselineIC.h"
 #include "jit/BaselineJIT.h"
+#include "jit/JitFrameIterator.h"
+
+#include "vm/Debugger.h"
 
 namespace js {
 namespace jit {
@@ -52,6 +53,7 @@ class DebugModeOSRVolatileStub
     { }
 
     bool invalid() const {
+        MOZ_ASSERT(!frame_->isHandlingException());
         ICEntry& entry = frame_->script()->baselineScript()->icEntryFromPCOffset(pcOffset_);
         return stub_ != entry.fallbackStub();
     }
@@ -65,6 +67,31 @@ class DebugModeOSRVolatileStub
 
     bool operator!=(const T& other) const { MOZ_ASSERT(!invalid()); return stub_ != other; }
     bool operator==(const T& other) const { MOZ_ASSERT(!invalid()); return stub_ == other; }
+};
+
+//
+// A JitFrameIterator that updates itself in case of recompilation of an
+// on-stack baseline script.
+//
+class DebugModeOSRVolatileJitFrameIterator : public JitFrameIterator
+{
+    DebugModeOSRVolatileJitFrameIterator** stack, *prev;
+
+  public:
+    explicit DebugModeOSRVolatileJitFrameIterator(JSContext* cx)
+      : JitFrameIterator(cx)
+    {
+        stack = &cx->liveVolatileJitFrameIterators_;
+        prev = *stack;
+        *stack = this;
+    }
+
+    ~DebugModeOSRVolatileJitFrameIterator() {
+        MOZ_ASSERT(*stack == this);
+        *stack = prev;
+    }
+
+    static void forwardLiveIterators(JSContext* cx, uint8_t* oldAddr, uint8_t* newAddr);
 };
 
 //
@@ -96,11 +123,11 @@ struct BaselineDebugModeOSRInfo
 };
 
 bool
-RecompileOnStackBaselineScriptsForDebugMode(JSContext* cx, JSCompartment* comp);
+RecompileOnStackBaselineScriptsForDebugMode(JSContext* cx,
+                                            const Debugger::ExecutionObservableSet& obs,
+                                            Debugger::IsObserving observing);
 
 } // namespace jit
 } // namespace js
-
-#endif // JS_ION
 
 #endif // jit_BaselineDebugModeOSR_h

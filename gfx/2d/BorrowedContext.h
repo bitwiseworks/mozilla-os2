@@ -29,7 +29,7 @@ public:
     , mDT(nullptr)
   { }
 
-  BorrowedCairoContext(DrawTarget *aDT)
+  explicit BorrowedCairoContext(DrawTarget *aDT)
     : mDT(aDT)
   {
     mCairo = BorrowCairoContextFromDrawTarget(aDT);
@@ -84,9 +84,10 @@ public:
     , mDT(nullptr)
   { }
 
-  BorrowedCGContext(DrawTarget *aDT)
+  explicit BorrowedCGContext(DrawTarget *aDT)
     : mDT(aDT)
   {
+    MOZ_ASSERT(aDT, "Caller should check for nullptr");
     cg = BorrowCGContextFromDrawTarget(aDT);
   }
 
@@ -95,6 +96,7 @@ public:
   // time.
   CGContextRef Init(DrawTarget *aDT)
   {
+    MOZ_ASSERT(aDT, "Caller should check for nullptr");
     MOZ_ASSERT(!mDT, "Can't initialize twice!");
     mDT = aDT;
     cg = BorrowCGContextFromDrawTarget(aDT);

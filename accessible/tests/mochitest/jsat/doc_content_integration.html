@@ -8,7 +8,9 @@
       '<head><title>such app</title></head>' +
       '<body>' +
       '<h1>wow</h1>' +
-      '<label><input type="checkbox">many option</label><br>' +
+      '<ul>' +
+      '<li><label><input type="checkbox">many option</label></li>' +
+      '</ul>' +
       '<label for="r">much range</label>' +
       '<input min="0" max="10" value="5" type="range" id="r">' +
       '</body>' +
@@ -20,6 +22,26 @@
 
     function hideAlert() {
       document.getElementById('alert').hidden = true;
+    }
+
+    function ariaShowBack() {
+      document.getElementById('back').setAttribute('aria-hidden', false);
+    }
+
+    function ariaHideBack() {
+      document.getElementById('back').setAttribute('aria-hidden', true);
+    }
+
+    function ariaShowIframe() {
+      document.getElementById('iframe').setAttribute('aria-hidden', false);
+    }
+
+    function ariaHideIframe() {
+      document.getElementById('iframe').setAttribute('aria-hidden', true);
+    }
+
+    function renameFruit() {
+      document.getElementById('fruit').setAttribute('aria-label', 'banana');
     }
 
   </script>
@@ -56,14 +78,16 @@
 <body>
   <div>Phone status bar</div>
   <div id="windows">
-    <div id="appframe"></div>
+    <button id="back">Back</button>
     <div role="dialog" id="alert" hidden>
       <h1>This is an alert!</h1>
       <p>Do you agree?</p>
-      <button onclick="hideAlert()">Yes</button>
+      <button onclick="setTimeout(hideAlert, 500)">Yes</button>
       <button onclick="hideAlert()">No</button>
     </div>
+    <div id="appframe"></div>
   </div>
   <button id="home">Home</button>
+  <button id="fruit" aria-label="apple"></button>
 </body>
 </html>

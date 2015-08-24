@@ -52,27 +52,8 @@ add_test(function test_toaFromString_international() {
   run_next_test();
 });
 
-function _getWorker() {
-  let _postedMessage;
-  let _worker = newWorker({
-    postRILMessage: function(data) {
-    },
-    postMessage: function(message) {
-      _postedMessage = message;
-    }
-  });
-  return {
-    get postedMessage() {
-      return _postedMessage;
-    },
-    get worker() {
-      return _worker;
-    }
-  };
-}
-
 add_test(function test_setCallForward_unconditional() {
-  let workerHelper = _getWorker();
+  let workerHelper = newInterceptWorker();
   let worker = workerHelper.worker;
   let context = worker.ContextPool._contexts[0];
 
@@ -83,8 +64,8 @@ add_test(function test_setCallForward_unconditional() {
   };
 
   context.RIL.setCallForward({
-    action: Ci.nsIDOMMozMobileCFInfo.CALL_FORWARD_ACTION_REGISTRATION,
-    reason: Ci.nsIDOMMozMobileCFInfo.CALL_FORWARD_REASON_UNCONDITIONAL,
+    action: CALL_FORWARD_ACTION_REGISTRATION,
+    reason: CALL_FORWARD_REASON_UNCONDITIONAL,
     serviceClass: ICC_SERVICE_CLASS_VOICE,
     number: "666222333",
     timeSeconds: 10
@@ -99,7 +80,7 @@ add_test(function test_setCallForward_unconditional() {
 });
 
 add_test(function test_queryCallForwardStatus_unconditional() {
-  let workerHelper = _getWorker();
+  let workerHelper = newInterceptWorker();
   let worker = workerHelper.worker;
   let context = worker.ContextPool._contexts[0];
 
@@ -122,7 +103,7 @@ add_test(function test_queryCallForwardStatus_unconditional() {
       0,   // rules.timeSeconds
       145, // rules.toa
       49,  // rules.serviceClass
-      Ci.nsIDOMMozMobileCFInfo.CALL_FORWARD_REASON_UNCONDITIONAL, // rules.reason
+      CALL_FORWARD_REASON_UNCONDITIONAL, // rules.reason
       1,   // rules.active
       1    // rulesLength
     ];
@@ -132,8 +113,8 @@ add_test(function test_queryCallForwardStatus_unconditional() {
   };
 
   context.RIL.queryCallForwardStatus({
-    action: Ci.nsIDOMMozMobileCFInfo.CALL_FORWARD_ACTION_QUERY_STATUS,
-    reason: Ci.nsIDOMMozMobileCFInfo.CALL_FORWARD_REASON_UNCONDITIONAL,
+    action: CALL_FORWARD_ACTION_QUERY_STATUS,
+    reason: CALL_FORWARD_REASON_UNCONDITIONAL,
     serviceClass: ICC_SERVICE_CLASS_VOICE,
     number: "666222333",
     timeSeconds: 10
@@ -147,8 +128,7 @@ add_test(function test_queryCallForwardStatus_unconditional() {
   do_print(postedMessage.rules.length);
   do_check_eq(postedMessage.rules.length, 1);
   do_check_true(postedMessage.rules[0].active);
-  do_check_eq(postedMessage.rules[0].reason,
-              Ci.nsIDOMMozMobileCFInfo.CALL_FORWARD_REASON_UNCONDITIONAL);
+  do_check_eq(postedMessage.rules[0].reason, CALL_FORWARD_REASON_UNCONDITIONAL);
   do_check_eq(postedMessage.rules[0].number, "+34666222333");
   run_next_test();
 });

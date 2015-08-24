@@ -4,7 +4,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-PROGRAM = 'updater'
+Program('updater')
 
 SOURCES += [
     'archivereader.cpp',
@@ -23,11 +23,39 @@ if CONFIG['OS_ARCH'] == 'WINNT':
     RCINCLUDE = 'updater.rc'
     DEFINES['UNICODE'] = True
     DEFINES['_UNICODE'] = True
+    DEFINES['NOMINMAX'] = True
     USE_STATIC_LIBS = True
 
     # Pick up nsWindowsRestart.cpp
     LOCAL_INCLUDES += [
         '/toolkit/xre',
+    ]
+    USE_LIBS += [
+        'updatecommon-standalone',
+        'verifymar',
+    ]
+    OS_LIBS += [
+        'comctl32',
+        'ws2_32',
+        'shell32',
+        'shlwapi',
+        'crypt32',
+        'advapi32',
+    ]
+else:
+    USE_LIBS += [
+        'updatecommon',
+    ]
+
+USE_LIBS += [
+    'mar',
+]
+
+if CONFIG['MOZ_NATIVE_BZ2']:
+    OS_LIBS += CONFIG['MOZ_BZ2_LIBS']
+else:
+    USE_LIBS += [
+        'bz2',
     ]
 
 if CONFIG['MOZ_ENABLE_GTK']:
@@ -42,7 +70,7 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
         'launchchild_osx.mm',
         'progressui_osx.mm',
     ]
-    LDFLAGS += ['-framework Cocoa']
+    OS_LIBS += ['-framework Cocoa']
 elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
     have_progressui = 1
     SOURCES += [
@@ -50,6 +78,10 @@ elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
         'progressui_gonk.cpp',
     ]
     DISABLE_STL_WRAPPING = True
+    OS_LIBS += [
+        'cutils',
+        'sysutils',
+    ]
 
 if have_progressui == 0:
     SOURCES += [
@@ -57,6 +89,7 @@ if have_progressui == 0:
     ]
 
 DEFINES['NS_NO_XPCOM'] = True
+DISABLE_STL_WRAPPING = True
 for var in ('MAR_CHANNEL_ID', 'MOZ_APP_VERSION'):
     DEFINES[var] = '"%s"' % CONFIG[var]
 
@@ -74,8 +107,11 @@ DELAYLOAD_DLLS += [
 
 if CONFIG['_MSC_VER']:
     WIN32_EXE_LDFLAGS += ['-ENTRY:wmainCRTStartup']
+elif CONFIG['OS_ARCH'] == 'WINNT':
+    WIN32_EXE_LDFLAGS += ['-municode']
 
-if CONFIG['MOZ_UPDATE_CHANNEL'] in ('beta', 'release', 'esr'):
-    DEFINES['MAR_SIGNING_RELEASE_BETA'] = '1'
-elif CONFIG['MOZ_UPDATE_CHANNEL'] in ('nightly', 'aurora', 'nightly-elm', 'nightly-profiling', 'nightly-oak', 'nightly-ux'):
-    DEFINES['MAR_SIGNING_AURORA_NIGHTLY'] = '1'
+if CONFIG['MOZ_WIDGET_GTK']:
+    CXXFLAGS += CONFIG['TK_CFLAGS']
+    OS_LIBS += CONFIG['TK_LIBS']
+
+FAIL_ON_WARNINGS = True

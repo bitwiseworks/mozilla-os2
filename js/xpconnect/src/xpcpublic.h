@@ -8,13 +8,15 @@
 #define xpcpublic_h
 
 #include "jsapi.h"
-#include "jsproxy.h"
 #include "js/HeapAPI.h"
 #include "js/GCAPI.h"
+#include "js/Proxy.h"
 
 #include "nsISupports.h"
 #include "nsIURI.h"
 #include "nsIPrincipal.h"
+#include "nsIGlobalObject.h"
+#include "nsPIDOMWindow.h"
 #include "nsWrapperCache.h"
 #include "nsStringGlue.h"
 #include "nsTArray.h"
@@ -26,18 +28,13 @@
 class nsGlobalWindow;
 class nsIPrincipal;
 class nsScriptNameSpaceManager;
-class nsIGlobalObject;
 class nsIMemoryReporterCallback;
-
-#ifndef BAD_TLS_INDEX
-#define BAD_TLS_INDEX ((uint32_t) -1)
-#endif
 
 namespace xpc {
 
 class Scriptability {
 public:
-    Scriptability(JSCompartment* c);
+    explicit Scriptability(JSCompartment* c);
     bool Allowed();
     bool IsImmuneToScriptPolicy();
 
@@ -70,8 +67,8 @@ private:
 JSObject*
 TransplantObject(JSContext* cx, JS::HandleObject origobj, JS::HandleObject target);
 
-bool IsXBLScope(JSCompartment* compartment);
-bool IsInXBLScope(JSObject* obj);
+bool IsContentXBLScope(JSCompartment* compartment);
+bool IsInContentXBLScope(JSObject* obj);
 
 // Return a raw XBL scope object corresponding to contentScope, which must
 // be an object whose global is a DOM window.
@@ -90,23 +87,37 @@ JSObject*
 GetXBLScope(JSContext* cx, JSObject* contentScope);
 
 inline JSObject*
-GetXBLScopeOrGlobal(JSContext* cx, JSObject* obj) {
-    if (IsInXBLScope(obj))
+GetXBLScopeOrGlobal(JSContext* cx, JSObject* obj)
+{
+    if (IsInContentXBLScope(obj))
         return js::GetGlobalForObjectCrossCompartment(obj);
     return GetXBLScope(cx, obj);
 }
 
+// This function is similar to GetXBLScopeOrGlobal. However, if |obj| is a
+// chrome scope, then it will return an add-on scope if addonId is non-null.
+// Like GetXBLScopeOrGlobal, it returns the scope of |obj| if it's already a
+// content XBL scope. But it asserts that |obj| is not an add-on scope.
+JSObject*
+GetScopeForXBLExecution(JSContext* cx, JS::HandleObject obj, JSAddonId* addonId);
+
 // Returns whether XBL scopes have been explicitly disabled for code running
-// in this compartment. See the comment around mAllowXBLScope.
+// in this compartment. See the comment around mAllowContentXBLScope.
 bool
-AllowXBLScope(JSCompartment* c);
+AllowContentXBLScope(JSCompartment* c);
 
 // Returns whether we will use an XBL scope for this compartment. This is
 // semantically equivalent to comparing global != GetXBLScope(global), but it
 // does not have the side-effect of eagerly creating the XBL scope if it does
 // not already exist.
 bool
-UseXBLScope(JSCompartment* c);
+UseContentXBLScope(JSCompartment* c);
+
+bool
+IsInAddonScope(JSObject* obj);
+
+JSObject*
+GetAddonScope(JSContext* cx, JS::HandleObject contentScope, JSAddonId* addonId);
 
 bool
 IsSandboxPrototypeProxy(JSObject* obj);
@@ -127,6 +138,9 @@ XrayAwareCalleeGlobal(JSObject* fun);
 
 void
 TraceXPCGlobal(JSTracer* trc, JSObject* obj);
+
+uint64_t
+GetCompartmentCPOWMicroseconds(JSCompartment* compartment);
 
 } /* namespace xpc */
 
@@ -161,25 +175,11 @@ xpc_FastGetCachedWrapper(JSContext* cx, nsWrapperCache* cache, JS::MutableHandle
     return nullptr;
 }
 
-// The JS GC marks objects gray that are held alive directly or
-// indirectly by an XPConnect root. The cycle collector explores only
-// this subset of the JS heap.
-inline bool
-xpc_IsGrayGCThing(void* thing)
-{
-    return JS::GCThingIsMarkedGray(thing);
-}
-
-// The cycle collector only cares about some kinds of GCthings that are
-// reachable from an XPConnect root. Implemented in nsXPConnect.cpp.
-extern bool
-xpc_GCThingIsGrayCCThing(void* thing);
-
 inline JSScript*
 xpc_UnmarkGrayScript(JSScript* script)
 {
     if (script)
-        JS::ExposeGCThingToActiveJS(script, JSTRACE_SCRIPT);
+        JS::ExposeScriptToActiveJS(script);
 
     return script;
 }
@@ -196,11 +196,6 @@ xpc_TryUnmarkWrappedGrayObject(nsISupports* aWrappedJS);
 extern void
 xpc_UnmarkSkippableJSHolders();
 
-// No JS can be on the stack when this is called. Probably only useful from
-// xpcshell.
-void
-xpc_ActivateDebugMode();
-
 // readable string conversions, static methods and members only
 class XPCStringConvert
 {
@@ -211,7 +206,11 @@ class XPCStringConvert
     // would take a lot more machinery.
     struct ZoneStringCache
     {
-        nsStringBuffer* mBuffer;
+        // mString owns mBuffer.  mString is a JS thing, so it can only die
+        // during GC.  We clear mString and mBuffer during GC.  As long as
+        // the above holds, mBuffer should not be a dangling pointer, so
+        // using this as a cache key should be safe.
+        void* mBuffer;
         JSString* mString;
     };
 
@@ -232,7 +231,7 @@ public:
         JS::Zone* zone = js::GetContextZone(cx);
         ZoneStringCache* cache = static_cast<ZoneStringCache*>(JS_GetZoneUserData(zone));
         if (cache && buf == cache->mBuffer) {
-            MOZ_ASSERT(JS::GetGCThingZone(cache->mString) == zone);
+            MOZ_ASSERT(JS::GetTenuredGCThingZone(cache->mString) == zone);
             JS::MarkStringAsLive(zone, cache->mString);
             rval.setString(cache->mString);
             *sharedBuffer = false;
@@ -240,7 +239,7 @@ public:
         }
 
         JSString* str = JS_NewExternalString(cx,
-                                             static_cast<jschar*>(buf->Data()),
+                                             static_cast<char16_t*>(buf->Data()),
                                              length, &sDOMStringFinalizer);
         if (!str) {
             return false;
@@ -274,12 +273,14 @@ public:
 private:
     static const JSStringFinalizer sLiteralFinalizer, sDOMStringFinalizer;
 
-    static void FinalizeLiteral(const JSStringFinalizer* fin, jschar* chars);
+    static void FinalizeLiteral(const JSStringFinalizer* fin, char16_t* chars);
 
-    static void FinalizeDOMString(const JSStringFinalizer* fin, jschar* chars);
+    static void FinalizeDOMString(const JSStringFinalizer* fin, char16_t* chars);
 
     XPCStringConvert();         // not implemented
 };
+
+class nsIAddonInterposition;
 
 namespace xpc {
 
@@ -374,8 +375,8 @@ public:
     nsAutoCString pathPrefix;
 
 private:
-    ZoneStatsExtras(const ZoneStatsExtras& other) MOZ_DELETE;
-    ZoneStatsExtras& operator=(const ZoneStatsExtras& other) MOZ_DELETE;
+    ZoneStatsExtras(const ZoneStatsExtras& other) = delete;
+    ZoneStatsExtras& operator=(const ZoneStatsExtras& other) = delete;
 };
 
 // ReportJSRuntimeExplicitTreeStats will expect this in the |extra| member
@@ -390,8 +391,8 @@ public:
     nsCOMPtr<nsIURI> location;
 
 private:
-    CompartmentStatsExtras(const CompartmentStatsExtras& other) MOZ_DELETE;
-    CompartmentStatsExtras& operator=(const CompartmentStatsExtras& other) MOZ_DELETE;
+    CompartmentStatsExtras(const CompartmentStatsExtras& other) = delete;
+    CompartmentStatsExtras& operator=(const CompartmentStatsExtras& other) = delete;
 };
 
 // This reports all the stats in |rtStats| that belong in the "explicit" tree,
@@ -402,7 +403,9 @@ nsresult
 ReportJSRuntimeExplicitTreeStats(const JS::RuntimeStats& rtStats,
                                  const nsACString& rtPath,
                                  nsIMemoryReporterCallback* cb,
-                                 nsISupports* closure, size_t* rtTotal = nullptr);
+                                 nsISupports* closure,
+                                 bool anonymize,
+                                 size_t* rtTotal = nullptr);
 
 /**
  * Throws an exception on cx and returns false.
@@ -411,31 +414,24 @@ bool
 Throw(JSContext* cx, nsresult rv);
 
 /**
- * Every global should hold a native that implements the nsIGlobalObject interface.
+ * Returns the nsISupports native behind a given reflector (either DOM or
+ * XPCWN).
  */
-nsIGlobalObject*
-GetNativeForGlobal(JSObject* global);
+nsISupports*
+UnwrapReflectorToISupports(JSObject* reflector);
 
 /**
- * In some cases a native object does not really belong to any compartment (XBL,
- * document created from by XHR of a worker, etc.). But when for some reason we
- * have to wrap these natives (because of an event for example) instead of just
- * wrapping them into some random compartment we find on the context stack (like
- * we did previously) a default compartment is used. This function returns that
- * compartment's global. It is a singleton on the runtime.
- * If you find yourself wanting to use this compartment, you're probably doing
+ * Singleton scopes for stuff that really doesn't fit anywhere else.
+ *
+ * If you find yourself wanting to use these compartments, you're probably doing
  * something wrong. Callers MUST consult with the XPConnect module owner before
  * using this compartment. If you don't, bholley will hunt you down.
  */
 JSObject*
-GetJunkScope();
+UnprivilegedJunkScope();
 
-/**
- * Returns the native global of the junk scope. See comment of GetJunkScope
- * about the conditions of using it.
- */
-nsIGlobalObject*
-GetJunkScopeGlobal();
+JSObject*
+PrivilegedJunkScope();
 
 /**
  * Shared compilation scope for XUL prototype documents and XBL
@@ -443,7 +439,13 @@ GetJunkScopeGlobal();
  * it is invisible to the debugger.
  */
 JSObject*
-GetCompilationScope();
+CompilationScope();
+
+/**
+ * Returns the nsIGlobalObject corresponding to |aObj|'s JS global.
+ */
+nsIGlobalObject*
+NativeGlobal(JSObject* aObj);
 
 /**
  * If |aObj| is a window, returns the associated nsGlobalWindow.
@@ -452,13 +454,6 @@ GetCompilationScope();
 nsGlobalWindow*
 WindowOrNull(JSObject* aObj);
 
-/*
- * Returns the dummy global associated with the SafeJSContext. Callers MUST
- * consult with the XPConnect module owner before using this function.
- */
-JSObject*
-GetSafeJSContextGlobal();
-
 /**
  * If |aObj| has a window for a global, returns the associated nsGlobalWindow.
  * Otherwise, returns null.
@@ -466,24 +461,76 @@ GetSafeJSContextGlobal();
 nsGlobalWindow*
 WindowGlobalOrNull(JSObject* aObj);
 
+/**
+ * If |aObj| is in an addon scope and that addon scope is associated with a
+ * live DOM Window, returns the associated nsGlobalWindow. Otherwise, returns
+ * null.
+ */
+nsGlobalWindow*
+AddonWindowOrNull(JSObject* aObj);
+
+/**
+ * If |cx| is in a compartment whose global is a window, returns the associated
+ * nsGlobalWindow. Otherwise, returns null.
+ */
+nsGlobalWindow*
+CurrentWindowOrNull(JSContext* cx);
+
 // Error reporter used when there is no associated DOM window on to which to
 // report errors and warnings.
+//
+// Note - This is temporarily implemented in nsJSEnvironment.cpp.
 void
 SystemErrorReporter(JSContext* cx, const char* message, JSErrorReport* rep);
 
 void
 SimulateActivityCallback(bool aActive);
 
-void
-RecordAdoptedNode(JSCompartment* c);
-
-void
-RecordDonatedNode(JSCompartment* c);
-
 // This function may be used off-main-thread, in which case it is benignly
 // racey.
 bool
 ShouldDiscardSystemSource();
+
+bool
+SetAddonInterposition(const nsACString& addonId, nsIAddonInterposition* interposition);
+
+bool
+ExtraWarningsForSystemJS();
+
+class ErrorReport {
+  public:
+    NS_INLINE_DECL_THREADSAFE_REFCOUNTING(ErrorReport);
+
+    ErrorReport() : mWindowID(0)
+                  , mLineNumber(0)
+                  , mColumn(0)
+                  , mFlags(0)
+                  , mIsMuted(false)
+    {}
+
+    void Init(JSErrorReport* aReport, const char* aFallbackMessage,
+              bool aIsChrome, uint64_t aWindowID);
+    void LogToConsole();
+
+  public:
+
+    nsCString mCategory;
+    nsString mErrorMsg;
+    nsString mFileName;
+    nsString mSourceLine;
+    uint64_t mWindowID;
+    uint32_t mLineNumber;
+    uint32_t mColumn;
+    uint32_t mFlags;
+    bool mIsMuted;
+
+  private:
+    ~ErrorReport() {}
+};
+
+void
+DispatchScriptErrorEvent(nsPIDOMWindow* win, JSRuntime* rt, xpc::ErrorReport* xpcReport,
+                         JS::Handle<JS::Value> exception);
 
 } // namespace xpc
 

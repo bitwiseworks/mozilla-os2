@@ -13,7 +13,6 @@
 #include "gfx3DMatrix.h"                // for gfx3DMatrix
 #include "gfxLineSegment.h"             // for gfxLineSegment
 #include "gfxPoint.h"                   // for gfxPoint
-#include "gfxPoint3D.h"                 // for gfxPoint3D
 #include "gfxQuad.h"                    // for gfxQuad
 #include "gfxRect.h"                    // for gfxRect
 #include "gfxTypes.h"                   // for gfxFloat
@@ -23,10 +22,10 @@
 #include "limits.h"
 #include "mozilla/Assertions.h"
 
-using namespace mozilla::gfx;
-
 namespace mozilla {
 namespace layers {
+
+using namespace mozilla::gfx;
 
 enum LayerSortOrder {
   Undefined,
@@ -44,10 +43,10 @@ enum LayerSortOrder {
  */
 static gfxFloat RecoverZDepth(const gfx3DMatrix& aTransform, const gfxPoint& aPoint)
 {
-    const gfxPoint3D l(0, 0, 1);
-    gfxPoint3D l0 = gfxPoint3D(aPoint.x, aPoint.y, 0);
-    gfxPoint3D p0 = aTransform.Transform3D(gfxPoint3D(0, 0, 0));
-    gfxPoint3D normal = aTransform.GetNormalVector();
+    const Point3D l(0, 0, 1);
+    Point3D l0 = Point3D(aPoint.x, aPoint.y, 0);
+    Point3D p0 = aTransform.Transform3D(Point3D(0, 0, 0));
+    Point3D normal = aTransform.GetNormalVector();
 
     gfxFloat n = normal.DotProduct(p0 - l0); 
     gfxFloat d = normal.DotProduct(l);
@@ -80,10 +79,8 @@ static LayerSortOrder CompareDepth(Layer* aOne, Layer* aTwo) {
   gfxRect ourRect = aOne->GetEffectiveVisibleRegion().GetBounds();
   gfxRect otherRect = aTwo->GetEffectiveVisibleRegion().GetBounds();
 
-  gfx3DMatrix ourTransform;
-  To3DMatrix(aOne->GetTransform(), ourTransform);
-  gfx3DMatrix otherTransform;
-  To3DMatrix(aTwo->GetTransform(), otherTransform);
+  gfx3DMatrix ourTransform = To3DMatrix(aOne->GetTransform());
+  gfx3DMatrix otherTransform = To3DMatrix(aTwo->GetTransform());
 
   // Transform both rectangles and project into 2d space.
   gfxQuad ourTransformedRect = ourTransform.TransformRect(ourRect);
@@ -153,32 +150,39 @@ static LayerSortOrder CompareDepth(Layer* aOne, Layer* aTwo) {
 #ifdef DEBUG
 static bool gDumpLayerSortList = getenv("MOZ_DUMP_LAYER_SORT_LIST") != 0;
 
-static const int BLACK = 0;
-static const int RED = 1;
-static const int GREEN = 2;
-static const int YELLOW = 3;
-static const int BLUE = 4;
-static const int MAGENTA = 5;
-static const int CYAN = 6;
-static const int WHITE = 7;
-
-//#define USE_XTERM_COLORING
+// #define USE_XTERM_COLORING
 #ifdef USE_XTERM_COLORING
+// List of color values, which can be added to the xterm foreground offset or
+// background offset to generate a xterm color code.
+// NOTE: The colors that we don't explicitly use (by name) are commented out,
+// to avoid triggering Wunused-const-variable build warnings.
+static const int XTERM_FOREGROUND_COLOR_OFFSET = 30;
+static const int XTERM_BACKGROUND_COLOR_OFFSET = 40;
+static const int BLACK = 0;
+//static const int RED = 1;
+static const int GREEN = 2;
+//static const int YELLOW = 3;
+//static const int BLUE = 4;
+//static const int MAGENTA = 5;
+//static const int CYAN = 6;
+//static const int WHITE = 7;
 
 static const int RESET = 0;
-static const int BRIGHT = 1;
-static const int DIM = 2;
-static const int UNDERLINE = 3;
-static const int BLINK = 4;
-static const int REVERSE = 7;
-static const int HIDDEN = 8;
+// static const int BRIGHT = 1;
+// static const int DIM = 2;
+// static const int UNDERLINE = 3;
+// static const int BLINK = 4;
+// static const int REVERSE = 7;
+// static const int HIDDEN = 8;
 
 static void SetTextColor(uint32_t aColor)
 {
   char command[13];
 
   /* Command is the control command to the terminal */
-  sprintf(command, "%c[%d;%d;%dm", 0x1B, RESET, aColor + 30, BLACK + 40);
+  sprintf(command, "%c[%d;%d;%dm", 0x1B, RESET,
+          aColor + XTERM_FOREGROUND_COLOR_OFFSET,
+          BLACK + XTERM_BACKGROUND_COLOR_OFFSET);
   printf("%s", command);
 }
 

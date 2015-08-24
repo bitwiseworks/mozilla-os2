@@ -1,4 +1,4 @@
-/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -10,6 +10,10 @@ const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 Cu.import('resource://gre/modules/XPCOMUtils.jsm');
 Cu.import('resource://gre/modules/Services.jsm');
 
+XPCOMUtils.defineLazyServiceGetter(this, "gSysMsgr",
+                                   "@mozilla.org/system-message-internal;1",
+                                   "nsISystemMessagesInternal");
+
 const DEBUG = false; // set to true to show debug messages
 
 const kCAPTIVEPORTALDETECTOR_CONTRACTID = '@mozilla.org/toolkit/captive-detector;1';
@@ -17,6 +21,9 @@ const kCAPTIVEPORTALDETECTOR_CID        = Components.ID('{d9cd00ba-aa4d-47b1-879
 
 const kOpenCaptivePortalLoginEvent = 'captive-portal-login';
 const kAbortCaptivePortalLoginEvent = 'captive-portal-login-abort';
+const kCaptivePortalLoginSuccessEvent = 'captive-portal-login-success';
+
+const kCaptivePortalSystemMessage = 'captive-portal';
 
 function URLFetcher(url, timeout) {
   let self = this;
@@ -114,7 +121,7 @@ function LoginObserver(captivePortalDetector) {
 
   // Public interface of LoginObserver
   let observer = {
-    QueryInterface: XPCOMUtils.generateQI([Ci.nsIHttpActivityOberver,
+    QueryInterface: XPCOMUtils.generateQI([Ci.nsIHttpActivityObserver,
                                            Ci.nsITimerCallback]),
 
     attach: function attach() {
@@ -221,7 +228,7 @@ function CaptivePortalDetector() {
   this._requestQueue = []; // Maintain a progress table, store callbacks and the ongoing XHR
   this._interfaceNames = {}; // Maintain names of the requested network interfaces
 
-  debug('CaptiveProtalDetector initiated, waitng for network connection established');
+  debug('CaptiveProtalDetector initiated, waiting for network connection established');
 }
 
 CaptivePortalDetector.prototype = {
@@ -240,7 +247,7 @@ CaptivePortalDetector.prototype = {
 
     // Prevent multiple requests on a single network interface
     if (this._interfaceNames[aInterfaceName]) {
-      throw Components.Exception('Do not allow multiple request on one interface: ' + aInterface);
+      throw Components.Exception('Do not allow multiple request on one interface: ' + aInterfaceName);
     }
 
     let request = {interfaceName: aInterfaceName};
@@ -332,6 +339,7 @@ CaptivePortalDetector.prototype = {
     this._loginObserver.attach();
     this._runningRequest['eventId'] = id;
     this._sendEvent(kOpenCaptivePortalLoginEvent, details);
+    gSysMsgr.broadcastMessage(kCaptivePortalSystemMessage, {});
   },
 
   _mayRetry: function _mayRetry() {
@@ -348,6 +356,16 @@ CaptivePortalDetector.prototype = {
       debug('callback executed');
       if (this._runningRequest.hasOwnProperty('callback')) {
         this._runningRequest.callback.complete(success);
+      }
+
+      // Only when the request has a event id and |success| is true
+      // do we need to notify the login-success event.
+      if (this._runningRequest.hasOwnProperty('eventId') && success) {
+        let details = {
+          type: kCaptivePortalLoginSuccessEvent,
+          id: this._runningRequest['eventId'],
+        };
+        this._sendEvent(kCaptivePortalLoginSuccessEvent, details);
       }
 
       // Continue the following request

@@ -11,6 +11,7 @@
 #include "nsIInterfaceRequestorUtils.h"
 #include "AudioChannelManager.h"
 #include "mozilla/dom/AudioChannelManagerBinding.h"
+#include "mozilla/Services.h"
 
 using namespace mozilla::hal;
 
@@ -29,7 +30,6 @@ AudioChannelManager::AudioChannelManager()
 {
   RegisterSwitchObserver(SWITCH_HEADPHONES, this);
   mState = GetCurrentSwitchState(SWITCH_HEADPHONES);
-  SetIsDOMBinding();
 }
 
 AudioChannelManager::~AudioChannelManager()
@@ -85,7 +85,7 @@ AudioChannelManager::SetVolumeControlChannel(const nsAString& aChannel)
   // Only normal channel doesn't need permission.
   if (newChannel != AudioChannel::Normal) {
     nsCOMPtr<nsIPermissionManager> permissionManager =
-      do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
+      services::GetPermissionManager();
     if (!permissionManager) {
       return false;
     }
@@ -131,7 +131,7 @@ AudioChannelManager::NotifyVolumeControlChannelChanged()
   bool isActive = false;
   docshell->GetIsActive(&isActive);
 
-  AudioChannelService* service = AudioChannelService::GetAudioChannelService();
+  AudioChannelService* service = AudioChannelService::GetOrCreateAudioChannelService();
   if (isActive) {
     service->SetDefaultVolumeControlChannel(mVolumeChannel, isActive);
   } else {

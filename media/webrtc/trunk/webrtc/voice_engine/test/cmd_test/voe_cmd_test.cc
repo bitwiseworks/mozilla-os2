@@ -17,16 +17,18 @@
 
 #include <vector>
 
+#include "gflags/gflags.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webrtc/engine_configurations.h"
+#include "webrtc/modules/audio_processing/include/audio_processing.h"
 #include "webrtc/system_wrappers/interface/scoped_ptr.h"
 #include "webrtc/test/channel_transport/include/channel_transport.h"
 #include "webrtc/test/testsupport/fileutils.h"
+#include "webrtc/test/testsupport/trace_to_stderr.h"
 #include "webrtc/voice_engine/include/voe_audio_processing.h"
 #include "webrtc/voice_engine/include/voe_base.h"
 #include "webrtc/voice_engine/include/voe_codec.h"
 #include "webrtc/voice_engine/include/voe_dtmf.h"
-#include "webrtc/voice_engine/include/voe_encryption.h"
 #include "webrtc/voice_engine/include/voe_errors.h"
 #include "webrtc/voice_engine/include/voe_external_media.h"
 #include "webrtc/voice_engine/include/voe_file.h"
@@ -36,6 +38,9 @@
 #include "webrtc/voice_engine/include/voe_rtp_rtcp.h"
 #include "webrtc/voice_engine/include/voe_video_sync.h"
 #include "webrtc/voice_engine/include/voe_volume_control.h"
+
+DEFINE_bool(use_log_file, false,
+    "Output logs to a file; by default they will be printed to stderr.");
 
 using namespace webrtc;
 using namespace test;
@@ -56,7 +61,6 @@ VoEAudioProcessing* apm = NULL;
 VoENetwork* netw = NULL;
 VoEFile* file = NULL;
 VoEVideoSync* vsync = NULL;
-VoEEncryption* encr = NULL;
 VoEHardware* hardware = NULL;
 VoEExternalMedia* xmedia = NULL;
 VoENetEqStats* neteqst = NULL;
@@ -72,6 +76,8 @@ void MyObserver::CallbackOnError(int channel, int err_code) {
   // Add printf for other error codes here
   if (err_code == VE_TYPING_NOISE_WARNING) {
     printf("  TYPING NOISE DETECTED \n");
+  } else if (err_code == VE_TYPING_NOISE_OFF_WARNING) {
+    printf("  TYPING NOISE OFF DETECTED \n");
   } else if (err_code == VE_RECEIVE_PACKET_TIMEOUT) {
     printf("  RECEIVE PACKET TIMEOUT \n");
   } else if (err_code == VE_PACKET_RECEIPT_RESTARTED) {
@@ -111,7 +117,9 @@ void PrintCodecs(bool opus_stereo) {
   }
 }
 
-int main() {
+int main(int argc, char** argv) {
+  google::ParseCommandLineFlags(&argc, &argv, true);
+
   int res = 0;
 
   printf("Test started \n");
@@ -126,23 +134,24 @@ int main() {
   netw = VoENetwork::GetInterface(m_voe);
   file = VoEFile::GetInterface(m_voe);
   vsync = VoEVideoSync::GetInterface(m_voe);
-  encr = VoEEncryption::GetInterface(m_voe);
   hardware = VoEHardware::GetInterface(m_voe);
   xmedia = VoEExternalMedia::GetInterface(m_voe);
   neteqst = VoENetEqStats::GetInterface(m_voe);
 
   MyObserver my_observer;
 
-  const std::string out_path = webrtc::test::OutputPath();
-  const std::string trace_filename = out_path + "webrtc_trace.txt";
-
-  printf("Set trace filenames (enable trace)\n");
-  VoiceEngine::SetTraceFilter(kTraceAll);
-  res = VoiceEngine::SetTraceFile(trace_filename.c_str());
-  VALIDATE;
-
-  res = VoiceEngine::SetTraceCallback(NULL);
-  VALIDATE;
+  scoped_ptr<test::TraceToStderr> trace_to_stderr;
+  if (!FLAGS_use_log_file) {
+    trace_to_stderr.reset(new test::TraceToStderr);
+  } else {
+    const std::string trace_filename = test::OutputPath() + "webrtc_trace.txt";
+    VoiceEngine::SetTraceFilter(kTraceAll);
+    res = VoiceEngine::SetTraceFile(trace_filename.c_str());
+    VALIDATE;
+    res = VoiceEngine::SetTraceCallback(NULL);
+    VALIDATE;
+    printf("Outputting logs to file: %s\n", trace_filename.c_str());
+  }
 
   printf("Init\n");
   res = base1->Init();
@@ -161,7 +170,7 @@ int main() {
   VALIDATE;
   printf("%s\n", tmp);
 
-  RunTest(out_path);
+  RunTest(test::OutputPath());
 
   printf("Terminate \n");
 
@@ -197,9 +206,6 @@ int main() {
   if (vsync)
     vsync->Release();
 
-  if (encr)
-    encr->Release();
-
   if (hardware)
     hardware->Release();
 
@@ -225,8 +231,8 @@ void RunTest(std::string out_path) {
   bool enable_rx_ns = false;
   bool typing_detection = false;
   bool muted = false;
-  bool on_hold = false;
   bool opus_stereo = false;
+  bool experimental_ns_enabled = false;
 
 #if defined(WEBRTC_ANDROID)
   std::string resource_path = "/sdcard/";
@@ -252,6 +258,9 @@ void RunTest(std::string out_path) {
     fflush(NULL);
   }
 
+  scoped_ptr<VoiceChannelTransport> voice_channel_transport(
+      new VoiceChannelTransport(netw, chan));
+
   char ip[64];
   printf("1. 127.0.0.1 \n");
   printf("2. Specify IP \n");
@@ -271,9 +280,6 @@ void RunTest(std::string out_path) {
   if (1 == rPort)
     rPort = 1234;
   printf("Set Send port \n");
-
-  scoped_ptr<VoiceChannelTransport> voice_channel_transport(
-      new VoiceChannelTransport(netw, chan));
 
   printf("Set Send IP \n");
   res = voice_channel_transport->SetSendDestination(ip, rPort);
@@ -323,8 +329,6 @@ void RunTest(std::string out_path) {
   // Call loop
   bool newcall = true;
   while (newcall) {
-
-#ifndef WEBRTC_ANDROID
     int rd(-1), pd(-1);
     res = hardware->GetNumOfRecordingDevices(rd);
     VALIDATE;
@@ -356,7 +360,6 @@ void RunTest(std::string out_path) {
     printf("Setting sound devices \n");
     res = hardware->SetRecordingDevice(rd);
     VALIDATE;
-#endif  // WEBRTC_ANDROID
 
     res = codec->SetVADStatus(0, enable_cng);
     VALIDATE;
@@ -397,7 +400,6 @@ void RunTest(std::string out_path) {
       VALIDATE;
     }
 
-#ifndef WEBRTC_ANDROID
     printf("Getting mic volume \n");
     unsigned int vol = 999;
     res = volume->GetMicVolume(vol);
@@ -405,7 +407,6 @@ void RunTest(std::string out_path) {
     if ((vol > 255) || (vol < 1)) {
       printf("\n****ERROR in GetMicVolume");
     }
-#endif
 
     int forever = 1;
     while (forever) {
@@ -417,6 +418,7 @@ void RunTest(std::string out_path) {
       printf("%i. Toggle CNG\n", option_index++);
       printf("%i. Toggle AGC\n", option_index++);
       printf("%i. Toggle NS\n", option_index++);
+      printf("%i. Toggle experimental NS\n", option_index++);
       printf("%i. Toggle EC\n", option_index++);
       printf("%i. Select AEC\n", option_index++);
       printf("%i. Select AECM\n", option_index++);
@@ -431,9 +433,8 @@ void RunTest(std::string out_path) {
       printf("%i. Toggle receive-side NS \n", option_index++);
       printf("%i. AGC status \n", option_index++);
       printf("%i. Toggle microphone mute \n", option_index++);
-      printf("%i. Toggle on hold status \n", option_index++);
       printf("%i. Get last error code \n", option_index++);
-      printf("%i. Toggle typing detection (for Mac/Windows only) \n",
+      printf("%i. Toggle typing detection \n",
              option_index++);
       printf("%i. Record a PCM file \n", option_index++);
       printf("%i. Play a previously recorded PCM file locally \n",
@@ -444,6 +445,9 @@ void RunTest(std::string out_path) {
       printf("%i. Remove a file-playing channel \n", option_index++);
       printf("%i. Toggle Opus stereo (Opus must be selected again to apply "
              "the setting) \n", option_index++);
+      printf("%i. Set Opus maximum playback rate \n", option_index++);
+      printf("%i. Set bit rate (only take effect on codecs that allow the "
+             "change) \n", option_index++);
 
       printf("Select action or %i to stop the call: ", option_index);
       int option_selection;
@@ -481,6 +485,16 @@ void RunTest(std::string out_path) {
           printf("\n NS is now on! \n");
         else
           printf("\n NS is now off! \n");
+      } else if (option_selection == option_index++) {
+        experimental_ns_enabled = !experimental_ns_enabled;
+        Config config;
+        config.Set<ExperimentalNs>(new ExperimentalNs(experimental_ns_enabled));
+        base1->audio_processing()->SetExtraOptions(config);
+        if (experimental_ns_enabled) {
+          printf("\n Experimental NS is now on!\n");
+        } else {
+          printf("\n Experimental NS is now off!\n");
+        }
       } else if (option_selection == option_index++) {
         enable_aec = !enable_aec;
         res = apm->SetEcStatus(enable_aec, kEcUnchanged);
@@ -608,19 +622,6 @@ void RunTest(std::string out_path) {
           printf("\n Microphone is now on mute! \n");
         else
           printf("\n Microphone is no longer on mute! \n");
-      } else if (option_selection == option_index++) {
-        // Toggle the call on hold
-        OnHoldModes mode;
-        res = base1->GetOnHoldStatus(chan, on_hold, mode);
-        VALIDATE;
-        on_hold = !on_hold;
-        mode = kHoldSendAndPlay;
-        res = base1->SetOnHoldStatus(chan, on_hold, mode);
-        VALIDATE;
-        if (on_hold)
-          printf("\n Call now on hold! \n");
-        else
-          printf("\n Call now not on hold! \n");
       } else if (option_selection == option_index++) {
         // Get the last error code and print to screen
         int err_code = 0;
@@ -759,6 +760,19 @@ void RunTest(std::string out_path) {
         else
           printf("\n Opus mono enabled (select Opus again to apply the "
                  "setting). \n");
+      } else if (option_selection == option_index++) {
+        printf("\n Input maxium playback rate in Hz: ");
+        int max_playback_rate;
+        ASSERT_EQ(1, scanf("%i", &max_playback_rate));
+        res = codec->SetOpusMaxPlaybackRate(chan, max_playback_rate);
+        VALIDATE;
+      } else if (option_selection == option_index++) {
+        res = codec->GetSendCodec(chan, cinst);
+        VALIDATE;
+        printf("Current bit rate is %i bps, set to: ", cinst.rate);
+        ASSERT_EQ(1, scanf("%i", &cinst.rate));
+        res = codec->SetSendCodec(chan, cinst);
+        VALIDATE;
       } else {
         break;
       }

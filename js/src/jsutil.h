@@ -35,13 +35,16 @@ js_memcpy(void* dst_, const void* src_, size_t len)
 {
     char* dst = (char*) dst_;
     const char* src = (const char*) src_;
-    JS_ASSERT_IF(dst >= src, (size_t) (dst - src) >= len);
-    JS_ASSERT_IF(src >= dst, (size_t) (src - dst) >= len);
+    MOZ_ASSERT_IF(dst >= src, (size_t) (dst - src) >= len);
+    MOZ_ASSERT_IF(src >= dst, (size_t) (src - dst) >= len);
 
     return memcpy(dst, src, len);
 }
 
 namespace js {
+
+MOZ_NORETURN MOZ_COLD void
+CrashAtUnhandlableOOM(const char* reason);
 
 template <class T>
 struct AlignmentTestStruct
@@ -61,7 +64,7 @@ class AlignedPtrAndFlag
 
   public:
     AlignedPtrAndFlag(T* t, bool aFlag) {
-        JS_ASSERT((uintptr_t(t) & 1) == 0);
+        MOZ_ASSERT((uintptr_t(t) & 1) == 0);
         bits = uintptr_t(t) | uintptr_t(aFlag);
     }
 
@@ -74,7 +77,7 @@ class AlignedPtrAndFlag
     }
 
     void setPtr(T* t) {
-        JS_ASSERT((uintptr_t(t) & 1) == 0);
+        MOZ_ASSERT((uintptr_t(t) & 1) == 0);
         bits = uintptr_t(t) | uintptr_t(flag());
     }
 
@@ -87,7 +90,7 @@ class AlignedPtrAndFlag
     }
 
     void set(T* t, bool aFlag) {
-        JS_ASSERT((uintptr_t(t) & 1) == 0);
+        MOZ_ASSERT((uintptr_t(t) & 1) == 0);
         bits = uintptr_t(t) | aFlag;
     }
 };
@@ -193,7 +196,7 @@ template <typename T, typename U>
 static inline U
 ComputeByteAlignment(T bytes, U alignment)
 {
-    JS_ASSERT(IsPowerOfTwo(alignment));
+    MOZ_ASSERT(IsPowerOfTwo(alignment));
     return (alignment - (bytes % alignment)) % alignment;
 }
 
@@ -226,7 +229,7 @@ static inline unsigned
 BitArrayIndexToWordIndex(size_t length, size_t bitIndex)
 {
     unsigned wordIndex = bitIndex / BitArrayElementBits;
-    JS_ASSERT(wordIndex < length);
+    MOZ_ASSERT(wordIndex < length);
     return wordIndex;
 }
 
@@ -274,12 +277,30 @@ ClearAllBitArrayElements(size_t* array, size_t length)
 
 }  /* namespace js */
 
+static inline void*
+Poison(void* ptr, int value, size_t num)
+{
+    static bool inited = false;
+    static bool poison = true;
+    if (!inited) {
+        char* env = getenv("JSGC_DISABLE_POISONING");
+        if (env)
+            poison = false;
+        inited = true;
+    }
+
+    if (poison)
+        return memset(ptr, value, num);
+
+    return nullptr;
+}
+
 /* Crash diagnostics */
-#ifdef DEBUG
+#if defined(DEBUG) && !defined(MOZ_ASAN)
 # define JS_CRASH_DIAGNOSTICS 1
 #endif
 #if defined(JS_CRASH_DIAGNOSTICS) || defined(JS_GC_ZEAL)
-# define JS_POISON(p, val, size) memset((p), (val), (size))
+# define JS_POISON(p, val, size) Poison(p, val, size)
 #else
 # define JS_POISON(p, val, size) ((void) 0)
 #endif
@@ -341,7 +362,6 @@ typedef size_t jsbitmap;
     JS_END_MACRO
 #elif MOZ_IS_GCC
 
-#if MOZ_GCC_VERSION_AT_LEAST(4, 6, 0)
 # define JS_SILENCE_UNUSED_VALUE_IN_EXPR(expr)                                \
     JS_BEGIN_MACRO                                                            \
         _Pragma("GCC diagnostic push")                                        \
@@ -349,7 +369,6 @@ typedef size_t jsbitmap;
         expr;                                                                 \
         _Pragma("GCC diagnostic pop")                                         \
     JS_END_MACRO
-#endif
 #endif
 
 #if !defined(JS_SILENCE_UNUSED_VALUE_IN_EXPR)

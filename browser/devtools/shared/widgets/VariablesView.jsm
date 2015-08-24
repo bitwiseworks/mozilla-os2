@@ -1,4 +1,4 @@
-/* -*- Mode: javascript; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -987,7 +987,7 @@ VariablesView.prototype = {
    * Gets the parent node holding this view.
    * @return nsIDOMNode
    */
-  get boxObject() this._list.boxObject.QueryInterface(Ci.nsIScrollBoxObject),
+  get boxObject() this._list.boxObject,
 
   /**
    * Gets the parent node holding this view.
@@ -1039,7 +1039,8 @@ VariablesView.NON_SORTABLE_CLASSES = [
   "Int32Array",
   "Uint32Array",
   "Float32Array",
-  "Float64Array"
+  "Float64Array",
+  "NodeList"
 ];
 
 /**
@@ -1065,7 +1066,7 @@ VariablesView.isSortable = function(aClassName) {
  *         The string to be evaluated.
  */
 VariablesView.simpleValueEvalMacro = function(aItem, aCurrentString, aPrefix = "") {
-  return aPrefix + aItem._symbolicName + "=" + aCurrentString;
+  return aPrefix + aItem.symbolicName + "=" + aCurrentString;
 };
 
 /**
@@ -1083,7 +1084,7 @@ VariablesView.simpleValueEvalMacro = function(aItem, aCurrentString, aPrefix = "
  */
 VariablesView.overrideValueEvalMacro = function(aItem, aCurrentString, aPrefix = "") {
   let property = "\"" + aItem._nameString + "\"";
-  let parent = aPrefix + aItem.ownerView._symbolicName || "this";
+  let parent = aPrefix + aItem.ownerView.symbolicName || "this";
 
   return "Object.defineProperty(" + parent + "," + property + "," +
     "{ value: " + aCurrentString +
@@ -1110,7 +1111,7 @@ VariablesView.getterOrSetterEvalMacro = function(aItem, aCurrentString, aPrefix 
   let propertyObject = aItem.ownerView;
   let parentObject = propertyObject.ownerView;
   let property = "\"" + propertyObject._nameString + "\"";
-  let parent = aPrefix + parentObject._symbolicName || "this";
+  let parent = aPrefix + parentObject.symbolicName || "this";
 
   switch (aCurrentString) {
     case "":
@@ -1293,7 +1294,7 @@ Scope.prototype = {
     let child = this._createChild(aName, aDescriptor);
     this._store.set(aName, child);
     this._variablesView._itemsByElement.set(child._target, child);
-    this._variablesView._currHierarchy.set(child._absoluteName, child);
+    this._variablesView._currHierarchy.set(child.absoluteName, child);
     child.header = !!aName;
 
     return child;
@@ -1796,7 +1797,7 @@ Scope.prototype = {
     element.className = aTargetClassName;
 
     let arrow = this._arrow = document.createElement("hbox");
-    arrow.className = "arrow";
+    arrow.className = "arrow theme-twisty";
 
     let name = this._name = document.createElement("label");
     name.className = "plain name";
@@ -2047,7 +2048,7 @@ Scope.prototype = {
     let parentView = self.ownerView;
     let topView;
 
-    while (topView = parentView.ownerView) {
+    while ((topView = parentView.ownerView)) {
       parentView = topView;
     }
     return parentView;
@@ -2115,7 +2116,7 @@ Scope.prototype = {
 // Creating maps and arrays thousands of times for variables or properties
 // with a large number of children fills up a lot of memory. Make sure
 // these are instantiated only if needed.
-DevToolsUtils.defineLazyPrototypeGetter(Scope.prototype, "_store", Map);
+DevToolsUtils.defineLazyPrototypeGetter(Scope.prototype, "_store", () => new Map());
 DevToolsUtils.defineLazyPrototypeGetter(Scope.prototype, "_enumItems", Array);
 DevToolsUtils.defineLazyPrototypeGetter(Scope.prototype, "_nonEnumItems", Array);
 
@@ -2151,8 +2152,6 @@ function Variable(aScope, aName, aDescriptor) {
 
   Scope.call(this, aScope, aName, this._initialDescriptor = aDescriptor);
   this.setGrip(aDescriptor.value);
-  this._symbolicName = aName;
-  this._absoluteName = aScope.name + "[\"" + aName + "\"]";
 }
 
 Variable.prototype = Heritage.extend(Scope.prototype, {
@@ -2202,7 +2201,7 @@ Variable.prototype = Heritage.extend(Scope.prototype, {
 
     this.ownerView._store.delete(this._nameString);
     this._variablesView._itemsByElement.delete(this._target);
-    this._variablesView._currHierarchy.delete(this._absoluteName);
+    this._variablesView._currHierarchy.delete(this.absoluteName);
 
     this._target.remove();
 
@@ -2323,7 +2322,22 @@ Variable.prototype = Heritage.extend(Scope.prototype, {
    * For example, a symbolic name may look like "arguments['0']['foo']['bar']".
    * @return string
    */
-  get symbolicName() this._symbolicName,
+  get symbolicName() {
+    return this._nameString;
+  },
+
+  /**
+   * Gets full path to this variable, including name of the scope.
+   * @return string
+   */
+  get absoluteName() {
+    if (this._absoluteName) {
+      return this._absoluteName;
+    }
+
+    this._absoluteName = this.ownerView._nameString + "[\"" + this._nameString + "\"]";
+    return this._absoluteName;
+  },
 
   /**
    * Gets this variable's symbolic path to the topmost scope.
@@ -2405,10 +2419,27 @@ Variable.prototype = Heritage.extend(Scope.prototype, {
       this._valueLabel.classList.remove(VariablesView.getClass(prevGrip));
     }
     this._valueGrip = aGrip;
-    this._valueString = VariablesView.getString(aGrip, {
-      concise: true,
-      noEllipsis: true,
-    });
+
+    if(aGrip && (aGrip.optimizedOut || aGrip.uninitialized || aGrip.missingArguments)) {
+      if(aGrip.optimizedOut) {
+        this._valueString = STR.GetStringFromName("variablesViewOptimizedOut")
+      }
+      else if(aGrip.uninitialized) {
+        this._valueString = STR.GetStringFromName("variablesViewUninitialized")
+      }
+      else if(aGrip.missingArguments) {
+        this._valueString = STR.GetStringFromName("variablesViewMissingArgs")
+      }
+      this.eval = null;
+    }
+    else {
+      this._valueString = VariablesView.getString(aGrip, {
+        concise: true,
+        noEllipsis: true,
+      });
+      this.eval = this.ownerView.eval;
+    }
+
     this._valueClassName = VariablesView.getClass(aGrip);
 
     this._valueLabel.classList.add(this._valueClassName);
@@ -2445,10 +2476,10 @@ Variable.prototype = Heritage.extend(Scope.prototype, {
     let fadeInDelay = this._variablesView.lazyEmptyDelay + 1;
     let fadeOutDelay = fadeInDelay + aDuration;
 
-    setNamedTimeout("vview-flash-in" + this._absoluteName,
+    setNamedTimeout("vview-flash-in" + this.absoluteName,
       fadeInDelay, () => this._target.setAttribute("changed", ""));
 
-    setNamedTimeout("vview-flash-out" + this._absoluteName,
+    setNamedTimeout("vview-flash-out" + this.absoluteName,
       fadeOutDelay, () => this._target.removeAttribute("changed"));
   },
 
@@ -2704,7 +2735,7 @@ Variable.prototype = Heritage.extend(Scope.prototype, {
     this._openInspectorNode = this.document.createElement("toolbarbutton");
     this._openInspectorNode.className = "plain variables-view-open-inspector";
     this._openInspectorNode.addEventListener("mousedown", this.openNodeInInspector, false);
-    this._title.insertBefore(this._openInspectorNode, this._title.querySelector("toolbarbutton"));
+    this._title.appendChild(this._openInspectorNode);
 
     this._linkedToInspector = true;
   },
@@ -2973,9 +3004,9 @@ Variable.prototype = Heritage.extend(Scope.prototype, {
     }, e);
   },
 
-  _symbolicName: "",
+  _symbolicName: null,
   _symbolicPath: null,
-  _absoluteName: "",
+  _absoluteName: null,
   _initialDescriptor: null,
   _separatorLabel: null,
   _valueLabel: null,
@@ -3004,24 +3035,48 @@ Variable.prototype = Heritage.extend(Scope.prototype, {
  */
 function Property(aVar, aName, aDescriptor) {
   Variable.call(this, aVar, aName, aDescriptor);
-  this._symbolicName = aVar._symbolicName + "[\"" + aName + "\"]";
-  this._absoluteName = aVar._absoluteName + "[\"" + aName + "\"]";
 }
 
 Property.prototype = Heritage.extend(Variable.prototype, {
   /**
    * The class name applied to this property's target element.
    */
-  targetClassName: "variables-view-property variable-or-property"
+  targetClassName: "variables-view-property variable-or-property",
+
+  /**
+   * @see Variable.symbolicName
+   * @return string
+   */
+  get symbolicName() {
+    if (this._symbolicName) {
+      return this._symbolicName;
+    }
+
+    this._symbolicName = this.ownerView.symbolicName + "[\"" + this._nameString + "\"]";
+    return this._symbolicName;
+  },
+
+  /**
+   * @see Variable.absoluteName
+   * @return string
+   */
+  get absoluteName() {
+    if (this._absoluteName) {
+      return this._absoluteName;
+    }
+
+    this._absoluteName = this.ownerView.absoluteName + "[\"" + this._nameString + "\"]";
+    return this._absoluteName;
+  }
 });
 
 /**
  * A generator-iterator over the VariablesView, Scopes, Variables and Properties.
  */
-VariablesView.prototype["@@iterator"] =
-Scope.prototype["@@iterator"] =
-Variable.prototype["@@iterator"] =
-Property.prototype["@@iterator"] = function*() {
+VariablesView.prototype[Symbol.iterator] =
+Scope.prototype[Symbol.iterator] =
+Variable.prototype[Symbol.iterator] =
+Property.prototype[Symbol.iterator] = function*() {
   yield* this._store;
 };
 
@@ -3088,7 +3143,7 @@ VariablesView.prototype.wasExpanded = function(aItem) {
   if (!(aItem instanceof Scope)) {
     return false;
   }
-  let prevItem = this._prevHierarchy.get(aItem._absoluteName || aItem._nameString);
+  let prevItem = this._prevHierarchy.get(aItem.absoluteName || aItem._nameString);
   return prevItem ? prevItem._isExpanded : false;
 };
 
@@ -3108,7 +3163,7 @@ VariablesView.prototype.hasChanged = function(aItem) {
   if (!(aItem instanceof Variable)) {
     return false;
   }
-  let prevItem = this._prevHierarchy.get(aItem._absoluteName);
+  let prevItem = this._prevHierarchy.get(aItem.absoluteName);
   return prevItem ? prevItem._valueString != aItem._valueString : false;
 };
 
@@ -3171,6 +3226,7 @@ VariablesView.isPrimitive = function(aDescriptor) {
       type == "-Infinity" ||
       type == "NaN" ||
       type == "-0" ||
+      type == "symbol" ||
       type == "longString") {
     return true;
   }
@@ -3388,6 +3444,11 @@ VariablesView.stringifiers.byType = {
     }
     return null;
   },
+
+  symbol: function(aGrip, aOptions) {
+    const name = aGrip.name || "";
+    return "Symbol(" + name + ")";
+  },
 }; // VariablesView.stringifiers.byType
 
 VariablesView.stringifiers.byObjectClass = {
@@ -3531,6 +3592,17 @@ VariablesView.stringifiers.byObjectKind = {
 
     let {preview} = aGrip;
     let props = [];
+
+    if (aGrip.class == "Promise" && aGrip.promiseState) {
+      let { state, value, reason } = aGrip.promiseState;
+      props.push("<state>: " + VariablesView.getString(state));
+      if (state == "fulfilled") {
+        props.push("<value>: " + VariablesView.getString(value, { concise: true }));
+      } else if (state == "rejected") {
+        props.push("<reason>: " + VariablesView.getString(reason, { concise: true }));
+      }
+    }
+
     for (let key of Object.keys(preview.ownProperties || {})) {
       let value = preview.ownProperties[key];
       let valueString = "";
@@ -3642,9 +3714,14 @@ VariablesView.stringifiers.byObjectKind = {
 
     switch (preview.nodeType) {
       case Ci.nsIDOMNode.DOCUMENT_NODE: {
-        let location = WebConsoleUtils.abbreviateSourceURL(preview.location,
-                                                           { onlyCropQuery: !concise });
-        return aGrip.class + " \u2192 " + location;
+        let result = aGrip.class;
+        if (preview.location) {
+          let location = WebConsoleUtils.abbreviateSourceURL(preview.location,
+                                                            { onlyCropQuery: !concise });
+          result += " \u2192 " + location;
+        }
+
+        return result;
       }
 
       case Ci.nsIDOMNode.ATTRIBUTE_NODE: {
@@ -3696,6 +3773,10 @@ VariablesView.stringifiers.byObjectKind = {
         let result = "<" + preview.nodeName;
         if (attrs.id) {
           result += "#" + attrs.id;
+        }
+
+        if (attrs.class) {
+          result += "." + attrs.class.trim().replace(/\s+/, ".");
         }
         return result + ">";
       }

@@ -34,7 +34,7 @@ class nsDOMCSSRGBColor;
  * Read-only CSS primitive value - a DOM object representing values in DOM
  * computed style.
  */
-class nsROCSSPrimitiveValue MOZ_FINAL : public mozilla::dom::CSSValue,
+class nsROCSSPrimitiveValue final : public mozilla::dom::CSSValue,
   public nsIDOMCSSPrimitiveValue
 {
 public:
@@ -48,9 +48,9 @@ public:
   NS_DECL_NSIDOMCSSVALUE
 
   // CSSValue
-  virtual void GetCssText(nsString& aText, mozilla::ErrorResult& aRv) MOZ_OVERRIDE MOZ_FINAL;
-  virtual void SetCssText(const nsAString& aText, mozilla::ErrorResult& aRv) MOZ_OVERRIDE MOZ_FINAL;
-  virtual uint16_t CssValueType() const MOZ_OVERRIDE MOZ_FINAL;
+  virtual void GetCssText(nsString& aText, mozilla::ErrorResult& aRv) override final;
+  virtual void SetCssText(const nsAString& aText, mozilla::ErrorResult& aRv) override final;
+  virtual uint16_t CssValueType() const override final;
 
   // CSSPrimitiveValue
   uint16_t PrimitiveType()
@@ -77,7 +77,6 @@ public:
 
   // nsROCSSPrimitiveValue
   nsROCSSPrimitiveValue();
-  ~nsROCSSPrimitiveValue();
 
   void SetNumber(float aValue);
   void SetNumber(int32_t aValue);
@@ -105,9 +104,11 @@ public:
     return nullptr;
   }
 
-  virtual JSObject *WrapObject(JSContext *cx) MOZ_OVERRIDE;
+  virtual JSObject *WrapObject(JSContext *cx) override;
 
 private:
+  ~nsROCSSPrimitiveValue();
+
   uint16_t mType;
 
   union {

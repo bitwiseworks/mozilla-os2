@@ -18,7 +18,7 @@
 #include "nsIUploadChannel.h"
 #include "mozilla/Attributes.h"
 
-class nsViewSourceChannel MOZ_FINAL : public nsIViewSourceChannel,
+class nsViewSourceChannel final : public nsIViewSourceChannel,
                                       public nsIStreamListener,
                                       public nsIHttpChannel,
                                       public nsIHttpChannelInternal,
@@ -47,12 +47,13 @@ public:
         : mIsDocument(false)
         , mOpened(false) {}
 
-    NS_HIDDEN_(nsresult) Init(nsIURI* uri);
+    nsresult Init(nsIURI* uri);
 
-    NS_HIDDEN_(nsresult) InitSrcdoc(nsIURI* aURI, const nsAString &aSrcdoc,
-                                    nsIURI* aBaseURI);
+    nsresult InitSrcdoc(nsIURI* aURI, const nsAString &aSrcdoc);
 
 protected:
+    ~nsViewSourceChannel() {}
+
     nsCOMPtr<nsIChannel>        mChannel;
     nsCOMPtr<nsIHttpChannel>    mHttpChannel;
     nsCOMPtr<nsIHttpChannelInternal>    mHttpChannelInternal;
@@ -61,7 +62,6 @@ protected:
     nsCOMPtr<nsIUploadChannel>  mUploadChannel;
     nsCOMPtr<nsIStreamListener> mListener;
     nsCOMPtr<nsIURI>            mOriginalURI;
-    nsCOMPtr<nsIURI>            mBaseURI;
     nsCString                   mContentType;
     bool                        mIsDocument; // keeps track of the LOAD_DOCUMENT_URI flag
     bool                        mOpened;

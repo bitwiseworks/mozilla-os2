@@ -3,10 +3,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#if defined(MOZ_LOGGING)
-#define FORCE_PR_LOG
-#endif
-
 #include "OfflineCacheUpdateChild.h"
 #include "OfflineCacheUpdateParent.h"
 #include "nsXULAppAPI.h"
@@ -18,9 +14,6 @@
 #include "nsIApplicationCacheContainer.h"
 #include "nsIApplicationCacheChannel.h"
 #include "nsIApplicationCacheService.h"
-#include "nsICache.h"
-#include "nsICacheService.h"
-#include "nsICacheSession.h"
 #include "nsICachingChannel.h"
 #include "nsIContent.h"
 #include "nsIDocShell.h"
@@ -34,7 +27,6 @@
 #include "nsIWebProgress.h"
 #include "nsIWebNavigation.h"
 #include "nsICryptoHash.h"
-#include "nsICacheEntryDescriptor.h"
 #include "nsIPermissionManager.h"
 #include "nsIPrincipal.h"
 #include "nsIScriptSecurityManager.h"
@@ -53,7 +45,7 @@
 #include "nsIDocShell.h"
 #include "nsIDocShellTreeItem.h"
 #include "nsIDocShellTreeOwner.h"
-#include "mozilla/dom/TabChild.h"
+#include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/PermissionMessageUtils.h"
 #include "nsContentUtils.h"
 #include "mozilla/unused.h"
@@ -133,7 +125,7 @@ GetAppIDAndInBrowserFromWindow(nsIDOMWindow *aWindow,
 // nsOfflineCachePendingUpdate
 //-----------------------------------------------------------------------------
 
-class nsOfflineCachePendingUpdate MOZ_FINAL : public nsIWebProgressListener
+class nsOfflineCachePendingUpdate final : public nsIWebProgressListener
                                             , public nsSupportsWeakReference
 {
 public:
@@ -153,6 +145,8 @@ public:
         }
 
 private:
+    ~nsOfflineCachePendingUpdate() {}
+
     nsRefPtr<nsOfflineCacheUpdateService> mService;
     nsCOMPtr<nsIURI> mManifestURI;
     nsCOMPtr<nsIURI> mDocumentURI;
@@ -492,6 +486,7 @@ nsresult
 nsOfflineCacheUpdateService::FindUpdate(nsIURI *aManifestURI,
                                         uint32_t aAppID,
                                         bool aInBrowser,
+                                        nsIFile *aCustomProfileDir,
                                         nsOfflineCacheUpdate **aUpdate)
 {
     nsresult rv;
@@ -519,7 +514,7 @@ nsOfflineCacheUpdateService::FindUpdate(nsIURI *aManifestURI,
             continue;
         }
 
-        if (update->IsForGroupID(groupID)) {
+        if (update->IsForGroupID(groupID) && update->IsForProfile(aCustomProfileDir)) {
             update.swap(*aUpdate);
             return NS_OK;
         }
@@ -695,7 +690,7 @@ OfflineAppPermForPrincipal(nsIPrincipal *aPrincipal,
     }
 
     nsCOMPtr<nsIPermissionManager> permissionManager =
-        do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
+        services::GetPermissionManager();
     if (!permissionManager) {
         return NS_OK;
     }
@@ -752,8 +747,7 @@ nsOfflineCacheUpdateService::AllowOfflineApp(nsIDOMWindow *aWindow,
     nsresult rv;
 
     if (GeckoProcessType_Default != XRE_GetProcessType()) {
-        TabChild* child = TabChild::GetFrom(aWindow);
-        NS_ENSURE_TRUE(child, NS_ERROR_FAILURE);
+        ContentChild* child = ContentChild::GetSingleton();
 
         if (!child->SendSetOfflinePermission(IPC::Principal(aPrincipal))) {
             return NS_ERROR_FAILURE;
@@ -767,7 +761,7 @@ nsOfflineCacheUpdateService::AllowOfflineApp(nsIDOMWindow *aWindow,
     }
     else {
         nsCOMPtr<nsIPermissionManager> permissionManager =
-            do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
+            services::GetPermissionManager();
         if (!permissionManager)
             return NS_ERROR_NOT_AVAILABLE;
 

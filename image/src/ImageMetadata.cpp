@@ -11,7 +11,8 @@
 #include "nsISupportsPrimitives.h"
 #include "nsXPCOMCID.h"
 
-using namespace mozilla::image;
+namespace mozilla {
+namespace image {
 
 void
 ImageMetadata::SetOnImage(RasterImage* image)
@@ -26,8 +27,7 @@ ImageMetadata::SetOnImage(RasterImage* image)
   }
 
   image->SetLoopCount(mLoopCount);
-
-  for (uint32_t i = 0; i < image->GetNumFrames(); i++) {
-    image->SetFrameAsNonPremult(i, mIsNonPremultiplied);
-  }
 }
+
+} // namespace image
+} // namespace mozilla

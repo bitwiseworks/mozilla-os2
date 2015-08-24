@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 package org.mozilla.gecko.tests;
 
 import org.mozilla.gecko.Element;
@@ -12,12 +16,12 @@ import com.jayway.android.robotium.solo.Condition;
 public class testNewTab extends BaseTest {
     private Element tabCount = null;
     private Element tabs = null;
-    private Element closeTab = null;
+    private final Element closeTab = null;
     private int tabCountInt = 0;
 
     public void testNewTab() {
-        String url = getAbsoluteUrl("/robocop/robocop_blank_01.html");
-        String url2 = getAbsoluteUrl("/robocop/robocop_blank_02.html");
+        String url = getAbsoluteUrl(StringHelper.ROBOCOP_BLANK_PAGE_01_URL);
+        String url2 = getAbsoluteUrl(StringHelper.ROBOCOP_BLANK_PAGE_02_URL);
 
         blockForGeckoReady();
 
@@ -42,57 +46,7 @@ public class testNewTab extends BaseTest {
         mAsserter.is(tabCountInt, expectedTabCount, "Number of tabs increased");
 
         // cleanup: close all opened tabs
-        //closeTabs();
-    }
-
-    private void closeTabs() {
-        final int closeTabId = closeTab.getId();
-        String tabCountText = null;
-
-        // open tabs panel
-        boolean clicked = tabs.click();
-        if (!clicked) {
-            mAsserter.ok(clicked != false, "checking that tabs clicked", "tabs element clicked");
-        }
-
-        // wait for closeTab to appear (this is usually immediate)
-        boolean success = waitForTest(new BooleanTest() {
-            @Override
-            public boolean test() {
-                View closeTabView = getActivity().findViewById(closeTabId);
-                if (closeTabView == null) {
-                    return false;
-                }
-                return true;
-            }
-        }, MAX_WAIT_MS);
-        if (!success) {
-            mAsserter.ok(success != false, "waiting for close tab view", "close tab view available");
-        }
-
-        // close tabs until only one remains
-        tabCountText = tabCount.getText();
-        tabCountInt = Integer.parseInt(tabCountText);
-        while (tabCountInt > 1) {
-            clicked = closeTab.click();
-            if (!clicked) {
-                mAsserter.ok(clicked != false, "checking that close_tab clicked", "close_tab element clicked");
-            }
-
-            success = waitForCondition(new Condition() {
-                @Override
-                public boolean isSatisfied() {
-                    String newTabCountText = tabCount.getText();
-                    int newTabCount = Integer.parseInt(newTabCountText);
-                    if (newTabCount < tabCountInt) {
-                        tabCountInt = newTabCount;
-                        return true;
-                    }
-                    return false;
-                }
-            }, MAX_WAIT_MS);
-            mAsserter.ok(success, "Checking tab closed", "number of tabs now "+tabCountInt);
-        }
+        closeAddedTabs();
     }
 
     private void getTabCount(final int expected) {

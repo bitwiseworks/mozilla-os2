@@ -7,8 +7,13 @@
 let Cu = Components.utils;
 let Ci = Components.interfaces;
 
+Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource:///modules/sessionstore/FrameTree.jsm", this);
 let gFrameTree = new FrameTree(this);
+
+function executeSoon(callback) {
+  Services.tm.mainThread.dispatch(callback, Components.interfaces.nsIThread.DISPATCH_NORMAL);
+}
 
 gFrameTree.addObserver({
   onFrameTreeReset: function () {
@@ -20,6 +25,49 @@ gFrameTree.addObserver({
   }
 });
 
+let historyListener = {
+  OnHistoryNewEntry: function () {
+    sendAsyncMessage("ss-test:OnHistoryNewEntry");
+  },
+
+  OnHistoryGoBack: function () {
+    sendAsyncMessage("ss-test:OnHistoryGoBack");
+    return true;
+  },
+
+  OnHistoryGoForward: function () {
+    sendAsyncMessage("ss-test:OnHistoryGoForward");
+    return true;
+  },
+
+  OnHistoryGotoIndex: function () {
+    sendAsyncMessage("ss-test:OnHistoryGotoIndex");
+    return true;
+  },
+
+  OnHistoryPurge: function () {
+    sendAsyncMessage("ss-test:OnHistoryPurge");
+    return true;
+  },
+
+  OnHistoryReload: function () {
+    sendAsyncMessage("ss-test:OnHistoryReload");
+    return true;
+  },
+
+  OnHistoryReplaceEntry: function () {
+    sendAsyncMessage("ss-test:OnHistoryReplaceEntry");
+  },
+
+  QueryInterface: XPCOMUtils.generateQI([
+    Ci.nsISHistoryListener,
+    Ci.nsISupportsWeakReference
+  ])
+};
+
+docShell.QueryInterface(Ci.nsIWebNavigation).
+  sessionHistory.addSHistoryListener(historyListener);
+
 /**
  * This frame script is only loaded for sessionstore mochitests. It enables us
  * to modify and query docShell data when running with multiple processes.
@@ -30,8 +78,12 @@ addEventListener("hashchange", function () {
 });
 
 addEventListener("MozStorageChanged", function () {
-  sendSyncMessage("ss-test:MozStorageChanged");
-});
+  // It's possible that this event handler runs before the one in
+  // content-sessionStore.js. We run ours a little later to make sure
+  // that the session store code has seen the event before we allow
+  // the test to proceed.
+  executeSoon(() => sendAsyncMessage("ss-test:MozStorageChanged"));
+}, true);
 
 addMessageListener("ss-test:modifySessionStorage", function (msg) {
   for (let key of Object.keys(msg.data)) {
@@ -62,8 +114,31 @@ addMessageListener("ss-test:getStyleSheets", function (msg) {
 });
 
 addMessageListener("ss-test:enableStyleSheetsForSet", function (msg) {
-  content.document.enableStyleSheetsForSet(msg.data);
-  sendAsyncMessage("ss-test:enableStyleSheetsForSet");
+  let sheets = content.document.styleSheets;
+  let change = false;
+  for (let i = 0; i < sheets.length; i++) {
+    if (sheets[i].disabled != (msg.data.indexOf(sheets[i].title) == -1)) {
+      change = true;
+      break;
+    }
+  }
+  function observer() {
+    Services.obs.removeObserver(observer, "style-sheet-applicable-state-changed");
+
+    // It's possible our observer will run before the one in
+    // content-sessionStore.js. Therefore, we run ours a little
+    // later.
+    executeSoon(() => sendAsyncMessage("ss-test:enableStyleSheetsForSet"));
+  }
+  if (change) {
+    // We don't want to reply until content-sessionStore.js has seen
+    // the change.
+    Services.obs.addObserver(observer, "style-sheet-applicable-state-changed", false);
+
+    content.document.enableStyleSheetsForSet(msg.data);
+  } else {
+    sendAsyncMessage("ss-test:enableStyleSheetsForSet");
+  }
 });
 
 addMessageListener("ss-test:enableSubDocumentStyleSheetsForSet", function (msg) {
@@ -74,13 +149,13 @@ addMessageListener("ss-test:enableSubDocumentStyleSheetsForSet", function (msg) 
 
 addMessageListener("ss-test:getAuthorStyleDisabled", function (msg) {
   let {authorStyleDisabled} =
-    docShell.contentViewer.QueryInterface(Ci.nsIMarkupDocumentViewer);
+    docShell.contentViewer;
   sendSyncMessage("ss-test:getAuthorStyleDisabled", authorStyleDisabled);
 });
 
 addMessageListener("ss-test:setAuthorStyleDisabled", function (msg) {
   let markupDocumentViewer =
-    docShell.contentViewer.QueryInterface(Ci.nsIMarkupDocumentViewer);
+    docShell.contentViewer;
   markupDocumentViewer.authorStyleDisabled = msg.data;
   sendSyncMessage("ss-test:setAuthorStyleDisabled");
 });
@@ -164,16 +239,13 @@ addMessageListener("ss-test:click", function ({data}) {
   sendAsyncMessage("ss-test:click");
 });
 
-addMessageListener("ss-test:historyPushState", function ({data}) {
-  content.window.history.
-    pushState(data.stateObj || {}, data.title || "", data.url);
-
-  sendAsyncMessage("ss-test:historyPushState");
+addMessageListener("ss-test:run", function({data, objects}) {
+  let f = eval('(' + data.code + ')');
+  let result = f(content, objects.arg);
+  sendAsyncMessage("ss-test:runFinished", result);
 });
 
-addMessageListener("ss-test:historyReplaceState", function ({data}) {
-  content.window.history.
-    replaceState(data.stateObj || {}, data.title || "", data.url);
-
-  sendAsyncMessage("ss-test:historyReplaceState");
-});
+addEventListener("load", function(event) {
+  let subframe = event.target != content.document;
+  sendAsyncMessage("ss-test:loadEvent", {subframe: subframe, url: event.target.documentURI});
+}, true);

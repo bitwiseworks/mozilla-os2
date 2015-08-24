@@ -36,6 +36,7 @@
 
 var gElement = document.getElementById("testnode");
 var gDeclaration = gElement.style;
+var gUnsetValueEnabled = SpecialPowers.getBoolPref("layout.css.unset-value.enabled");
 
 /*
  * This lists properties where garbage identifiers are allowed at the
@@ -50,6 +51,13 @@ var gAllowsExtra = {
   "font": { "caption": true, "icon": true, "menu": true, "message-box": true,
             "small-caption": true, "status-bar": true },
   "voice-family": {},
+  "list-style": {
+    "inside none": true, "none inside": true, "none": true,
+    "none outside": true, "outside none": true,
+    'url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKElEQVR42u3NQQ0AAAgEoNP+nTWFDzcoQE1udQQCgUAgEAgEAsGTYAGjxAE/G/Q2tQAAAABJRU5ErkJggg==")': true,
+    'url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKElEQVR42u3NQQ0AAAgEoNP+nTWFDzcoQE1udQQCgUAgEAgEAsGTYAGjxAE/G/Q2tQAAAABJRU5ErkJggg==") outside': true,
+    'outside url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKElEQVR42u3NQQ0AAAgEoNP+nTWFDzcoQE1udQQCgUAgEAgEAsGTYAGjxAE/G/Q2tQAAAABJRU5ErkJggg==")': true
+  },
 };
 
 /* These are the reverse of the above list; they're the unusual values
@@ -112,7 +120,7 @@ function test_property(property)
   var idx;
   test_value("inherit");
   test_value("initial");
-  if (SpecialPowers.getBoolPref("layout.css.unset-value.enabled"))
+  if (gUnsetValueEnabled)
     test_value("unset");
   for (idx in info.initial_values)
     test_value(info.initial_values[idx]);

@@ -72,6 +72,11 @@ WeaveService.prototype = {
                                          Ci.nsISupportsWeakReference]),
 
   ensureLoaded: function () {
+    // If we are loaded and not using FxA, load the migration module.
+    if (!this.fxAccountsEnabled) {
+      Cu.import("resource://services-sync/FxaMigrator.jsm");
+    }
+
     Components.utils.import("resource://services-sync/main.js");
 
     // Side-effect of accessing the service is that it is instantiated.
@@ -109,16 +114,6 @@ WeaveService.prototype = {
   },
 
   /**
-   * Returns whether the password engine is allowed. We explicitly disallow
-   * the password engine when a master password is used to ensure those can't
-   * be accessed without the master key.
-   */
-  get allowPasswordsEngine() {
-    // This doesn't apply to old-style sync, it's only an issue for FxA.
-    return !this.fxAccountsEnabled || !Utils.mpEnabled();
-  },
-
-  /**
    * Whether Sync appears to be enabled.
    *
    * This returns true if all the Sync preferences for storing account
@@ -146,19 +141,22 @@ WeaveService.prototype = {
       this.timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
       this.timer.initWithCallback({
         notify: function() {
+          let isConfigured = false;
           // We only load more if it looks like Sync is configured.
           let prefs = Services.prefs.getBranch(SYNC_PREFS_BRANCH);
-          if (!prefs.prefHasUserValue("username")) {
-            return;
+          if (prefs.prefHasUserValue("username")) {
+            // We have a username. So, do a more thorough check. This will
+            // import a number of modules and thus increase memory
+            // accordingly. We could potentially copy code performed by
+            // this check into this file if our above code is yielding too
+            // many false positives.
+            Components.utils.import("resource://services-sync/main.js");
+            isConfigured = Weave.Status.checkSetup() != Weave.CLIENT_NOT_CONFIGURED;
           }
-
-          // We have a username. So, do a more thorough check. This will
-          // import a number of modules and thus increase memory
-          // accordingly. We could potentially copy code performed by
-          // this check into this file if our above code is yielding too
-          // many false positives.
-          Components.utils.import("resource://services-sync/main.js");
-          if (Weave.Status.checkSetup() != Weave.CLIENT_NOT_CONFIGURED) {
+          let getHistogramById = Services.telemetry.getHistogramById;
+          getHistogramById("WEAVE_CONFIGURED").add(isConfigured);
+          if (isConfigured) {
+            getHistogramById("WEAVE_CONFIGURED_MASTER_PASSWORD").add(Utils.mpEnabled());
             this.ensureLoaded();
           }
         }.bind(this)
@@ -179,10 +177,11 @@ AboutWeaveLog.prototype = {
     return 0;
   },
 
-  newChannel: function(aURI) {
+  newChannel: function(aURI, aLoadInfo) {
     let dir = FileUtils.getDir("ProfD", ["weave", "logs"], true);
     let uri = Services.io.newFileURI(dir);
-    let channel = Services.io.newChannelFromURI(uri);
+    let channel = Services.io.newChannelFromURIWithLoadInfo(uri, aLoadInfo);
+
     channel.originalURI = aURI;
 
     // Ensure that the about page has the same privileges as a regular directory

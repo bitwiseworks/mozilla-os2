@@ -1,4 +1,4 @@
-/* -*- Mode: Javascript; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim: set ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
@@ -163,7 +163,9 @@ const TEST_DATA = [
       {name: "content", value: '"a not s\
           o very long title"', priority: ""}
     ]
-  }
+  },
+  // Test calc with nested parentheses
+  {input: "width: calc((100% - 3em) / 2)", expected: [{name: "width", value: "calc((100% - 3em) / 2)", priority: ""}]},
 ];
 
 function run_test() {

@@ -16,12 +16,16 @@
         'spreadsortlib',
         '../interface',
       ],
+      'dependencies': [
+        '../../base/base.gyp:rtc_base_approved',
+      ],
       'direct_dependent_settings': {
         'include_dirs': [
           '../interface',
         ],
       },
       'sources': [
+        '../interface/aligned_array.h',
         '../interface/aligned_malloc.h',
         '../interface/atomic32.h',
         '../interface/clock.h',
@@ -35,22 +39,29 @@
         '../interface/data_log_impl.h',
         '../interface/event_tracer.h',
         '../interface/event_wrapper.h',
+        '../interface/field_trial.h',
         '../interface/file_wrapper.h',
         '../interface/fix_interlocked_exchange_pointer_win.h',
-        '../interface/list_wrapper.h',
+        '../interface/logcat_trace_context.h',
         '../interface/logging.h',
+        '../interface/metrics.h',
         '../interface/ref_count.h',
+        '../interface/rtp_to_ntp.h',
         '../interface/rw_lock_wrapper.h',
         '../interface/scoped_ptr.h',
         '../interface/scoped_refptr.h',
+        '../interface/scoped_vector.h',
         '../interface/sleep.h',
         '../interface/sort.h',
         '../interface/static_instance.h',
+        '../interface/stl_util.h',
         '../interface/stringize_macros.h',
         '../interface/thread_wrapper.h',
         '../interface/tick_util.h',
+        '../interface/timestamp_extrapolator.h',
         '../interface/trace.h',
         '../interface/trace_event.h',
+        '../interface/utf_util_win.h',
         'aligned_malloc.cc',
         'atomic32_mac.cc',
         'atomic32_posix.cc',
@@ -81,9 +92,9 @@
         'event_win.h',
         'file_impl.cc',
         'file_impl.h',
-        'list_no_stl.cc',
+        'logcat_trace_context.cc',
         'logging.cc',
-        'logging_no_op.cc',
+        'rtp_to_ntp.cc',
         'rw_lock.cc',
         'rw_lock_generic.cc',
         'rw_lock_generic.h',
@@ -100,9 +111,9 @@
         'thread_posix.h',
         'thread_win.cc',
         'thread_win.h',
+        'timestamp_extrapolator.cc',
         'trace_impl.cc',
         'trace_impl.h',
-        'trace_impl_no_op.cc',
         'trace_posix.cc',
         'trace_posix.h',
         'trace_win.cc',
@@ -114,25 +125,14 @@
         }, {
           'sources!': [ 'data_log.cc', ],
         },],
-        ['enable_tracing==1', {
-          'sources!': [
-            'logging_no_op.cc',
-            'trace_impl_no_op.cc',
-          ],
-        }, {
-          'sources!': [
-            'logging.cc',
-            'trace_impl.cc',
-            'trace_impl.h',
-            'trace_posix.cc',
-            'trace_posix.h',
-            'trace_win.cc',
-            'trace_win.h',
-          ],
-        }],
-        ['enable_lazy_trace_alloc==0', {
+        ['enable_lazy_trace_alloc==1', {
           'defines': [
             'WEBRTC_LAZY_TRACE_ALLOC',
+          ],
+        }],
+        ['build_with_mozilla', {
+          'sources': [
+            'metrics_default.cc',
           ],
         }],
         ['OS=="android" or moz_widget_toolkit_gonk==1', {
@@ -149,6 +149,16 @@
             # Android doesn't have these in <=2.2
             'rw_lock_posix.cc',
             'rw_lock_posix.h',
+          ],
+          'link_settings': {
+            'libraries': [
+              '-llog',
+            ],
+          },
+        }, {  # OS!="android"
+          'sources!': [
+            '../interface/logcat_trace_context.h',
+            'logcat_trace_context.cc',
           ],
         }],
         ['OS=="linux"', {
@@ -201,21 +211,40 @@
         4267,  # size_t to int truncation.
         4334,  # Ignore warning on shift operator promotion.
       ],
+    }, {
+      'target_name': 'field_trial_default',
+      'type': 'static_library',
+      'sources': [
+        'field_trial_default.cc',
+      ],
+      'dependencies': [
+        'system_wrappers',
+      ]
+    }, {
+      'target_name': 'metrics_default',
+      'type': 'static_library',
+      'sources': [
+        'metrics_default.cc',
+      ],
+      'dependencies': [
+        'system_wrappers',
+      ]
+    }, {
+      'target_name': 'system_wrappers_default',
+      'type': 'static_library',
+      'dependencies': [
+        'field_trial_default',
+        'metrics_default',
+      ]
     },
   ], # targets
   'conditions': [
     ['OS=="android" or moz_widget_toolkit_gonk==1', {
       'targets': [
         {
-          'variables': {
-            # Treat this as third-party code.
-            'chromium_code': 0,
-          },
           'target_name': 'cpu_features_android',
           'type': 'static_library',
           'sources': [
-            # TODO(leozwang): Ideally we want to audomatically exclude .c files
-            # as with .cc files, gyp currently only excludes .cc files.
             'cpu_features_android.c',
           ],
           'conditions': [
@@ -231,15 +260,14 @@
                   ],
                 }],
               ],
-            }, {
-              'sources': [
-                'android/cpu-features.c',
-                'android/cpu-features.h',
-              ],
-            }],
-          ],
-        },
-      ],
+         }, {
+           'sources': [
+             'droid-cpu-features.c',
+             'droid-cpu-features.h',
+           ],
+         }],
+        ],
+      }],
     }],
   ], # conditions
 }

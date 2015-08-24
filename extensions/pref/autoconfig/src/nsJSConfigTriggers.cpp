@@ -3,12 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifdef MOZ_LOGGING
-// sorry, this has to be before the pre-compiled header
-#define FORCE_PR_LOG /* Allow logging in the release build */
-#endif
 #include "jsapi.h"
-#include "nsIXPCSecurityManager.h"
 #include "nsIXPConnect.h"
 #include "nsIJSRuntimeService.h"
 #include "nsCOMPtr.h"
@@ -20,7 +15,6 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/Maybe.h"
 #include "nsContentUtils.h"
-#include "nsCxPusher.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsJSPrincipals.h"
 #include "jswrapper.h"
@@ -30,14 +24,14 @@ using mozilla::AutoSafeJSContext;
 
 //*****************************************************************************
 
-static mozilla::Maybe<JS::PersistentRooted<JSObject *> > autoconfigSb;
+static JS::PersistentRooted<JSObject *> autoconfigSb;
 
 nsresult CentralizedAdminPrefManagerInit()
 {
     nsresult rv;
 
     // If the sandbox is already created, no need to create it again.
-    if (!autoconfigSb.empty())
+    if (autoconfigSb.initialized())
         return NS_OK;
 
     // Grab XPConnect.
@@ -59,16 +53,16 @@ nsresult CentralizedAdminPrefManagerInit()
 
     // Unwrap, store and root the sandbox.
     NS_ENSURE_STATE(sandbox->GetJSObject());
-    autoconfigSb.construct(cx, js::UncheckedUnwrap(sandbox->GetJSObject()));
+    autoconfigSb.init(cx, js::UncheckedUnwrap(sandbox->GetJSObject()));
 
     return NS_OK;
 }
 
 nsresult CentralizedAdminPrefManagerFinish()
 {
-    if (!autoconfigSb.empty()) {
+    if (autoconfigSb.initialized()) {
         AutoSafeJSContext cx;
-        autoconfigSb.destroy();
+        autoconfigSb.reset();
         JS_MaybeGC(cx);
     }
     return NS_OK;
@@ -109,12 +103,12 @@ nsresult EvaluateAdminConfigScript(const char *js_buffer, size_t length,
     }
 
     AutoSafeJSContext cx;
-    JSAutoCompartment ac(cx, autoconfigSb.ref());
+    JSAutoCompartment ac(cx, autoconfigSb);
 
     nsAutoCString script(js_buffer, length);
     JS::RootedValue v(cx);
-    rv = xpc->EvalInSandboxObject(NS_ConvertASCIItoUTF16(script), filename, cx, autoconfigSb.ref(),
-                                  /* returnStringOnly = */ false, &v);
+    rv = xpc->EvalInSandboxObject(NS_ConvertASCIItoUTF16(script), filename, cx,
+                                  autoconfigSb, &v);
     NS_ENSURE_SUCCESS(rv, rv);
 
     return NS_OK;

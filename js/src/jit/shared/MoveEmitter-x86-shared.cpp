@@ -85,9 +85,9 @@ MoveEmitterX86::maybeEmitOptimizedCycle(const MoveResolver& moves, size_t i,
         // it's cheap to do an XOR swap.
         FloatRegister a = moves.getMove(i).to().floatReg();
         FloatRegister b = moves.getMove(i + 1).to().floatReg();
-        masm.xorpd(a, b);
-        masm.xorpd(b, a);
-        masm.xorpd(a, b);
+        masm.vxorpd(a, b, b);
+        masm.vxorpd(b, a, a);
+        masm.vxorpd(a, b, b);
         return true;
     }
 
@@ -97,20 +97,26 @@ MoveEmitterX86::maybeEmitOptimizedCycle(const MoveResolver& moves, size_t i,
 void
 MoveEmitterX86::emit(const MoveResolver& moves)
 {
+#if defined(JS_CODEGEN_X86) && defined(DEBUG)
+    // Clobber any scratch register we have, to make regalloc bugs more visible.
+    if (hasScratchRegister())
+        masm.mov(ImmWord(0xdeadbeef), scratchRegister());
+#endif
+
     for (size_t i = 0; i < moves.numMoves(); i++) {
         const MoveOp& move = moves.getMove(i);
         const MoveOperand& from = move.from();
         const MoveOperand& to = move.to();
 
         if (move.isCycleEnd()) {
-            JS_ASSERT(inCycle_);
+            MOZ_ASSERT(inCycle_);
             completeCycle(to, move.type());
             inCycle_ = false;
             continue;
         }
 
         if (move.isCycleBegin()) {
-            JS_ASSERT(!inCycle_);
+            MOZ_ASSERT(!inCycle_);
 
             // Characterize the cycle.
             bool allGeneralRegs = true, allFloatRegs = true;
@@ -141,8 +147,14 @@ MoveEmitterX86::emit(const MoveResolver& moves)
           case MoveOp::GENERAL:
             emitGeneralMove(from, to);
             break;
+          case MoveOp::INT32X4:
+            emitInt32X4Move(from, to);
+            break;
+          case MoveOp::FLOAT32X4:
+            emitFloat32X4Move(from, to);
+            break;
           default:
-            MOZ_ASSUME_UNREACHABLE("Unexpected move type");
+            MOZ_CRASH("Unexpected move type");
         }
     }
 }
@@ -157,7 +169,7 @@ MoveEmitterX86::cycleSlot()
 {
     if (pushedAtCycle_ == -1) {
         // Reserve stack for cycle resolution
-        masm.reserveStack(sizeof(double));
+        masm.reserveStack(Simd128DataSize);
         pushedAtCycle_ = masm.framePushed();
     }
 
@@ -170,7 +182,7 @@ MoveEmitterX86::toAddress(const MoveOperand& operand) const
     if (operand.base() != StackPointer)
         return Address(operand.base(), operand.disp());
 
-    JS_ASSERT(operand.disp() >= 0);
+    MOZ_ASSERT(operand.disp() >= 0);
 
     // Otherwise, the stack offset may need to be adjusted.
     return Address(StackPointer, operand.disp() + (masm.framePushed() - pushedAtStart_));
@@ -187,7 +199,7 @@ MoveEmitterX86::toOperand(const MoveOperand& operand) const
     if (operand.isGeneralReg())
         return Operand(operand.reg());
 
-    JS_ASSERT(operand.isFloatReg());
+    MOZ_ASSERT(operand.isFloatReg());
     return Operand(operand.floatReg());
 }
 
@@ -200,7 +212,7 @@ MoveEmitterX86::toPopOperand(const MoveOperand& operand) const
         if (operand.base() != StackPointer)
             return Operand(operand.base(), operand.disp());
 
-        JS_ASSERT(operand.disp() >= 0);
+        MOZ_ASSERT(operand.disp() >= 0);
 
         // Otherwise, the stack offset may need to be adjusted.
         // Note the adjustment by the stack slot here, to offset for the fact that pop
@@ -211,7 +223,7 @@ MoveEmitterX86::toPopOperand(const MoveOperand& operand) const
     if (operand.isGeneralReg())
         return Operand(operand.reg());
 
-    JS_ASSERT(operand.isFloatReg());
+    MOZ_ASSERT(operand.isFloatReg());
     return Operand(operand.floatReg());
 }
 
@@ -225,24 +237,40 @@ MoveEmitterX86::breakCycle(const MoveOperand& to, MoveOp::Type type)
     // This case handles (A -> B), which we reach first. We save B, then allow
     // the original move to continue.
     switch (type) {
+      case MoveOp::INT32X4:
+        if (to.isMemory()) {
+            masm.loadAlignedInt32x4(toAddress(to), ScratchSimdReg);
+            masm.storeAlignedInt32x4(ScratchSimdReg, cycleSlot());
+        } else {
+            masm.storeAlignedInt32x4(to.floatReg(), cycleSlot());
+        }
+        break;
+      case MoveOp::FLOAT32X4:
+        if (to.isMemory()) {
+            masm.loadAlignedFloat32x4(toAddress(to), ScratchSimdReg);
+            masm.storeAlignedFloat32x4(ScratchSimdReg, cycleSlot());
+        } else {
+            masm.storeAlignedFloat32x4(to.floatReg(), cycleSlot());
+        }
+        break;
       case MoveOp::FLOAT32:
         if (to.isMemory()) {
-            masm.loadFloat32(toAddress(to), ScratchFloatReg);
-            masm.storeFloat32(ScratchFloatReg, cycleSlot());
+            masm.loadFloat32(toAddress(to), ScratchFloat32Reg);
+            masm.storeFloat32(ScratchFloat32Reg, cycleSlot());
         } else {
             masm.storeFloat32(to.floatReg(), cycleSlot());
         }
         break;
       case MoveOp::DOUBLE:
         if (to.isMemory()) {
-            masm.loadDouble(toAddress(to), ScratchFloatReg);
-            masm.storeDouble(ScratchFloatReg, cycleSlot());
+            masm.loadDouble(toAddress(to), ScratchDoubleReg);
+            masm.storeDouble(ScratchDoubleReg, cycleSlot());
         } else {
             masm.storeDouble(to.floatReg(), cycleSlot());
         }
         break;
-#ifdef JS_CODEGEN_X64
       case MoveOp::INT32:
+#ifdef JS_CODEGEN_X64
         // x64 can't pop to a 32-bit destination, so don't push.
         if (to.isMemory()) {
             masm.load32(toAddress(to), ScratchReg);
@@ -252,14 +280,11 @@ MoveEmitterX86::breakCycle(const MoveOperand& to, MoveOp::Type type)
         }
         break;
 #endif
-#ifndef JS_CODEGEN_X64
-      case MoveOp::INT32:
-#endif
       case MoveOp::GENERAL:
         masm.Push(toOperand(to));
         break;
       default:
-        MOZ_ASSUME_UNREACHABLE("Unexpected move type");
+        MOZ_CRASH("Unexpected move type");
     }
 }
 
@@ -273,30 +298,50 @@ MoveEmitterX86::completeCycle(const MoveOperand& to, MoveOp::Type type)
     // This case handles (B -> A), which we reach last. We emit a move from the
     // saved value of B, to A.
     switch (type) {
-      case MoveOp::FLOAT32:
-        JS_ASSERT(pushedAtCycle_ != -1);
-        JS_ASSERT(pushedAtCycle_ - pushedAtStart_ >= sizeof(float));
+      case MoveOp::INT32X4:
+        MOZ_ASSERT(pushedAtCycle_ != -1);
+        MOZ_ASSERT(pushedAtCycle_ - pushedAtStart_ >= Simd128DataSize);
         if (to.isMemory()) {
-            masm.loadFloat32(cycleSlot(), ScratchFloatReg);
-            masm.storeFloat32(ScratchFloatReg, toAddress(to));
+            masm.loadAlignedInt32x4(cycleSlot(), ScratchSimdReg);
+            masm.storeAlignedInt32x4(ScratchSimdReg, toAddress(to));
+        } else {
+            masm.loadAlignedInt32x4(cycleSlot(), to.floatReg());
+        }
+        break;
+      case MoveOp::FLOAT32X4:
+        MOZ_ASSERT(pushedAtCycle_ != -1);
+        MOZ_ASSERT(pushedAtCycle_ - pushedAtStart_ >= Simd128DataSize);
+        if (to.isMemory()) {
+            masm.loadAlignedFloat32x4(cycleSlot(), ScratchSimdReg);
+            masm.storeAlignedFloat32x4(ScratchSimdReg, toAddress(to));
+        } else {
+            masm.loadAlignedFloat32x4(cycleSlot(), to.floatReg());
+        }
+        break;
+      case MoveOp::FLOAT32:
+        MOZ_ASSERT(pushedAtCycle_ != -1);
+        MOZ_ASSERT(pushedAtCycle_ - pushedAtStart_ >= sizeof(float));
+        if (to.isMemory()) {
+            masm.loadFloat32(cycleSlot(), ScratchFloat32Reg);
+            masm.storeFloat32(ScratchFloat32Reg, toAddress(to));
         } else {
             masm.loadFloat32(cycleSlot(), to.floatReg());
         }
         break;
       case MoveOp::DOUBLE:
-        JS_ASSERT(pushedAtCycle_ != -1);
-        JS_ASSERT(pushedAtCycle_ - pushedAtStart_ >= sizeof(double));
+        MOZ_ASSERT(pushedAtCycle_ != -1);
+        MOZ_ASSERT(pushedAtCycle_ - pushedAtStart_ >= sizeof(double));
         if (to.isMemory()) {
-            masm.loadDouble(cycleSlot(), ScratchFloatReg);
-            masm.storeDouble(ScratchFloatReg, toAddress(to));
+            masm.loadDouble(cycleSlot(), ScratchDoubleReg);
+            masm.storeDouble(ScratchDoubleReg, toAddress(to));
         } else {
             masm.loadDouble(cycleSlot(), to.floatReg());
         }
         break;
-#ifdef JS_CODEGEN_X64
       case MoveOp::INT32:
-        JS_ASSERT(pushedAtCycle_ != -1);
-        JS_ASSERT(pushedAtCycle_ - pushedAtStart_ >= sizeof(int32_t));
+#ifdef JS_CODEGEN_X64
+        MOZ_ASSERT(pushedAtCycle_ != -1);
+        MOZ_ASSERT(pushedAtCycle_ - pushedAtStart_ >= sizeof(int32_t));
         // x64 can't pop to a 32-bit destination.
         if (to.isMemory()) {
             masm.load32(cycleSlot(), ScratchReg);
@@ -306,15 +351,12 @@ MoveEmitterX86::completeCycle(const MoveOperand& to, MoveOp::Type type)
         }
         break;
 #endif
-#ifndef JS_CODEGEN_X64
-      case MoveOp::INT32:
-#endif
       case MoveOp::GENERAL:
-        JS_ASSERT(masm.framePushed() - pushedAtStart_ >= sizeof(intptr_t));
+        MOZ_ASSERT(masm.framePushed() - pushedAtStart_ >= sizeof(intptr_t));
         masm.Pop(toPopOperand(to));
         break;
       default:
-        MOZ_ASSUME_UNREACHABLE("Unexpected move type");
+        MOZ_CRASH("Unexpected move type");
     }
 }
 
@@ -324,20 +366,20 @@ MoveEmitterX86::emitInt32Move(const MoveOperand& from, const MoveOperand& to)
     if (from.isGeneralReg()) {
         masm.move32(from.reg(), toOperand(to));
     } else if (to.isGeneralReg()) {
-        JS_ASSERT(from.isMemory());
+        MOZ_ASSERT(from.isMemory());
         masm.load32(toAddress(from), to.reg());
     } else {
         // Memory to memory gpr move.
-        JS_ASSERT(from.isMemory());
-#ifdef JS_CODEGEN_X64
-        // x64 has a ScratchReg. Use it.
-        masm.load32(toAddress(from), ScratchReg);
-        masm.move32(ScratchReg, toOperand(to));
-#else
-        // No ScratchReg; bounce it off the stack.
-        masm.Push(toOperand(from));
-        masm.Pop(toPopOperand(to));
-#endif
+        MOZ_ASSERT(from.isMemory());
+        if (hasScratchRegister()) {
+            Register reg = scratchRegister();
+            masm.load32(toAddress(from), reg);
+            masm.move32(reg, toOperand(to));
+        } else {
+            // No scratch register available; bounce it off the stack.
+            masm.Push(toOperand(from));
+            masm.Pop(toPopOperand(to));
+        }
     }
 }
 
@@ -347,37 +389,37 @@ MoveEmitterX86::emitGeneralMove(const MoveOperand& from, const MoveOperand& to)
     if (from.isGeneralReg()) {
         masm.mov(from.reg(), toOperand(to));
     } else if (to.isGeneralReg()) {
-        JS_ASSERT(from.isMemoryOrEffectiveAddress());
+        MOZ_ASSERT(from.isMemoryOrEffectiveAddress());
         if (from.isMemory())
             masm.loadPtr(toAddress(from), to.reg());
         else
             masm.lea(toOperand(from), to.reg());
     } else if (from.isMemory()) {
         // Memory to memory gpr move.
-#ifdef JS_CODEGEN_X64
-        // x64 has a ScratchReg. Use it.
-        masm.loadPtr(toAddress(from), ScratchReg);
-        masm.mov(ScratchReg, toOperand(to));
-#else
-        // No ScratchReg; bounce it off the stack.
-        masm.Push(toOperand(from));
-        masm.Pop(toPopOperand(to));
-#endif
+        if (hasScratchRegister()) {
+            Register reg = scratchRegister();
+            masm.loadPtr(toAddress(from), reg);
+            masm.mov(reg, toOperand(to));
+        } else {
+            // No scratch register available; bounce it off the stack.
+            masm.Push(toOperand(from));
+            masm.Pop(toPopOperand(to));
+        }
     } else {
         // Effective address to memory move.
-        JS_ASSERT(from.isEffectiveAddress());
-#ifdef JS_CODEGEN_X64
-        // x64 has a ScratchReg. Use it.
-        masm.lea(toOperand(from), ScratchReg);
-        masm.mov(ScratchReg, toOperand(to));
-#else
-        // This is tricky without a ScratchReg. We can't do an lea. Bounce the
-        // base register off the stack, then add the offset in place. Note that
-        // this clobbers FLAGS!
-        masm.Push(from.base());
-        masm.Pop(toPopOperand(to));
-        masm.addPtr(Imm32(from.disp()), toOperand(to));
-#endif
+        MOZ_ASSERT(from.isEffectiveAddress());
+        if (hasScratchRegister()) {
+            Register reg = scratchRegister();
+            masm.lea(toOperand(from), reg);
+            masm.mov(reg, toOperand(to));
+        } else {
+            // This is tricky without a scratch reg. We can't do an lea. Bounce the
+            // base register off the stack, then add the offset in place. Note that
+            // this clobbers FLAGS!
+            masm.Push(from.base());
+            masm.Pop(toPopOperand(to));
+            masm.addPtr(Imm32(from.disp()), toOperand(to));
+        }
     }
 }
 
@@ -393,9 +435,9 @@ MoveEmitterX86::emitFloat32Move(const MoveOperand& from, const MoveOperand& to)
         masm.loadFloat32(toAddress(from), to.floatReg());
     } else {
         // Memory to memory move.
-        JS_ASSERT(from.isMemory());
-        masm.loadFloat32(toAddress(from), ScratchFloatReg);
-        masm.storeFloat32(ScratchFloatReg, toAddress(to));
+        MOZ_ASSERT(from.isMemory());
+        masm.loadFloat32(toAddress(from), ScratchFloat32Reg);
+        masm.storeFloat32(ScratchFloat32Reg, toAddress(to));
     }
 }
 
@@ -411,16 +453,52 @@ MoveEmitterX86::emitDoubleMove(const MoveOperand& from, const MoveOperand& to)
         masm.loadDouble(toAddress(from), to.floatReg());
     } else {
         // Memory to memory move.
-        JS_ASSERT(from.isMemory());
-        masm.loadDouble(toAddress(from), ScratchFloatReg);
-        masm.storeDouble(ScratchFloatReg, toAddress(to));
+        MOZ_ASSERT(from.isMemory());
+        masm.loadDouble(toAddress(from), ScratchDoubleReg);
+        masm.storeDouble(ScratchDoubleReg, toAddress(to));
+    }
+}
+
+void
+MoveEmitterX86::emitInt32X4Move(const MoveOperand& from, const MoveOperand& to)
+{
+    if (from.isFloatReg()) {
+        if (to.isFloatReg())
+            masm.moveInt32x4(from.floatReg(), to.floatReg());
+        else
+            masm.storeAlignedInt32x4(from.floatReg(), toAddress(to));
+    } else if (to.isFloatReg()) {
+        masm.loadAlignedInt32x4(toAddress(from), to.floatReg());
+    } else {
+        // Memory to memory move.
+        MOZ_ASSERT(from.isMemory());
+        masm.loadAlignedInt32x4(toAddress(from), ScratchSimdReg);
+        masm.storeAlignedInt32x4(ScratchSimdReg, toAddress(to));
+    }
+}
+
+void
+MoveEmitterX86::emitFloat32X4Move(const MoveOperand& from, const MoveOperand& to)
+{
+    if (from.isFloatReg()) {
+        if (to.isFloatReg())
+            masm.moveFloat32x4(from.floatReg(), to.floatReg());
+        else
+            masm.storeAlignedFloat32x4(from.floatReg(), toAddress(to));
+    } else if (to.isFloatReg()) {
+        masm.loadAlignedFloat32x4(toAddress(from), to.floatReg());
+    } else {
+        // Memory to memory move.
+        MOZ_ASSERT(from.isMemory());
+        masm.loadAlignedFloat32x4(toAddress(from), ScratchSimdReg);
+        masm.storeAlignedFloat32x4(ScratchSimdReg, toAddress(to));
     }
 }
 
 void
 MoveEmitterX86::assertDone()
 {
-    JS_ASSERT(!inCycle_);
+    MOZ_ASSERT(!inCycle_);
 }
 
 void

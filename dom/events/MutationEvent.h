@@ -30,7 +30,7 @@ public:
   // Forward to base class
   NS_FORWARD_TO_EVENT
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE
+  virtual JSObject* WrapObjectInternal(JSContext* aCx) override
   {
     return MutationEventBinding::Wrap(aCx, this);
   }
@@ -56,6 +56,9 @@ public:
                             aRelatedNode ? aRelatedNode->AsDOMNode() : nullptr,
                             aPrevValue, aNewValue, aAttrName, aAttrChange);
   }
+
+protected:
+  ~MutationEvent() {}
 };
 
 } // namespace dom

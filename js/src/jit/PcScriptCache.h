@@ -45,8 +45,8 @@ struct PcScriptCache
              JSScript** scriptRes, jsbytecode** pcRes)
     {
         // If a GC occurred, lazily clear the cache now.
-        if (gcNumber != rt->gcNumber) {
-            clear(rt->gcNumber);
+        if (gcNumber != rt->gc.gcNumber()) {
+            clear(rt->gc.gcNumber());
             return false;
         }
 
@@ -61,6 +61,9 @@ struct PcScriptCache
     }
 
     void add(uint32_t hash, uint8_t* addr, jsbytecode* pc, JSScript* script) {
+        MOZ_ASSERT(addr);
+        MOZ_ASSERT(pc);
+        MOZ_ASSERT(script);
         entries[hash].returnAddress = addr;
         entries[hash].pc = pc;
         entries[hash].script = script;

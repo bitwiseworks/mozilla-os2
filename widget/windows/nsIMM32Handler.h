@@ -110,6 +110,7 @@ protected:
 
 class nsIMM32Handler
 {
+  typedef mozilla::widget::IMENotification IMENotification;
   typedef mozilla::widget::MSGResult MSGResult;
 public:
   static void Initialize();
@@ -145,6 +146,11 @@ public:
 
   static nsIMEUpdatePreference GetIMEUpdatePreference();
 
+  // Returns NS_SUCCESS_EVENT_CONSUMED if the mouse button event is consumed by
+  // IME.  Otherwise, NS_OK.
+  static nsresult OnMouseButtonEvent(nsWindow* aWindow,
+                                     const IMENotification& aIMENotification);
+
 protected:
   static void EnsureHandlerInstance();
 
@@ -176,8 +182,6 @@ protected:
 
   // On*() methods return true if the caller of message handler shouldn't do
   // anything anymore.  Otherwise, false.
-  bool OnMouseEvent(nsWindow* aWindow, LPARAM lParam, int aAction,
-                    MSGResult& aResult);
   static bool OnKeyDownEvent(nsWindow* aWindow, WPARAM wParam, LPARAM lParam,
                              MSGResult& aResult);
 
@@ -223,7 +227,10 @@ protected:
                               const nsIMEContext &aIMEContext);
   bool HandleComposition(nsWindow* aWindow, const nsIMEContext &aIMEContext,
                            LPARAM lParam);
-  void HandleEndComposition(nsWindow* aWindow);
+  // If aCommitString is null, this commits composition with the latest
+  // dispatched data.  Otherwise, commits composition with the value.
+  void HandleEndComposition(nsWindow* aWindow,
+                            const nsAString* aCommitString = nullptr);
   bool HandleReconvert(nsWindow* aWindow, LPARAM lParam, LRESULT *oResult);
   bool HandleQueryCharPosition(nsWindow* aWindow, LPARAM lParam,
                                  LRESULT *oResult);
@@ -272,7 +279,9 @@ protected:
                                           uint32_t aOffset,
                                           nsIntRect &aCharRect);
   bool GetCaretRect(nsWindow* aWindow, nsIntRect &aCaretRect);
-  void GetCompositionString(const nsIMEContext &aIMEContext, DWORD aIndex);
+  void GetCompositionString(const nsIMEContext &aIMEContext,
+                            DWORD aIndex,
+                            nsAString& aCompositionString) const;
   /**
    *  Get the current target clause of composition string.
    *  If there are one or more characters whose attribute is ATTR_TARGET_*,
@@ -286,8 +295,18 @@ protected:
    *  in the composition string, you need to subtract mCompositionStart from it.
    */
   bool GetTargetClauseRange(uint32_t *aOffset, uint32_t *aLength = nullptr);
-  void DispatchTextEvent(nsWindow* aWindow, const nsIMEContext &aIMEContext,
-                         bool aCheckAttr = true);
+
+  /**
+   * DispatchCompositionChangeEvent() dispatches NS_COMPOSITION_CHANGE event
+   * with clause information (it'll be retrieved by CreateTextRangeArray()).
+   * I.e., this should be called only during composing.  If a composition is
+   * being committed, only HandleCompositionEnd() should be called.
+   *
+   * @param aWindow     The window which has the composition.
+   * @param aIMEContext Native IME context which has the composition.
+   */
+  void DispatchCompositionChangeEvent(nsWindow* aWindow,
+                                      const nsIMEContext& aIMEContext);
   already_AddRefed<mozilla::TextRangeArray> CreateTextRangeArray();
 
   nsresult EnsureClauseArray(int32_t aCount);
@@ -330,7 +349,6 @@ protected:
 
   nsWindow* mComposingWindow;
   nsString  mCompositionString;
-  nsString  mLastDispatchedCompositionString;
   InfallibleTArray<uint32_t> mClauseArray;
   InfallibleTArray<uint8_t> mAttributeArray;
 
