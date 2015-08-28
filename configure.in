@@ -5587,8 +5587,8 @@ else
 fi
 
 AC_SUBST(MOZ_LIBKAI)
-AC_SUBST(MOZ_LIBKAI_CFLAGS)
-AC_SUBST(MOZ_LIBKAI_LIBS)
+AC_SUBST_LIST(MOZ_LIBKAI_CFLAGS)
+AC_SUBST_LIST(MOZ_LIBKAI_LIBS)
 
 dnl ========================================================
 dnl system libvpx Support
