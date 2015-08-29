@@ -23,7 +23,7 @@ EXPORTS += [
     'nsUCSupport.h',
     'uconvutil.h',
     'ucvcn/nsUCvCnCID.h',
-    'ucvibm/nsUCvIBMCID.h'
+    'ucvibm/nsUCvIBMCID.h',
     'ucvja/nsUCVJA2CID.h',
     'ucvja/nsUCVJACID.h',
     'ucvko/nsUCvKOCID.h',
@@ -55,23 +55,23 @@ UNIFIED_SOURCES += [
 ]
 
 UNIFIED_SOURCES += [
+    'ucvibm/nsCP1125ToUnicode.cpp',
+    'ucvibm/nsCP1131ToUnicode.cpp',
     'ucvibm/nsCP850ToUnicode.cpp',
     'ucvibm/nsCP852ToUnicode.cpp',
     'ucvibm/nsCP855ToUnicode.cpp',
     'ucvibm/nsCP857ToUnicode.cpp',
     'ucvibm/nsCP862ToUnicode.cpp',
     'ucvibm/nsCP864ToUnicode.cpp',
+    'ucvibm/nsCP869ToUnicode.cpp',
+    'ucvibm/nsUnicodeToCP1125.cpp',
+    'ucvibm/nsUnicodeToCP1131.cpp',
     'ucvibm/nsUnicodeToCP850.cpp',
     'ucvibm/nsUnicodeToCP852.cpp',
     'ucvibm/nsUnicodeToCP855.cpp',
     'ucvibm/nsUnicodeToCP857.cpp',
     'ucvibm/nsUnicodeToCP862.cpp',
     'ucvibm/nsUnicodeToCP864.cpp',
-    'ucvibm/nsCP1125ToUnicode.cpp',
-    'ucvibm/nsCP1131ToUnicode.cpp',
-    'ucvibm/nsCP869ToUnicode.cpp',
-    'ucvibm/nsUnicodeToCP1125.cpp',
-    'ucvibm/nsUnicodeToCP1131.cpp',
     'ucvibm/nsUnicodeToCP869.cpp',
 ]
 

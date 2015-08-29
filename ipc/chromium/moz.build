@@ -259,7 +259,6 @@ if os_bsd:
 if os_os2:
     SOURCES += [
         'src/base/atomicops_internals_x86_gcc.cc',
-        'src/base/base_paths_os2.cc',
         'src/base/message_pump_os2.cc',
         'src/base/platform_thread_os2.cc',
         'src/base/process_util_linux.cc',

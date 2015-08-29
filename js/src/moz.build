@@ -398,7 +398,7 @@ if CONFIG['OS_ARCH'] == 'WINNT':
     DEFINES['_CRT_RAND_S'] = True
 elif CONFIG['OS_ARCH'] == 'OS2':
     SOURCES += [
-        'assembler/jit/ExecutableAllocatorOS2.cpp',
+        'jit/ExecutableAllocatorOS2.cpp',
         'yarr/OSAllocatorOS2.cpp',
     ]
 else:
