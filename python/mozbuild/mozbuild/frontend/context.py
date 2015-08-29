@@ -830,6 +830,19 @@ VARIABLES = {
         shared objects, and is supported only on some unix platforms.
         """, None),
 
+    'SHORT_LIBNAME': (unicode, unicode,
+        """The short name of the shared library corrently being linked
+
+        This is primarily needed on OS/2 which limits the DLL file name to the
+        8.3 format.
+
+        In ``example/components/moz.build``,::
+
+           SHORT_LIBNAME = 'xpcomsmp'
+
+        would generate ``example/components/xpcompsmp.dll`` on OS/2.
+        """, None),
+
     'HOST_SIMPLE_PROGRAMS': (StrictOrderingOnAppendList, list,
         """Compile a list of host executable names.
 

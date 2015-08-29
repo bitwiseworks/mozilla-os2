@@ -685,6 +685,7 @@ class TreeMetadataEmitter(LoggingMixin):
         is_component = context.get('IS_COMPONENT')
 
         soname = context.get('SONAME')
+        short_name = context.get('SHORT_LIBNAME')
 
         lib_defines = context.get('LIBRARY_DEFINES')
 
@@ -750,6 +751,12 @@ class TreeMetadataEmitter(LoggingMixin):
                     raise SandboxValidationError(
                         'SONAME requires FORCE_SHARED_LIB', context)
                 shared_args['soname'] = soname
+
+            if short_name:
+                if not shared_lib:
+                    raise SandboxValidationError(
+                        'SHORT_LIBNAME requires FORCE_SHARED_LIB', context)
+                shared_args['short_name'] = short_name
 
             # If both a shared and a static library are created, only the
             # shared library is meant to be a SDK library.

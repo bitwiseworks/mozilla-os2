@@ -131,13 +131,17 @@ def GeckoCppUnitTests(names, **kwargs):
 
 
 @template
-def GeckoSharedLibrary(name, **kwargs):
+def GeckoSharedLibrary(name, short_name=None, **kwargs):
     '''Template for shared libraries related to Gecko.
 
     `name` identifies the library base name.
+    `short_name` identifies the short library name (used on platforms
+    that have the 8.3 limit on the DLL file name, e.g. OS/2), defaults
+    to `name`.
+
     See the documentation for `GeckoBinary` for other possible arguments.
     '''
-    SharedLibrary(name)
+    SharedLibrary(name, short_name=short_name)
 
     kwargs.setdefault('mozglue', 'library')
 

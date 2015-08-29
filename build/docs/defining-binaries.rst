@@ -289,6 +289,11 @@ On e.g. Linux, the above ``myprog`` will have DT_NEEDED markers for
 ``libotherlib.so`` if there weren't a ``SONAME``. This means the runtime
 requirement for ``myprog`` is ``libfoo.so`` instead of ``libotherlib.so``.
 
+The ``SHORT_LIBNAME`` variable declares a short name for the shared library.
+It defaults to the ``Library`` name or the ``SHARED_LIBRARY_NAME`` if set.
+This only impacts platforms with the 8.3 limit on the DLL file name
+(e.g. OS/2).
+
 
 Gecko-related binaries
 ======================

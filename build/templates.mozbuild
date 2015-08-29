@@ -63,11 +63,13 @@ def Library(name):
 
 
 @template
-def SharedLibrary(name):
+def SharedLibrary(name, short_name=None):
     '''Template for shared libraries.'''
     Library(name)
 
     FORCE_SHARED_LIB = True
+    if short_name:
+        SHORT_LIBNAME = short_name
 
     Binary()
 
