@@ -28,7 +28,6 @@ endif
 ifndef MOZ_NATIVE_FFI
 DEFINES += -DFFI_BUILDING
 endif
-endif
 
 endif # JS_HAS_CTYPES
 
