@@ -11,8 +11,36 @@
 #include "nsISupportsPrimitives.h"
 #include "nsIComponentManager.h"
 
+#if 0
 NS_IMPL_ADDREF(nsPrintProgress)
 NS_IMPL_RELEASE(nsPrintProgress)
+#else
+NS_IMETHODIMP_(MozExternalRefCountType) nsPrintProgress::AddRef(void)
+{
+  NS_PRECONDITION(int32_t(mRefCnt) >= 0, "illegal refcnt");
+  nsrefcnt count;
+  count = ++mRefCnt;
+  //NS_LOG_ADDREF(this, count, "nsPrintProgress", sizeof(*this));
+  return count;
+}
+
+NS_IMETHODIMP_(MozExternalRefCountType) nsPrintProgress::Release(void)
+{
+  nsrefcnt count;
+  NS_PRECONDITION(0 != mRefCnt, "dup release");
+  count = --mRefCnt;
+  //NS_LOG_RELEASE(this, count, "nsPrintProgress");
+  if (0 == count) {
+    mRefCnt = 1; /* stabilize */
+    /* enable this to find non-threadsafe destructors: */
+    /* NS_ASSERT_OWNINGTHREAD(nsPrintProgress); */
+    delete this;
+    return 0;
+  }
+  return count;
+}
+
+#endif
 
 NS_INTERFACE_MAP_BEGIN(nsPrintProgress)
    NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIPrintStatusFeedback)
