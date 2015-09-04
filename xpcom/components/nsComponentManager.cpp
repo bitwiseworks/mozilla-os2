@@ -319,14 +319,29 @@ nsComponentManagerImpl::nsComponentManagerImpl()
 
 nsTArray<const mozilla::Module*>* nsComponentManagerImpl::sStaticModules;
 
+#if defined(__EMX__)
+extern "C" int __kPStaticModules__;
+#else
 NSMODULE_DEFN(start_kPStaticModules);
 NSMODULE_DEFN(end_kPStaticModules);
+#endif
 
 /* The content between start_kPStaticModules and end_kPStaticModules is gathered
  * by the linker from various objects containing symbols in a specific section.
  * ASAN considers (rightfully) the use of this content as a global buffer
  * overflow. But this is a deliberate and well-considered choice, with no proper
- * way to make ASAN happy. */
+ * way to make ASAN happy.
+ *
+ * Note that GCC for OS/2 doesn't support the section attribute (because the
+ * a.out format used there as gas output doesn't support custom sections).
+ * Instead, we use special .stabs types (N_SETA/N_SETD) to generate a table of
+ * pointers to the module variables gathered across the sources. This means that
+ * the variables themselves are not packed in a table (as it happens on other
+ * platforms using sections) but instead their addresses are packed (so one more
+ * level of indirection is back). We have the address of this table in
+ * __kPStaticModules__ and its last element is nullptr, hence we don't need fake
+ * start_kPStaticModules and end_kPStaticModules to access the table.
+ */
 MOZ_ASAN_BLACKLIST
 /* static */ void
 nsComponentManagerImpl::InitializeStaticModules()
@@ -336,12 +351,32 @@ nsComponentManagerImpl::InitializeStaticModules()
   }
 
   sStaticModules = new nsTArray<const mozilla::Module*>;
+#if defined(__EMX__)
+  int* ptr = &__kPStaticModules__;
+  if (*ptr == -2) { /* emxomf */
+    for (const mozilla::Module * const* const* staticModules =
+           (const mozilla::Module * const* const*)(ptr + 1);
+         *staticModules != nullptr; ++staticModules)
+      sStaticModules->AppendElement(**staticModules);
+  } else {
+      if (*ptr == -1)
+        --ptr;          /* Fix GNU ld bug */
+      int n = *ptr++;   /* Get size of vector */
+      if (*ptr == -1) { /* First element must be -1, see crt0.s */
+        for (const mozilla::Module * const* const* staticModules =
+               (const mozilla::Module * const* const*)(ptr + 1);
+             n > 1; ++staticModules, --n)
+          sStaticModules->AppendElement(**staticModules);
+      }
+  }
+#else
   for (const mozilla::Module * const* staticModules =
          &NSMODULE_NAME(start_kPStaticModules) + 1;
        staticModules < &NSMODULE_NAME(end_kPStaticModules); ++staticModules)
     if (*staticModules) { // ASAN adds padding
       sStaticModules->AppendElement(*staticModules);
     }
+#endif
 }
 
 nsTArray<nsComponentManagerImpl::ComponentLocation>*

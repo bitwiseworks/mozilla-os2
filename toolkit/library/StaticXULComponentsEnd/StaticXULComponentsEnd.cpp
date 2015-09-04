@@ -1,5 +1,6 @@
 #include "mozilla/Module.h"
 
+#if !defined(__EMX__)
 /* Ensure end_kPStaticModules is at the end of the .kPStaticModules section
  * on Windows. Somehow, placing the object last is not enough with PGO/LTCG. */
 #ifdef _MSC_VER
@@ -11,3 +12,4 @@
 #  define NSMODULE_SECTION __declspec(allocate(".kPStaticModules$Z"), dllexport)
 #endif
 NSMODULE_DEFN(end_kPStaticModules) = nullptr;
+#endif

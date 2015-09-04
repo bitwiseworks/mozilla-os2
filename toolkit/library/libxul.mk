@@ -52,6 +52,9 @@ endif
 endif
 endif
 
+# On OS/2 we don't need to check for NSModule order, see nsComponentManager.cpp
+ifneq ($(OS_ARCH),OS2)
+
 ifdef _MSC_VER
 get_first_and_last = dumpbin -exports $1 | grep _NSModule@@ | sort -k 3 | sed -n 's/^.*?\([^@]*\)@@.*$$/\1/;1p;$$p'
 else
@@ -63,6 +66,8 @@ LOCAL_CHECKS = test "$$($(get_first_and_last) | xargs echo)" != "start_kPStaticM
 ifeq (Linux,$(OS_ARCH))
 LOCAL_CHECKS += ; test "$$($(TOOLCHAIN_PREFIX)readelf -l $1 | awk '$1 == "LOAD" { t += 1 } END { print t }')" -le 1 && echo "Only one PT_LOAD segment" && exit 1 || exit 0
 endif
+
+endif # !OS2
 
 ifeq ($(OS_ARCH),OS2)
 RCFLAGS += -i $(topsrcdir)/widget/os2

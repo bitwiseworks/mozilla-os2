@@ -127,14 +127,23 @@ struct Module
 #      define NSMODULE_SECTION __attribute__((section(".kPStaticModules"), visibility("protected")))
 #    elif defined(__MACH__)
 #      define NSMODULE_SECTION __attribute__((section("__DATA, .kPStaticModules"), visibility("default")))
+#    elif defined (__EMX__)
+#      define NSMODULE_SECTION
+#      define NSMODULE_DEFN_INTERNAL(_nsmodule_name) NSMODULE_DEFN_INTERNAL2(_nsmodule_name)
+#      define NSMODULE_DEFN_INTERNAL2(_nsmodule_name) \
+         __asm__(".stabs \"___kPStaticModules__\", 25, 0, 0, _" #_nsmodule_name); \
+         extern "C" __attribute__((dllexport)) mozilla::Module const *const _nsmodule_name
+#      define NSMODULE_DEFN(_name) NSMODULE_DEFN_INTERNAL(NSMODULE_NAME(_name))
 #    elif defined (_WIN32)
 #      define NSMODULE_SECTION __attribute__((section(".kPStaticModules"), dllexport))
 #    endif
 #  endif
-#  if !defined(NSMODULE_SECTION)
-#    error Do not know how to define sections.
+#  if !defined(NSMODULE_DEFN)
+#    if !defined(NSMODULE_SECTION)
+#      error Do not know how to define sections.
+#    endif
+#    define NSMODULE_DEFN(_name) extern NSMODULE_SECTION mozilla::Module const *const NSMODULE_NAME(_name)
 #  endif
-#  define NSMODULE_DEFN(_name) extern NSMODULE_SECTION mozilla::Module const *const NSMODULE_NAME(_name)
 #else
 #  define NSMODULE_NAME(_name) NSModule
 #  define NSMODULE_DEFN(_name) extern "C" NS_EXPORT mozilla::Module const *const NSModule
