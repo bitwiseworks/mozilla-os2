@@ -1736,9 +1736,15 @@ nsPluginFrame::PaintPlugin(nsDisplayListBuilder* aBuilder,
     mInstanceOwner->GetWindow(window);
 
     if (window->type == NPWindowTypeDrawable) {
+      gfxContext* ctx = aRenderingContext.ThebesContext();
+      // Translate the context:
+      gfxPoint devPixelPt =
+        nsLayoutUtils::PointToGfxPoint(aPluginRect.TopLeft(),
+                                       PresContext()->AppUnitsPerDevPixel());
+
+      gfxContextMatrixAutoSaveRestore autoSR(ctx);
+      ctx->SetMatrix(ctx->CurrentMatrix().Translate(devPixelPt));
       // FIXME - Bug 385435: Doesn't aDirtyRect need translating too?
-      nsRenderingContext::AutoPushTranslation
-        translate(&aRenderingContext, aPluginRect.TopLeft());
 
       // check if we need to call SetWindow with updated parameters
       bool doupdatewindow = false;
@@ -1753,7 +1759,6 @@ nsPluginFrame::PaintPlugin(nsDisplayListBuilder* aBuilder,
        * to tell the plugin where it is, we dispatch a NPWindow through
        * |HandleEvent| to tell the plugin when its window moved
        */
-      gfxContext *ctx = aRenderingContext.ThebesContext();
 
       gfxMatrix ctxMatrix = ctx->CurrentMatrix();
       if (ctxMatrix.HasNonTranslation()) {
@@ -1770,9 +1775,6 @@ nsPluginFrame::PaintPlugin(nsDisplayListBuilder* aBuilder,
 
       origin.x = NSToIntRound(ctxMatrix.GetTranslation().x);
       origin.y = NSToIntRound(ctxMatrix.GetTranslation().y);
-
-      /* Need to force the clip to be set */
-      ctx->UpdateSurfaceClip();
 
       /* Set the device offsets as appropriate, for whatever our current group offsets might be */
       gfxFloat xoff, yoff;
