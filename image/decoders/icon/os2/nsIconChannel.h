@@ -13,6 +13,7 @@
 #include "nsXPIDLString.h"
 #include "nsIChannel.h"
 #include "nsILoadGroup.h"
+#include "nsILoadInfo.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIURI.h"
@@ -21,8 +22,10 @@
 
 class nsIFile;
 
-class nsIconChannel MOZ_FINAL : public nsIChannel, public nsIStreamListener
+class nsIconChannel final : public nsIChannel, public nsIStreamListener
 {
+  ~nsIconChannel();
+
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIREQUEST
@@ -31,22 +34,24 @@ public:
   NS_DECL_NSISTREAMLISTENER
 
   nsIconChannel();
-  virtual ~nsIconChannel();
 
   nsresult Init(nsIURI* uri);
 
 protected:
   nsCOMPtr<nsIURI> mUrl;
   nsCOMPtr<nsIURI> mOriginalURI;
-  int64_t          mContentLength;
   nsCOMPtr<nsILoadGroup> mLoadGroup;
   nsCOMPtr<nsIInterfaceRequestor> mCallbacks;
-  nsCOMPtr<nsISupports>  mOwner; 
+  nsCOMPtr<nsISupports>  mOwner;
+  nsCOMPtr<nsILoadInfo>  mLoadInfo;
 
   nsCOMPtr<nsIInputStreamPump> mPump;
   nsCOMPtr<nsIStreamListener>  mListener;
 
-  nsresult ExtractIconInfoFromUrl(nsIFile ** aLocalFile, uint32_t * aDesiredImageSize, nsACString &aContentType, nsACString &aFileExtension);
+  nsresult ExtractIconInfoFromUrl(nsIFile** aLocalFile,
+                                  uint32_t* aDesiredImageSize,
+                                  nsACString& aContentType,
+                                  nsACString& aFileExtension);
   nsresult MakeInputStream(nsIInputStream** _retval, bool nonBlocking);
 };
 
