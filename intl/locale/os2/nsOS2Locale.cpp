@@ -36,13 +36,12 @@ int APIENTRY UniQueryLocaleValue ( const LocaleObject locale_object,
 /* nsOS2Locale ISupports */
 NS_IMPL_ISUPPORTS(nsOS2Locale,nsIOS2Locale)
 
-nsOS2Locale::nsOS2Locale(void)
+nsOS2Locale::nsOS2Locale()
 {
 }
 
-nsOS2Locale::~nsOS2Locale(void)
+nsOS2Locale::~nsOS2Locale()
 {
-
 }
 
 /* Workaround for GCC problem */
