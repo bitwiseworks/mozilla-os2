@@ -35,27 +35,34 @@ static double gTicksPerSecDbl = .0;
 static double gTicksPerMsDbl = .0;
 
 double
-TimeDuration::ToSeconds() const
+BaseTimeDurationPlatformUtils::ToSeconds(int64_t aTicks)
 {
-  return double(mValue)/gTicksPerSecDbl;
+  return double(aTicks)/gTicksPerSecDbl;
 }
 
 double
-TimeDuration::ToSecondsSigDigits() const
+BaseTimeDurationPlatformUtils::ToSecondsSigDigits(int64_t aTicks)
 {
-  return ToSeconds();
+  return ToSeconds(aTicks);
 }
 
-TimeDuration
-TimeDuration::FromMilliseconds(double aMilliseconds)
+int64_t
+BaseTimeDurationPlatformUtils::TicksFromMilliseconds(double aMilliseconds)
 {
-  return TimeDuration::FromTicks(aMilliseconds * gTicksPerMsDbl);
+  double result = aMilliseconds * gTicksPerMsDbl;
+  if (result > INT64_MAX) {
+    return INT64_MAX;
+  } else if (result < INT64_MIN) {
+    return INT64_MIN;
+  }
+
+  return result;
 }
 
-TimeDuration
-TimeDuration::Resolution()
+int64_t
+BaseTimeDurationPlatformUtils::ResolutionInTicks()
 {
-  return TimeDuration::FromTicks(int64_t(gTicksPerSec));
+  return static_cast<int64_t>(gTicksPerSec);
 }
 
 nsresult
