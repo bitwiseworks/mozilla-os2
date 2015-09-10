@@ -12,6 +12,11 @@ DEFFILE = $(DEPTH)/db/sqlite3/src/sqlite-processed.def
 
 else
 ifndef MOZ_FOLD_LIBS
+ifeq ($(OS_ARCH),OS2)
+ADD_TO_DEF_FILE = $(call py_action,preprocessor,$(DEFINES) \
+       $(topsrcdir)/db/sqlite3/src/sqlite.def) | sed -e '1,/^EXPORTS$$/ d' -e 's,sqlite3,_\0,' \
+       -e 's,\ DATA.*$$,,' >> $(DEF_FILE)
+else
 ifdef GCC_USE_GNU_LD
 
 GARBAGE += \
@@ -23,6 +28,7 @@ $(LD_VERSION_SCRIPT): $(topsrcdir)/db/sqlite3/src/sqlite.def
 	@$(call py_action,convert_def_file, \
 	  $(DEFINES) $(ACDEFINES) $(XULPPFLAGS) -o $@ $^)
 
+endif
 endif
 endif
 endif

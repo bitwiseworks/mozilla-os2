@@ -18,6 +18,8 @@ else:
     else:
         SharedLibrary('sqlite')
         SHARED_LIBRARY_NAME = 'mozsqlite3'
+        if CONFIG['OS_ARCH'] == 'OS2':
+            SHORT_LIBNAME = 'mozsqlt3'
 
         if CONFIG['OS_ARCH'] == 'Linux' and CONFIG['GCC_USE_GNU_LD']:
             LD_VERSION_SCRIPT = 'sqlite-processed.def'
