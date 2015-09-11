@@ -25,20 +25,17 @@ public:
 
     virtual already_AddRefed<gfxASurface>
       CreateOffscreenSurface(const IntSize& size,
-                             gfxContentType contentType) MOZ_OVERRIDE;
+                             gfxContentType contentType) override;
 
     nsresult GetFontList(nsIAtom *aLangGroup,
                          const nsACString& aGenericFamily,
                          nsTArray<nsString>& aListOfFonts);
     nsresult UpdateFontList();
-    nsresult ResolveFontName(const nsAString& aFontName,
-                             FontResolverCallback aCallback,
-                             void *aClosure, bool& aAborted);
     nsresult GetStandardFamilyName(const nsAString& aFontName, nsAString& aFamilyName);
 
-    gfxFontGroup *CreateFontGroup(const nsAString &aFamilies,
+    gfxFontGroup *CreateFontGroup(const mozilla::FontFamilyList& aFontFamilyList,
                                   const gfxFontStyle *aStyle,
-                                  gfxUserFontSet *aUserFontSet);
+                                  gfxUserFontSet *aUserFontSet) override;
 
     // Given a string and a font we already have, find the font that
     // supports the most code points and most closely resembles aFont.

@@ -91,8 +91,6 @@ static void FillMetricsDefaults(gfxFont::Metrics *aMetrics)
     aMetrics->underlineOffset = -aMetrics->underlineSize;
     aMetrics->strikeoutOffset = 0.25 * aMetrics->emHeight;
     aMetrics->strikeoutSize = aMetrics->underlineSize;
-    aMetrics->superscriptOffset = aMetrics->xHeight;
-    aMetrics->subscriptOffset = aMetrics->xHeight;
 }
 
 // Snap a line to pixels while keeping the center and size of the
@@ -107,15 +105,15 @@ static void SnapLineToPixels(gfxFloat& aOffset, gfxFloat& aSize)
     aSize = snappedSize;
 }
 
-// gfxOS2Font::GetMetrics()
+// gfxOS2Font::GetHorizontalMetrics()
 // return the metrics of the current font using the gfxFont metrics structure.
 // If the metrics are not available yet, compute them using the FreeType
 // function on the font. (This is partly based on the respective function from
 // gfxPangoFonts)
-const gfxFont::Metrics& gfxOS2Font::GetMetrics()
+const gfxFont::Metrics& gfxOS2Font::GetHorizontalMetrics()
 {
 #ifdef DEBUG_thebes_1
-    printf("gfxOS2Font[%#x]::GetMetrics()\n", (unsigned)this);
+    printf("gfxOS2Font[%#x]::GetHorizontalMetrics()\n", (unsigned)this);
 #endif
     if (mMetrics) {
         return *mMetrics;
@@ -211,17 +209,10 @@ const gfxFont::Metrics& gfxOS2Font::GetMetrics()
         // if we are here we can improve the avgCharWidth
         mMetrics->aveCharWidth = std::max(mMetrics->aveCharWidth,
                                         os2->xAvgCharWidth * xScale);
-
-        mMetrics->superscriptOffset = std::max(os2->ySuperscriptYOffset * yScale, 1.0);
-        // some fonts have the incorrect sign (from gfxPangoFonts)
-        mMetrics->subscriptOffset   = std::max(fabs(os2->ySubscriptYOffset * yScale),
-                                             1.0);
         mMetrics->strikeoutOffset   = os2->yStrikeoutPosition * yScale;
         mMetrics->strikeoutSize     = os2->yStrikeoutSize * yScale;
     } else {
         // use fractions of emHeight instead of xHeight for these to be more robust
-        mMetrics->superscriptOffset = mMetrics->emHeight * 0.5;
-        mMetrics->subscriptOffset   = mMetrics->emHeight * 0.2;
         mMetrics->strikeoutOffset   = mMetrics->emHeight * 0.3;
         mMetrics->strikeoutSize     = face->underline_thickness * yScale;
     }
@@ -255,7 +246,7 @@ const gfxFont::Metrics& gfxOS2Font::GetMetrics()
     SanitizeMetrics(mMetrics, false);
 
 #ifdef DEBUG_thebes_1
-    printf("gfxOS2Font[%#x]::GetMetrics():\n"
+    printf("gfxOS2Font[%#x]::GetHorizontalMetrics():\n"
            "  %s (%s)\n"
            "  emHeight=%f == %f=gfxFont::style.size == %f=adjSz\n"
            "  maxHeight=%f  xHeight=%f\n"
@@ -492,46 +483,37 @@ already_AddRefed<gfxOS2Font> gfxOS2Font::GetOrMakeFont(const nsAString& aName,
  * class gfxOS2FontGroup
  **********************************************************************/
 
-gfxOS2FontGroup::gfxOS2FontGroup(const nsAString& aFamilies,
+gfxOS2FontGroup::gfxOS2FontGroup(const FontFamilyList & aFontFamilyList,
                                  const gfxFontStyle* aStyle,
                                  gfxUserFontSet *aUserFontSet)
-    : gfxFontGroup(aFamilies, aStyle, aUserFontSet)
+    : gfxFontGroup(aFontFamilyList, aStyle, aUserFontSet)
 {
 #ifdef DEBUG_thebes_2
-    printf("gfxOS2FontGroup[%#x]::gfxOS2FontGroup(\"%s\", %#x)\n",
-           (unsigned)this, NS_LossyConvertUTF16toASCII(aFamilies).get(),
-           (unsigned)aStyle);
+    {
+        nsString families;
+        aFontFamilyList.ToString(families);
+        printf("gfxOS2FontGroup[%#x]::gfxOS2FontGroup(\"%s\", %#x)\n",
+               (unsigned)this, NS_LossyConvertUTF16toASCII(families).get(),
+               (unsigned)aStyle);
+    }
 #endif
 
     // check for WarpSans and as we cannot display that (yet), replace
     // it with Workplace Sans
-    int pos = 0;
-    if ((pos = mFamilies.Find("WarpSans", false, 0, -1)) > -1) {
-        mFamilies.Replace(pos, 8, NS_LITERAL_STRING("Workplace Sans"));
+    const nsTArray<FontFamilyName>& fontlist = mFamilyList.GetFontlist();
+    for (uint32_t i = 0; i < fontlist.Length(); i++) {
+        const FontFamilyName& name = fontlist[i];
+        if (name.IsNamed() && name.mName.EqualsASCII("WarpSans")) {
+            mFamilyList.Append(FontFamilyName(NS_LITERAL_STRING("Workplace Sans")));
+            break;
+        }
     }
-
-    nsTArray<nsString> familyArray;
-    ForEachFont(FontCallback, &familyArray);
-
-    // To be able to easily search for glyphs in other fonts, append a few good
-    // replacement candidates to the list. The best ones are the Unicode fonts that
-    // are set up.
-    nsString fontString;
-    gfxPlatform::GetPlatform()->GetPrefFonts(nsGkAtoms::Unicode, fontString, false);
-    ForEachFont(fontString, nsGkAtoms::Unicode, FontCallback, &familyArray);
 
     // Should append some default font if there are no available fonts.
     // Let's use Helv which should be available on any OS/2 system; if
     // it's not there, Fontconfig replaces it with something else...
-    if (familyArray.Length() == 0) {
-        familyArray.AppendElement(NS_LITERAL_STRING("Helv"));
-    }
-
-    for (uint32_t i = 0; i < familyArray.Length(); i++) {
-        nsRefPtr<gfxOS2Font> font = gfxOS2Font::GetOrMakeFont(familyArray[i], &mStyle);
-        if (font) {
-            mFonts.AppendElement(FamilyFace(nullptr, font));
-        }
+    if (fontlist.Length() == 0) {
+        mFamilyList.Append(FontFamilyName(NS_LITERAL_STRING("Helv")));
     }
 }
 
@@ -544,7 +526,7 @@ gfxOS2FontGroup::~gfxOS2FontGroup()
 
 gfxFontGroup *gfxOS2FontGroup::Copy(const gfxFontStyle *aStyle)
 {
-    return new gfxOS2FontGroup(mFamilies, aStyle, mUserFontSet);
+    return new gfxOS2FontGroup(mFamilyList, aStyle, mUserFontSet);
 }
 
 /**
@@ -560,7 +542,8 @@ static int32_t AppendDirectionalIndicatorUTF8(bool aIsRTL, nsACString& aString)
 }
 
 gfxTextRun *gfxOS2FontGroup::MakeTextRun(const char16_t* aString, uint32_t aLength,
-                                         const Parameters* aParams, uint32_t aFlags)
+                                         const Parameters* aParams, uint32_t aFlags,
+                                         gfxMissingFontRecorder *aMFR)
 {
     if (aLength == 0) {
         return MakeEmptyTextRun(aParams, aFlags);
@@ -576,6 +559,11 @@ gfxTextRun *gfxOS2FontGroup::MakeTextRun(const char16_t* aString, uint32_t aLeng
     if (!textRun)
         return nullptr;
 
+    uint16_t orientation = aFlags & TEXT_ORIENT_MASK;
+    if (orientation == TEXT_ORIENT_VERTICAL_MIXED) {
+        orientation = TEXT_ORIENT_VERTICAL_SIDEWAYS_RIGHT;
+    }
+
     mEnableKerning = !(aFlags & gfxTextRunFactory::TEXT_OPTIMIZE_SPEED);
 
     nsAutoCString utf8;
@@ -588,7 +576,7 @@ gfxTextRun *gfxOS2FontGroup::MakeTextRun(const char16_t* aString, uint32_t aLeng
            (unsigned)this, NS_LossyConvertUTF16toASCII(u16).get(), aLength, (unsigned)aParams, aFlags);
 #endif
 
-    InitTextRun(textRun, (uint8_t *)utf8.get(), utf8.Length(), headerLen);
+    InitTextRun(textRun, (uint8_t *)utf8.get(), utf8.Length(), headerLen, orientation, aMFR);
 
     textRun->FetchGlyphExtents(aParams->mContext);
 
@@ -596,7 +584,8 @@ gfxTextRun *gfxOS2FontGroup::MakeTextRun(const char16_t* aString, uint32_t aLeng
 }
 
 gfxTextRun *gfxOS2FontGroup::MakeTextRun(const uint8_t* aString, uint32_t aLength,
-                                         const Parameters* aParams, uint32_t aFlags)
+                                         const Parameters* aParams, uint32_t aFlags,
+                                         gfxMissingFontRecorder *aMFR)
 {
 #ifdef DEBUG_thebes_2
     const char *cStr = reinterpret_cast<const char *>(aString);
@@ -613,6 +602,11 @@ gfxTextRun *gfxOS2FontGroup::MakeTextRun(const uint8_t* aString, uint32_t aLengt
     }
 
     aFlags |= TEXT_IS_8BIT;
+
+    uint16_t orientation = aFlags & TEXT_ORIENT_MASK;
+    if (orientation == TEXT_ORIENT_VERTICAL_MIXED) {
+        orientation = TEXT_ORIENT_VERTICAL_SIDEWAYS_RIGHT;
+    }
 
     if (GetStyle()->size == 0) {
         // Short-circuit for size-0 fonts, as Windows and ATSUI can't handle
@@ -632,7 +626,7 @@ gfxTextRun *gfxOS2FontGroup::MakeTextRun(const uint8_t* aString, uint32_t aLengt
     if ((aFlags & TEXT_IS_ASCII) && !isRTL) {
         // We don't need to send an override character here, the characters must be all
         // LTR
-        InitTextRun(textRun, (uint8_t *)chars, aLength, 0);
+        InitTextRun(textRun, (uint8_t *)chars, aLength, 0, orientation, aMFR);
     } else {
         // Although chars in not necessarily ASCII (as it may point to the low
         // bytes of any UCS-2 characters < 256), NS_ConvertASCIItoUTF16 seems
@@ -641,7 +635,7 @@ gfxTextRun *gfxOS2FontGroup::MakeTextRun(const uint8_t* aString, uint32_t aLengt
         nsAutoCString utf8;
         int32_t headerLen = AppendDirectionalIndicatorUTF8(isRTL, utf8);
         AppendUTF16toUTF8(unicodeString, utf8);
-        InitTextRun(textRun, (uint8_t *)utf8.get(), utf8.Length(), headerLen);
+        InitTextRun(textRun, (uint8_t *)utf8.get(), utf8.Length(), headerLen, orientation, aMFR);
     }
 
     textRun->FetchGlyphExtents(aParams->mContext);
@@ -651,10 +645,12 @@ gfxTextRun *gfxOS2FontGroup::MakeTextRun(const uint8_t* aString, uint32_t aLengt
 
 void gfxOS2FontGroup::InitTextRun(gfxTextRun *aTextRun, const uint8_t *aUTF8Text,
                                   uint32_t aUTF8Length,
-                                  uint32_t aUTF8HeaderLength)
+                                  uint32_t aUTF8HeaderLength,
+                                  uint16_t orientation,
+                                  gfxMissingFontRecorder *aMFR)
 {
     CreateGlyphRunsFT(aTextRun, aUTF8Text + aUTF8HeaderLength,
-                      aUTF8Length - aUTF8HeaderLength);
+                      aUTF8Length - aUTF8HeaderLength, orientation, aMFR);
 }
 
 // Helper function to return the leading UTF-8 character in a char pointer
@@ -684,25 +680,26 @@ uint32_t getUTF8CharAndNext(const uint8_t *aString, uint8_t *aLength)
 }
 
 void gfxOS2FontGroup::CreateGlyphRunsFT(gfxTextRun *aTextRun, const uint8_t *aUTF8,
-                                        uint32_t aUTF8Length)
+                                        uint32_t aUTF8Length, uint16_t orientation,
+                                        gfxMissingFontRecorder *aMFR)
 {
 #ifdef DEBUG_thebes_2
     printf("gfxOS2FontGroup::CreateGlyphRunsFT(%#x, _aUTF8_, %d)\n",
            (unsigned)aTextRun, /*aUTF8,*/ aUTF8Length);
     for (uint32_t i = 0; i < FontListLength(); i++) {
-        gfxOS2Font *font = GetFontAt(i);
+        gfxOS2Font *font = GetOS2FontAt(i);
         printf("  i=%d, name=%s, size=%f\n", i, NS_LossyConvertUTF16toASCII(font->GetName()).get(),
                font->GetStyle()->size);
     }
 #endif
-    uint32_t lastFont = FontListLength()-1;
-    gfxOS2Font *font0 = GetFontAt(0);
+    uint32_t lastFont = mFonts.Length()-1;
+    gfxOS2Font *font0 = GetOS2FontAt(0);
     const uint8_t *p = aUTF8;
     uint32_t utf16Offset = 0;
     const uint32_t appUnitsPerDevUnit = aTextRun->GetAppUnitsPerDevUnit();
     gfxOS2Platform *platform = gfxOS2Platform::GetPlatform();
 
-    aTextRun->AddGlyphRun(font0, gfxTextRange::kFontGroup, 0, false);
+    aTextRun->AddGlyphRun(font0, gfxTextRange::kFontGroup, 0, false, orientation);
     // a textRun likely has the same font for most of the characters, so we can
     // lock it before the loop for efficiency
     FT_Face face0 = cairo_ft_scaled_font_lock_face(font0->CairoScaledFont());
@@ -737,7 +734,7 @@ void gfxOS2FontGroup::CreateGlyphRunsFT(gfxTextRun *aTextRun, const uint8_t *aUT
                 gfxOS2Font *font = font0;
                 FT_Face face = face0;
                 if (i > 0) {
-                    font = GetFontAt(i);
+                    font = GetOS2FontAt(i);
                     face = cairo_ft_scaled_font_lock_face(font->CairoScaledFont());
 #ifdef DEBUG_thebes_2
                     if (i == lastFont) {
@@ -765,16 +762,16 @@ void gfxOS2FontGroup::CreateGlyphRunsFT(gfxTextRun *aTextRun, const uint8_t *aUT
                         // likely to find more chars in this font, append it
                         // to the font list to find it quicker next time
                         mFonts.AppendElement(FamilyFace(nullptr, fontX));
-                        lastFont = FontListLength()-1;
+                        lastFont = mFonts.Length()-1;
                     }
                 }
 
                 // select the current font into the text run
-                aTextRun->AddGlyphRun(font, gfxTextRange::kFontGroup, utf16Offset, false);
+                aTextRun->AddGlyphRun(font, gfxTextRange::kFontGroup, utf16Offset, false, orientation);
 
                 int32_t advance = 0;
                 if (gid == font->GetSpaceGlyph()) {
-                    advance = (int)(font->GetMetrics().spaceWidth * appUnitsPerDevUnit);
+                    advance = (int)(font->GetHorizontalMetrics().spaceWidth * appUnitsPerDevUnit);
                 } else if (gid == 0) {
                     advance = -1; // trigger the missing glyphs case below
                 } else {
@@ -868,17 +865,4 @@ void gfxOS2FontGroup::CreateGlyphRunsFT(gfxTextRun *aTextRun, const uint8_t *aUT
         ++utf16Offset;
     }
     cairo_ft_scaled_font_unlock_face(font0->CairoScaledFont());
-}
-
-// append aFontName to aClosure string array, if not already present
-bool gfxOS2FontGroup::FontCallback(const nsAString& aFontName,
-                                     const nsACString& aGenericName,
-                                     bool aUseFontSet,
-                                     void *aClosure)
-{
-    nsTArray<nsString> *sa = static_cast<nsTArray<nsString>*>(aClosure);
-    if (!aFontName.IsEmpty() && !sa->Contains(aFontName)) {
-        sa->AppendElement(aFontName);
-    }
-    return true;
 }

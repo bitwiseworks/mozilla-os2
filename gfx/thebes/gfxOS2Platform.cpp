@@ -100,31 +100,17 @@ nsresult gfxOS2Platform::UpdateFontList()
 }
 
 nsresult
-gfxOS2Platform::ResolveFontName(const nsAString& aFontName,
-                                FontResolverCallback aCallback,
-                                void *aClosure, bool& aAborted)
-{
-#ifdef DEBUG_thebes
-    char *fontname = ToNewCString(aFontName);
-    printf("gfxOS2Platform::ResolveFontName(%s, ...)\n", fontname);
-    free(fontname);
-#endif
-    return sFontconfigUtils->ResolveFontName(aFontName, aCallback, aClosure,
-                                             aAborted);
-}
-
-nsresult
 gfxOS2Platform::GetStandardFamilyName(const nsAString& aFontName, nsAString& aFamilyName)
 {
     return sFontconfigUtils->GetStandardFamilyName(aFontName, aFamilyName);
 }
 
 gfxFontGroup *
-gfxOS2Platform::CreateFontGroup(const nsAString &aFamilies,
-                const gfxFontStyle *aStyle,
-                gfxUserFontSet *aUserFontSet)
+gfxOS2Platform::CreateFontGroup(const mozilla::FontFamilyList& aFontFamilyList,
+                                const gfxFontStyle *aStyle,
+                                gfxUserFontSet *aUserFontSet)
 {
-    return new gfxOS2FontGroup(aFamilies, aStyle, aUserFontSet);
+    return new gfxOS2FontGroup(aFontFamilyList, aStyle, aUserFontSet);
 }
 
 already_AddRefed<gfxOS2Font>

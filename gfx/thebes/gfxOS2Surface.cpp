@@ -182,13 +182,3 @@ bool gfxOS2Surface::EnableDIVE(bool aEnable, bool aHidePointer)
     // enable/disable DIVE (direct access to the video framebuffer)
     return cairo_os2_surface_enable_dive(aEnable, aHidePointer);
 }
-
-int32_t gfxOS2Surface::GetDefaultContextFlags() const
-{
-    if (mSurfType == os2Print)
-        return gfxContext::FLAG_SIMPLIFY_OPERATORS |
-               gfxContext::FLAG_DISABLE_SNAPPING |
-               gfxContext::FLAG_DISABLE_COPY_BACKGROUND;
-
-    return 0;
-}
