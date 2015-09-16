@@ -511,8 +511,10 @@ nsresult nsDragService::SaveAsContents(PCSZ pszDest, nsIURL* aURL)
 
   fwrite("", 0, 1, fp);
   fclose(fp);
-  webPersist->SaveURI(linkURI, nullptr, nullptr, nullptr, nullptr, file,
-                     document->GetLoadContext());
+  webPersist->SaveURI(linkURI, nullptr,
+                      document->GetDocumentURI(), document->GetReferrerPolicy(),
+                      nullptr, nullptr, file,
+                      document->GetLoadContext());
 
   return NS_OK;
 }

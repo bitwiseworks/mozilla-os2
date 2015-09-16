@@ -26,7 +26,7 @@ NS_IMETHODIMP nsRwsServiceConstructor(nsISupports *aOuter, REFNSIID aIID,
 
 class ExtCache;
 
-class nsRwsService : public nsIRwsService, public nsIObserver
+class nsRwsService final : public nsIRwsService, public nsIObserver
 {
 public:
   NS_DECL_NSIRWSSERVICE

@@ -12,16 +12,16 @@
 
 //------------------------------------------------------------------------
 
-class nsScreenManagerOS2 : public nsIScreenManager
+class nsScreenManagerOS2 final : public nsIScreenManager
 {
 public:
   nsScreenManagerOS2 ( );
-  virtual ~nsScreenManagerOS2();
 
   NS_DECL_ISUPPORTS
   NS_DECL_NSISCREENMANAGER
 
 private:
+  ~nsScreenManagerOS2();
 
   nsIScreen* CreateNewScreenObject ( ) ;
 

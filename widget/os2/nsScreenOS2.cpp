@@ -5,7 +5,7 @@
 
 #include "nsScreenOS2.h"
 
-nsScreenOS2 :: nsScreenOS2 (  )
+nsScreenOS2::nsScreenOS2()
 {
   // nothing else to do. I guess we could cache a bunch of information
   // here, but we want to ask the device at runtime in case anything
@@ -13,14 +13,22 @@ nsScreenOS2 :: nsScreenOS2 (  )
 }
 
 
-nsScreenOS2 :: ~nsScreenOS2()
+nsScreenOS2::~nsScreenOS2()
 {
   // nothing to see here.
 }
 
 
 NS_IMETHODIMP
-nsScreenOS2 :: GetRect(int32_t *outLeft, int32_t *outTop, int32_t *outWidth, int32_t *outHeight)
+nsScreenOS2::GetId(uint32_t* aId)
+{
+    *aId = 0;
+    return NS_OK;
+}
+
+
+NS_IMETHODIMP
+nsScreenOS2::GetRect(int32_t *outLeft, int32_t *outTop, int32_t *outWidth, int32_t *outHeight)
 {
   LONG alArray[2];
 
@@ -34,14 +42,13 @@ nsScreenOS2 :: GetRect(int32_t *outLeft, int32_t *outTop, int32_t *outWidth, int
   *outWidth = alArray[0];
   *outHeight = alArray[1];
 
-
   return NS_OK;
   
 } // GetRect
 
 
 NS_IMETHODIMP
-nsScreenOS2 :: GetAvailRect(int32_t *outLeft, int32_t *outTop, int32_t *outWidth, int32_t *outHeight)
+nsScreenOS2::GetAvailRect(int32_t *outLeft, int32_t *outTop, int32_t *outWidth, int32_t *outHeight)
 {
   static APIRET rc = 0;
   static BOOL (APIENTRY * pfnQueryDesktopWorkArea)(HWND hwndDesktop, PWRECT pwrcWorkArea) = nullptr;
@@ -88,7 +95,7 @@ nsScreenOS2 :: GetAvailRect(int32_t *outLeft, int32_t *outTop, int32_t *outWidth
 
 
 NS_IMETHODIMP 
-nsScreenOS2 :: GetPixelDepth(int32_t *aPixelDepth)
+nsScreenOS2::GetPixelDepth(int32_t *aPixelDepth)
 {
   LONG lCap;
 
@@ -108,7 +115,7 @@ nsScreenOS2 :: GetPixelDepth(int32_t *aPixelDepth)
 
 
 NS_IMETHODIMP 
-nsScreenOS2 :: GetColorDepth(int32_t *aColorDepth)
+nsScreenOS2::GetColorDepth(int32_t *aColorDepth)
 {
   return GetPixelDepth ( aColorDepth );
 

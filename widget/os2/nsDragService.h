@@ -20,7 +20,6 @@ class nsDragService : public nsBaseDragService, public nsIDragSessionOS2
 {
 public:
   nsDragService();
-  virtual ~nsDragService();
 
   NS_DECL_ISUPPORTS_INHERITED
 
@@ -48,6 +47,8 @@ public:
                                uint32_t* dragFlags);
 
 protected:
+  virtual ~nsDragService();
+
     // nsIDragSessionOS2
   NS_IMETHOD NativeDragEnter(PDRAGINFO pdinfo);
   NS_IMETHOD NativeDrop(PDRAGINFO pdinfo, HWND hwnd, bool* rendering);

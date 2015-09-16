@@ -16,13 +16,13 @@ class nsSound : public nsISound,
 {
 public: 
   nsSound();
-  virtual ~nsSound();
 
   NS_DECL_ISUPPORTS
   NS_DECL_NSISOUND
   NS_DECL_NSISTREAMLOADEROBSERVER
 
 protected:
+  virtual ~nsSound();
   nsresult PlaySoundFile(const nsAString &aSoundFile);
   nsresult PlaySoundFile(const nsACString &aSoundFile);
 };

@@ -7,7 +7,7 @@
 #include "nsScreenOS2.h"
 
 
-nsScreenManagerOS2 :: nsScreenManagerOS2 ( )
+nsScreenManagerOS2::nsScreenManagerOS2()
 {
   // nothing else to do. I guess we could cache a bunch of information
   // here, but we want to ask the device at runtime in case anything
@@ -15,7 +15,7 @@ nsScreenManagerOS2 :: nsScreenManagerOS2 ( )
 }
 
 
-nsScreenManagerOS2 :: ~nsScreenManagerOS2()
+nsScreenManagerOS2::~nsScreenManagerOS2()
 {
   // nothing to see here.
 }
@@ -34,11 +34,11 @@ NS_IMPL_ISUPPORTS(nsScreenManagerOS2, nsIScreenManager)
 //        screen. This should change when a multi-monitor impl is done.
 //
 nsIScreen* 
-nsScreenManagerOS2 :: CreateNewScreenObject (  )
+nsScreenManagerOS2::CreateNewScreenObject()
 {
   nsIScreen* retval = nullptr;
-  if ( !mCachedMainScreen )
-    mCachedMainScreen = new nsScreenOS2 ( );
+  if (!mCachedMainScreen)
+    mCachedMainScreen = new nsScreenOS2();
   NS_IF_ADDREF(retval = mCachedMainScreen.get());
   
   return retval;
@@ -54,10 +54,10 @@ nsScreenManagerOS2 :: CreateNewScreenObject (  )
 // The coordinates are in pixels (not twips) and in screen coordinates.
 //
 NS_IMETHODIMP
-nsScreenManagerOS2 :: ScreenForRect ( int32_t /*inLeft*/, int32_t /*inTop*/, int32_t /*inWidth*/,
-                                       int32_t /*inHeight*/, nsIScreen **outScreen )
+nsScreenManagerOS2::ScreenForRect(int32_t /*inLeft*/, int32_t /*inTop*/, int32_t /*inWidth*/,
+                                  int32_t /*inHeight*/, nsIScreen **outScreen)
 {
-  GetPrimaryScreen ( outScreen );
+  GetPrimaryScreen(outScreen);
   return NS_OK;
     
 } // ScreenForRect
@@ -70,7 +70,7 @@ nsScreenManagerOS2 :: ScreenForRect ( int32_t /*inLeft*/, int32_t /*inTop*/, int
 // often.
 //
 NS_IMETHODIMP 
-nsScreenManagerOS2 :: GetPrimaryScreen(nsIScreen * *aPrimaryScreen) 
+nsScreenManagerOS2::GetPrimaryScreen(nsIScreen * *aPrimaryScreen)
 {
   *aPrimaryScreen = CreateNewScreenObject();    // addrefs  
   return NS_OK;
@@ -84,7 +84,7 @@ nsScreenManagerOS2 :: GetPrimaryScreen(nsIScreen * *aPrimaryScreen)
 // Returns how many physical screens are available.
 //
 NS_IMETHODIMP
-nsScreenManagerOS2 :: GetNumberOfScreens(uint32_t *aNumberOfScreens)
+nsScreenManagerOS2::GetNumberOfScreens(uint32_t *aNumberOfScreens)
 {
   *aNumberOfScreens = 1;
   return NS_OK;
@@ -99,7 +99,7 @@ nsScreenManagerOS2::GetSystemDefaultScale(float *aDefaultScale)
 }
 
 NS_IMETHODIMP
-nsScreenManagerOS2 :: ScreenForNativeWidget(void *nativeWidget, nsIScreen **aScreen)
+nsScreenManagerOS2::ScreenForNativeWidget(void *nativeWidget, nsIScreen **aScreen)
 {
   *aScreen = CreateNewScreenObject();    // addrefs
   return NS_OK;

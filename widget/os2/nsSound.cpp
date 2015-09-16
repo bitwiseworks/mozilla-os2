@@ -25,6 +25,7 @@
 #include "nsSound.h"
 #include "nsIURL.h"
 #include "nsNetUtil.h"
+#include "nsContentUtils.h"
 #include "nsNativeCharsetUtils.h"
 
 NS_IMPL_ISUPPORTS(nsSound, nsISound, nsIStreamLoaderObserver)
@@ -120,7 +121,12 @@ NS_IMETHODIMP nsSound::Play(nsIURL *aURL)
   }
 
   nsCOMPtr<nsIStreamLoader> loader;
-  return NS_NewStreamLoader(getter_AddRefs(loader), aURL, this);
+  return NS_NewStreamLoader(getter_AddRefs(loader),
+                            aURL,
+                            this, // aObserver
+                            nsContentUtils::GetSystemPrincipal(),
+                            nsILoadInfo::SEC_NORMAL,
+                            nsIContentPolicy::TYPE_OTHER);
 }
 
 /*****************************************************************************/

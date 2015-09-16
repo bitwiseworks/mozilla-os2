@@ -25,7 +25,6 @@ class nsDeviceContextSpecOS2 : public nsIDeviceContextSpec
 {
 public:
   nsDeviceContextSpecOS2();
-  virtual ~nsDeviceContextSpecOS2();
 
   NS_DECL_ISUPPORTS
 
@@ -47,6 +46,8 @@ protected:
 
   int16_t    AdjustDestinationForFormat(int16_t aFormat, long driverType);
   nsresult   CreateStreamForFormat(int16_t aFormat, nsIOutputStream **aStream);
+
+  virtual ~nsDeviceContextSpecOS2();
 
   os2PrintQ*    mQueue;
   HDC           mPrintDC;
