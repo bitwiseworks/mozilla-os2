@@ -5,13 +5,16 @@
 #include "nsOS2Uni.h"
 #include "nsIServiceManager.h"
 #include "nsIPlatformCharset.h"
+#include "nsIUnicodeDecoder.h"
+#include "nsIUnicodeEncoder.h"
+#include "mozilla/dom/EncodingUtils.h"
 #include <stdlib.h>
 
+using mozilla::dom::EncodingUtils;
 
 /**********************************************************
     OS2Uni
  **********************************************************/
-nsICharsetConverterManager* OS2Uni::gCharsetManager = nullptr;
 
 struct ConverterInfo
 {
@@ -46,16 +49,11 @@ ConverterInfo gConverterInfo[eCONVERTER_COUNT] =
 nsISupports*
 OS2Uni::GetUconvObject(int aCodePage, ConverterRequest aReq)
 {
-  if (gCharsetManager == nullptr) {
-    CallGetService(NS_CHARSETCONVERTERMANAGER_CONTRACTID, &gCharsetManager);
-  }
-
   nsresult rv;
   nsISupports* uco = nullptr;
   for (int i = 0; i < eCONVERTER_COUNT; i++) {
     if (aCodePage == gConverterInfo[i].mCodePage) {
       if (gConverterInfo[i].mEncoder == nullptr) {
-        const char* convname;
         nsAutoCString charset;
         if (aCodePage == 0) {
           nsCOMPtr<nsIPlatformCharset>
@@ -66,18 +64,19 @@ OS2Uni::GetUconvObject(int aCodePage, ConverterRequest aReq)
             // default to IBM850 if this should fail
             charset = "IBM850";
           }
-          convname = charset.get();
         } else {
-          convname = gConverterInfo[i].mConvName;
+            charset = gConverterInfo[i].mConvName;
         }
-        rv = gCharsetManager->GetUnicodeEncoderRaw(convname,
-                                                   &gConverterInfo[i].mEncoder);
-        gConverterInfo[i].mEncoder->
-                    SetOutputErrorBehavior(nsIUnicodeEncoder::kOnError_Replace,
-                                           nullptr, '?');
-        gCharsetManager->GetUnicodeDecoderRaw(convname,
-                                              &gConverterInfo[i].mDecoder);
-        NS_ASSERTION(NS_SUCCEEDED(rv), "Failed to get converter");
+        nsAutoCString encoding;
+        if (EncodingUtils::FindEncodingForLabelNoReplacement(charset, encoding)) {
+          gConverterInfo[i].mEncoder = EncodingUtils::EncoderForEncoding(encoding).take();
+          gConverterInfo[i].mEncoder->
+            SetOutputErrorBehavior(nsIUnicodeEncoder::kOnError_Replace,
+                                   nullptr, '?');
+          gConverterInfo[i].mDecoder = EncodingUtils::DecoderForEncoding(encoding).take();
+        } else {
+          NS_ASSERTION(false, "Failed to get converter");
+        }
       }
       if (aReq == eConv_Encoder) {
         uco = gConverterInfo[i].mEncoder;
@@ -97,7 +96,6 @@ void OS2Uni::FreeUconvObjects()
     NS_IF_RELEASE(gConverterInfo[i].mEncoder);
     NS_IF_RELEASE(gConverterInfo[i].mDecoder);
   }
-  NS_IF_RELEASE(gCharsetManager);
 }
 
 /**********************************************************

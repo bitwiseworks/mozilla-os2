@@ -7,7 +7,6 @@
 
 #include <uconv.h>
 #include "nsTArray.h"
-#include "nsICharsetConverterManager.h"
 #include "gfxCore.h"
 
 enum ConverterRequest {
@@ -19,8 +18,6 @@ class OS2Uni {
 public:
   static nsISupports* GetUconvObject(int CodePage, ConverterRequest aReq);
   static void FreeUconvObjects();
-private:
-  static nsICharsetConverterManager* gCharsetManager;
 };
 
 #define CHAR_BUFFER_SIZE 1024

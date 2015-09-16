@@ -17,6 +17,9 @@
 #include "nsIWidget.h"
 #include "nsOS2Uni.h"
 #include "nsFilePicker.h"
+#include "mozilla/dom/EncodingUtils.h"
+
+using mozilla::dom::EncodingUtils;
 
 #ifndef MAX_PATH
 #define MAX_PATH CCHMAXPATH
@@ -50,8 +53,6 @@ MRESULT EXPENTRY FileDialogProc( HWND hwndDlg, ULONG msg, MPARAM mp1, MPARAM mp2
 nsFilePicker::nsFilePicker()
 {
   mWnd = NULLHANDLE;
-  mUnicodeEncoder = nullptr;
-  mUnicodeDecoder = nullptr;
   mSelectedType   = 0;
 }
 
@@ -64,9 +65,6 @@ nsFilePicker::~nsFilePicker()
 {
   mFilters.Clear();
   mTitles.Clear();
-
-  NS_IF_RELEASE(mUnicodeEncoder);
-  NS_IF_RELEASE(mUnicodeDecoder);
 }
 
 /* static */ void
@@ -483,12 +481,12 @@ void nsFilePicker::GetFileSystemCharset(nsCString & fileSystemCharset)
 
   if (aCharset.Length() < 1) {
     nsCOMPtr <nsIPlatformCharset> platformCharset = do_GetService(NS_PLATFORMCHARSET_CONTRACTID, &rv);
-	  if (NS_SUCCEEDED(rv)) 
-		  rv = platformCharset->GetCharset(kPlatformCharsetSel_FileName, aCharset);
+    if (NS_SUCCEEDED(rv))
+     rv = platformCharset->GetCharset(kPlatformCharsetSel_FileName, aCharset);
 
     NS_ASSERTION(NS_SUCCEEDED(rv), "error getting platform charset");
-	  if (NS_FAILED(rv)) 
-		  aCharset.AssignLiteral("IBM850");
+    if (NS_FAILED(rv))
+      aCharset.AssignLiteral("IBM850");
   }
   fileSystemCharset = aCharset;
 }
@@ -503,12 +501,7 @@ char * nsFilePicker::ConvertToFileSystemCharset(const nsAString& inString)
   if (nullptr == mUnicodeEncoder) {
     nsAutoCString fileSystemCharset;
     GetFileSystemCharset(fileSystemCharset);
-
-    nsCOMPtr<nsICharsetConverterManager> ccm = 
-             do_GetService(NS_CHARSETCONVERTERMANAGER_CONTRACTID, &rv); 
-    if (NS_SUCCEEDED(rv)) {
-      rv = ccm->GetUnicodeEncoderRaw(fileSystemCharset.get(), &mUnicodeEncoder);
-    }
+    mUnicodeEncoder = EncodingUtils::EncoderForEncoding(fileSystemCharset);
   }
 
   // converts from unicode to the file system charset
@@ -546,12 +539,7 @@ char16_t * nsFilePicker::ConvertFromFileSystemCharset(const char *inString)
   if (nullptr == mUnicodeDecoder) {
     nsAutoCString fileSystemCharset;
     GetFileSystemCharset(fileSystemCharset);
-
-    nsCOMPtr<nsICharsetConverterManager> ccm = 
-             do_GetService(NS_CHARSETCONVERTERMANAGER_CONTRACTID, &rv); 
-    if (NS_SUCCEEDED(rv)) {
-      rv = ccm->GetUnicodeDecoderRaw(fileSystemCharset.get(), &mUnicodeDecoder);
-    }
+    mUnicodeDecoder = EncodingUtils::DecoderForEncoding(fileSystemCharset);
   }
 
   // converts from the file system charset to unicode

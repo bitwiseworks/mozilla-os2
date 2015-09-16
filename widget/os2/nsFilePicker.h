@@ -10,7 +10,8 @@
 #include "nsISimpleEnumerator.h"
 #include "nsCOMArray.h"
 #include "nsTArray.h"
-#include "nsICharsetConverterManager.h"
+#include "nsIUnicodeDecoder.h"
+#include "nsIUnicodeEncoder.h"
 #include "nsBaseFilePicker.h"
 #include "nsString.h"
 
@@ -26,9 +27,9 @@
 
 class nsFilePicker : public nsBaseFilePicker
 {
+  virtual ~nsFilePicker();
 public:
   nsFilePicker(); 
-  virtual ~nsFilePicker();
 
   static void ReleaseGlobals();
 
@@ -64,8 +65,8 @@ protected:
   nsString               mDefaultExtension;
   nsTArray<nsString>     mFilters;
   nsTArray<nsString>     mTitles;
-  nsIUnicodeEncoder*     mUnicodeEncoder;
-  nsIUnicodeDecoder*     mUnicodeDecoder;
+  nsCOMPtr<nsIUnicodeEncoder> mUnicodeEncoder;
+  nsCOMPtr<nsIUnicodeDecoder> mUnicodeDecoder;
   int16_t                mSelectedType;
   nsCOMArray<nsIFile>    mFiles;
   static char            mLastUsedDirectory[];
