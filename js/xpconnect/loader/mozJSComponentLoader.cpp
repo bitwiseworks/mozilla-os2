@@ -831,8 +831,7 @@ mozJSComponentLoader::ObjectForLocation(ComponentLoaderInfo& aInfo,
             }
 
             if (!mReuseLoaderGlobal) {
-                script = Compile(cx, obj, options, buf,
-                                 rlen);
+                Compile(cx, obj, options, buf, rlen, &script);
             } else {
                 // Note: exceptions will get handled further down;
                 // don't early return for them here.
