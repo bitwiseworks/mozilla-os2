@@ -546,7 +546,6 @@ void nsWindow::ReleaseGlobals()
 NS_METHOD nsWindow::Create(nsIWidget* aParent,
                            nsNativeWidget aNativeParent,
                            const nsIntRect& aRect,
-                           nsDeviceContext* aContext,
                            nsWidgetInitData* aInitData)
 {
   mWindowState = nsWindowState_eInCreate;
@@ -569,7 +568,7 @@ NS_METHOD nsWindow::Create(nsIWidget* aParent,
     }
   }
 
-  BaseCreate(aParent, aRect, aContext, aInitData);
+  BaseCreate(aParent, aRect, aInitData);
 
 #ifdef DEBUG_FOCUS
   mWindowIdentifier = currentWindowIdentifier;
@@ -693,7 +692,7 @@ NS_METHOD nsWindow::Destroy()
     rollupWidget = rollupListener->GetRollupWidget();
   }
   if (this == rollupWidget) {
-    rollupListener->Rollup(UINT32_MAX, nullptr, nullptr);
+    rollupListener->Rollup(UINT32_MAX, false, nullptr, nullptr);
     CaptureRollupEvents(nullptr, false);
   }
 
@@ -962,14 +961,15 @@ NS_METHOD nsWindow::GetClientBounds(nsIntRect& aRect)
 
 //-----------------------------------------------------------------------------
 
-nsIntPoint nsWindow::WidgetToScreenOffset()
+LayoutDeviceIntPoint nsWindow::WidgetToScreenOffset()
 {
   POINTL point = { 0, 0 };
   NS2PM(point);
 
   WinMapWindowPoints(mWnd, HWND_DESKTOP, &point, 1);
-  return nsIntPoint(point.x,
-                    WinQuerySysValue(HWND_DESKTOP, SV_CYSCREEN) - point.y - 1);
+  return LayoutDeviceIntPoint(point.x,
+                              WinQuerySysValue(HWND_DESKTOP, SV_CYSCREEN) -
+                              point.y - 1);
 }
 
 //-----------------------------------------------------------------------------
@@ -1203,10 +1203,12 @@ void nsWindow::SetPluginClipRegion(const Configuration& aConfiguration)
   NS_ASSERTION((mParent && mParent->mWnd), "Child window has no parent");
 
   // If nothing has changed, exit.
-  if (!StoreWindowClipRegion(aConfiguration.mClipRegion) &&
+  if (IsWindowClipRegionEqual(aConfiguration.mClipRegion) &&
       mBounds.IsEqualInterior(aConfiguration.mBounds)) {
     return;
   }
+
+  StoreWindowClipRegion(aConfiguration.mClipRegion);
 
   // Set the widget's x/y to its nominal unclipped value.  It doesn't
   // affect our calculations but other code relies on it being correct.
@@ -1835,7 +1837,8 @@ bool nsWindow::RollupOnButtonDown(ULONG aMsg)
   // We only need to deal with the last rollup for left mouse down events.
   NS_ASSERTION(!mLastRollup, "mLastRollup is null");
   bool consumeRollupEvent =
-    rollupListener->Rollup(popupsToRollup, nullptr, aMsg == WM_BUTTON1DOWN ? &mLastRollup : nullptr);
+    rollupListener->Rollup(popupsToRollup, true, nullptr,
+                           aMsg == WM_BUTTON1DOWN ? &mLastRollup : nullptr);
   NS_IF_ADDREF(mLastRollup);
 
   // If true, the buttondown event won't be passed on to the wndproc.
@@ -1870,7 +1873,7 @@ void nsWindow::RollupOnFocusLost(HWND aFocus)
     }
 
     // Rollup all popups.
-    rollupListener->Rollup(UINT32_MAX, nullptr, nullptr);
+    rollupListener->Rollup(UINT32_MAX, false, nullptr, nullptr);
   }
 }
 
@@ -1895,9 +1898,9 @@ MRESULT EXPENTRY fnwpNSWindow(HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2)
   // If we're not in the destructor, hold on to the object for the
   // life of this method, in case it gets deleted during processing.
   // Yes, it's a double hack since someWindow is not really an interface.
-  nsCOMPtr<nsISupports> kungFuDeathGrip;
+  nsCOMPtr<nsIWidget> kungFuDeathGrip;
   if (!wnd->mIsDestroying) {
-    kungFuDeathGrip = do_QueryInterface((nsBaseWidget*)wnd);
+    kungFuDeathGrip = wnd;
   }
 
   // Pre-process msgs that may cause a rollup.
@@ -2286,8 +2289,9 @@ do {
   NS_ASSERTION(gfxPlatform::GetPlatform()->SupportsAzureContentForType(BackendType::CAIRO),
                "OS/2 only supports Cairo backend");
   IntSize intSize(mThebesSurface->GetSize().width, mThebesSurface->GetSize().height);
-  thebesContext = new gfxContext(gfxPlatform::GetPlatform()->
-                                 CreateDrawTargetForSurface(mThebesSurface, intSize));
+  RefPtr<DrawTarget> dt = gfxPlatform::GetPlatform()->
+                          CreateDrawTargetForSurface(mThebesSurface, intSize);
+  thebesContext = new gfxContext(dt);
   if (MOZ_UNLIKELY(!thebesContext->GetDrawTarget()))
       NS_RUNTIMEABORT("Thebes layers require a DrawTarget context");
 
@@ -2422,7 +2426,7 @@ bool nsWindow::OnMouseChord(MPARAM mp1, MPARAM mp2)
   } else {
     event.modifiers = MODIFIER_SHIFT;
   }
-  event.eventStructType = NS_KEY_EVENT;
+  event.mClass      = eKeyboardEventClass;
   event.charCode    = 0;
 
   // OS/2 does not set the Shift, Ctrl, or Alt on keyup
@@ -2688,6 +2692,7 @@ bool nsWindow::OnTranslateAccelerator(PQMSG pQmsg)
 
   return false;
 }
+
 bool nsWindow::OnQueryConvertPos(MPARAM mp1, MRESULT& mresult)
 {
   PRECTL pCursorPos = (PRECTL)mp1;
@@ -2715,6 +2720,7 @@ bool nsWindow::OnQueryConvertPos(MPARAM mp1, MRESULT& mresult)
   mresult = (MRESULT)QCP_CONVERT;
   return true;
 }
+
 bool nsWindow::ImeResultString(HIMI himi)
 {
   ULONG ulBufLen;
@@ -2730,7 +2736,6 @@ bool nsWindow::ImeResultString(HIMI himi)
     return false;
   }
   if (!mIsComposing) {
-    mLastDispatchedCompositionString.Truncate();
     WidgetCompositionEvent start(true, NS_COMPOSITION_START, this);
     InitEvent(start);
     DispatchWindowEvent(&start);
@@ -2741,25 +2746,17 @@ bool nsWindow::ImeResultString(HIMI himi)
   MultiByteToWideChar(0, compositionStringA.Elements(), ulBufLen,
                       outBuf, outBufLen);
   nsAutoString compositionString(outBuf.Elements());
-  if (mLastDispatchedCompositionString != compositionString) {
-    WidgetCompositionEvent update(true, NS_COMPOSITION_UPDATE, this);
-    InitEvent(update);
-    update.data = compositionString;
-    mLastDispatchedCompositionString = compositionString;
-    DispatchWindowEvent(&update);
-  }
 
-  WidgetTextEvent text(true, NS_TEXT_TEXT, this);
-  InitEvent(text);
-  text.theText = compositionString;
-  DispatchWindowEvent(&text);
+  WidgetCompositionEvent textChange(true, NS_COMPOSITION_CHANGE, this);
+  InitEvent(textChange);
+  textChange.mData = compositionString;
+  DispatchWindowEvent(&textChange);
 
   WidgetCompositionEvent end(true, NS_COMPOSITION_END, this);
   InitEvent(end);
-  end.data = compositionString;
+  end.mData = compositionString;
   DispatchWindowEvent(&end);
   mIsComposing = false;
-  mLastDispatchedCompositionString.Truncate();
   return true;
 }
 static uint32_t
@@ -2802,7 +2799,6 @@ bool nsWindow::ImeConversionString(HIMI himi)
     return false;
   }
   if (!mIsComposing) {
-    mLastDispatchedCompositionString.Truncate();
     WidgetCompositionEvent start(true, NS_COMPOSITION_START, this);
     InitEvent(start);
     DispatchWindowEvent(&start);
@@ -2813,14 +2809,11 @@ bool nsWindow::ImeConversionString(HIMI himi)
   MultiByteToWideChar(0, compositionStringA.Elements(), ulBufLen,
                       outBuf, outBufLen);
   nsAutoString compositionString(outBuf.Elements());
-  // Is a conversion string changed ?
-  if (mLastDispatchedCompositionString != compositionString) {
-    WidgetCompositionEvent update(true, NS_COMPOSITION_UPDATE, this);
-    InitEvent(update);
-    update.data = compositionString;
-    mLastDispatchedCompositionString = compositionString;
-    DispatchWindowEvent(&update);
-  }
+
+  WidgetCompositionEvent change(true, NS_COMPOSITION_CHANGE, this);
+  InitEvent(change);
+  change.mData = compositionString;
+
   nsRefPtr<TextRangeArray> textRangeArray = new TextRangeArray();
   if (!compositionString.IsEmpty()) {
     bool oneClause = false;
@@ -2918,20 +2911,17 @@ bool nsWindow::ImeConversionString(HIMI himi)
       textRangeArray->AppendElement(newRange);
     }
   }
-  WidgetTextEvent text(true, NS_TEXT_TEXT, this);
-  InitEvent(text);
-  text.theText = compositionString;
-  text.mRanges = textRangeArray;
-  DispatchWindowEvent(&text);
+
+  change.mRanges = textRangeArray;
+  DispatchWindowEvent(&change);
 
   if (compositionString.IsEmpty()) { // IME conversion was canceled ?
     WidgetCompositionEvent end(true, NS_COMPOSITION_END, this);
     InitEvent(end);
-    end.data = compositionString;
+    end.mData = compositionString;
     DispatchWindowEvent(&end);
 
     mIsComposing = false;
-    mLastDispatchedCompositionString.Truncate();
   }
 
   return true;
@@ -3514,7 +3504,7 @@ bool nsWindow::DispatchMouseEvent(uint32_t aEventType, MPARAM mp1, MPARAM mp2,
   pluginEvent.wParam = 0;
   pluginEvent.lParam = MAKELONG(event.refPoint.x, event.refPoint.y);
 
-  event.pluginEvent = (void*)&pluginEvent;
+  event.mPluginEvent.Copy(pluginEvent);
 
   return DispatchWindowEvent(&event);
 }
@@ -3547,7 +3537,7 @@ bool nsWindow::DispatchPluginActivationEvent()
 
   NPEvent pluginEvent;
   pluginEvent.event = WM_FOCUSCHANGED;
-  event.pluginEvent = (void*)&pluginEvent;
+  event.mPluginEvent.Copy(pluginEvent);
 
   return DispatchWindowEvent(&event);
 }

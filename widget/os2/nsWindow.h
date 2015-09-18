@@ -111,6 +111,7 @@ extern "C" {
 // Forward declarations
 
 class imgIContainer;
+class gfxASurface;
 class gfxOS2Surface;
 class os2FrameWindow;
 
@@ -125,13 +126,11 @@ class nsWindow : public nsBaseWidget
 {
 public:
   nsWindow();
-  virtual ~nsWindow();
 
   // from nsIWidget
   NS_IMETHOD            Create(nsIWidget* aParent,
                                nsNativeWidget aNativeParent,
                                const nsIntRect& aRect,
-                               nsDeviceContext* aContext,
                                nsWidgetInitData* aInitData = nullptr);
   NS_IMETHOD            Destroy();
   virtual nsIWidget*    GetParent();
@@ -149,7 +148,7 @@ public:
   virtual bool          HasPendingInputEvent();
   NS_IMETHOD            GetBounds(nsIntRect& aRect);
   NS_IMETHOD            GetClientBounds(nsIntRect& aRect);
-  virtual nsIntPoint    WidgetToScreenOffset();
+  virtual mozilla::LayoutDeviceIntPoint WidgetToScreenOffset();
   NS_IMETHOD            Move(double aX, double aY);
   NS_IMETHOD            Resize(double aWidth, double aHeight,
                                bool    aRepaint);
@@ -187,6 +186,8 @@ public:
   // nsWindow
   static void           ReleaseGlobals();
 protected:
+  virtual ~nsWindow();
+
   // from nsBaseWidget
   virtual void          OnDestroy();
 
@@ -268,7 +269,6 @@ protected:
   nsCOMPtr<imgIContainer> mCssCursorImg;// saved by SetCursor(imgIContainer*)
   nsRefPtr<gfxOS2Surface> mThebesSurface;
   bool          mIsComposing;
-  nsString      mLastDispatchedCompositionString;
 #ifdef DEBUG_FOCUS
   int           mWindowIdentifier;  // a serial number for each new window
 #endif

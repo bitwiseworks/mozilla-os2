@@ -31,6 +31,7 @@
 #include "nsWindow.h"
 #include "nsAppShell.h"
 #include "nsAppShellSingleton.h"
+#include "mozilla/ModuleUtils.h"
 #include "nsBidiKeyboard.h"
 #include "nsDragService.h"
 #include "nsIFile.h"
@@ -52,6 +53,8 @@
 #include "nsPrintOptionsOS2.h"
 #include "nsPrintSession.h"
 #include "nsIdleServiceOS2.h"
+
+using namespace mozilla;
 
 // objects that just require generic constructors
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsBidiKeyboard)
