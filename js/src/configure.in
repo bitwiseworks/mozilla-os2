@@ -2282,7 +2282,7 @@ MOZ_CXX11
 dnl Check for .hidden assembler directive and visibility attribute.
 dnl Borrowed from glibc configure.in
 dnl ===============================================================
-if test "$GNU_CC" -a "$OS_TARGET" != WINNT; then
+if test "$GNU_CC" -a "$OS_TARGET" != WINNT -a "$OS_TARGET" != OS2; then
   AC_DEFINE(HAVE_VISIBILITY_HIDDEN_ATTRIBUTE)
   AC_DEFINE(HAVE_VISIBILITY_ATTRIBUTE)
   case "$OS_TARGET" in
