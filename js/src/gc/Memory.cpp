@@ -55,9 +55,11 @@ static mozilla::Atomic<int, mozilla::Relaxed> growthDirection(0);
 // so we use a generous limit of 32 unusable chunks to ensure we reach them.
 static const int MaxLastDitchAttempts = 32;
 
+#if !defined(XP_OS2)
 static void GetNewChunk(void** aAddress, void** aRetainedAddr, size_t size, size_t alignment);
 static void* MapAlignedPagesSlow(size_t size, size_t alignment);
 static void* MapAlignedPagesLastDitch(size_t size, size_t alignment);
+#endif
 
 size_t
 SystemPageSize()
@@ -83,12 +85,13 @@ OffsetFromAligned(void* p, size_t alignment)
     return uintptr_t(p) % alignment;
 }
 
+#if !defined(XP_OS2)
 void*
 TestMapAlignedPagesLastDitch(size_t size, size_t alignment)
 {
     return MapAlignedPagesLastDitch(size, alignment);
 }
-
+#endif
 
 #if defined(XP_WIN)
 
@@ -302,13 +305,15 @@ DeallocateMappedContent(void* p, size_t length)
 #define OS2_MAX_RECURSIONS  16
 
 void
-gc::InitMemorySubsystem(JSRuntime *rt)
+InitMemorySubsystem()
 {
-    rt->gcSystemPageSize = rt->gcSystemAllocGranularity = ArenaSize;
+    if (pageSize == 0) {
+        pageSize = allocGranularity = ArenaSize;
+    }
 }
 
 void
-gc::UnmapPages(JSRuntime *rt, void *addr, size_t size)
+UnmapPages(void *addr, size_t size)
 {
     if (!DosFreeMem(addr))
         return;
@@ -329,7 +334,7 @@ gc::UnmapPages(JSRuntime *rt, void *addr, size_t size)
 }
 
 static void *
-MapAlignedPagesRecursively(JSRuntime *rt, size_t size, size_t alignment, int& recursions)
+MapAlignedPagesRecursively(size_t size, size_t alignment, int& recursions)
 {
     if (++recursions >= OS2_MAX_RECURSIONS)
         return nullptr;
@@ -340,8 +345,8 @@ MapAlignedPagesRecursively(JSRuntime *rt, size_t size, size_t alignment, int& re
                     OBJ_ANY | PAG_COMMIT | PAG_READ | PAG_WRITE))
 #endif
     {
-        JS_ALWAYS_TRUE(DosAllocMem(&tmp, size,
-                                   PAG_COMMIT | PAG_READ | PAG_WRITE) == 0);
+        MOZ_ALWAYS_TRUE(DosAllocMem(&tmp, size,
+                                    PAG_COMMIT | PAG_READ | PAG_WRITE) == 0);
     }
     size_t offset = reinterpret_cast<uintptr_t>(tmp) & (alignment - 1);
     if (!offset)
@@ -358,30 +363,30 @@ MapAlignedPagesRecursively(JSRuntime *rt, size_t size, size_t alignment, int& re
     unsigned long rc = DosQueryMem(&(static_cast<char*>(tmp))[size],
                                    &cb, &flags);
     if (!rc && (flags & PAG_FREE) && cb >= filler) {
-        UnmapPages(rt, tmp, 0);
+        UnmapPages(tmp, 0);
 #if defined(MOZ_OS2_HIGH_MEMORY)
         if (DosAllocMem(&tmp, filler,
                         OBJ_ANY | PAG_COMMIT | PAG_READ | PAG_WRITE))
 #endif
         {
-            JS_ALWAYS_TRUE(DosAllocMem(&tmp, filler,
-                                       PAG_COMMIT | PAG_READ | PAG_WRITE) == 0);
+            MOZ_ALWAYS_TRUE(DosAllocMem(&tmp, filler,
+                                        PAG_COMMIT | PAG_READ | PAG_WRITE) == 0);
         }
     }
 
-    void *p = MapAlignedPagesRecursively(rt, size, alignment, recursions);
-    UnmapPages(rt, tmp, 0);
+    void *p = MapAlignedPagesRecursively(size, alignment, recursions);
+    UnmapPages(tmp, 0);
 
     return p;
 }
 
 void *
-gc::MapAlignedPages(JSRuntime *rt, size_t size, size_t alignment)
+MapAlignedPages(size_t size, size_t alignment)
 {
-    JS_ASSERT(size >= alignment);
-    JS_ASSERT(size % alignment == 0);
-    JS_ASSERT(size % rt->gcSystemPageSize == 0);
-    JS_ASSERT(alignment % rt->gcSystemAllocGranularity == 0);
+    MOZ_ASSERT(size >= alignment);
+    MOZ_ASSERT(size % alignment == 0);
+    MOZ_ASSERT(size % pageSize == 0);
+    MOZ_ASSERT(alignment % allocGranularity == 0);
 
     int recursions = -1;
 
@@ -390,7 +395,7 @@ gc::MapAlignedPages(JSRuntime *rt, size_t size, size_t alignment)
      * of the right size by recursively allocating blocks of unaligned
      * free memory until only an aligned allocation is possible.
      */
-    void *p = MapAlignedPagesRecursively(rt, size, alignment, recursions);
+    void *p = MapAlignedPagesRecursively(size, alignment, recursions);
     if (p)
         return p;
 
@@ -404,8 +409,8 @@ gc::MapAlignedPages(JSRuntime *rt, size_t size, size_t alignment)
                     OBJ_ANY | PAG_COMMIT | PAG_READ | PAG_WRITE))
 #endif
     {
-        JS_ALWAYS_TRUE(DosAllocMem(&p, 2 * size,
-                                   PAG_COMMIT | PAG_READ | PAG_WRITE) == 0);
+        MOZ_ALWAYS_TRUE(DosAllocMem(&p, 2 * size,
+                                    PAG_COMMIT | PAG_READ | PAG_WRITE) == 0);
     }
 
     uintptr_t addr = reinterpret_cast<uintptr_t>(p);
@@ -415,30 +420,33 @@ gc::MapAlignedPages(JSRuntime *rt, size_t size, size_t alignment)
 }
 
 bool
-gc::MarkPagesUnused(JSRuntime *rt, void *p, size_t size)
+MarkPagesUnused(void *p, size_t size)
 {
-    if (!DecommitEnabled(rt))
+    if (!DecommitEnabled())
         return true;
 
-    JS_ASSERT(uintptr_t(p) % rt->gcSystemPageSize == 0);
+    MOZ_ASSERT(OffsetFromAligned(p, pageSize) == 0);
     return true;
 }
 
 bool
-gc::MarkPagesInUse(JSRuntime *rt, void *p, size_t size)
+MarkPagesInUse(void *p, size_t size)
 {
-    JS_ASSERT(uintptr_t(p) % rt->gcSystemPageSize == 0);
+    if (!DecommitEnabled())
+        return true;
+
+    MOZ_ASSERT(OffsetFromAligned(p, pageSize) == 0);
     return true;
 }
 
 size_t
-gc::GetPageFaultCount()
+GetPageFaultCount()
 {
     return 0;
 }
 
 void *
-gc::AllocateMappedContent(int fd, size_t offset, size_t length, size_t alignment)
+AllocateMappedContent(int fd, size_t offset, size_t length, size_t alignment)
 {
     // TODO: Similar to Bug 988813 - Support memory mapped array buffer for OS/2 platform.
     return nullptr;
@@ -446,7 +454,7 @@ gc::AllocateMappedContent(int fd, size_t offset, size_t length, size_t alignment
 
 // Deallocate mapped memory for object.
 void
-gc::DeallocateMappedContent(void *p, size_t length)
+DeallocateMappedContent(void *p, size_t length)
 {
     // TODO: Similar to Bug 988813 - Support memory mapped array buffer for OS/2 platform.
 }
