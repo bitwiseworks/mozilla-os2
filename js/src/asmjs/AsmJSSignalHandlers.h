@@ -27,8 +27,7 @@ struct JSRuntime;
 #endif
 
 #ifdef XP_OS2
-# define INCL_DOSEXCEPTIONS
-# define INCL_DOSMEMMGR
+# define INCL_DOS
 # include <os2.h>
 # undef ADDRESS // used as an identifier somewhere
 # include <string.h>
