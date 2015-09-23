@@ -547,9 +547,6 @@ HandleException(PEXCEPTIONREPORTRECORD pReport,
     if (pReport->ExceptionNum != XCPT_GUARD_PAGE_VIOLATION)
         return false;
 
-    uint8_t **ppc = ContextToPC(pContext);
-    uint8_t *pc = *ppc;
-
     if (pReport->cParameters < 2)
         return false;
 

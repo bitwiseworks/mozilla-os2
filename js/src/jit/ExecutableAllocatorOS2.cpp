@@ -63,7 +63,7 @@ js::jit::DeallocateExecutableMemory(void* addr, size_t bytes, size_t pageSize)
 
 ExecutablePool::Allocation ExecutableAllocator::systemAlloc(size_t n)
 {
-    void* allocation = AllocateExecutableMemory(randomAddress, n, PAG_READ | PAG_WRITE | PAG_EXECUTE,
+    void* allocation = AllocateExecutableMemory(nullptr, n, PAG_READ | PAG_WRITE | PAG_EXECUTE,
                                                 "js-jit-code", pageSize);
     ExecutablePool::Allocation alloc = { reinterpret_cast<char*>(allocation), n };
     return alloc;

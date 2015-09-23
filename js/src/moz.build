@@ -399,7 +399,6 @@ if CONFIG['OS_ARCH'] == 'WINNT':
 elif CONFIG['OS_ARCH'] == 'OS2':
     SOURCES += [
         'jit/ExecutableAllocatorOS2.cpp',
-        'yarr/OSAllocatorOS2.cpp',
     ]
 else:
     SOURCES += [

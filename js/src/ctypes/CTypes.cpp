@@ -2437,10 +2437,10 @@ ImplicitConvert(JSContext* cx,
         JSObject* objCTypes = CType::GetGlobalCTypes(cx, targetType);
         if (!objCTypes)
           return false;
-        JSCTypesCallbacks* callbacks = GetCallbacks(objCTypes);
+        const JSCTypesCallbacks* callbacks = GetCallbacks(objCTypes);
         if (callbacks && callbacks->unicodeToNative) {
           if (sourceLinear->hasLatin1Chars()) {
-            *charBuffer = cx->pod_malloc<char*>(sourceLength + 1);
+            *charBuffer = cx->pod_malloc<char>(sourceLength + 1);
             if (*charBuffer) {
               JS::AutoCheckCannotGC nogc;
               memcpy(*charBuffer, sourceLinear->latin1Chars(nogc), sourceLength);
@@ -2562,12 +2562,11 @@ ImplicitConvert(JSContext* cx,
         JSObject* objCTypes = CType::GetGlobalCTypes(cx, targetType);
         if (!objCTypes)
           return false;
-        JSCTypesCallbacks* callbacks = GetCallbacks(objCTypes);
+        const JSCTypesCallbacks* callbacks = GetCallbacks(objCTypes);
         if (callbacks && callbacks->unicodeToNative) {
-          char *buf;
           if (sourceLinear->hasLatin1Chars()) {
             JS::AutoCheckCannotGC nogc;
-            char *buf = sourceLinear->latin1Chars(nogc);
+            const Latin1Char *buf = sourceLinear->latin1Chars(nogc);
             nbytes = sourceLength;
             if (targetLength < nbytes) {
               JS_ReportError(cx, "ArrayType has insufficient length");
@@ -4476,7 +4475,7 @@ ArrayType::ConstructData(JSContext* cx,
         JSObject* objCTypes = CType::GetGlobalCTypes(cx, obj);
         if (!objCTypes)
           return false;
-        JSCTypesCallbacks* callbacks = GetCallbacks(objCTypes);
+        const JSCTypesCallbacks* callbacks = GetCallbacks(objCTypes);
         if (callbacks && callbacks->unicodeToNative) {
           if (sourceLinear->hasLatin1Chars()) {
             length = sourceLength + 1;
@@ -6760,7 +6759,7 @@ ReadStringCommon(JSContext* cx, InflateUTF8Method inflateUTF8, unsigned argc, js
     JSObject* objCTypes = CType::GetGlobalCTypes(cx, baseType);
     if (!objCTypes)
       return false;
-    JSCTypesCallbacks* callbacks = GetCallbacks(objCTypes);
+    const JSCTypesCallbacks* callbacks = GetCallbacks(objCTypes);
     if (callbacks && callbacks->nativeToUnicode) {
       dst = callbacks->nativeToUnicode(cx, bytes, length);
       if (!*dst)
