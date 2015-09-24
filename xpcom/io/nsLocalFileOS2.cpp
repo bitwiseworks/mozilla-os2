@@ -237,9 +237,17 @@ static int isleadbyte(int c)
 // nsDirEnumerator
 //-----------------------------------------------------------------------------
 
-class nsDirEnumerator : public nsISimpleEnumerator,
-                        public nsIDirectoryEnumerator
+class nsDirEnumerator final : public nsISimpleEnumerator,
+                              public nsIDirectoryEnumerator
 {
+    friend class nsLocalFile;
+
+    private:
+        ~nsDirEnumerator()
+        {
+            Close();
+        }
+
     public:
 
         NS_DECL_ISUPPORTS
@@ -355,11 +363,6 @@ class nsDirEnumerator : public nsISimpleEnumerator,
             return NS_OK;
         }
 
-        virtual ~nsDirEnumerator()
-        {
-            Close();
-        }
-
     protected:
         PRDir*             mDir;
         nsCOMPtr<nsIFile>  mParent;
@@ -376,12 +379,13 @@ class nsDriveEnumerator : public nsISimpleEnumerator
 {
 public:
     nsDriveEnumerator();
-    virtual ~nsDriveEnumerator();
     NS_DECL_ISUPPORTS
     NS_DECL_NSISIMPLEENUMERATOR
     nsresult Init();
 
 private:
+    virtual ~nsDriveEnumerator();
+
     // mDrives is a bitmap representing the available drives
     // mLetter is incremented each time mDrives is shifted rightward
     uint32_t    mDrives;
@@ -2299,7 +2303,7 @@ nsLocalFile::Equals(nsIFile *inFile, bool *_retval)
 }
 
 NS_IMETHODIMP
-nsLocalFile::Contains(nsIFile *inFile, bool recur, bool *_retval)
+nsLocalFile::Contains(nsIFile *inFile, bool *_retval)
 {
     // Check we are correctly initialized.
     CHECK_mWorkingPath();
