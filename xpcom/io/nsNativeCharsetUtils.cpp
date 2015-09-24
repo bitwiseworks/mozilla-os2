@@ -1018,7 +1018,8 @@ NS_ConvertWtoA(const char16_t* aStrInW, int aBufferSizeOut,
 //-----------------------------------------------------------------------------
 #elif defined(XP_OS2)
 
-#define INCL_DOS
+#define INCL_BASE
+#define INCL_PM
 #include <os2.h>
 #include <uconv.h>
 #include "nsAString.h"

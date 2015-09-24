@@ -9,8 +9,8 @@
 // (its possible resolution is limited to 100000 ticks per second max (as set by
 // PR_INTERVAL_MAX).
 
-#define INCL_DOS
-#define INCL_DOSERRORS
+#define INCL_BASE
+#define INCL_PM
 #include <os2.h>
 
 #include "mozilla/TimeStamp.h"

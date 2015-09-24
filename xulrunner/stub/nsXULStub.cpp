@@ -26,9 +26,8 @@
 #include <CoreFoundation/CoreFoundation.h>
 #define PATH_SEPARATOR_CHAR '/'
 #elif defined (XP_OS2)
-#define INCL_DOS
-#define INCL_DOSMISC
-#define INCL_DOSERRORS
+#define INCL_BASE
+#define INCL_PM
 #include <os2.h>
 #include <unistd.h>
 #include <sys/types.h>

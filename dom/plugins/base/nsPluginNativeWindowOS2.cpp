@@ -5,7 +5,8 @@
 
 /*****************************************************************************/
 
-#define INCL_WIN
+#define INCL_BASE
+#define INCL_PM
 #include "os2.h"
 
 #include "nsDebug.h"

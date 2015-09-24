@@ -11,9 +11,8 @@
 #include <string.h>
 #include <stdlib.h>
 
-#define INCL_DOS
-#define INCL_WINSHELLDATA
-#define INCL_MMIOOS2
+#define INCL_BASE
+#define INCL_PM
 #include <os2.h>
 #include <mmioos2.h>
 #include <mcios2.h>

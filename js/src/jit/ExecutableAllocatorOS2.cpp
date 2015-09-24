@@ -26,7 +26,8 @@
 
 #include "jit/ExecutableAllocator.h"
 
-#define INCL_DOS
+#define INCL_BASE
+#define INCL_PM
 #include <os2.h>
 
 using namespace js::jit;

@@ -4,12 +4,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#define INCL_BASE
+#define INCL_PM
+#include <os2.h>
+
 #include "mozilla/ArrayUtils.h"
 
 #include "nsIPlatformCharset.h"
 #include "nsUConvPropertySearch.h"
-#define INCL_WIN
-#include <os2.h>
 #include "nsIOS2Locale.h"
 #include "nsCOMPtr.h"
 #include "nsReadableUtils.h"

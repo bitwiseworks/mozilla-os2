@@ -27,11 +27,8 @@ using mozilla::IsWin7OrLater;
 #elif defined(XP_OS2)
 
 #define MAX_PATH _MAX_PATH
-#define INCL_WINWORKPLACE
-#define INCL_DOSMISC
-#define INCL_DOSMODULEMGR
-#define INCL_DOSPROCESS
-#define INCL_WINSHELLDATA
+#define INCL_BASE
+#define INCL_PM
 #include <os2.h>
 #include <stdlib.h>
 #include <stdio.h>

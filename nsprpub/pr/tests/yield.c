@@ -11,6 +11,8 @@
 #include <windows.h>
 #else
 #include "primpl.h"
+#define INCL_BASE
+#define INCL_PM
 #include <os2.h>
 #endif
 

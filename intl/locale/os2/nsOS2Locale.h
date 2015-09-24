@@ -5,11 +5,14 @@
 #define _nslocaleos2_h_
 
 
+#define INCL_BASE
+#define INCL_PM
+#include <os2.h>
+
 #include "nsISupports.h"
 #include "nscore.h"
 #include "nsString.h"
 #include "nsIOS2Locale.h"
-#include <os2.h>
 
 
 class nsOS2Locale final : public nsIOS2Locale {

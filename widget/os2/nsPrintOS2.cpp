@@ -7,11 +7,8 @@
 
 #include <stdlib.h>
 
+#define INCL_BASE
 #define INCL_PM
-#define INCL_SPLDOSPRINT
-#define INCL_DEV
-#define INCL_DEVDJP
-#define INCL_GRE_DEVICE
 #include <os2.h>
 
 #include "nsIServiceManager.h"

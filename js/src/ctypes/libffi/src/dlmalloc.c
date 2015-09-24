@@ -460,7 +460,8 @@ DEFAULT_MMAP_THRESHOLD       default: 256K
 #endif  /* WIN32 */
 
 #ifdef __OS2__
-#define INCL_DOS
+#define INCL_BASE
+#define INCL_PM
 #include <os2.h>
 #define HAVE_MMAP 1
 #define HAVE_MORECORE 0

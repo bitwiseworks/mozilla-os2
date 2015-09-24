@@ -19,8 +19,8 @@
 #include <Carbon/Carbon.h>
 #include "nsILocalFileMac.h"
 #elif defined(XP_OS2)
-#define INCL_DOSPROCESS
-#define INCL_DOSMODULEMGR
+#define INCL_BASE
+#define INCL_PM
 #include <os2.h>
 #elif defined(XP_WIN)
 #include <windows.h>

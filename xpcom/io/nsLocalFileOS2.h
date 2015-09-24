@@ -14,6 +14,10 @@
 #ifndef _nsLocalFileOS2_H_
 #define _nsLocalFileOS2_H_
 
+#define INCL_BASE
+#define INCL_PM
+#include <os2.h>
+
 #include "nscore.h"
 #include "nsError.h"
 #include "nsString.h"
@@ -24,13 +28,6 @@
 #include "nsIHashable.h"
 #include "nsIClassInfoImpl.h"
 #include "prio.h"
-
-#define INCL_DOS
-#define INCL_DOSERRORS
-#define INCL_WINCOUNTRY
-#define INCL_WINWORKPLACE
-
-#include <os2.h>
 
 class TypeEaEnumerator;
 

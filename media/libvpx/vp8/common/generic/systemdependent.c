@@ -25,8 +25,8 @@
 #include <windows.h>
 typedef void (WINAPI *PGNSI)(LPSYSTEM_INFO);
 #elif defined(__OS2__)
-#define INCL_DOS
-#define INCL_DOSSPINLOCK
+#define INCL_BASE
+#define INCL_PM
 #include <os2.h>
 #endif
 #endif

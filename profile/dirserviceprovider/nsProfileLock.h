@@ -15,8 +15,8 @@ class nsIProfileUnlocker;
 #endif
 
 #if defined (XP_OS2)
-#define INCL_DOSERRORS
-#define INCL_DOSFILEMGR
+#define INCL_BASE
+#define INCL_PM
 #include <os2.h>
 #endif
 

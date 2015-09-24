@@ -4,8 +4,8 @@
 
 // OS/2 plugin-loading code.
 
-#define INCL_DOS
-#define INCL_DOSERRORS
+#define INCL_BASE
+#define INCL_PM
 #include <os2.h>
 
 #include "nsPluginsDir.h"

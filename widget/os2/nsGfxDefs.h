@@ -7,13 +7,13 @@
 
 // nsGfxDefs.h - common includes etc. for gfx library
 
+
+#define INCL_BASE
+#define INCL_PM
+#include <os2.h>
+
 #include "nscore.h"
 
-#define INCL_PM
-#define INCL_DOS
-#define INCL_DOSERRORS
-#define INCL_DEV
-#include <os2.h>
 #include "prlog.h"
 #include "nsHashtable.h"
 

@@ -6,11 +6,11 @@
 #ifndef nsAppShell_h__
 #define nsAppShell_h__
 
-#include "nsBaseAppShell.h"
-#define INCL_DEV
-#define INCL_WIN
-#define INCL_DOS
+#define INCL_BASE
+#define INCL_PM
 #include <os2.h>
+
+#include "nsBaseAppShell.h"
 
 /**
  * Native OS/2 Application shell wrapper

@@ -29,7 +29,8 @@
     typedef pthread_key_t TLSIndex;
 #   define TLS_INVALID_INDEX (static_cast<TLSIndex>(-1))
 #elif defined(ANGLE_PLATFORM_OS2)
-#   #define INCL_DOS
+#   define INCL_BASE
+#   define INCL_PM
 #   include <os2.h>
     typedef PULONG TLSIndex;
 #   define TLS_INVALID_INDEX (nullptr)

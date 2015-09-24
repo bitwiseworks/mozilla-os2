@@ -39,7 +39,8 @@
 #undef CreateFile
 #undef CREATE_NEW
 #elif defined(XP_OS2)
-#define INCL_DOSERRORS
+#define INCL_BASE
+#define INCL_PM
 #include <os2.h>
 #else
 // XXX add necessary include file for ftruncate (or equivalent)

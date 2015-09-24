@@ -5,8 +5,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /* OS/2-specific local file uri parsing */
-#define INCL_DOSERRORS
-#define INCL_DOS
+#define INCL_BASE
+#define INCL_PM
 #include <os2.h>
 #include "nsURLHelper.h"
 #include "nsEscape.h"

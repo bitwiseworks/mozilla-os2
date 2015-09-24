@@ -43,7 +43,8 @@
 # define getpid() GetCurrentProcessId()
 #elif defined(XP_OS2)
 # include <unistd.h>
-# define INCL_DOSFILEMGR
+#define INCL_BASE
+#define INCL_PM
 # include <os2.h>
 #elif defined(XP_UNIX)
 # include <unistd.h>

@@ -10,7 +10,8 @@
 # include "jswin.h"
 
 #elif defined(XP_OS2)
-# define INCL_DOS
+# define INCL_BASE
+# define INCL_PM
 # include <os2.h>
 
 #elif defined(XP_MACOSX) || defined(DARWIN) || defined(XP_UNIX)

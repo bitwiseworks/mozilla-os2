@@ -5,10 +5,13 @@
 #ifndef _nsios2locale_h_
 #define _nsios2locale_h_
 
+#define INCL_BASE
+#define INCL_PM
+#include <os2.h>
+
 #include "nsISupports.h"
 #include "nscore.h"
 #include "nsString.h"
-#include <os2.h>
 
 // {F25F74F0-FB59-11d3-A9F2-00203522A03C}
 #define NS_IOS2LOCALE_IID	                    \

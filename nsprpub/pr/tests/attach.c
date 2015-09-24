@@ -48,8 +48,8 @@
 #elif defined(SOLARIS)
 #include <thread.h>
 #elif defined(OS2)
-#define INCL_DOS
-#define INCL_ERRORS
+#define INCL_BASE
+#define INCL_PM
 #include <os2.h>
 #include <process.h>
 #elif defined(XP_BEOS)

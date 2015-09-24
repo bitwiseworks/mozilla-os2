@@ -98,7 +98,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <setjmp.h>
-#define INCL_DOS
+#define INCL_BASE
+#define INCL_PM
 #include <os2.h>
 #else
 #include <sys/types.h>

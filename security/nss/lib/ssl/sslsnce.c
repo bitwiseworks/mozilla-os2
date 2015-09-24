@@ -983,7 +983,8 @@ ServerSessionIDUncache(sslSessionID *sid)
 
 #ifdef XP_OS2
 
-#define INCL_DOSPROCESS
+#define INCL_BASE
+#define INCL_PM
 #include <os2.h>
 
 long gettid(void)

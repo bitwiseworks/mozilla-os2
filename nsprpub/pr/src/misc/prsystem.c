@@ -13,8 +13,8 @@
 #endif
 
 #if defined(OS2)
-#define INCL_DOS
-#define INCL_DOSMISC
+#define INCL_BASE
+#define INCL_PM
 #include <os2.h>
 /* define the required constant if it is not already defined in the headers */
 #ifndef QSV_NUMPROCESSORS

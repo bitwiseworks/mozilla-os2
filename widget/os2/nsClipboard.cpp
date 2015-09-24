@@ -12,8 +12,8 @@
 #include "nsOS2Uni.h"
 #include "nsClipboard.h"
 
-#define INCL_DOSERRORS
-#define INCL_WIN
+#define INCL_BASE
+#define INCL_PM
 #include <os2.h>
 
 inline uint32_t RegisterClipboardFormat(PCSZ pcszFormat)

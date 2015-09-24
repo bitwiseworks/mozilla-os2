@@ -8,10 +8,8 @@
 
 #include <stdlib.h>
 
+#define INCL_BASE
 #define INCL_PM
-#define INCL_DOS
-#define INCL_SPLDOSPRINT
-#define INCL_DEVDJP
 #include <os2.h>
 
 #define INCL_GRE_DEVICE

@@ -47,9 +47,8 @@
  **/
 
 
-#define INCL_WINERRORS
-#define INCL_GPI
-#define INCL_DEV
+#define INCL_BASE
+#define INCL_PM
 #include <os2.h>
 #include "cairo-os2-private.h"
 

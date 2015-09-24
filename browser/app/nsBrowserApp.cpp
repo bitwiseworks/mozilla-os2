@@ -5,6 +5,7 @@
 
 #if defined(XP_OS2)
 #define INCL_BASE
+#define INCL_PM
 #include <os2.h>
 #endif
 

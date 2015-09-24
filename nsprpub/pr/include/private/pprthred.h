@@ -13,9 +13,8 @@
 #include "nspr.h"
 
 #if defined(XP_OS2)
-#define INCL_DOS
-#define INCL_DOSERRORS
-#define INCL_WIN
+#define INCL_BASE
+#define INCL_PM
 #include <os2.h>
 #endif
 

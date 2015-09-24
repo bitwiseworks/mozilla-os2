@@ -4,8 +4,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
-#define INCL_DOS
-#define INCL_DOSERRORS
+#define INCL_BASE
+#define INCL_PM
 #include <os2.h>
 #include <stdlib.h>
 #include <time.h>

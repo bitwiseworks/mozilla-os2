@@ -47,15 +47,13 @@
 #ifndef _nswindow_h
 #define _nswindow_h
 
-#include "nsBaseWidget.h"
-#include "mozilla/MouseEvents.h"
-
-#define INCL_DOS
-#define INCL_WIN
-#define INCL_NLS
-#define INCL_GPI
+#define INCL_BASE
+#define INCL_PM
 #include <os2.h>
 #include <os2im.h>
+
+#include "nsBaseWidget.h"
+#include "mozilla/MouseEvents.h"
 
 //-----------------------------------------------------------------------------
 // Items that may not be in the OS/2 Toolkit headers

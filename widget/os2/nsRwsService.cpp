@@ -5,6 +5,10 @@
 
 //------------------------------------------------------------------------
 
+#define INCL_BASE
+#define INCL_PM
+#include <os2.h>
+
 #include "nsIFile.h"
 #include "mozilla/ModuleUtils.h"
 #include "nsIObserver.h"
@@ -14,10 +18,6 @@
 #include "nsReadableUtils.h"
 #include "nsIStringBundle.h"
 #include "mozilla/Services.h"
-
-#define INCL_WIN
-#define INCL_DOS
-#include <os2.h>
 
 // nsRwsService must be included _after_ os2.h
 #include "nsRwsService.h"

@@ -45,7 +45,8 @@
 #elif XP_WIN
 #include "gfxWindowsSurface.h"
 #elif defined(XP_OS2)
-#define INCL_WIN
+#define INCL_BASE
+#define INCL_PM
 #include <os2.h>
 #include "gfxPDFSurface.h"
 #include "gfxPSSurface.h"

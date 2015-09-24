@@ -12,8 +12,8 @@
 #include <libx.h>
 #endif */
 
-#define INCL_DOSFILEMGR
-#define INCL_DOSERRORS
+#define INCL_BASE
+#define INCL_PM
 #include <os2.h>
 
 #if OS2 >= 2

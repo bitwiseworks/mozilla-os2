@@ -18,6 +18,7 @@
 #include "nsProxyRelease.h"
 #include "nsIRwsService.h"
 
+#define INCL_BASE
 #define INCL_PM
 #include <os2.h>
 

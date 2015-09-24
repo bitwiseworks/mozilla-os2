@@ -13,10 +13,8 @@
 #include "nsNetCID.h"
 #include "nsEscape.h"
 
-#define INCL_DOS
-#define INCL_DOSMISC
-#define INCL_DOSERRORS
-#define INCL_WINSHELLDATA
+#define INCL_BASE
+#define INCL_PM
 #include <os2.h>
 
 class nsMIMEInfoOS2 : public nsMIMEInfoBase, public nsIPropertyBag

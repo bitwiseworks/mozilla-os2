@@ -56,7 +56,8 @@
 #elif defined(XP_OS2)
 #include <process.h>
 #include <float.h>
-#define INCL_DOS
+#define INCL_BASE
+#define INCL_PM
 #include <os2.h>
 #else
 #include <unistd.h>

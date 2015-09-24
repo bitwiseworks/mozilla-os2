@@ -40,7 +40,8 @@ extern "C" {
 
 #elif defined(__OS2__)
 /* OS/2 */
-#define INCL_DOS
+#define INCL_BASE
+#define INCL_PM
 #include <os2.h>
 
 #include <stdlib.h>

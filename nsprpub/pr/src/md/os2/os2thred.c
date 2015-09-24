@@ -6,6 +6,7 @@
 // exceptq trap file generator
 #include <string.h>
 #define INCL_BASE
+#define INCL_PM
 #include <os2.h>
 #define INCL_LIBLOADEXCEPTQ
 #include <exceptq.h>
