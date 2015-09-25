@@ -10,6 +10,9 @@
 
 #define INCL_BASE
 #define INCL_PM
+// too pity the above two don't include this one (looks like a bug):
+#define INCL_SPLDOSPRINT
+#define INCL_DEVDJP
 #include <os2.h>
 
 #define INCL_GRE_DEVICE
