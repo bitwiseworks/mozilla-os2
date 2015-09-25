@@ -19,6 +19,12 @@ if CONFIG['OS_TARGET'] == 'WINNT':
     DEFINES['HAVE_MS_C_RUNTIME'] = True
     DEFINES['__PRETTY_FUNCTION__'] = '__FUNCTION__'
     LOCAL_INCLUDES += [ 'ports/win32/include' ]
+elif CONFIG['OS_TARGET'] == 'OS2':
+    DEFINES['HAVE_SYS_UIO_H'] = True
+    DEFINES['off64_t'] = 'int64_t'
+    DEFINES['ENODATA'] = '-0x80000003'
+    DEFINES['EBADMSG'] = '-0x80000006'
+    LOCAL_INCLUDES += [ 'ports/bsd/include' ]
 elif CONFIG['OS_TARGET'] == 'Darwin':
     DEFINES['HAVE_SYS_UIO_H'] = True
     DEFINES['off64_t'] = 'off_t'
