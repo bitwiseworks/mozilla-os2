@@ -275,6 +275,7 @@ public:
     void CheckConsole();
 
 private:
+    ~nsNativeAppSupportOS2() {}
     static HDDEDATA APIENTRY HandleDDENotification( ULONG    idInst,
                                                     USHORT   uType,
                                                     USHORT   uFmt,
@@ -1643,7 +1644,8 @@ nsNativeAppSupportOS2::OpenBrowserWindow()
           if ( navItem ) {
             nsCOMPtr<nsIDocShellTreeItem> rootItem;
             navItem->GetRootTreeItem( getter_AddRefs( rootItem ) );
-            nsCOMPtr<nsIDOMWindow> rootWin( do_GetInterface( rootItem ) );
+            nsCOMPtr<nsIDOMWindow> rootWin =
+              rootItem ? rootItem->GetWindow() : nullptr;
             nsCOMPtr<nsIDOMChromeWindow> chromeWin(do_QueryInterface(rootWin));
             if ( chromeWin )
               chromeWin->GetBrowserDOMWindow( getter_AddRefs ( bwin ) );
