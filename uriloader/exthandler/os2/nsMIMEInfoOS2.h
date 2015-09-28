@@ -19,6 +19,8 @@
 
 class nsMIMEInfoOS2 : public nsMIMEInfoBase, public nsIPropertyBag
 {
+    virtual ~nsMIMEInfoOS2();
+
   public:
     nsMIMEInfoOS2(const char *aType = "") :
       nsMIMEInfoBase(aType), mDefaultAppHandle(0) {}
@@ -26,7 +28,6 @@ class nsMIMEInfoOS2 : public nsMIMEInfoBase, public nsIPropertyBag
       nsMIMEInfoBase(aMIMEType), mDefaultAppHandle(0) {}
     nsMIMEInfoOS2(const nsACString& aType, HandlerClass aClass) :
       nsMIMEInfoBase(aType, aClass), mDefaultAppHandle(0) {}
-    virtual ~nsMIMEInfoOS2();
 
     NS_DECL_ISUPPORTS_INHERITED
     NS_DECL_NSIPROPERTYBAG
@@ -43,9 +44,9 @@ class nsMIMEInfoOS2 : public nsMIMEInfoBase, public nsIPropertyBag
     void SetDefaultAppHandle(uint32_t aHandle);
 
   protected:
-    virtual NS_HIDDEN_(nsresult) LoadUriInternal(nsIURI *aURI);
+    virtual nsresult LoadUriInternal(nsIURI *aURI);
     // XXX should we do most of the work here and let LaunchWithFile() call this?
-    virtual NS_HIDDEN_(nsresult) LaunchDefaultWithFile(nsIFile *aFile) {
+    virtual nsresult LaunchDefaultWithFile(nsIFile *aFile) {
       NS_NOTREACHED("Do not call this, use LaunchWithFile");
       return NS_ERROR_UNEXPECTED;
     }

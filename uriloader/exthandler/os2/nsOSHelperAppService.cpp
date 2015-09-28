@@ -17,7 +17,6 @@
 #include "nsIProcess.h"
 #include "nsXPCOM.h"
 #include "nsISupportsPrimitives.h"
-#include "nsHashtable.h"
 #include "nsCRT.h"
 #include "prenv.h"      // for PR_GetEnv()
 #include "nsMIMEInfoOS2.h"
@@ -28,6 +27,9 @@
 #include "mozilla/Services.h"
 #include "mozilla/Preferences.h"
 #include <stdlib.h>     // for system()
+
+#define LOG(args) PR_LOG(mLog, PR_LOG_DEBUG, args)
+#define LOG_ENABLED() PR_LOG_TEST(mLog, PR_LOG_DEBUG)
 
 using namespace mozilla;
 
@@ -69,7 +71,6 @@ nsresult
 nsOSHelperAppService::UnescapeCommand(const nsAString& aEscapedCommand,
                                       const nsAString& aMajorType,
                                       const nsAString& aMinorType,
-                                      nsHashtable& aTypeOptions,
                                       nsACString& aUnEscapedCommand) {
   LOG(("-- UnescapeCommand"));
   LOG(("Command to escape: '%s'\n",
@@ -840,7 +841,6 @@ nsOSHelperAppService::ParseNormalMIMETypesEntry(const nsAString& aEntry,
 nsresult
 nsOSHelperAppService::LookUpHandlerAndDescription(const nsAString& aMajorType,
                                                   const nsAString& aMinorType,
-                                                  nsHashtable& aTypeOptions,
                                                   nsAString& aHandler,
                                                   nsAString& aDescription,
                                                   nsAString& aMozillaFlags) {
@@ -856,7 +856,6 @@ nsOSHelperAppService::LookUpHandlerAndDescription(const nsAString& aMajorType,
     rv = GetHandlerAndDescriptionFromMailcapFile(mailcapFileName,
                                                  aMajorType,
                                                  aMinorType,
-                                                 aTypeOptions,
                                                  aHandler,
                                                  aDescription,
                                                  aMozillaFlags);
@@ -870,7 +869,6 @@ nsOSHelperAppService::LookUpHandlerAndDescription(const nsAString& aMajorType,
       rv = GetHandlerAndDescriptionFromMailcapFile(mailcapFileName,
                                                    aMajorType,
                                                    aMinorType,
-                                                   aTypeOptions,
                                                    aHandler,
                                                    aDescription,
                                                    aMozillaFlags);
@@ -886,7 +884,6 @@ nsresult
 nsOSHelperAppService::GetHandlerAndDescriptionFromMailcapFile(const nsAString& aFilename,
                                                               const nsAString& aMajorType,
                                                               const nsAString& aMinorType,
-                                                              nsHashtable& aTypeOptions,
                                                               nsAString& aHandler,
                                                               nsAString& aDescription,
                                                               nsAString& aMozillaFlags) {
@@ -1035,7 +1032,6 @@ nsOSHelperAppService::GetHandlerAndDescriptionFromMailcapFile(const nsAString& a
                   rv = UnescapeCommand(Substring(++equal_sign_iter, semicolon_iter),
                                        aMajorType,
                                        aMinorType,
-                                       aTypeOptions,
                                        testCommand);
                   LOG(("Running Test: %s\n", testCommand.get()));
                   // XXX this should not use system(), since that can block the UI thread!
@@ -1146,7 +1142,6 @@ nsOSHelperAppService::GetFromExtension(const nsCString& aFileExt) {
   NS_ADDREF(mimeInfo);
   
   mimeInfo->AppendExtension(aFileExt);
-  nsHashtable typeOptions; // empty hash table
   // The mailcap lookup is two-pass to handle the case of mailcap files
   // that have something like:
   //
@@ -1154,13 +1149,13 @@ nsOSHelperAppService::GetFromExtension(const nsCString& aFileExt) {
   // text/rtf; soffice %s
   //
   // in that order.  We want to pick up "soffice" for text/rtf in such cases
-  rv = LookUpHandlerAndDescription(majorType, minorType, typeOptions,
+  rv = LookUpHandlerAndDescription(majorType, minorType,
                                    handler, mailcap_description,
                                    mozillaFlags);
   if (NS_FAILED(rv)) {
     // maybe we have an entry for "majorType/*"?
     rv = LookUpHandlerAndDescription(majorType, NS_LITERAL_STRING("*"),
-                                     typeOptions, handler, mailcap_description,
+                                     handler, mailcap_description,
                                      mozillaFlags);
   }
   LOG(("Handler/Description results:  handler='%s', description='%s', mozillaFlags='%s'\n",
@@ -1202,8 +1197,6 @@ nsOSHelperAppService::GetFromType(const nsCString& aMIMEType) {
     mime_types_description, mailcap_description,
     handler, mozillaFlags;
 
-  nsHashtable typeOptions;
-  
   // extract the major and minor types
   NS_ConvertASCIItoUTF16 mimeType(aMIMEType);
   nsAString::const_iterator start_iter, end_iter,
@@ -1213,7 +1206,6 @@ nsOSHelperAppService::GetFromType(const nsCString& aMIMEType) {
   mimeType.BeginReading(start_iter);
   mimeType.EndReading(end_iter);
 
-  // XXX FIXME: add typeOptions parsing in here
   rv = ParseMIMEType(start_iter, majorTypeStart, majorTypeEnd,
                      minorTypeStart, minorTypeEnd, end_iter);
 
@@ -1232,7 +1224,6 @@ nsOSHelperAppService::GetFromType(const nsCString& aMIMEType) {
   // in that order.  We want to pick up "soffice" for text/rtf in such cases
   rv = LookUpHandlerAndDescription(majorType,
                                    minorType,
-                                   typeOptions,
                                    handler,
                                    mailcap_description,
                                    mozillaFlags);
@@ -1240,7 +1231,6 @@ nsOSHelperAppService::GetFromType(const nsCString& aMIMEType) {
     // maybe we have an entry for "majorType/*"?
     rv = LookUpHandlerAndDescription(majorType,
                                      NS_LITERAL_STRING("*"),
-                                     typeOptions,
                                      handler,
                                      mailcap_description,
                                      mozillaFlags);

@@ -16,9 +16,6 @@
 #include "nsMIMEInfoImpl.h"
 #include "nsCOMPtr.h"
 
-#define LOG(args) PR_LOG(mLog, PR_LOG_DEBUG, args)
-#define LOG_ENABLED() PR_LOG_TEST(mLog, PR_LOG_DEBUG)
-
 class nsHashtable;
 class nsILineInputStream;
 class nsMIMEInfoOS2;
@@ -54,7 +51,6 @@ private:
   static nsresult UnescapeCommand(const nsAString& aEscapedCommand,
                                   const nsAString& aMajorType,
                                   const nsAString& aMinorType,
-                                  nsHashtable& aTypeOptions,
                                   nsACString& aUnEscapedCommand);
   static nsresult GetFileLocation(const char* aPrefName,
                                   const char* aEnvVarName,
@@ -107,14 +103,12 @@ private:
 
   static nsresult LookUpHandlerAndDescription(const nsAString& aMajorType,
                                               const nsAString& aMinorType,
-                                              nsHashtable& aTypeOptions,
                                               nsAString& aHandler,
                                               nsAString& aDescription,
                                               nsAString& aMozillaFlags);
   static nsresult GetHandlerAndDescriptionFromMailcapFile(const nsAString& aFilename,
                                                           const nsAString& aMajorType,
                                                           const nsAString& aMinorType,
-                                                          nsHashtable& aTypeOptions,
                                                           nsAString& aHandler,
                                                           nsAString& aDescription,
                                                           nsAString& aMozillaFlags);
