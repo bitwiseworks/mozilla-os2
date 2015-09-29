@@ -81,16 +81,16 @@ StackIdentifier::StackIdentifier(const PluginIdentifier& aIdentifier, bool aInte
     return;
   }
 
-  mIdentifier = mozilla::plugins::parent::_getintidentifier(aIdentifier.get_int32_t());
+  mIdentifier = mozilla::plugins::parent::NPN_getintidentifier(aIdentifier.get_int32_t());
 }
 
 static bool
 FromNPIdentifier(NPIdentifier aIdentifier, PluginIdentifier* aResult)
 {
-  if (mozilla::plugins::parent::_identifierisstring(aIdentifier)) {
+  if (mozilla::plugins::parent::NPN_identifierisstring(aIdentifier)) {
     nsCString string;
     NPUTF8* chars =
-      mozilla::plugins::parent::_utf8fromidentifier(aIdentifier);
+      mozilla::plugins::parent::NPN_utf8fromidentifier(aIdentifier);
     if (!chars) {
       return false;
     }
@@ -99,7 +99,7 @@ FromNPIdentifier(NPIdentifier aIdentifier, PluginIdentifier* aResult)
     return true;
   }
   else {
-    int32_t intval = mozilla::plugins::parent::_intfromidentifier(aIdentifier);
+    int32_t intval = mozilla::plugins::parent::NPN_intfromidentifier(aIdentifier);
     *aResult = PluginIdentifier(intval);
     return true;
   }
@@ -1183,6 +1183,7 @@ PluginScriptableObjectParent::AnswerEnumerate(InfallibleTArray<PluginIdentifier>
     PluginIdentifier id;
     if (!FromNPIdentifier(ids[index], &id)) {
       return false;
+    }
     aProperties->AppendElement(id);
   }
 

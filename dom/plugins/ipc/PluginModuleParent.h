@@ -433,7 +433,7 @@ private:
     virtual nsresult NP_Initialize(NPNetscapeFuncs* bFuncs, NPError* error) override;
 #endif
 
-#if defined(XP_WIN) || defined(XP_MACOSX)
+#if defined(XP_WIN) || defined(XP_MACOSX) || defined(XP_OS2)
     virtual nsresult NP_GetEntryPoints(NPPluginFuncs* pFuncs, NPError* error) override;
 #endif
 

@@ -36,7 +36,7 @@ AsyncNPObject::AsyncNPObject(PluginAsyncSurrogate* aSurrogate)
 AsyncNPObject::~AsyncNPObject()
 {
   if (mRealObject) {
-    parent::_releaseobject(mRealObject);
+    parent::NPN_releaseobject(mRealObject);
     mRealObject = nullptr;
   }
 }
@@ -219,8 +219,8 @@ PluginAsyncSurrogate::NPP_GetValue(NPPVariable aVariable, void* aRetval)
     return instance->NPP_GetValue(aVariable, aRetval);
   }
 
-  NPObject* npobject = parent::_createobject(mInstance,
-                                             const_cast<NPClass*>(GetClass()));
+  NPObject* npobject = parent::NPN_createobject(mInstance,
+                                                const_cast<NPClass*>(GetClass()));
   MOZ_ASSERT(npobject);
   MOZ_ASSERT(npobject->_class == GetClass());
   MOZ_ASSERT(npobject->referenceCount == 1);
@@ -420,7 +420,7 @@ PluginAsyncSurrogate::DestroyAsyncStream(NPStream* aStream)
   // streamListener was suspended during async init. We must resume the stream
   // request prior to calling _destroystream for cleanup to work correctly.
   streamListener->ResumeRequest();
-  parent::_destroystream(mInstance, aStream, NPRES_DONE);
+  parent::NPN_destroystream(mInstance, aStream, NPRES_DONE);
 }
 
 /* static */ bool

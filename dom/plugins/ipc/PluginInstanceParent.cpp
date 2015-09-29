@@ -74,7 +74,7 @@ StreamNotifyParent::RecvRedirectNotifyResponse(const bool& allow)
   return true;
 }
 
-#if defined(XP_WIN)
+#if defined(XP_WIN) || defined(XP_OS2)
 namespace mozilla {
 namespace plugins {
 /**
@@ -83,6 +83,7 @@ namespace plugins {
  */
 static nsClassHashtable<nsVoidPtrHashKey, PluginInstanceParent>* sPluginInstanceList;
 
+#if defined(XP_WIN)
 // static
 PluginInstanceParent*
 PluginInstanceParent::LookupPluginInstanceByID(uintptr_t aId)
@@ -93,6 +94,7 @@ PluginInstanceParent::LookupPluginInstanceByID(uintptr_t aId)
     }
     return nullptr;
 }
+#endif
 }
 }
 #endif
@@ -1203,11 +1205,6 @@ PluginInstanceParent::NPP_HandleEvent(void* event)
 
 #if defined(XP_OS2)
     if (mWindowType == NPWindowTypeDrawable) {
-        if (IsAsyncDrawing()) {
-            // No support fo async drawing so far.
-            return handled;
-        }
-
         switch (npevent->event) {
             case WM_PAINT:
             {
@@ -2052,29 +2049,60 @@ PluginInstanceParent::PluginWindowHookProc(HWND hWnd,
 void
 PluginInstanceParent::SubclassPluginWindow(HWND aWnd)
 {
-    NS_ASSERTION(!(mPluginHWND && aWnd != mPluginHWND),
-      "PluginInstanceParent::SubclassPluginWindow hwnd is not our window!");
+    if ((aWnd && mPluginHWND == aWnd) || (!aWnd && mPluginHWND)) {
+        return;
+    }
 
-    if (!mPluginHWND) {
-        mPluginHWND = aWnd;
-        mPluginWndProc = ::WinSubclassWindow(mPluginHWND, PluginWindowHookProc);
-        DebugOnly<BOOL> bRes = ::WinSetWindowPtr(mPluginHWND, QWL_PENDATA, this);
-        NS_ASSERTION(mPluginWndProc,
-          "PluginInstanceParent::SubclassPluginWindow failed to set subclass!");
-        NS_ASSERTION(bRes,
-          "PluginInstanceParent::SubclassPluginWindow failed to set prop!");
-   }
+    if (XRE_GetProcessType() == GeckoProcessType_Content) {
+        if (!aWnd) {
+            NS_WARNING("PluginInstanceParent::SubclassPluginWindow unexpected null window");
+            return;
+        }
+        mPluginHWND = aWnd; // now a remote window, we can't subclass this
+        mPluginWndProc = nullptr;
+        // Note sPluginInstanceList wil delete 'this' if we do not remove
+        // it on shutdown.
+        sPluginInstanceList->Put((void*)mPluginHWND, this);
+        return;
+    }
+
+    NS_ASSERTION(!(mPluginHWND && aWnd != mPluginHWND),
+        "PluginInstanceParent::SubclassPluginWindow hwnd is not our window!");
+
+    mPluginHWND = aWnd;
+    mPluginWndProc = ::WinSubclassWindow(mPluginHWND, PluginWindowHookProc);
+    DebugOnly<BOOL> bRes = ::WinSetWindowPtr(mPluginHWND, QWL_PENDATA, this);
+    NS_ASSERTION(mPluginWndProc,
+        "PluginInstanceParent::SubclassPluginWindow failed to set subclass!");
+    NS_ASSERTION(bRes,
+        "PluginInstanceParent::SubclassPluginWindow failed to set prop!");
 }
 
 void
 PluginInstanceParent::UnsubclassPluginWindow()
 {
+    if (XRE_GetProcessType() == GeckoProcessType_Content) {
+        if (mPluginHWND) {
+            // Remove 'this' from the plugin list safely
+            nsAutoPtr<PluginInstanceParent> tmp;
+            MOZ_ASSERT(sPluginInstanceList);
+            sPluginInstanceList->RemoveAndForget((void*)mPluginHWND, tmp);
+            tmp.forget();
+            if (!sPluginInstanceList->Count()) {
+                delete sPluginInstanceList;
+                sPluginInstanceList = nullptr;
+            }
+        }
+        mPluginHWND = NULLHANDLE;
+        return;
+    }
+
     if (mPluginHWND && mPluginWndProc) {
         ::WinSubclassWindow(mPluginHWND, mPluginWndProc);
-        ::WinSetWindowPtr(mPluginHWND, QWL_PENDATA, NULL);
+        ::WinSetWindowPtr(mPluginHWND, QWL_PENDATA, nullptr);
 
-        mPluginWndProc = NULL;
-        mPluginHWND = NULL;
+        mPluginWndProc = nullptr;
+        mPluginHWND = NULLHANDLE;
     }
 }
 
@@ -2122,7 +2150,7 @@ PluginInstanceParent::SharedSurfaceSetWindow(const NPWindow* aWindow,
     mSharedSize = newPort;
 
     base::SharedMemoryHandle handle;
-    if (NS_FAILED(mSharedSurfaceDib.ShareToProcess(mParent->ChildProcessHandle(), &handle)))
+    if (NS_FAILED(mSharedSurfaceDib.ShareToProcess(OtherProcess(), &handle)))
       return false;
 
     aRemoteWindow.surfaceHandle = handle;

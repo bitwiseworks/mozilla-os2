@@ -490,7 +490,7 @@ PluginModuleChromeParent::OnProcessLaunched(const bool aSucceeded)
 
     if (mInitOnAsyncConnect) {
         mInitOnAsyncConnect = false;
-#if defined(XP_WIN)
+#if defined(XP_WIN) || defined(XP_OS2)
         mAsyncInitRv = NP_GetEntryPoints(mNPPIface,
                                          &mAsyncInitError);
         if (NS_SUCCEEDED(mAsyncInitRv))
@@ -1730,7 +1730,7 @@ bool
 PluginModuleParent::GetSetting(NPNVariable aVariable)
 {
     NPBool boolVal = false;
-    mozilla::plugins::parent::_getvalue(nullptr, aVariable, &boolVal);
+    mozilla::plugins::parent::NPN_getvalue(nullptr, aVariable, &boolVal);
     return boolVal;
 }
 
@@ -2541,7 +2541,7 @@ PluginModuleParent::RecvNPN_SetException(const nsCString& aMessage)
     PLUGIN_LOG_DEBUG(("%s", FULLFUNCTION));
 
     // This function ignores its first argument.
-    mozilla::plugins::parent::_setexception(nullptr, NullableStringGet(aMessage));
+    mozilla::plugins::parent::NPN_setexception(nullptr, NullableStringGet(aMessage));
     return true;
 }
 

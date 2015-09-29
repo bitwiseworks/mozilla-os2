@@ -217,9 +217,11 @@ PluginInstanceChild::~PluginInstanceChild()
 {
 #if defined(OS_WIN) || defined(XP_OS2)
     NS_ASSERTION(!mPluginWindowHWND, "Destroying PluginInstanceChild without NPP_Destroy?");
+#if defined(OS_WIN)
     if (GetQuirks() & PluginModuleChild::QUIRK_UNITY_FIXUP_MOUSE_CAPTURE) {
         ClearUnityHooks();
     }
+#endif
 #endif
 #if defined(MOZ_WIDGET_COCOA)
     if (mShColorSpace) {
