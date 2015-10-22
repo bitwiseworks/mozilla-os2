@@ -46,9 +46,6 @@ public:
     // enable/disable DIVE (direct access to the video framebuffer)
     static bool EnableDIVE(bool aEnable, bool aHidePointer);
 
-    // returns special rendering flags for os2Print surfaces
-    virtual int32_t GetDefaultContextFlags() const;
-
 private:
     typedef enum {
         os2Null     = 0,

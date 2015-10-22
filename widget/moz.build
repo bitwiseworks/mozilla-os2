@@ -197,12 +197,12 @@ if CONFIG['MOZ_X11']:
         'GfxInfoX11.cpp'
     ]
 
-if toolkit in ('cocoa', 'windows'):
+if toolkit in ('cocoa', 'windows', 'os2'):
     UNIFIED_SOURCES += [
         'nsBaseClipboard.cpp',
     ]
 
-if toolkit in ('qt', 'gtk2', 'gtk3', 'cocoa', 'windows',
+if toolkit in ('qt', 'gtk2', 'gtk3', 'cocoa', 'windows', 'os2',
                                     'android', 'gonk'):
     UNIFIED_SOURCES += [
         'nsBaseFilePicker.cpp',

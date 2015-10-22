@@ -63,6 +63,12 @@ nsScreenManagerOS2::ScreenForRect(int32_t /*inLeft*/, int32_t /*inTop*/, int32_t
 } // ScreenForRect
 
 
+NS_IMETHODIMP
+nsScreenManagerOS2::ScreenForId(uint32_t aId, nsIScreen** aOutScreen)
+{
+  GetPrimaryScreen(aOutScreen);
+}
+
 //
 // GetPrimaryScreen
 //
