@@ -131,7 +131,7 @@ struct Module
 #      define NSMODULE_SECTION
 #      define NSMODULE_DEFN_INTERNAL(_nsmodule_name) NSMODULE_DEFN_INTERNAL2(_nsmodule_name)
 #      define NSMODULE_DEFN_INTERNAL2(_nsmodule_name) \
-         __asm__(".stabs \"___kPStaticModules__\", 25, 0, 0, _" #_nsmodule_name); \
+         __asm__(".stabs \"___kPStaticModules__\", 23, 0, 0, _" #_nsmodule_name); \
          extern "C" __attribute__((dllexport)) mozilla::Module const *const _nsmodule_name
 #      define NSMODULE_DEFN(_name) NSMODULE_DEFN_INTERNAL(NSMODULE_NAME(_name))
 #    elif defined (_WIN32)

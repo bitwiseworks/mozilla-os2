@@ -334,7 +334,7 @@ NSMODULE_DEFN(end_kPStaticModules);
  *
  * Note that GCC for OS/2 doesn't support the section attribute (because the
  * a.out format used there as gas output doesn't support custom sections).
- * Instead, we use special .stabs types (N_SETA/N_SETD) to generate a table of
+ * Instead, we use special .stabs types (N_SETA/N_SETT) to generate a table of
  * pointers to the module variables gathered across the sources. This means that
  * the variables themselves are not packed in a table (as it happens on other
  * platforms using sections) but instead their addresses are packed (so one more
