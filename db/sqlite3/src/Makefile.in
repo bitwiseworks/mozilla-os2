@@ -30,9 +30,3 @@ endif
 ifeq ($(OS_ARCH),WINNT)
 MODULE_OPTIMIZE_FLAGS = -O2
 endif
-
-ifeq ($(OS_ARCH),OS2)
-ADD_TO_DEF_FILE = $(call py_action,preprocessor,$(DEFINES) \
-       $(srcdir)/sqlite.def) | sed -e '1,/^EXPORTS$$/ d' -e 's,sqlite3,_\0,' \
-       -e 's,\ DATA.*$$,,' >> $(DEF_FILE)
-endif

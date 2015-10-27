@@ -695,9 +695,9 @@ nsJSCID::GetService(HandleValue iidval, JSContext* cx, uint8_t optionalArgc,
 #ifdef DEBUG
     if (NS_FAILED(rv)) {
       nsAutoCString details;
-      mDetails.ToString (getter_Copies(details));
+      mDetails->ToString (getter_Copies(details));
       NS_WARNING(nsPrintfCString("service manager returned %X from GetService for class '%s' (%s)",
-                                 rv, details.get(), mDetails.ID().ToString()).get());
+                                 rv, details.get(), mDetails->ID().ToString()).get());
     }
 #endif
     if (NS_FAILED(rv) || !srvc)
