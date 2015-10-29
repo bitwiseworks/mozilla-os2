@@ -242,6 +242,10 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
         'nsNativeConnectionHelper.cpp',
         'nsURLHelperWin.cpp',
     ]
+elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'os2':
+    SOURCES += [
+        'nsURLHelperOS2.cpp',
+    ]
 elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     SOURCES += [
         'nsURLHelperOSX.cpp',
