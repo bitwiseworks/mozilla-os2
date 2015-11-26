@@ -4878,7 +4878,7 @@ MOZ_ANDROID_GOOGLE_PLAY_SERVICES
 dnl ========================================================
 dnl = Pango
 dnl ========================================================
-if test "$MOZ_ENABLE_GTK" -o "$MOZ_ENABLE_QT"
+if test "$MOZ_ENABLE_GTK" -o "$MOZ_ENABLE_QT" -o "$OS_TARGET" = "OS2"
 then
     PKG_CHECK_MODULES(_PANGOCHK, pango >= $PANGO_VERSION)
 

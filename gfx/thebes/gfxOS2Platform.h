@@ -7,7 +7,6 @@
 #define GFX_OS2_PLATFORM_H
 
 #include "gfxPlatform.h"
-#include "gfxOS2Fonts.h"
 #include "gfxFontUtils.h"
 #include "nsTArray.h"
 
@@ -20,7 +19,7 @@ public:
     virtual ~gfxOS2Platform();
 
     static gfxOS2Platform *GetPlatform() {
-        return (gfxOS2Platform*) gfxPlatform::GetPlatform();
+        return static_cast<gfxOS2Platform*>(gfxPlatform::GetPlatform());
     }
 
     virtual already_AddRefed<gfxASurface>
@@ -37,23 +36,8 @@ public:
                                   const gfxFontStyle *aStyle,
                                   gfxUserFontSet *aUserFontSet) override;
 
-    // Given a string and a font we already have, find the font that
-    // supports the most code points and most closely resembles aFont.
-    // This simple version involves looking at the fonts on the machine to see
-    // which code points they support.
-    already_AddRefed<gfxOS2Font> FindFontForChar(uint32_t aCh, gfxOS2Font *aFont);
-
-    // return true if it's already known that we don't have a font for this char
-    bool noFontWithChar(uint32_t aCh) {
-        return mCodepointsWithNoFonts.test(aCh);
-    }
-
 protected:
     static gfxFontconfigUtils *sFontconfigUtils;
-
-private:
-    // when font lookup fails for a character, cache it to skip future searches
-    gfxSparseBitSet mCodepointsWithNoFonts;
 };
 
 #endif /* GFX_OS2_PLATFORM_H */
