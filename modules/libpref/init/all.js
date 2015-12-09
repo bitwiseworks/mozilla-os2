@@ -3523,10 +3523,6 @@ pref("mousewheel.system_scroll_override_on_root_content.enabled", false);
 // False to stop crashes in the font matching code
 pref("gfx.downloadable_fonts.enabled", false);
 
-// Add the anti-aliasing preferences supported through Cairo
-pref("gfx.os2.font.antialiasing", true);
-pref("gfx.os2.font.hinting", 2);
-
 # OS2
 #endif
 

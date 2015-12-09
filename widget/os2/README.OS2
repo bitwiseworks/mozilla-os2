@@ -296,28 +296,20 @@ The following enable additional logging:
   and the ability to search multiple fonts for the correct glyph.
   However, it only supports TrueType & Type1 fonts.  OS/2 bitmap fonts
   like WarpSans, System Proportional, etc, are NOT supported.  Users
-  are encouraged to install Alex Taylor's "Workplace Sans" TrueType
-  font to restore an "OS/2 look-and-feel" to menus and dialogs.
+  are encouraged to install the Alex Taylor's "Workplace Sans" TrueType
+  font to restore the native OS/2 look-and-feel for menus and dialogs.
   Note: Currently OS/2 versions do not support @font-face
 
-* The apps' built-in antialiasing can be controlled via two preference
-  settings.  Type "about:config" into the Address Bar, then press Enter
-  (for Thunderbird, use the 'Config Editor' on the 'Advanced' page of its
-  Options dialog).  If the following preferences aren't listed, you can
-  add them by right-clicking any item and selecting "New" from the menu.
+* Starting with Firefox 38, Mozilla apps use the complete version of the
+  recently ported to OS/2 fontconfig library to configure fonts. All
+  font settings (and many aspects of the FreeType font engine) are now
+  controlled through the %UNIXROOT%\etc\fonts.conf file. Please refer to
 
-  - gfx.os2.font.antialiasing (Boolean)
-    This preference controls whether antialiasing is enabled; the default
-    value is "true".
+    http://www.freedesktop.org/software/fontconfig/fontconfig-user.html
 
-  - gfx.os2.font.hinting (Integer)
-    This controls the hinting level.  It can range from 0 (no hinting)
-    to 3 (full hinting);  the default value is 2.  Font hinting improves
-    the contrast of displayed text, but may produce poor results for
-    certain characters of some fonts, most notably the OS/2 version of
-    "Times New Roman".
+  for more information on how to configure fonts using fonts.conf.
 
-  Note:  you may need to restart the application to see your changes.
+  Note: You may need to restart the application to see your changes.
 
 * Fonts that contain special characters in their names (like Asian
   Unicode font names) may not display correctly in the list of fonts
