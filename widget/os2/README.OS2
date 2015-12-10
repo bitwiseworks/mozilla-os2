@@ -296,7 +296,7 @@ The following enable additional logging:
   and the ability to search multiple fonts for the correct glyph.
   However, it only supports TrueType & Type1 fonts.  OS/2 bitmap fonts
   like WarpSans, System Proportional, etc, are NOT supported.  Users
-  are encouraged to install the Alex Taylor's "Workplace Sans" TrueType
+  are encouraged to install Alex Taylor's "Workplace Sans" TrueType
   font to restore the native OS/2 look-and-feel for menus and dialogs.
   Note: Currently OS/2 versions do not support @font-face
 
