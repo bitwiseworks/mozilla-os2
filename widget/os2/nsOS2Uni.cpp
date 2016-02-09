@@ -43,7 +43,7 @@ ConverterInfo gConverterInfo[eCONVERTER_COUNT] =
   { 1386, "GB2312",        nullptr,  nullptr },
   { 949,  "EUC-KR",        nullptr,  nullptr },
   { 950,  "Big5",          nullptr,  nullptr },
-  { 1361, "x-johab",       nullptr,  nullptr }
+  { 1361, "windows-949",   nullptr,  nullptr }
 };
 
 nsISupports*
@@ -109,6 +109,11 @@ WideCharToMultiByte(int aCodePage, const char16_t* aSrc,
   nsISupports* sup = OS2Uni::GetUconvObject(aCodePage, eConv_Encoder);
   nsCOMPtr<nsIUnicodeEncoder> uco = do_QueryInterface(sup);
 
+  if (!uco) {
+    NS_ABORT();
+    return;
+  }
+
   if (NS_FAILED(uco->GetMaxLength(aSrc, aSrcLength, &aResultLength))) {
     NS_ABORT();
     return;
@@ -136,6 +141,11 @@ MultiByteToWideChar(int aCodePage, const char* aSrc,
 {
   nsISupports* sup = OS2Uni::GetUconvObject(aCodePage, eConv_Decoder);
   nsCOMPtr<nsIUnicodeDecoder> uco = do_QueryInterface(sup);
+
+  if (!uco) {
+    NS_ABORT();
+    return;
+  }
 
   if (NS_FAILED(uco->GetMaxLength(aSrc, aSrcLength, &aResultLength))) {
     NS_ABORT();
