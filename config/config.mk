@@ -569,7 +569,7 @@ NSINSTALL_NATIVECMD := %nsinstall nsinstall
 ifdef NSINSTALL_BIN
 NSINSTALL = $(NSINSTALL_BIN)
 else
-ifeq ($(HOST_OS_ARCH),WINNT)
+ifeq (,$(filter-out WINNT OS2, $(HOST_OS_ARCH)))
 NSINSTALL = $(NSINSTALL_PY)
 else
 NSINSTALL = $(DEPTH)/config/nsinstall$(HOST_BIN_SUFFIX)
