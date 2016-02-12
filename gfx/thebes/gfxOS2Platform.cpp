@@ -18,6 +18,7 @@
 #include "gfxFontconfigUtils.h"
 #include "gfxPangoFonts.h"
 #include "gfx2DGlue.h"
+#include "gfxUserFontSet.h"
 
 /**********************************************************************
  * class gfxOS2Platform
@@ -103,4 +104,52 @@ gfxOS2Platform::CreateFontGroup(const mozilla::FontFamilyList& aFontFamilyList,
                                 gfxUserFontSet *aUserFontSet)
 {
     return new gfxPangoFontGroup(aFontFamilyList, aStyle, aUserFontSet);
+}
+
+gfxFontEntry*
+gfxOS2Platform::LookupLocalFont(const nsAString& aFontName,
+                                uint16_t aWeight,
+                                int16_t aStretch,
+                                bool aItalic)
+{
+    return gfxPangoFontGroup::NewFontEntry(aFontName, aWeight,
+                                           aStretch, aItalic);
+}
+
+gfxFontEntry*
+gfxOS2Platform::MakePlatformFont(const nsAString& aFontName,
+                                 uint16_t aWeight,
+                                 int16_t aStretch,
+                                 bool aItalic,
+                                 const uint8_t* aFontData,
+                                 uint32_t aLength)
+{
+    // passing ownership of the font data to the new font entry
+    return gfxPangoFontGroup::NewFontEntry(aFontName, aWeight,
+                                           aStretch, aItalic,
+                                           aFontData, aLength);
+}
+
+bool
+gfxOS2Platform::IsFontFormatSupported(nsIURI *aFontURI, uint32_t aFormatFlags)
+{
+    // check for strange format flags
+    NS_ASSERTION(!(aFormatFlags & gfxUserFontSet::FLAG_FORMAT_NOT_USED),
+                 "strange font format hint set");
+
+    // accept supported formats
+    // Pango doesn't apply features from AAT TrueType extensions.
+    // Assume that if this is the only SFNT format specified,
+    // then AAT extensions are required for complex script support.
+    if (aFormatFlags & gfxUserFontSet::FLAG_FORMATS_COMMON) {
+        return true;
+    }
+
+    // reject all other formats, known and unknown
+    if (aFormatFlags != 0) {
+        return false;
+    }
+
+    // no format hint set, need to look at data
+    return true;
 }
