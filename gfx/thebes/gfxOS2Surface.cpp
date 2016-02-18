@@ -124,8 +124,8 @@ gfxOS2Surface::~gfxOS2Surface()
 void gfxOS2Surface::Refresh(RECTL *aRect, int aCount, HPS aPS)
 {
     if (mSurfType == os2Window)
-       cairo_os2_surface_paint_window((cairo_os2_surface_t*)CairoSurface(),
-                                       (aPS ? aPS : mPS), aRect, aCount);
+       cairo_os2_surface_paint_window(CairoSurface(),
+                                      (aPS ? aPS : mPS), aRect, aCount);
 }
 
 int gfxOS2Surface::Resize(const gfxIntSize& aSize)
@@ -133,7 +133,7 @@ int gfxOS2Surface::Resize(const gfxIntSize& aSize)
     if (mSurfType != os2Window)
         return 0;
 
-    int status = cairo_os2_surface_set_size((cairo_os2_surface_t*)CairoSurface(),
+    int status = cairo_os2_surface_set_size(CairoSurface(),
                                             aSize.width, aSize.height, FALSE);
     if (status == CAIRO_STATUS_SUCCESS) {
         RecordMemoryUsed((aSize.width * aSize.height * 4) -
@@ -155,10 +155,10 @@ HPS gfxOS2Surface::GetPS()
     // didn't, but we'll check anyway to avoid leakage.  As a last resort,
     // if this is a window surface we'll create one & hang on to it.
     if (!mPS) {
-        cairo_os2_surface_get_hps((cairo_os2_surface_t*)CairoSurface(), &mPS);
+        cairo_os2_surface_get_hps(CairoSurface(), &mPS);
         if (!mPS && mSurfType == os2Window && mWnd) {
             mPS = WinGetPS(mWnd);
-            cairo_os2_surface_set_hps((cairo_os2_surface_t*)CairoSurface(), mPS);
+            cairo_os2_surface_set_hps(CairoSurface(), mPS);
         }
     }
 
