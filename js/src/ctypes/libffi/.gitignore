@@ -1,0 +1,15 @@
+Makefile.in
+aclocal.m4
+config.guess
+config.sub
+fficonfig.h.in
+fficonfig.h.in~
+include/Makefile.in
+ltmain.sh
+m4/libtool.m4
+m4/ltoptions.m4
+m4/ltsugar.m4
+m4/ltversion.m4
+m4/lt~obsolete.m4
+man/Makefile.in
+testsuite/Makefile.in
