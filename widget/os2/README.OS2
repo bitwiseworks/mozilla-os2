@@ -320,6 +320,11 @@ The following enable additional logging:
 -- Printing -------------------------------------------------------------------
 ===============================================================================
 
+IMPORTANT NOTE: The current version of the Mozilla graphics engine is work
+in progress and has Native Driver Support temporarily disabled. Therefore,
+the section called "Native Driver Support" below should be ignored. Printing
+to PDF and Postscript should still work as before.
+
 This version offers printing support using both native drivers and the
 app's built-in PDF and Postscript generators.
 

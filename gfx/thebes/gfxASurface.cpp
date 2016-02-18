@@ -209,8 +209,12 @@ gfxASurface::Wrap (cairo_surface_t *csurf, const gfxIntSize& aSize)
     }
 #endif
 #ifdef CAIRO_HAS_OS2_SURFACE
+#if 0 // This is temporariy disabled, see #147.
     else if (stype == CAIRO_SURFACE_TYPE_OS2 ||
              stype == CAIRO_SURFACE_TYPE_OS2_PRINTING) {
+#else
+    else if (stype == CAIRO_SURFACE_TYPE_OS2) {
+#endif
         result = new gfxOS2Surface(csurf);
     }
 #endif

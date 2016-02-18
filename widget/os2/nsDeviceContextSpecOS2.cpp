@@ -536,6 +536,7 @@ NS_IMETHODIMP nsDeviceContextSpecOS2::GetSurfaceForPrinter(gfxASurface **surface
   }
 
 //*** Native
+#if 0 // This is temporariy disabled, see #147.
   else {
     char* filePath = nullptr;
     if (mDestination == printToFile) {
@@ -557,6 +558,7 @@ NS_IMETHODIMP nsDeviceContextSpecOS2::GetSurfaceForPrinter(gfxASurface **surface
       gfxOS2Surface(mPrintDC, gfxIntSize(int(mXPixels), int(mYPixels)),
                     (mDestination == printPreview));
   }
+#endif
 
   if (!newSurface) {
     DBGM("new gfxOS2Surface failed");

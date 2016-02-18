@@ -57,6 +57,7 @@ gfxOS2Surface::gfxOS2Surface(HWND aWnd)
     RecordMemoryUsed(mSize.width * mSize.height * 4 + OS2_OVERHEAD);
 }
 
+#if 0 // This is temporariy disabled, see #147.
 gfxOS2Surface::gfxOS2Surface(HDC aDC, const gfxIntSize& aSize, int aPreview)
     : mWnd(0), mDC(aDC), mPS(0), mSize(aSize), mSurfType(os2Print)
 {
@@ -86,6 +87,7 @@ gfxOS2Surface::gfxOS2Surface(HDC aDC, const gfxIntSize& aSize, int aPreview)
     // BGR4 to BGR3 but there's no way to determine their size.
     RecordMemoryUsed(OS2_OVERHEAD);
 }
+#endif
 
 gfxOS2Surface::gfxOS2Surface(cairo_surface_t *csurf)
     : mWnd(0), mDC(0), mPS(0), mSize(0,0), mSurfType(os2Image)
