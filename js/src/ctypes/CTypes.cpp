@@ -2440,12 +2440,18 @@ ImplicitConvert(JSContext* cx,
         const JSCTypesCallbacks* callbacks = GetCallbacks(objCTypes);
         if (callbacks && callbacks->unicodeToNative) {
           if (sourceLinear->hasLatin1Chars()) {
-            *charBuffer = cx->pod_malloc<char>(sourceLength + 1);
-            if (*charBuffer) {
-              JS::AutoCheckCannotGC nogc;
-              memcpy(*charBuffer, sourceLinear->latin1Chars(nogc), sourceLength);
-              (*charBuffer)[sourceLength] = 0;
+            char16_t* chars = cx->pod_malloc<char16_t>(sourceLength + 1);
+            if (!chars) {
+              JS_ReportAllocationOverflow(cx);
+              return false;
             }
+            {
+              JS::AutoCheckCannotGC nogc;
+              CopyAndInflateChars(chars, sourceLinear->latin1Chars(nogc), sourceLength);
+            }
+            *charBuffer =
+              callbacks->unicodeToNative(cx, chars, sourceLength);
+            js_free(chars);
           } else {
             JS::AutoCheckCannotGC nogc;
             *charBuffer =
@@ -2564,33 +2570,38 @@ ImplicitConvert(JSContext* cx,
           return false;
         const JSCTypesCallbacks* callbacks = GetCallbacks(objCTypes);
         if (callbacks && callbacks->unicodeToNative) {
+          char* nativeChars;
           if (sourceLinear->hasLatin1Chars()) {
-            JS::AutoCheckCannotGC nogc;
-            const Latin1Char *buf = sourceLinear->latin1Chars(nogc);
-            nbytes = sourceLength;
-            if (targetLength < nbytes) {
-              JS_ReportError(cx, "ArrayType has insufficient length");
+            char16_t* chars = cx->pod_malloc<char16_t>(sourceLength + 1);
+            if (!chars) {
+              JS_ReportAllocationOverflow(cx);
               return false;
             }
-            
-            memcpy (charBuffer, buf, nbytes);
+            {
+              JS::AutoCheckCannotGC nogc;
+              CopyAndInflateChars(chars, sourceLinear->latin1Chars(nogc), sourceLength);
+            }
+            nativeChars = callbacks->unicodeToNative(cx, chars, sourceLength);
+            js_free(chars);
           } else {
             JS::AutoCheckCannotGC nogc;
-            char *buf =
+            nativeChars =
               callbacks->unicodeToNative(cx, sourceLinear->twoByteChars(nogc), sourceLength);
-            if (!*buf)
-              return false;
-
-            nbytes = strlen(buf);
-            if (targetLength < nbytes) {
-              JS_free(cx, buf);
-              JS_ReportError(cx, "ArrayType has insufficient length");
-              return false;
-            }
-
-            memcpy (charBuffer, buf, nbytes);
-            JS_free(cx, buf);
           }
+
+          if (!nativeChars) {
+            JS_ReportAllocationOverflow(cx);
+            return false;
+          }
+          nbytes = strlen(nativeChars);
+          if (targetLength < nbytes) {
+            js_free(nativeChars);
+            JS_ReportError(cx, "ArrayType has insufficient length");
+            return false;
+          }
+
+          memcpy (charBuffer, nativeChars, nbytes);
+          js_free(nativeChars);
         } else {
           // Fallback: assume the platform native charset is UTF-8. This is true
           // for Mac OS X, Android, and probably Linux.
@@ -4478,6 +4489,7 @@ ArrayType::ConstructData(JSContext* cx,
         const JSCTypesCallbacks* callbacks = GetCallbacks(objCTypes);
         if (callbacks && callbacks->unicodeToNative) {
           if (sourceLinear->hasLatin1Chars()) {
+            // Latin1 will require the same number of bytes in any native latin charset.
             length = sourceLength + 1;
           } else {
             // We have to perform conversion to know how many chars are necessary.
