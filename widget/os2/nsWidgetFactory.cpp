@@ -56,6 +56,16 @@
 
 using namespace mozilla;
 
+// taken from gonk/nsWidgetFactory.cpp. GfxInfo is a legacy kludge, unfortunately
+// for the time being we still have to implement it on all platforms.
+#include "../gonk/GfxInfo.h"
+namespace mozilla {
+namespace widget {
+// This constructor should really be shared with all platforms.
+NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(GfxInfo, Init)
+}
+}
+
 // objects that just require generic constructors
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsBidiKeyboard)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsWindow)
@@ -84,6 +94,7 @@ NS_DEFINE_NAMED_CID(NS_CLIPBOARD_CID);
 NS_DEFINE_NAMED_CID(NS_CLIPBOARDHELPER_CID);
 NS_DEFINE_NAMED_CID(NS_DRAGSERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_FILEPICKER_CID);
+NS_DEFINE_NAMED_CID(NS_GFXINFO_CID);
 NS_DEFINE_NAMED_CID(NS_SOUND_CID);
 NS_DEFINE_NAMED_CID(NS_WINDOW_CID);
 NS_DEFINE_NAMED_CID(NS_TRANSFERABLE_CID);
@@ -105,6 +116,7 @@ static const mozilla::Module::CIDEntry kWidgetCIDs[] = {
     { &kNS_CLIPBOARDHELPER_CID, false, nullptr, nsClipboardHelperConstructor },
     { &kNS_DRAGSERVICE_CID, false, nullptr, nsDragServiceConstructor },
     { &kNS_FILEPICKER_CID, false, nullptr, nsFilePickerConstructor },
+    { &kNS_GFXINFO_CID, false, nullptr, mozilla::widget::GfxInfoConstructor },
     { &kNS_SOUND_CID, false, nullptr, nsSoundConstructor },
     { &kNS_WINDOW_CID, false, nullptr, nsWindowConstructor },
     { &kNS_TRANSFERABLE_CID, false, nullptr, nsTransferableConstructor },
@@ -128,6 +140,7 @@ static const mozilla::Module::ContractIDEntry kWidgetContracts[] = {
   { "@mozilla.org/widget/clipboardhelper;1", &kNS_CLIPBOARDHELPER_CID },
   { "@mozilla.org/widget/dragservice;1", &kNS_DRAGSERVICE_CID },
   { "@mozilla.org/filepicker;1", &kNS_FILEPICKER_CID },
+  { "@mozilla.org/gfx/info;1", &kNS_GFXINFO_CID },
   { "@mozilla.org/sound;1", &kNS_SOUND_CID },
   { "@mozilla.org/widget/window/os2;1", &kNS_WINDOW_CID },
   { "@mozilla.org/widget/transferable;1", &kNS_TRANSFERABLE_CID },
