@@ -4,6 +4,21 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#if defined(XP_OS2)
+#if defined(MOZ_OS2_HIGH_MEMORY)
+// os2safe.h has to be included before os2.h, needed for high mem
+#include <os2safe.h>
+#endif
+// exceptq trap file generator
+#define INCL_BASE
+#define INCL_PM
+#include <os2.h>
+#define INCL_LOADEXCEPTQ
+#include <exceptq.h>
+// PR_OS2_SetFloatExcpHandler
+#include "private/pprthred.h"
+#endif
+
 #include "nsXULAppAPI.h"
 #include "jsapi.h"
 #include "jsfriendapi.h"
@@ -1233,9 +1248,37 @@ GetCurrentWorkingDirectory(nsAString& workingDirectory)
 
 static JSSecurityCallbacks shellSecurityCallbacks;
 
+#if defined(XP_OS2)
+// Because we use early returns, we use a stack-based helper to set and un-set the OS2 FPU exception
+// handler. This helper also installs the EXCEPTQ handler on the current thread to make sure it
+// is chained so that it gets control after the FPU exception handler. This can't be done with
+// ScopedExceptqLoader since the proper stack order for locals is not guaranteed by the compiler.
+class ScopedFPHandler {
+private:
+  // For arrays it's guaranteed that &[0] < &[1] which we use to make sure that the registration
+  // record of the top (last) exception handler has a smaller address (i.e. located lower on the
+  // stack) — this is a requirement of the SEH logic.
+  EXCEPTIONREGISTRATIONRECORD excpreg[2];
+
+public:
+  ScopedFPHandler() {
+    LoadExceptq(&excpreg[1], nullptr, nullptr);
+    PR_OS2_SetFloatExcpHandler(&excpreg[0]);
+  }
+  ~ScopedFPHandler() {
+    PR_OS2_UnsetFloatExcpHandler(&excpreg[0]);
+    UninstallExceptq(&excpreg[1]);
+  }
+};
+#endif
+
 int
 XRE_XPCShellMain(int argc, char** argv, char** envp)
 {
+#if defined(XP_OS2)
+  ScopedFPHandler fpHandler;
+#endif
+
     JSRuntime* rt;
     JSContext* cx;
     int result;
