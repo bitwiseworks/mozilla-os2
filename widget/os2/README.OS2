@@ -90,39 +90,50 @@ If you don't have ArcView installed, you may download it from:
       If you use RPM/YUM, just run this command:
          yum install libc
 
-4. INSTALL 'freetyp6.dll', 'fntcfg2.dll', 'png1616.dll' and 'z.dll' into one of the directories
-      on your "LIBPATH". You can download RPMs with these files from:
-         http://rpm.netlabs.org/release/00/i386/i386/freetype-2.5.5-1.oc00.i386.rpm
-         http://rpm.netlabs.org/release/00/i386/i386/fontconfig-2.8.0-1.oc00.i386.rpm
-         http://rpm.netlabs.org/release/00/i386/i386/libpng-1.6.16-1.oc00.i386.rpm
-         http://rpm.netlabs.org/release/00/i386/i386/zlib-1.2.5-5.oc00.i386.rpm
-      If you use RPM/YUM, just run this command:
-         yum install freetype fontconfig
-
-5. INSTALL 'kai0.dll' into one of the directories
-      on your "LIBPATH". You can download RPMs with this file from:
-         http://rpm.netlabs.org/release/00/i386/i386/libkai-1.1.4-1.oc00.i386.rpm
-      If you use RPM/YUM, just run this command:
-         yum install libkai
-
-6. INSTALL 'pthr01.dll' and 'mmap.dll' into one of the directories
-      on your "LIBPATH". You can download RPMs with these files from:
-         http://rpm.netlabs.org/release/00/i386/i386/pthread-20150408-19.oc00.i386.rpm
-         http://rpm.netlabs.org/release/00/i386/i386/mmap-0.5-1.oc00.i386.rpm
-      If you use RPM/YUM, just run this command:
-         yum install pthread mmap
-
-7. INSTALL 'gcc1.dll' and 'stdcpp6.dll' into one of the directories
+4. INSTALL 'gcc1.dll' and 'stdcpp6.dll' into one of the directories
       on your "LIBPATH". You can download RPMs with these files from:
          http://rpm.netlabs.org/release/00/i386/i386/libgcc1-4.9.2.1-3.oc00.i386.rpm
          http://rpm.netlabs.org/release/00/i386/i386/libstdc++6-4.9.2.1-3.oc00.i386.rpm
       If you use RPM/YUM, just run this command:
          yum install libgcc1 libstdc++6
 
-8. Optional: Use mozinst to create icons on desktop.
+5. INSTALL 'cairo2.dll', 'pixman10.dll', 'pango100.dll', 'glib2.dll', 'gobj2.dll',
+     'gmod2.dll', 'urpo.dll' into one of the directories
+      on your "LIBPATH". You can download RPMs with these files from:
+         http://rpm.netlabs.org/release/00/zip/cairo-1_12_0-1_oc00.zip
+         http://rpm.netlabs.org/release/00/zip/pixman-0_32_8-2_oc00.zip
+         http://rpm.netlabs.org/release/00/zip/pango-1_28_4-1_oc00.zip
+         http://rpm.netlabs.org/release/00/zip/glib2-2_25_15-5_oc00.zip
+         http://rpm.netlabs.org/release/00/zip/urpo-20150513-11_oc00.zip
+      If you use RPM/YUM, just run this command:
+         yum install pango
+
+6. INSTALL 'freetyp6.dll', 'fntcfg2.dll', 'png1616.dll' and 'z.dll' into one of the directories
+      on your "LIBPATH". You can download RPMs with these files from:
+         http://rpm.netlabs.org/release/00/zip/freetype-2_6_2-1_oc00.zip
+         http://rpm.netlabs.org/release/00/zip/fontconfig-2_11_94-1_oc00.zip
+         http://rpm.netlabs.org/release/00/zip/libpng-1_6_18-1_oc00.zip
+         http://rpm.netlabs.org/release/00/zip/zlib-1_2_5-5_oc00.zip
+      If you use RPM/YUM, just run this command:
+         yum install freetype fontconfig zlib
+
+7. INSTALL 'kai0.dll' into one of the directories
+      on your "LIBPATH". You can download RPMs with this file from:
+         http://rpm.netlabs.org/release/00/zip/libkai-1_2_0-1_oc00.zip
+      If you use RPM/YUM, just run this command:
+         yum install libkai
+
+8. INSTALL 'pthr01.dll' and 'mmap.dll' into one of the directories
+      on your "LIBPATH". You can download RPMs with these files from:
+         http://rpm.netlabs.org/release/00/zip/pthread-20150408-19_oc00.zip
+         http://rpm.netlabs.org/release/00/zip/mmap-0_5-1_oc00.zip
+      If you use RPM/YUM, just run this command:
+         yum install pthread mmap
+
+9. Optional: Use mozinst to create icons on desktop.
       http://hobbes.nmsu.edu/h-search.php?key=mozinst
 
-9. Optional: you may want to install some of the items listed in the
+10. Optional: you may want to install some of the items listed in the
       "OS/2 Add-ons" section below to improve the app's performance.
 
 
@@ -321,9 +332,10 @@ The following enable additional logging:
 ===============================================================================
 
 IMPORTANT NOTE: The current version of the Mozilla graphics engine is work
-in progress and has Native Driver Support temporarily disabled. Therefore,
-the section called "Native Driver Support" below should be ignored. Printing
-to PDF and Postscript should still work as before.
+in progress and has Native Driver Support temporarily disabled because it
+does not currently work. Therefore, the section called "Native Driver Support"
+below should be ignored. Printing to PDF and Postscript should still work as
+described below.
 
 This version offers printing support using both native drivers and the
 app's built-in PDF and Postscript generators.

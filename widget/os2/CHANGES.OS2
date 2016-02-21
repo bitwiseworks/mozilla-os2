@@ -5,6 +5,20 @@ in the Mozilla product series from release to release.
 CHANGES
 
 
+Firefox 38.2.1 Beta 6 (2016-02-21)
+
+   - Update Firefox to version 38.2.1 ESR.
+
+   - Switch to original fontconfig for much better font substitution.
+
+   - Switch from GPI to Pango for better text layout and rendering. This
+     obsoletes 'gfx.os2.font.*' properties and also brings long-awaited
+     support for @font-face (loadable Web fonts).
+
+   - Temporarily disable native print driver spport which is currently
+     broken.
+
+
 Firefox 31.8.0 Beta 5 (2015-07-24)
 
    - Update Firefox to version 31.8.0 ESR.
