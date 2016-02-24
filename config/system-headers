@@ -459,6 +459,7 @@ frame/log.h
 frame/req.h
 freetype/freetype.h
 freetype/ftcache.h
+freetype/ftfntfmt.h
 freetype/ftglyph.h
 freetype/ftsynth.h
 freetype/ftoutln.h
@@ -472,6 +473,7 @@ freetype/ftbitmap.h
 freetype/ftxf86.h
 freetype.h
 ftcache.h
+ftfntfmt.h
 ftglyph.h
 ftsynth.h
 ftoutln.h
