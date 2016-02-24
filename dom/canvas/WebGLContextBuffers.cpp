@@ -169,6 +169,9 @@ WebGLContext::BufferData(GLenum target, WebGLsizeiptr size, GLenum usage)
     if (!CheckedInt<GLsizeiptr>(size).isValid())
         return ErrorOutOfMemory("bufferData: bad size");
 
+    if (gl->IsANGLE() && size > UINT32_MAX)
+        return ErrorOutOfMemory("bufferData: size too large");
+
     WebGLBuffer* boundBuffer = bufferSlot.get();
 
     if (!boundBuffer)
@@ -190,6 +193,7 @@ WebGLContext::BufferData(GLenum target, WebGLsizeiptr size, GLenum usage)
 
     boundBuffer->SetByteLength(size);
     if (!boundBuffer->ElementArrayCacheBufferData(nullptr, size)) {
+        boundBuffer->SetByteLength(0);
         return ErrorOutOfMemory("bufferData: out of memory");
     }
 }
@@ -220,6 +224,9 @@ WebGLContext::BufferData(GLenum target,
     if (!CheckedInt<GLsizeiptr>(data.Length()).isValid())
         return ErrorOutOfMemory("bufferData: bad size");
 
+    if (gl->IsANGLE() && data.Length() > UINT32_MAX)
+        return ErrorOutOfMemory("bufferData: size too large");
+
     if (!ValidateBufferUsageEnum(usage, "bufferData: usage"))
         return;
 
@@ -239,8 +246,10 @@ WebGLContext::BufferData(GLenum target,
     }
 
     boundBuffer->SetByteLength(data.Length());
-    if (!boundBuffer->ElementArrayCacheBufferData(data.Data(), data.Length()))
+    if (!boundBuffer->ElementArrayCacheBufferData(data.Data(), data.Length())) {
+        boundBuffer->SetByteLength(0);
         return ErrorOutOfMemory("bufferData: out of memory");
+    }
 }
 
 void
@@ -269,6 +278,9 @@ WebGLContext::BufferData(GLenum target, const dom::ArrayBufferView& data,
     if (!CheckedInt<GLsizeiptr>(data.Length()).isValid())
         return ErrorOutOfMemory("bufferData: bad size");
 
+    if (gl->IsANGLE() && data.Length() > UINT32_MAX)
+        return ErrorOutOfMemory("bufferData: size too large");
+
     InvalidateBufferFetching();
     MakeContextCurrent();
 
@@ -279,8 +291,10 @@ WebGLContext::BufferData(GLenum target, const dom::ArrayBufferView& data,
     }
 
     boundBuffer->SetByteLength(data.Length());
-    if (!boundBuffer->ElementArrayCacheBufferData(data.Data(), data.Length()))
+    if (!boundBuffer->ElementArrayCacheBufferData(data.Data(), data.Length())) {
+        boundBuffer->SetByteLength(0);
         return ErrorOutOfMemory("bufferData: out of memory");
+    }
 }
 
 void
