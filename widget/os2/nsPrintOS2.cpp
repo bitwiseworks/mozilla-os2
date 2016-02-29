@@ -17,7 +17,7 @@
 #include "nsIPrefService.h"
 #include "nsIPrefBranch.h"
 #include "nsUnicharUtils.h"
-#include "nsOS2Uni.h"
+#include "nsNativeCharsetUtils.h"
 #include "nsPrintOS2.h"
 
 //---------------------------------------------------------------------------
@@ -130,10 +130,7 @@ nsAString* os2PrintQ::PrinterTitle()
     if (cName.Length() > 64)
       cName.Truncate(64);
 
-    nsAutoChar16Buffer uName;
-    int32_t uNameLength = 123;
-    MultiByteToWideChar(0, cName.get(), cName.Length(), uName, uNameLength);
-    mPrinterTitle.Assign(nsDependentString(uName.Elements()));
+    NS_CopyNativeToUnicode(cName, mPrinterTitle);
 
     // store printer description in prefs for the print dialog
     nsresult rv;

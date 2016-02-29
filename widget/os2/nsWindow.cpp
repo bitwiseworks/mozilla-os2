@@ -44,7 +44,7 @@
 #include "nsIXULRuntime.h"
 #include "nsIContent.h"
 #include "nsIWidgetListener.h"
-#include "nsOS2Uni.h"
+#include "nsNativeCharsetUtils.h"
 #include "nsTHashtable.h"
 #include "nsGkAtoms.h"
 #include "wdgtos2rc.h"
@@ -2741,11 +2741,9 @@ bool nsWindow::ImeResultString(HIMI himi)
     DispatchWindowEvent(&start);
     mIsComposing = true;
   }
-  nsAutoChar16Buffer outBuf;
-  int32_t outBufLen;
-  MultiByteToWideChar(0, compositionStringA.Elements(), ulBufLen,
-                      outBuf, outBufLen);
-  nsAutoString compositionString(outBuf.Elements());
+  nsAutoString compositionString;
+  NS_CopyNativeToUnicode(nsDependentCString(compositionStringA.Elements(), ulBufLen),
+                         compositionString);
 
   WidgetCompositionEvent textChange(true, NS_COMPOSITION_CHANGE, this);
   InitEvent(textChange);
@@ -2804,11 +2802,9 @@ bool nsWindow::ImeConversionString(HIMI himi)
     DispatchWindowEvent(&start);
     mIsComposing = true;
   }
-  nsAutoChar16Buffer outBuf;
-  int32_t outBufLen;
-  MultiByteToWideChar(0, compositionStringA.Elements(), ulBufLen,
-                      outBuf, outBufLen);
-  nsAutoString compositionString(outBuf.Elements());
+  nsAutoString compositionString;
+  NS_CopyNativeToUnicode(nsDependentCString(compositionStringA.Elements(), ulBufLen),
+                         compositionString);
 
   WidgetCompositionEvent change(true, NS_COMPOSITION_CHANGE, this);
   InitEvent(change);
@@ -2869,10 +2865,10 @@ bool nsWindow::ImeConversionString(HIMI himi)
         // Convert ANSI string offsets to Unicode string offsets
         clauseOffsets[0] = 0;
         for (ULONG i = 1; i < ulClauseCount - 1; ++i) {
-          MultiByteToWideChar(0,
-                              compositionStringA.Elements(), clauseOffsets[i],
-                              outBuf, outBufLen);
-          clauseOffsets[i] = outBufLen;
+          nsAutoString outBuf;
+          NS_CopyNativeToUnicode(nsDependentCString(compositionStringA.Elements(), clauseOffsets[i]),
+                                 outBuf);
+          clauseOffsets[i] = outBuf.Length();
         }
         break;
       }
@@ -2883,9 +2879,10 @@ bool nsWindow::ImeConversionString(HIMI himi)
         ulCursorPos = NO_IME_CARET;
       } else {
         // Convert ANSI string position to Unicode string position
-        MultiByteToWideChar(0, compositionStringA.Elements(), ulCursorPos,
-                            outBuf, outBufLen);
-        ulCursorPos = outBufLen;
+        nsAutoString outBuf;
+        NS_CopyNativeToUnicode(nsDependentCString(compositionStringA.Elements(), ulCursorPos),
+                               outBuf);
+        ulCursorPos = outBuf.Length();
       }
     }
 
@@ -3059,9 +3056,8 @@ bool nsWindow::DispatchKeyEvent(MPARAM mp1, MPARAM mp2)
     inbuf[0] = usChar;
     inbuf[1] = '\0';
 
-    nsAutoChar16Buffer outbuf;
-    int32_t bufLength;
-    MultiByteToWideChar(0, (const char*)inbuf, 2, outbuf, bufLength);
+    nsAutoString outbuf;
+    NS_CopyNativeToUnicode(nsDependentCString((const char*)inbuf, 2), outbuf);
 
     pressEvent.charCode = outbuf[0];
 

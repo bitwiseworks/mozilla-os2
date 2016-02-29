@@ -24,7 +24,7 @@
 #include "nsUnicharUtils.h"
 #include "nsStringFwd.h"
 #include "nsStringEnumerator.h"
-#include "nsOS2Uni.h"
+#include "nsNativeCharsetUtils.h"
 #include "nsDirectoryServiceDefs.h"
 #include "nsIFileStreams.h"
 #include "gfxPDFSurface.h"
@@ -654,16 +654,7 @@ nsresult nsDeviceContextSpecOS2::CreateStreamForFormat(int16_t aFormat,
 static
 char* GetACPString(const char16_t* aStr)
 {
-   nsString str(aStr);
-   if (str.Length() == 0) {
-      return nullptr;
-   }
-
-   nsAutoCharBuffer buffer;
-   int32_t bufLength;
-   WideCharToMultiByte(0, str.get(), str.Length(),
-                       buffer, bufLength);
-   return ToNewCString(nsDependentCString(buffer.Elements()));
+   return GetACPString(nsDependentString(aStr));
 }
 
 static
@@ -673,11 +664,9 @@ char* GetACPString(const nsAString& aStr)
       return nullptr;
    }
 
-   nsAutoCharBuffer buffer;
-   int32_t bufLength;
-   WideCharToMultiByte(0, aStr.BeginReading(), aStr.Length(),
-                       buffer, bufLength);
-   return ToNewCString(nsDependentCString(buffer.Elements()));
+   nsAutoCString buf;
+   NS_CopyUnicodeToNative(aStr, buf);
+   return ToNewCString(buf);
 }
 
 //---------------------------------------------------------------------------

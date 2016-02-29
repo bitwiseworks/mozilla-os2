@@ -14,7 +14,6 @@ SOURCES += [
     'nsFilePicker.cpp',
     'nsIdleServiceOS2.cpp',
     'nsLookAndFeel.cpp',
-    'nsOS2Uni.cpp',
     'nsPrintOptionsOS2.cpp',
     'nsPrintOS2.cpp',
     'nsRwsService.cpp',

@@ -16,13 +16,14 @@
 #include "nsIURI.h"
 #include "nsIURL.h"
 #include "nsNetUtil.h"
-#include "nsOS2Uni.h"
+#include "nsNativeCharsetUtils.h"
 #include "wdgtos2rc.h"
 #include "nsILocalFileOS2.h"
 #include "nsIDocument.h"
 #include "nsISelection.h"
 #include "mozilla/BasicEvents.h"
 #include <algorithm>
+#include <uconv.h>
 
 // --------------------------------------------------------------------------
 // Local defines
@@ -1743,24 +1744,20 @@ void SaveTypeAndSource(nsIFile *file, nsIDOMDocument *domDoc,
 
 int UnicodeToCodepage(const nsAString& aString, char **aResult)
 {
-  nsAutoCharBuffer buffer;
-  int32_t bufLength;
-  WideCharToMultiByte(0, PromiseFlatString(aString).get(), aString.Length(),
-                      buffer, bufLength);
-  *aResult = ToNewCString(nsDependentCString(buffer.Elements()));
-  return bufLength;
+  nsAutoCString buf;
+  NS_CopyUnicodeToNative(aString, buf);
+  *aResult = ToNewCString(buf);
+  return buf.Length();
 }
 
 // --------------------------------------------------------------------------
 
 int CodepageToUnicode(const nsACString& aString, char16_t **aResult)
 {
-  nsAutoChar16Buffer buffer;
-  int32_t bufLength;
-  MultiByteToWideChar(0, PromiseFlatCString(aString).get(),
-                      aString.Length(), buffer, bufLength);
-  *aResult = ToNewUnicode(nsDependentString(buffer.Elements()));
-  return bufLength;
+  nsAutoString buf;
+  NS_CopyNativeToUnicode(aString, buf);
+  *aResult = ToNewUnicode(buf);
+  return buf.Length();
 }
 
 // --------------------------------------------------------------------------

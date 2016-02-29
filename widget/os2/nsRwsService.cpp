@@ -22,7 +22,7 @@
 // nsRwsService must be included _after_ os2.h
 #include "nsRwsService.h"
 #include "rwserr.h"
-#include "nsOS2Uni.h"
+#include "nsNativeCharsetUtils.h"
 
 #include "prenv.h"
 #include <stdio.h>
@@ -423,16 +423,14 @@ nsRwsService::HandlerFromPath(const char *aPath, uint32_t *aHandle,
     if (pszTitle == (char*)-1)
       break;
 
-    nsAutoChar16Buffer buffer;
-    int32_t bufLength;
-    MultiByteToWideChar(0, pszTitle, strlen(pszTitle),
-                       buffer, bufLength);
+    nsAutoString buffer;
+    NS_CopyNativeToUnicode(nsDependentCString(pszTitle), buffer);
 
     nsAutoString classViewer;
     AssignNLSString(NS_LITERAL_STRING("classViewerOS2").get(), classViewer);
     int pos = -1;
     if ((pos = classViewer.Find("%S")) > -1)
-      classViewer.Replace(pos, 2, buffer.Elements());
+      classViewer.Replace(pos, 2, buffer);
     _retval.Assign(classViewer);
     rv = NS_OK;
   } while (0);
@@ -762,11 +760,10 @@ static void AssignNLSString(const char16_t *aKey, nsAString& result)
 
 static nsresult AssignTitleString(const char *aTitle, nsAString& result)
 {
-  nsAutoChar16Buffer buffer;
-  int32_t bufLength;
+  nsAutoString buffer;
 
   // convert the title to Unicode
-  MultiByteToWideChar(0, aTitle, strlen(aTitle), buffer, bufLength);
+  NS_CopyNativeToUnicode(nsDependentCString(aTitle), buffer);
 
   char16_t  *pSrc;
   char16_t  *pDst;
@@ -774,7 +771,7 @@ static nsresult AssignTitleString(const char *aTitle, nsAString& result)
 
   // remove line breaks, leading whitespace, & extra embedded whitespace
   // (primitive, but gcc 3.2.2 doesn't support wchar)
-  for (fSkip=true, pSrc=pDst=buffer.Elements(); *pSrc; pSrc++) {
+  for (fSkip=true, pSrc=pDst=buffer.get(); *pSrc; pSrc++) {
     if (*pSrc == ' ' || *pSrc == '\r' || *pSrc == '\n' || *pSrc == '\t') {
       if (!fSkip)
         *pDst++ = ' ';
@@ -789,11 +786,11 @@ static nsresult AssignTitleString(const char *aTitle, nsAString& result)
   }
 
   // remove the single trailing space, if needed
-  if (fSkip && pDst > buffer.Elements())
+  if (fSkip && pDst > buffer.get())
     pDst--;
 
   *pDst = 0;
-  result.Assign(buffer.Elements());
+  result.Assign(buffer);
   return NS_OK;
 }
 

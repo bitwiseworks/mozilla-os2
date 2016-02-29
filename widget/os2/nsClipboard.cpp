@@ -9,7 +9,8 @@
 #include "nsCOMPtr.h"
 #include "nsPrimitiveHelpers.h"
 #include "nsXPIDLString.h"
-#include "nsOS2Uni.h"
+#include "nsNativeCharsetUtils.h"
+#include "nsCRTGlue.h"
 #include "nsClipboard.h"
 
 #define INCL_BASE
@@ -109,20 +110,18 @@ bool nsClipboard::GetClipboardDataByID(uint32_t aFormatID, const char *aFlavor)
 
       if (!strcmp( aFlavor, kUnicodeMime ))  // Asked for unicode, but only plain text available.  Convert it!
       {
-        nsAutoChar16Buffer buffer;
-        int32_t bufLength;
-        MultiByteToWideChar(0, static_cast<char*>(pDataMem), NumOfChars,
-                            buffer, bufLength);
-        pDataMem = ToNewUnicode(nsDependentString(buffer.Elements()));
+        nsAutoString buffer;
+        NS_CopyNativeToUnicode(nsDependentCString(static_cast<char*>(pDataMem), NumOfChars), buffer);
+        pDataMem = ToNewUnicode(buffer);
         TempBufAllocated = true;
-        NumOfBytes = bufLength * sizeof(UniChar);
+        NumOfBytes = buffer.Length() * sizeof(char16_t);
       }
 
     }
     else                           // All other text/.. flavors are in unicode
     {
-      uint32_t NumOfChars = UniStrlen( static_cast<UniChar*>(pDataMem) );
-      NumOfBytes = NumOfChars * sizeof(UniChar);
+      uint32_t NumOfChars = NS_strlen( static_cast<char16_t*>(pDataMem) );
+      NumOfBytes = NumOfChars * sizeof(char16_t);
       PVOID pTempBuf = nsMemory::Alloc(NumOfBytes);
       memcpy(pTempBuf, pDataMem, NumOfBytes);
       pDataMem = pTempBuf;
@@ -233,10 +232,10 @@ void nsClipboard::SetClipboardData(const char *aFlavor)
     }
     else                           // All other text/.. flavors are in unicode
     {
-      UniChar* pUnicodeMem = nullptr;
-      uint32_t NumOfChars = NumOfBytes / sizeof(UniChar);
+      char16_t* pUnicodeMem = nullptr;
+      uint32_t NumOfChars = NumOfBytes / sizeof(char16_t);
    
-      if (DosAllocSharedMem( reinterpret_cast<PPVOID>(&pUnicodeMem), nullptr, NumOfBytes + sizeof(UniChar), 
+      if (DosAllocSharedMem( reinterpret_cast<PPVOID>(&pUnicodeMem), nullptr, NumOfBytes + sizeof(char16_t),
                              PAG_WRITE | PAG_COMMIT | OBJ_GIVEABLE ) == NO_ERROR) 
       {
         memcpy( pUnicodeMem, pMozData, NumOfBytes );    // Copy text string
@@ -273,11 +272,11 @@ void nsClipboard::SetClipboardData(const char *aFlavor)
             }
           }
 
-          nsAutoCharBuffer buffer;
-          int32_t bufLength;
-          WideCharToMultiByte(0, static_cast<char16_t*>(pMozData),
-                              NumOfBytes, buffer, bufLength);
-          memcpy(pByteMem, buffer.Elements(), NumOfBytes);
+          nsAutoCString buffer;
+          NS_CopyUnicodeToNative(nsDependentString(static_cast<char16_t*>(pMozData), NumOfChars), buffer);
+          NumOfBytes = buffer.Length();
+          memcpy(pByteMem, buffer.get(), NumOfBytes);
+          pByteMem[NumOfBytes] = '\0';
           // With Warp4 copying more than 64K to the clipboard works well, but
           // legacy apps cannot always handle it. So output an alarm to alert the
           // user that there might be a problem.

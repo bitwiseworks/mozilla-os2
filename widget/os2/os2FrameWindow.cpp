@@ -17,7 +17,7 @@
 #include "nsIRollupListener.h"
 #include "nsIScreenManager.h"
 #include "nsIWidgetListener.h"
-#include "nsOS2Uni.h"
+#include "nsNativeCharsetUtils.h"
 
 //-----------------------------------------------------------------------------
 // External Variables (in nsWindow.cpp)
@@ -447,17 +447,16 @@ nsresult os2FrameWindow::SetTitle(const nsAString& aTitle)
     }
   }
 
-  nsAutoCharBuffer title;
-  int32_t titleLength;
-  WideCharToMultiByte(0, uchtemp, aTitle.Length(), title, titleLength);
-  if (titleLength > MAX_TITLEBAR_LENGTH) {
-    title[MAX_TITLEBAR_LENGTH] = '\0';
+  nsAutoCString title;
+  NS_CopyUnicodeToNative(nsDependentString(uchtemp, aTitle.Length()), title);
+  if (title.Length() > MAX_TITLEBAR_LENGTH) {
+    title.Truncate(MAX_TITLEBAR_LENGTH);
   }
-  WinSetWindowText(mFrameWnd, title.Elements());
+  WinSetWindowText(mFrameWnd, title.get());
 
   // If the chrome is hidden, set the text of the titlebar directly
   if (mChromeHidden) {
-    WinSetWindowText(mTitleBar, title.Elements());
+    WinSetWindowText(mTitleBar, title.get());
   }
 
   nsMemory::Free(uchtemp);

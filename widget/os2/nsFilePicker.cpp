@@ -15,7 +15,7 @@
 #include "nsEnumeratorUtils.h"
 #include "nsCRT.h"
 #include "nsIWidget.h"
-#include "nsOS2Uni.h"
+#include "nsNativeCharsetUtils.h"
 #include "nsFilePicker.h"
 #include "mozilla/dom/EncodingUtils.h"
 
@@ -163,11 +163,9 @@ NS_IMETHODIMP nsFilePicker::Show(int16_t *retval)
     for (i = 0; i < mTitles.Length(); i++)
     {
       const nsString& typeWide = mTitles[i];
-      nsAutoCharBuffer buffer;
-      int32_t bufLength;
-      WideCharToMultiByte(0, typeWide.get(), typeWide.Length(),
-                          buffer, bufLength);
-      apszTypeList[i] = ToNewCString(nsDependentCString(buffer.Elements()));
+      nsAutoCString buffer;
+      NS_CopyUnicodeToNative(typeWide, buffer);
+      apszTypeList[i] = ToNewCString(buffer);
     }
     apszTypeList[i] = 0;
     filedlg.papszITypeList = (PAPSZ)apszTypeList;
