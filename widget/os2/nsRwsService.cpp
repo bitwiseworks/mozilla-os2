@@ -771,7 +771,7 @@ static nsresult AssignTitleString(const char *aTitle, nsAString& result)
 
   // remove line breaks, leading whitespace, & extra embedded whitespace
   // (primitive, but gcc 3.2.2 doesn't support wchar)
-  for (fSkip=true, pSrc=pDst=buffer.get(); *pSrc; pSrc++) {
+  for (fSkip=true, pSrc=pDst=buffer.BeginWriting(); *pSrc; pSrc++) {
     if (*pSrc == ' ' || *pSrc == '\r' || *pSrc == '\n' || *pSrc == '\t') {
       if (!fSkip)
         *pDst++ = ' ';
