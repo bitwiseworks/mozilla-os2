@@ -111,7 +111,7 @@ If you don't have ArcView installed, you may download it from:
 6. INSTALL 'freetyp6.dll', 'fntcfg2.dll', 'png1616.dll' and 'z.dll' into one of the directories
       on your "LIBPATH". You can download RPMs with these files from:
          http://rpm.netlabs.org/release/00/zip/freetype-2_6_2-1_oc00.zip
-         http://rpm.netlabs.org/release/00/zip/fontconfig-2_11_94-1_oc00.zip
+         http://rpm.netlabs.org/release/00/zip/fontconfig-2_11_94-2_oc00.zip
          http://rpm.netlabs.org/release/00/zip/libpng-1_6_18-1_oc00.zip
          http://rpm.netlabs.org/release/00/zip/zlib-1_2_5-5_oc00.zip
       If you use RPM/YUM, just run this command:
@@ -309,22 +309,27 @@ The following enable additional logging:
   like WarpSans, System Proportional, etc, are NOT supported.  Users
   are encouraged to install Alex Taylor's "Workplace Sans" TrueType
   font to restore the native OS/2 look-and-feel for menus and dialogs.
-  Note: Currently OS/2 versions do not support @font-face
 
 * Starting with Firefox 38, Mozilla apps use the complete version of the
-  recently ported to OS/2 fontconfig library to configure fonts. All
-  font settings (and many aspects of the FreeType font engine) are now
-  controlled through the %UNIXROOT%\etc\fonts.conf file. Please refer to
+  fontconfig library recently ported to OS/2 to manage fonts. This library
+  requires UNIXROOT environment. If you have RPM/YUM installed, nothing
+  needs to be done except `yum install fontconfig`. If you prefer manual
+  installation then you have to unpack the entire contents of this archive:
+
+    http://rpm.netlabs.org/release/00/zip/fontconfig-2_11_94-2_oc00.zip
+
+  to your UNIXROOT tree (omitting `@unixroot` from the extracted path)
+  and make sure the UNIXROOT environment variable points to this tree.
+
+  All font settings (and many aspects of the FreeType font engine) are now
+  controlled through the `%UNIXROOT%\etc\fonts\fonts.conf` and
+  `%UNIXROOT%\etc\fonts\conf.d\*` files. Please refer to:
 
     http://www.freedesktop.org/software/fontconfig/fontconfig-user.html
 
   for more information on how to configure fonts using fonts.conf.
 
   Note: You may need to restart the application to see your changes.
-
-* Fonts that contain special characters in their names (like Asian
-  Unicode font names) may not display correctly in the list of fonts
-  in the Options panel.
 
 
 ===============================================================================
