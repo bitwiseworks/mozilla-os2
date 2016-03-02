@@ -509,12 +509,6 @@ posted to other forums may not be seen by the developers.
 * The OpenJDK (Java) plugin works but there are some problems with window
   updates. This is to be addressed in future releases.
 
-* The @font-face HTML attribute is not yet supported. As a result, tiny boxes
-  with hex numbers are displayed instead of characters on pages that use it.
-
-* Fonts with names containing special characters (like Asian Unicode names)
-  will not display correctly in the list of fonts in the Options panel.
-
 * Mozilla apps will beep when copying more than 64 kB of text to the clipboard.
   This is to alert users that many applications (most notably the system
   editor, EPM, and applications running in VIO windows) cannot paste more
