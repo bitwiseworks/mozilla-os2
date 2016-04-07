@@ -655,21 +655,63 @@ MRESULT os2FrameWindow::ProcessFrameMessage(ULONG msg, MPARAM mp1, MPARAM mp2)
      // on the icon won't restore it, the sysmenu will have the wrong
      // items, and/or the minmax button will have the wrong buttons.
 
-    case WM_ADJUSTWINDOWPOS:
-      if (mChromeHidden && ((PSWP)mp1)->fl & SWP_MINIMIZE) {
+    case WM_ADJUSTWINDOWPOS: {
+      PSWP pSwp = (PSWP)mp1;
+      if (mChromeHidden && pSwp->fl & SWP_MINIMIZE) {
         WinSetParent(mTitleBar, mFrameWnd, TRUE);
         WinSetParent(mSysMenu, mFrameWnd, TRUE);
         WinSetParent(mMinMax, mFrameWnd, TRUE);
       }
-      break;
 
-    case WM_ADJUSTFRAMEPOS:
-      if (mChromeHidden && ((PSWP)mp1)->fl & SWP_RESTORE) {
+      if (pSwp->fl & SWP_ZORDER ||
+          pSwp->fl & (SWP_ACTIVATE | SWP_SHOW)) {
+        // For some reason, when the window is first created and shown, the
+        // SWP_ZORDER flag is not set by PM so we miss the initial
+        // nsWidgetListener::ZLevelChanged notification that sets the first
+        // top-level window of the application. It seems that SWP_ACTIVATE and
+        // SWP_SHOW are set in such a case, so react on them too (assuming
+        // HWND_TOP).
+        HWND hwndAfter = pSwp->fl & SWP_ZORDER ? pSwp->hwndInsertBehind : HWND_TOP;
+
+        nsWindow *aboveWindow = 0;
+        nsWindowZ placement;
+
+        if (hwndAfter == HWND_BOTTOM)
+          placement = nsWindowZBottom;
+        else if (hwndAfter == HWND_TOP)
+          placement = nsWindowZTop;
+        else {
+          placement = nsWindowZRelative;
+          aboveWindow = nsWindow::GetNSWindowPtr(hwndAfter);
+        }
+
+        if (mOwner->mWidgetListener) {
+          nsCOMPtr<nsIWidget> actualBelow = nullptr;
+          if (mOwner->mWidgetListener->ZLevelChanged(false, &placement,
+                                                     aboveWindow, getter_AddRefs(actualBelow))) {
+            pSwp->fl |= SWP_ZORDER;
+            if (placement == nsWindowZBottom)
+              pSwp->hwndInsertBehind = HWND_BOTTOM;
+            else if (placement == nsWindowZTop)
+              pSwp->hwndInsertBehind = HWND_TOP;
+            else {
+              pSwp->hwndInsertBehind = (HWND)actualBelow->GetNativeData(NS_NATIVE_WINDOW);
+            }
+          }
+        }
+      }
+      break;
+    }
+
+    case WM_ADJUSTFRAMEPOS: {
+      PSWP pSwp = (PSWP)mp1;
+      if (mChromeHidden && (pSwp->fl & SWP_RESTORE)) {
         WinSetParent(mTitleBar, HWND_OBJECT, TRUE);
         WinSetParent(mSysMenu, HWND_OBJECT, TRUE);
         WinSetParent(mMinMax, HWND_OBJECT, TRUE);
       }
       break;
+    }
 
     case WM_DESTROY:
       DEBUGFOCUS(frame WM_DESTROY);

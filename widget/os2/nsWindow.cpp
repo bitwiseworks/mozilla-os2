@@ -719,11 +719,8 @@ inline HWND nsWindow::GetMainWindow() const
   return mFrame ? mFrame->GetFrameWnd() : mWnd;
 }
 
-//-----------------------------------------------------------------------------
-// Inline this here for consistency (and a cleaner looking .h).
-
 // static
-inline nsWindow* nsWindow::GetNSWindowPtr(HWND aWnd)
+nsWindow* nsWindow::GetNSWindowPtr(HWND aWnd)
 {
   return (nsWindow*)WinQueryWindowPtr(aWnd, QWL_NSWINDOWPTR);
 }
@@ -731,7 +728,7 @@ inline nsWindow* nsWindow::GetNSWindowPtr(HWND aWnd)
 //-----------------------------------------------------------------------------
 
 // static
-inline bool nsWindow::SetNSWindowPtr(HWND aWnd, nsWindow* aPtr)
+bool nsWindow::SetNSWindowPtr(HWND aWnd, nsWindow* aPtr)
 {
   return WinSetWindowPtr(aWnd, QWL_NSWINDOWPTR, aPtr);
 }
