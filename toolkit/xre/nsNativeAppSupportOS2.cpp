@@ -387,54 +387,6 @@ int DdeCmpStringHandles( HSZ hsz1, HSZ hsz2 )
   return(rc);
 }
 
-
-char *GetCommandLine()
-{
-   /* This function is meant to be like the Window's GetCommandLine() function.
-    * The value returned by pPIB->pib_pchcmd is of the format:
-    * <executable>\0<command line parameters>.  So the first string is the
-    * .exe and the second string is what followed on the command line.  Dorky,
-    * but I guess it'll have to do.
-    */
-   PTIB pTIB = nullptr;
-   PPIB pPIB = nullptr;
-   APIRET rc = NO_ERROR;
-   char *pchParam = nullptr;
-
-   rc = DosGetInfoBlocks( &pTIB, &pPIB );
-   if( rc == NO_ERROR )
-   {
-      INT iLen = 0;
-      char *pchTemp = nullptr;
-      pchParam = pPIB->pib_pchcmd;
-      strcpy( szCommandLine, pchParam );
-      iLen = strlen( pchParam );
-
-      /* szCommandLine[iLen] is '\0', so see what's next.  Probably be another
-       * '\0', a space or start of the arguments
-       */
-      pchTemp = &(pchParam[iLen+1]);
-
-      /* At this point, szCommandLine holds just the program name.  Now we
-       * go for the parameters.  If our next value is a space, ignore it
-       * and go for the next character
-       */
-      if( *pchTemp )
-      {
-         szCommandLine[iLen] = ' ';
-         iLen++;
-         if( *pchTemp == ' ' )
-         {
-            pchTemp++;
-         }
-         strcpy( &(szCommandLine[iLen]), pchTemp );
-      }
-
-   }
-
-   return( szCommandLine );
-}
-
 typedef struct _DDEMLFN
 {
    PFN   *fn;
@@ -621,7 +573,7 @@ struct MessageWindow {
     // SendRequest: Construct a data buffer <commandline>\0<workingdir>\0,
     // then pass the string via WM_COPYDATA to the message window.
 
-    NS_IMETHOD SendRequest( const char *cmd )
+    NS_IMETHOD SendRequest( int argc, const char* const* argv )
     {
     /* Nothing like WM_COPYDATA in OS/2, where the OS allows pointers to be
      * passed to a different process and automatically accessible by that
@@ -633,10 +585,26 @@ struct MessageWindow {
         COPYDATASTRUCT *pcds;
         PVOID pvData = nullptr;
 
-        if (!cmd)
-            return NS_ERROR_FAILURE;
+        // Step 1: count the command line size
+        uint32_t cmdLineSize = 0;
+        for (int i = 0; i < argc; ++i) {
+            if (i)
+                cmdLineSize++; // space between args
+            uint32_t len = strlen(argv[i]);
+            cmdLineSize += len;
+            bool seenSpace = false;
+            for (uint32_t j = 0; j < len; j++) {
+                if (argv[i][j] == '"' || argv[i][j] == '\\')
+                    cmdLineSize++; // backslash before each quote or backslash
+                else if (!seenSpace && argv[i][j] == ' ') {
+                    seenSpace = true;
+                    cmdLineSize += 2; // pair of quotes for spaces
+                }
+            }
+        }
 
-        ULONG ulSize = sizeof(COPYDATASTRUCT)+strlen(cmd)+1+CCHMAXPATH;
+        ULONG ulSize = sizeof(COPYDATASTRUCT)+cmdLineSize+1+CCHMAXPATH;
+
 #ifdef MOZ_OS2_HIGH_MEMORY
         APIRET rc = DosAllocSharedMem( &pvData, nullptr, ulSize,
                                        PAG_COMMIT | PAG_READ | PAG_WRITE | OBJ_GETTABLE | OBJ_ANY);
@@ -665,15 +633,30 @@ struct MessageWindow {
 
         char * ptr = &(pcds->chBuff);
         pcds->lpData = ptr;
-        strcpy( ptr, cmd);
-        pcds->cbData = strlen( ptr) + 1;
-        ptr += pcds->cbData;
+
+        // Step 2: flatten command line aguments
+        for (int i = 0; i < argc; ++i) {
+            if (i)
+                *ptr++ = ' '; // space between args
+            bool seenSpace = !!strchr(argv[i], ' ');
+            if (seenSpace)
+                *ptr++ = '"'; // opening quote
+            for (uint32_t j = 0; j < strlen(argv[i]); j++) {
+                if (argv[i][j] == '"' || argv[i][j] == '\\')
+                    *ptr++ = '\\';
+                *ptr++ = argv[i][j];
+            }
+            if (seenSpace)
+                *ptr++ = '"'; // closing quote
+        }
+        *ptr++ = '\0';
+        pcds->cbData = (ptr - (char*)pcds->lpData);
 
         if (DosQueryPathInfo( ".", FIL_QUERYFULLNAME, ptr, CCHMAXPATH)) {
             ptr[0] = '.';
             ptr[1] = '\0';
         }
-        pcds->cbData += strlen( ptr) + 1;
+        pcds->cbData += strlen(ptr) + 1;
 
         WinSendMsg( mHandle, WM_COPYDATA, 0, (MPARAM)pcds );
         DosFreeMem( pvData );
@@ -791,8 +774,7 @@ nsNativeAppSupportOS2::Start( bool *aResult ) {
     MessageWindow msgWindow;
     if ( msgWindow.getHWND() ) {
         // We are a client process.  Pass request to message window.
-        char *cmd = GetCommandLine();
-        rv = msgWindow.SendRequest( cmd );
+        rv = msgWindow.SendRequest(gArgc, gArgv);
     } else {
         // We will be server.
         rv = msgWindow.Create();
