@@ -22,11 +22,23 @@ public:
   static void Unlink();
   static already_AddRefed<PlatformDecoderModule> CreateDecoderModule();
 
+#ifdef XP_OS2
+  enum { NumDLLs = 3 }; // number of libav DLLs we load
+#endif
+
 private:
+#ifdef XP_OS2
+  static void* sLinkedLib[NumDLLs];
+#else
   static void* sLinkedLib;
+#endif
   static const AvFormatLib* sLib;
 
+#ifdef XP_OS2
+  static bool Bind(const char* const aLibName[NumDLLs], uint32_t Version);
+#else
   static bool Bind(const char* aLibName, uint32_t Version);
+#endif
 
   static enum LinkStatus {
     LinkStatus_INIT = 0,
