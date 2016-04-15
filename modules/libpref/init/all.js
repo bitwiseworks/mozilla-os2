@@ -285,9 +285,14 @@ pref("media.directshow.enabled", true);
 #endif
 #ifdef MOZ_FMP4
 pref("media.fragmented-mp4.enabled", true);
+#if defined(XP_OS2)
+// It's fine to use FFMPEG on OS/2 by default.
+pref("media.fragmented-mp4.ffmpeg.enabled", true);
+#else
 pref("media.fragmented-mp4.ffmpeg.enabled", false);
+#endif
 pref("media.fragmented-mp4.gmp.enabled", false);
-#if defined(XP_WIN) && defined(MOZ_WMF) || defined(XP_MACOSX) || defined(MOZ_WIDGET_GONK)
+#if defined(XP_WIN) && defined(MOZ_WMF) || defined(XP_MACOSX) || defined(MOZ_WIDGET_GONK) || defined(XP_OS2)
 // Denotes that the fragmented MP4 parser can be created by <video> elements.
 pref("media.fragmented-mp4.exposed", true);
 #else
