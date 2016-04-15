@@ -35,6 +35,7 @@ public:
 
 static const AvFormatLib sLibs[] = {
 #ifdef XP_OS2
+  { { "avform56.dll", "avcode56.dll", "avutil54.dll" }, FFmpegDecoderModule<55>::Create, 55 },
   { { "avform55.dll", "avcode55.dll", "avutil53.dll" }, FFmpegDecoderModule<55>::Create, 55 },
   { { "avform53.dll", "avcode53.dll", "avutil51.dll" }, FFmpegDecoderModule<53>::Create, 53 },
 #else
