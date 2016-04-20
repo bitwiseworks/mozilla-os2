@@ -3335,163 +3335,119 @@ pref("mousewheel.enable_pixel_scrolling", true);
 
 pref("ui.key.menuAccessKeyFocuses", true);
 
-pref("font.alias-list", "sans,sans-serif,serif,monospace,Tms Rmn,Helv,Courier,Times New Roman");
+// Firefox uses FontConfig and Freetype on OS/2 to match and render fonts.
+// FontConfig is therefore responsible for selecting a proper default font
+// for generic font families according to the system setup (including
+// language-specific font selection) so Firefox preferences simply default
+// to these generic families. Unfortunately, there is no default preference
+// for any/unmatched language group, so we have to list all language gropus
+// here (at least values of all menuitems in the "selectLangs" menulist in
+// http://mxr.mozilla.org/mozilla/source/browser/components/preferences/fonts.xul
+// should be listed).
 
-pref("font.mathfont-family", "MathJax_Main, STIXNonUnicode, STIXSizeOneSym, STIXSize1, STIXGeneral, Asana Math, DejaVu Sans");
+pref("font.name.serif.ar", "serif");
+pref("font.name.sans-serif.ar", "sans-serif");
+pref("font.name.monospace.ar", "monospace");
 
-// Languages only need lists if we have a default that might not be available.
-// Tms Rmn and Helv cannot be used by Thebes but the OS/2 version of FontConfig
-// maps them to Times New Roman and Helvetica, respectively. Those fonts and
-// Courier are available on OS/2 by default.
+pref("font.name.serif.el", "serif");
+pref("font.name.sans-serif.el", "sans-serif");
+pref("font.name.monospace.el", "monospace");
 
-pref("font.name.serif.ar", "Tms Rmn");
-pref("font.name.sans-serif.ar", "Helv");
-pref("font.name.monospace.ar", "Courier");
+pref("font.name.serif.he", "serif");
+pref("font.name.sans-serif.he", "sans-serif");
+pref("font.name.monospace.he", "monospace");
 
-pref("font.name.serif.el", "Tms Rmn");
-pref("font.name.sans-serif.el", "Helv");
-pref("font.name.monospace.el", "Courier");
+pref("font.name.serif.ja", "serif");
+pref("font.name.sans-serif.ja", "sans-serif");
+pref("font.name.monospace.ja", "monospace");
 
-pref("font.name.serif.he", "Tms Rmn");
-pref("font.name.sans-serif.he", "Helv");
-pref("font.name.monospace.he", "Courier");
+pref("font.name.serif.ko", "serif");
+pref("font.name.sans-serif.ko", "sans-serif");
+pref("font.name.monospace.ko", "monospace");
 
-pref("font.name.serif.ja", "Times New Roman WT J");
-pref("font.name-list.serif.ja", "Times New Roman WT J, Times New Roman WT, Times New Roman MT 30, Tms Rmn");
-pref("font.name.sans-serif.ja", "Helv");
-pref("font.name.monospace.ja", "Kochi Gothic");
-pref("font.name-list.monospace.ja", "Kochi Gothic, Kochi Mincho, Courier New, Courier");
+pref("font.name.serif.th", "serif");
+pref("font.name.sans-serif.th", "sans-serif");
+pref("font.name.monospace.th", "monospace");
 
-pref("font.name.serif.ko", "Times New Roman WT K");
-pref("font.name-list.serif.ko", "Times New Roman WT K, Times New Roman WT, Times New Roman MT 30, Tms Rmn");
-pref("font.name.sans-serif.ko", "Helv");
-pref("font.name.monospace.ko", "Courier");
+pref("font.name.serif.zh-CN", "serif");
+pref("font.name.sans-serif.zh-CN", "sans-serif");
+pref("font.name.monospace.zh-CN", "monospace");
 
-pref("font.name.serif.th", "Tms Rmn");
-pref("font.name.sans-serif.th", "Helv");
-pref("font.name.monospace.th", "Courier");
+pref("font.name.serif.zh-HK", "serif");
+pref("font.name.sans-serif.zh-HK", "sans-serif");
+pref("font.name.monospace.zh-HK", "monospace");
 
-pref("font.name.serif.tr", "Tms Rmn");
-pref("font.name.sans-serif.tr", "Helv");
-pref("font.name.monospace.tr", "Courier");
+pref("font.name.serif.zh-TW", "serif");
+pref("font.name.sans-serif.zh-TW", "sans-serif");
+pref("font.name.monospace.zh-TW", "monospace");
 
-pref("font.name.serif.x-baltic", "Tms Rmn");
-pref("font.name.sans-serif.x-baltic", "Helv");
-pref("font.name.monospace.x-baltic", "Courier");
+pref("font.name.serif.x-cans", "serif");
+pref("font.name.sans-serif.x-cans", "sans-serif");
+pref("font.name.monospace.x-cans", "monospace");
 
-pref("font.name.serif.x-central-euro", "Tms Rmn");
-pref("font.name.sans-serif.x-central-euro", "Helv");
-pref("font.name.monospace.x-central-euro", "Courier");
+pref("font.name.serif.x-cyrillic", "serif");
+pref("font.name.sans-serif.x-cyrillic", "sans-serif");
+pref("font.name.monospace.x-cyrillic", "monospace");
 
-pref("font.name.serif.x-cyrillic", "Tms Rmn");
-pref("font.name.sans-serif.x-cyrillic", "Helv");
-pref("font.name.monospace.x-cyrillic", "Courier");
+pref("font.name.serif.x-devanagari", "serif");
+pref("font.name.sans-serif.x-devanagari", "sans-serif");
+pref("font.name.monospace.x-devanagari", "monospace");
 
-// Unicode fonts
-// Fontconfig will match substrings, so that we only need to list e.g.
-// Times New Roman WT and it will search for the J, SC, TC, K variants.
-// The DejaVu fonts are shipped with eCS, so list them first but include other
-// fonts that OS/2 users are likely to have.
-pref("font.name.serif.x-unicode", "Times New Roman MT 30");
-pref("font.name-list.serif.x-unicode", "DejaVu Serif, FreeSerif, Times New Roman WT, Times New Roman MT 30, Tms Rmn");
-pref("font.name.sans-serif.x-unicode", "Lucida Sans Unicode");
-pref("font.name-list.sans-serif.x-unicode", "DejaVu Sans, FreeSans, Arial Unicode, Lucida Sans Unicode, Helv");
-pref("font.name.monospace.x-unicode", "DejaVu Sans Mono");
-pref("font.name-list.monospace.x-unicode", "DejaVu Sans Mono, FreeMono, Andale Mono, Courier New, Courier");
-pref("font.name.fantasy.x-unicode", "Times New Roman MT 30");
-pref("font.name-list.fantasy.x-unicode", "DejaVu Serif, FreeSerif, Times New Roman WT, Times New Roman MT 30");
-pref("font.name.cursive.x-unicode", "Times New Roman MT 30");
-pref("font.name-list.cursive.x-unicode", "DejaVu Serif, FreeSerif, Times New Roman WT, Times New Roman MT 30");
+pref("font.name.serif.x-ethi", "serif");
+pref("font.name.sans-serif.x-ethi", "sans-serif");
+pref("font.name.monospace.x-ethi", "monospace");
 
-pref("font.name.serif.x-western", "Tms Rmn");
-pref("font.name.sans-serif.x-western", "Helv");
-pref("font.name.monospace.x-western", "Courier");
+pref("font.name.serif.x-geor", "serif");
+pref("font.name.sans-serif.x-geor", "sans-serif");
+pref("font.name.monospace.x-geor", "monospace");
 
-pref("font.name.serif.zh-CN", "Times New Roman WT SC");
-pref("font.name-list.serif.zh_CN", "Times New Roman WT SC, Times New Roman MT 30, Times New Roman WT, Tms Rmn");
-pref("font.name.sans-serif.zh-CN", "Helv");
-pref("font.name.monospace.zh-CN", "Courier");
+pref("font.name.serif.x-gujr", "serif");
+pref("font.name.sans-serif.x-gujr", "sans-serif");
+pref("font.name.monospace.x-gujr", "monospace");
 
-pref("font.name.serif.zh-TW", "Times New Roman WT TC");
-pref("font.name-list.serif.zh-TW", "Times New Roman WT TC, Times New Roman MT 30, Times New Roman WT, Tms Rmn");
-pref("font.name.sans-serif.zh-TW", "Helv");
-pref("font.name.monospace.zh-TW", "Courier");
+pref("font.name.serif.x-guru", "serif");
+pref("font.name.sans-serif.x-guru", "sans-serif");
+pref("font.name.monospace.x-guru", "monospace");
 
-// just copied values from zh-TW
-pref("font.name.serif.zh-HK", "Times New Roman WT TC");
-pref("font.name-list.serif.zh-HK", "Times New Roman WT TC, Times New Roman MT 30, Times New Roman WT, Tms Rmn");
-pref("font.name.sans-serif.zh-HK", "Helv");
-pref("font.name.monospace.zh-HK", "Courier");
+pref("font.name.serif.x-knda", "serif");
+pref("font.name.sans-serif.x-knda", "sans-serif");
+pref("font.name.monospace.x-knda", "monospace");
 
-pref("font.default", "serif");
+pref("font.name.serif.x-khmr", "serif");
+pref("font.name.sans-serif.x-khmr", "sans-serif");
+pref("font.name.monospace.x-khmr", "monospace");
 
-pref("font.default.ar", "serif");
-pref("font.size.variable.ar", 16);
-pref("font.size.fixed.ar", 13);
+pref("font.name.serif.x-mlym", "serif");
+pref("font.name.sans-serif.x-mlym", "sans-serif");
+pref("font.name.monospace.x-mlym", "monospace");
 
-pref("font.default.el", "serif");
-pref("font.size.variable.el", 16);
-pref("font.size.fixed.el", 13);
+pref("font.name.serif.x-orya", "serif");
+pref("font.name.sans-serif.x-orya", "sans-serif");
+pref("font.name.monospace.x-orya", "monospace");
 
-pref("font.default.he", "serif");
-pref("font.size.variable.he", 16);
-pref("font.size.fixed.he", 13);
+pref("font.name.serif.x-sinh", "serif");
+pref("font.name.sans-serif.x-sinh", "sans-serif");
+pref("font.name.monospace.x-sinh", "monospace");
 
-pref("font.default.ja", "serif");
-pref("font.size.variable.ja", 16);
-pref("font.size.fixed.ja", 16);
+pref("font.name.serif.x-tamil", "serif");
+pref("font.name.sans-serif.x-tamil", "sans-serif");
+pref("font.name.monospace.x-tamil", "monospace");
 
-pref("font.default.ko", "serif");
-pref("font.size.variable.ko", 16);
-pref("font.size.fixed.ko", 16);
+pref("font.name.serif.x-telu", "serif");
+pref("font.name.sans-serif.x-telu", "sans-serif");
+pref("font.name.monospace.x-telu", "monospace");
 
-pref("font.default.th", "serif");
-pref("font.size.variable.th", 16);
-pref("font.size.fixed.th", 13);
+pref("font.name.serif.x-tibt", "serif");
+pref("font.name.sans-serif.x-tibt", "sans-serif");
+pref("font.name.monospace.x-tibt", "monospace");
 
-pref("font.default.tr", "serif");
-pref("font.size.variable.tr", 16);
-pref("font.size.fixed.tr", 13);
+pref("font.name.serif.x-unicode", "serif");
+pref("font.name.sans-serif.x-unicode", "sans-serif");
+pref("font.name.monospace.x-unicode", "monospace");
 
-pref("font.default.x-baltic", "serif");
-pref("font.size.variable.x-baltic", 16);
-pref("font.size.fixed.x-baltic", 13);
-
-pref("font.default.x-central-euro", "serif");
-pref("font.size.variable.x-central-euro", 16);
-pref("font.size.fixed.x-central-euro", 13);
-
-pref("font.default.x-cyrillic", "serif");
-pref("font.size.variable.x-cyrillic", 16);
-pref("font.size.fixed.x-cyrillic", 13);
-
-pref("font.default.x-devanagari", "serif");
-pref("font.size.variable.x-devanagari", 16);
-pref("font.size.fixed.x-devanagari", 13);
-
-pref("font.default.x-tamil", "serif");
-pref("font.size.variable.x-tamil", 16);
-pref("font.size.fixed.x-tamil", 13);
-
-pref("font.default.x-unicode", "serif");
-pref("font.size.variable.x-unicode", 16);
-pref("font.size.fixed.x-unicode", 13);
-
-pref("font.default.x-western", "serif");
-pref("font.size.variable.x-western", 16);
-pref("font.size.fixed.x-western", 13);
-
-pref("font.default.zh-CN", "serif");
-pref("font.size.variable.zh-CN", 16);
-pref("font.size.fixed.zh-CN", 16);
-
-pref("font.default.zh-TW", "serif");
-pref("font.size.variable.zh-TW", 16);
-pref("font.size.fixed.zh-TW", 16);
-
-pref("font.default.zh-HK", "serif");
-pref("font.size.variable.zh-HK", 16);
-pref("font.size.fixed.zh-HK", 16);
+pref("font.name.serif.x-western", "serif");
+pref("font.name.sans-serif.x-western", "sans-serif");
+pref("font.name.monospace.x-western", "monospace");
 
 pref("netinst.profile.show_profile_wizard", true); 
 
