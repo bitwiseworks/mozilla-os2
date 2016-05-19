@@ -739,6 +739,17 @@ SessionStore.prototype = {
       entry.referrer = aEntry.referrerURI.spec;
     }
 
+    var entryESR38 = aEntry.QueryInterface(Ci.nsISHEntry_ESR38);
+    if (entryESR38) {
+      if (entryESR38.originalURI) {
+        entry.originalURI = entryESR38.originalURI.spec;
+      }
+
+      if (entryESR38.loadReplace) {
+        entry.loadReplace = entryESR38.loadReplace;
+      }
+    }
+
     if (aEntry.contentType) {
       entry.contentType = aEntry.contentType;
     }
@@ -804,7 +815,7 @@ SessionStore.prototype = {
   },
 
   _deserializeHistoryEntry: function _deserializeHistoryEntry(aEntry, aIdMap, aDocIdentMap) {
-    let shEntry = Cc["@mozilla.org/browser/session-history-entry;1"].createInstance(Ci.nsISHEntry);
+    let shEntry = Cc["@mozilla.org/browser/session-history-entry;1"].createInstance(Ci.nsISHEntry_ESR38);
 
     shEntry.setURI(Services.io.newURI(aEntry.url, null, null));
     shEntry.setTitle(aEntry.title || aEntry.url);
@@ -817,6 +828,14 @@ SessionStore.prototype = {
     }
     if (aEntry.referrer) {
       shEntry.referrerURI = Services.io.newURI(aEntry.referrer, null, null);
+    }
+
+    if (aEntry.originalURI) {
+      shEntry.originalURI =  Services.io.newURI(aEntry.originalURI, null, null);
+    }
+
+    if (aEntry.loadReplace) {
+      shEntry.loadReplace = aEntry.loadReplace;
     }
 
     if (aEntry.cacheKey) {
