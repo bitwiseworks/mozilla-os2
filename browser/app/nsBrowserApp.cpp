@@ -86,11 +86,26 @@ static void Output(const char *fmt, ... )
   vfprintf(stderr, fmt, ap);
 #ifdef XP_OS2
   char msg[2048];
+  // Put the message to the console...
   vsnprintf(msg, sizeof(msg), fmt, ap);
+  // ...and to a message box
   HAB hab = WinInitialize(0);
-  WinCreateMsgQueue(hab, 0);
-  WinMessageBox(HWND_DESKTOP, 0, msg, "Firefox", 0,
-                MB_OK | MB_ERROR | MB_MOVEABLE);
+  if (hab) {
+    HMQ hmq = WinCreateMsgQueue(hab, 0);
+    if (!hmq && ERRORIDERROR(WinGetLastError(hab)) == PMERR_NOT_IN_A_PM_SESSION) {
+      // Morph from VIO to PM
+      PPIB ppib;
+      PTIB ptib;
+      DosGetInfoBlocks(&ptib, &ppib);
+      ppib->pib_ultype = 3;
+      // Retry
+      hmq = WinCreateMsgQueue(hab, 0);
+    }
+    if (hmq != NULLHANDLE) {
+      WinMessageBox(HWND_DESKTOP, 0, msg, "Firefox", 0,
+                    MB_OK | MB_ERROR | MB_MOVEABLE);
+    }
+  }
 #endif
 #else
   char msg[2048];
@@ -528,6 +543,7 @@ static nsresult
 InitXPCOMGlue(const char *argv0, nsIFile **xreDirectory)
 {
   char exePath[MAXPATHLEN];
+  char errBuf[MAXPATHLEN * 2];
 
   nsresult rv = mozilla::BinaryPath::Get(argv0, exePath);
   if (NS_FAILED(rv)) {
@@ -585,16 +601,19 @@ InitXPCOMGlue(const char *argv0, nsIFile **xreDirectory)
   }
   if (!greFound) {
 #endif
-    Output("Could not find the Mozilla runtime.\n");
+    Output("Could not find the Mozilla runtime (%s).\n", XPCOM_DLL);
     return NS_ERROR_FAILURE;
   }
 
   // We do this because of data in bug 771745
   XPCOMGlueEnablePreload();
 
-  rv = XPCOMGlueStartup(exePath);
+  rv = XPCOMGlueStartup2(exePath, errBuf, sizeof(errBuf));
   if (NS_FAILED(rv)) {
-    Output("Couldn't load %s.\n", XPCOM_DLL);
+    if (errBuf[0])
+      Output("Couldn't load %s (%s).\n", XPCOM_DLL, errBuf);
+    else
+      Output("Couldn't load %s.\n", XPCOM_DLL);
     return rv;
   }
 

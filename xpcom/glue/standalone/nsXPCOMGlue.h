@@ -22,9 +22,17 @@ extern "C" NS_HIDDEN_(void) XPCOMGlueEnablePreload();
 
 /**
  * Initialize the XPCOM glue by dynamically linking against the XPCOM
- * shared library indicated by xpcomFile.
+ * shared library indicated by aXPCOMFile.
  */
 extern "C" NS_HIDDEN_(nsresult) XPCOMGlueStartup(const char* aXPCOMFile);
+
+/**
+ * Initialize the XPCOM glue by dynamically linking against the XPCOM
+ * shared library indicated by aXPCOMFile. Returns the error message in
+ * aErrBuf on error unless aErrBuf is nullptr or aErrBufLen is 0.
+ */
+extern "C" NS_HIDDEN_(nsresult)
+XPCOMGlueStartup2(const char* aXPCOMFile, char *aErrBuf, size_t aErrBufLen);
 
 typedef void (*NSFuncPtr)();
 

@@ -96,29 +96,39 @@ CloseLibHandle(LibHandleType aLibHandle)
 
 typedef HMODULE LibHandleType;
 
+static char sErrorBuf[CCHMAXPATH * 2];
+
 static LibHandleType
 GetLibHandle(pathstr_t aDependentLib)
 {
-    CHAR pszError[_MAX_PATH];
-    ULONG ulrc = NO_ERROR;
-    LibHandleType libHandle;
-    ulrc = DosLoadModule(pszError, _MAX_PATH, aDependentLib, &libHandle);
-    return (ulrc == NO_ERROR) ? libHandle : NULLHANDLE;
+  CHAR pszError[CCHMAXPATH];
+  ULONG ulrc = NO_ERROR;
+  LibHandleType libHandle;
+  sErrorBuf[0] = '\0';
+  pszError[0] = '\0';
+  ulrc = DosLoadModule(pszError, sizeof(pszError), aDependentLib, &libHandle);
+  if (ulrc != NO_ERROR) {
+    if (pszError[0])
+      sprintf(sErrorBuf, "OS/2 error %lu, faulty module: %s", ulrc, pszError);
+    else
+      sprintf(sErrorBuf, "OS/2 error %lu", ulrc);
+  }
+  return (ulrc == NO_ERROR) ? libHandle : NULLHANDLE;
 }
 
 static NSFuncPtr
 GetSymbol(LibHandleType aLibHandle, const char *aSymbol)
 {
-    ULONG ulrc = NO_ERROR;
-    NSFuncPtr sym;
-    ulrc = DosQueryProcAddr(aLibHandle, 0, aSymbol, (PFN*)&sym);
-    return (ulrc == NO_ERROR) ? sym : nullptr;
+  ULONG ulrc = NO_ERROR;
+  NSFuncPtr sym;
+  ulrc = DosQueryProcAddr(aLibHandle, 0, aSymbol, (PFN*)&sym);
+  return (ulrc == NO_ERROR) ? sym : nullptr;
 }
 
 static void
 CloseLibHandle(LibHandleType aLibHandle)
 {
-    DosFreeModule(aLibHandle);
+  DosFreeModule(aLibHandle);
 }
 
 #elif defined(XP_MACOSX)
@@ -461,10 +471,14 @@ XPCOMGlueEnablePreload()
 }
 
 nsresult
-XPCOMGlueStartup(const char* aXPCOMFile)
+XPCOMGlueStartup2(const char* aXPCOMFile, char *aErrBuf, size_t aErrBufLen)
 {
   xpcomFunctions.version = XPCOM_GLUE_VERSION;
   xpcomFunctions.size    = sizeof(XPCOMFunctions);
+
+  // Start with no error message
+  if (aErrBuf && aErrBufLen)
+    *aErrBuf = '\0';
 
   if (!aXPCOMFile) {
     aXPCOMFile = XPCOM_DLL;
@@ -472,6 +486,13 @@ XPCOMGlueStartup(const char* aXPCOMFile)
 
   GetFrozenFunctionsFunc func = XPCOMGlueLoad(aXPCOMFile);
   if (!func) {
+    if (aErrBuf && aErrBufLen) {
+#ifdef XP_OS2
+      size_t len = aErrBufLen < sizeof(sErrorBuf) ? aErrBufLen : sizeof(sErrorBuf);
+      strncpy(aErrBuf, sErrorBuf, len - 1);
+      aErrBuf[len] = '\0';
+#endif
+    }
     return NS_ERROR_NOT_AVAILABLE;
   }
 
@@ -482,6 +503,12 @@ XPCOMGlueStartup(const char* aXPCOMFile)
   }
 
   return NS_OK;
+}
+
+nsresult
+XPCOMGlueStartup(const char* aXPCOMFile)
+{
+  return XPCOMGlueStartup2(aXPCOMFile, nullptr, 0);
 }
 
 XPCOM_API(nsresult)
