@@ -6,6 +6,10 @@
 #define INCL_BASE
 #define INCL_PM
 #include <os2.h>
+#ifdef BYTE_ORDER
+#undef BYTE_ORDER // pmord.h def conflicts with machine/endian.h
+#endif
+
 #include <stdlib.h>
 
 #include "nsLookAndFeel.h"
