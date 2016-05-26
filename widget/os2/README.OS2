@@ -57,84 +57,83 @@
 -- Installation ---------------------------------------------------------------
 ===============================================================================
 
-The instructions below may refer to RPM archives which you need to unpack
-to get the required files. Ii you have a recent eCS installation, there is
-an utility called ArcView which can unpack many formats including RPM.
-If you don't have ArcView installed, you may download it from:
-   http://www.altsan.org/programming/os2/index.html#arcview
+Mozilla is a complex product that uses a huge number of 3rd party libraries
+such as Cairo, FreeType, NSPR and many others. In order to provide better OS/2
+support for both Mozilla and these libraries we build them as dynamically
+loadable modules (DLLs) which are maintained and distributed separately and
+which Mozilla executables are simply linked with. This approach also allows
+other applications use the same library modules which, among other benefits,
+reduces the overall memory footprint and saves other vital system resources.
 
-1. UNZIP the archive into any directory you wish.  This will create a
-      subdirectory with the same name as the program.  For example:
-         unzip firefox-5.0.en-US.os2.zip -d x:\mozilla.org
-      will install Firefox in x:\mozilla.org\firefox.
+As a side effect of this approach, Mozilla applications got so many external
+dependencies that it is nearly impossible for the end user to install all of
+them from the ZIP files manually — and even naming them all in this file
+would be a very hard task. For this reason, starting from the release of
+Firfox version 38.8.0 (Beta 7), manual installation of Mozilla requirements
+is no longer supported. The only supported way of installing all the
+requirements now is the YUM command line tool or the Arca Nova Package Manager
+application (ANPM). The following instructions describe the necessary steps.
 
-   !! If you already have a directory with the same name from an older
-      installation, rename it first (e.g. 'firefox-old').  Do not let
-      the new version install on top of the old one.
+1. Install the RPM/YUM environment. The simplest way to do so is to download
+   and install ANPM as described here:
 
-2. CHOOSE a directory where the Mozilla applications can store their
-      profile data, then add a line like this to config.sys:
-         SET MOZILLA_HOME=x:\mozilla.org
-      The first time you run any Mozilla app, it will create a 'mozilla'
-      subdirectory where your customized settings are saved.
+   https://www.arcanoae.com/wiki/anpm/.
 
-   !! Without "SET MOZILLA_HOME=", the 'mozilla' subdirectory will be
-      created in the same directory as the program itself.  This can
-      make it very hard to upgrade to new versions without deleting
-      your customized settings.
+   If you prefer command line, you may install only the RPM/YUM environment
+   and tools as described here:
 
-3. INSTALL 'libc066.dll' and other 'libc*.dll' files into one of the
-      directories on your "LIBPATH" (e.g. 'x:\os2\dll').  You can download
-      an RPM with these files from:
-         http://rpm.netlabs.org/release/00/i386/i386/libc-0.6.6-26.oc00.i386.rpm
-      If you use RPM/YUM, just run this command:
-         yum install libc
+   http://trac.netlabs.org/rpm/wiki/RpmInstall.
 
-4. INSTALL 'gcc1.dll' and 'stdcpp6.dll' into one of the directories
-      on your "LIBPATH". You can download RPMs with these files from:
-         http://rpm.netlabs.org/release/00/i386/i386/libgcc1-4.9.2.1-3.oc00.i386.rpm
-         http://rpm.netlabs.org/release/00/i386/i386/libstdc++6-4.9.2.1-3.oc00.i386.rpm
-      If you use RPM/YUM, just run this command:
-         yum install libgcc1 libstdc++6
+2. Install the following packages needed by Firefox using either YUM or ANPM:
 
-5. INSTALL 'cairo2.dll', 'pixman10.dll', 'pango100.dll', 'glib2.dll', 'gobj2.dll',
-     'gmod2.dll', 'urpo.dll' into one of the directories
-      on your "LIBPATH". You can download RPMs with these files from:
-         http://rpm.netlabs.org/release/00/zip/cairo-1_12_0-1_oc00.zip
-         http://rpm.netlabs.org/release/00/zip/pixman-0_32_8-2_oc00.zip
-         http://rpm.netlabs.org/release/00/zip/pango-1_28_4-1_oc00.zip
-         http://rpm.netlabs.org/release/00/zip/glib2-2_25_15-5_oc00.zip
-         http://rpm.netlabs.org/release/00/zip/urpo-20150513-11_oc00.zip
-      If you use RPM/YUM, just run this command:
-         yum install pango
+   libstdc++6 nspr nss libicu pixman cairo pango fontconfig freetype libkai
 
-6. INSTALL 'freetyp6.dll', 'fntcfg2.dll', 'png1616.dll' and 'z.dll' into one of the directories
-      on your "LIBPATH". You can download RPMs with these files from:
-         http://rpm.netlabs.org/release/00/zip/freetype-2_6_2-1_oc00.zip
-         http://rpm.netlabs.org/release/00/zip/fontconfig-2_11_94-2_oc00.zip
-         http://rpm.netlabs.org/release/00/zip/libpng-1_6_18-1_oc00.zip
-         http://rpm.netlabs.org/release/00/zip/zlib-1_2_5-5_oc00.zip
-      If you use RPM/YUM, just run this command:
-         yum install freetype fontconfig zlib
+   If you use YUM, simply type `yum install <package_list>` on the command line
+   and press Enter. For ANPM, select "YUM -> Quick install..." from the menu,
+   copy the given package list into the entry field and press Enter. The
+   packages and all their dependencies will be downloaded and installed
+   automatically. Note that if some of these packages are already installed,
+   the install command will simply do nothing for them.
 
-7. INSTALL 'kai0.dll' into one of the directories
-      on your "LIBPATH". You can download RPMs with this file from:
-         http://rpm.netlabs.org/release/00/zip/libkai-1_2_0-1_oc00.zip
-      If you use RPM/YUM, just run this command:
-         yum install libkai
+3. Update the packages that you may have already installed to their latest
+   versions (which may be required by the newest Mozilla application release)
+   by either executing `yum update` on the command line or selecting
+   "YUM -> Update all" from the menu in ARPM. This will automatically download
+   and install updates (including the updates to the dependent packages, if
+   necessary). Note that if some of the packages are already at their latest
+   versions, the update command will simply do nothing for them.
 
-8. INSTALL 'pthr01.dll' and 'mmap.dll' into one of the directories
-      on your "LIBPATH". You can download RPMs with these files from:
-         http://rpm.netlabs.org/release/00/zip/pthread-20150408-19_oc00.zip
-         http://rpm.netlabs.org/release/00/zip/mmap-0_5-1_oc00.zip
-      If you use RPM/YUM, just run this command:
-         yum install pthread mmap
+4. Unzip the Mozilla application archive into any directory of your choice.
+   This will create a subdirectory with the same name as the program. For
+   example:
 
-9. Optional: Use mozinst to create icons on desktop.
-      http://hobbes.nmsu.edu/h-search.php?key=mozinst
+   unzip firefox-38.8.0.en-US.os2.zip -d D:\Apps
 
-10. Optional: you may want to install some of the items listed in the
-      "OS/2 Add-ons" section below to improve the app's performance.
+   This command will install Firefox in D:\Apps\firefox.
+
+   WARNING!!! If you already have a directory with the same name from an older
+   installation, rename it first (e.g. to 'firefox-old').  Do not let the new
+   version install on top of the old one.
+
+5. Choose a directory where the Mozilla applications can store their profile
+   data, then add a line like this to CONFIG.SYS:
+
+   SET MOZILLA_HOME=D:\Home
+
+   The first time you run any Mozilla application, it will create a 'Mozilla'
+   subdirectory in 'D:\Home' where your customized settings are saved.
+
+   WARNING!!! Without "SET MOZILLA_HOME=", the 'Mozilla' subdirectory will be
+   created in the same directory as the program itself. This can make it very
+   hard to upgrade to new versions without deleting your customized settings.
+
+6. Optional. Use mozinst to create application icons on the Desktop. Download
+   mozinit from:
+
+   http://hobbes.nmsu.edu/h-search.php?key=mozinst
+
+7. Optional. You may want to install some of the items listed in the "OS/2
+   Add-ons" section below to improve the application's performance.
 
 
 ===============================================================================
@@ -207,6 +206,12 @@ Note:  For best performance of most browser plugins, you may want
 ===============================================================================
 -- OS/2 Add-ons ---------------------------------------------------------------
 ===============================================================================
+
+* MP4 Video
+    Starting from version 38.8.0, Firefox can play MP4 (H264/AAC) video files
+    in HTML5 content but this requires the recent FFmpeg runtime libraries to
+    be installed. To do so, run `yum install ffmpeg-libs` on the command line
+    or install the 'ffmpeg-libs' package using ANPM.
 
 * Workplace Sans - TrueType Font
     Mozilla no longer supports bitmap fonts like WarpSans, so its menus
@@ -314,16 +319,13 @@ The following enable additional logging:
   fontconfig library recently ported to OS/2 to manage fonts. This library
   requires UNIXROOT environment. If you have RPM/YUM installed, nothing
   needs to be done except `yum install fontconfig`. If you prefer manual
-  installation then you have to unpack the entire contents of this archive:
-
-    http://rpm.netlabs.org/release/00/zip/fontconfig-2_11_94-2_oc00.zip
-
-  to your UNIXROOT tree (omitting `@unixroot` from the extracted path)
+  installation then you have to unpack the entire contents of the fontconfig
+  package to your UNIXROOT tree (omitting `@unixroot` from the extracted path)
   and make sure the UNIXROOT environment variable points to this tree.
 
   All font settings (and many aspects of the FreeType font engine) are now
-  controlled through the `%UNIXROOT%\etc\fonts\fonts.conf` and
-  `%UNIXROOT%\etc\fonts\conf.d\*` files. Please refer to:
+  controlled through the '%UNIXROOT%\etc\fonts\fonts.conf' and
+  '%UNIXROOT%\etc\fonts\conf.d\*' files. Please refer to:
 
     http://www.freedesktop.org/software/fontconfig/fontconfig-user.html
 

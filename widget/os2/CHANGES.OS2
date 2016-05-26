@@ -5,6 +5,29 @@ in the Mozilla product series from release to release.
 CHANGES
 
 
+Firefox 38.8.0 Beta 7 (2016-05-27)
+
+   - Update Firefox to latest version 38.8.0 ESR.
+
+   - Fix saved passwords not shown on the Options->Security page.
+
+   - Fix broken Open in New Tab and Restore Session functionality.
+     This also fixes opening URLs from command line in new tabs
+     instead of creating a new window.
+
+   - Add support for dynamic FFmpeg DLL discovery and enable MP4 video support
+     by default. This allows to play H264/AAC video files in HTML5 if supported
+     FFmpeg DLLs are present on the system (see README.OS2).
+
+   - Set default font families to generic "serif", "sans-serif" and "monospace"
+     instead of fixed familiy names. This allows Firefox to automatically pick
+     up system-global defaults set (or changed) in FontConfig (see README.OS2).
+
+   - Report the OS/2 error code and faluty module name in a PM message box and
+     to the standard output if Mozilla runime (XUL.DLL) cannot be loaded at
+     startup.
+
+
 Firefox 38.2.1 Beta 6 (2016-02-21)
 
    - Update Firefox to version 38.2.1 ESR.
