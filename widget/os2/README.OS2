@@ -71,7 +71,7 @@ them from the ZIP files manually — and even naming them all in this file
 would be a very hard task. For this reason, starting from the release of
 Firfox version 38.8.0 (Beta 7), manual installation of Mozilla requirements
 is no longer supported. The only supported way of installing all the
-requirements now is the YUM command line tool or the Arca Nova Package Manager
+requirements now is the YUM command line tool or the Arca Noae Package Manager
 application (ANPM). The following instructions describe the necessary steps.
 
 1. Install the RPM/YUM environment. The simplest way to do so is to download
