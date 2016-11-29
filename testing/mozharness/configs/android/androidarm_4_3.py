@@ -54,12 +54,222 @@ config = {
         'stop-emulator',
     ],
     "emulator": {
-            "name": "test-1",
-            "device_id": "emulator-5554",
-            "http_port": "8854", # starting http port to use for the mochitest server
-            "ssl_port": "4454", # starting ssl port to use for the server
-            "emulator_port": 5554,
+        "name": "test-1",
+        "device_id": "emulator-5554",
+        "http_port": "8854",  # starting http port to use for the mochitest server
+        "ssl_port": "4454",  # starting ssl port to use for the server
+        "emulator_port": 5554,
+    },
+    "suite_definitions": {
+        "mochitest": {
+            "run_filename": "runtestsremote.py",
+            "testsdir": "mochitest",
+            "options": [
+                "--dm_trans=adb",
+                "--app=%(app)s",
+                "--remote-webserver=%(remote_webserver)s",
+                "--xre-path=%(xre_path)s",
+                "--utility-path=%(utility_path)s",
+                "--http-port=%(http_port)s",
+                "--ssl-port=%(ssl_port)s",
+                "--certificate-path=%(certs_path)s",
+                "--symbols-path=%(symbols_path)s",
+                "--quiet",
+                "--log-raw=%(raw_log_file)s",
+                "--log-errorsummary=%(error_summary_file)s",
+                "--extra-profile-file=fonts",
+                "--screenshot-on-fail",
+            ],
         },
+        "mochitest-gl": {
+            "run_filename": "runtestsremote.py",
+            "testsdir": "mochitest",
+            "options": [
+                "--dm_trans=adb",
+                "--app=%(app)s",
+                "--remote-webserver=%(remote_webserver)s",
+                "--xre-path=%(xre_path)s",
+                "--utility-path=%(utility_path)s",
+                "--http-port=%(http_port)s",
+                "--ssl-port=%(ssl_port)s",
+                "--certificate-path=%(certs_path)s",
+                "--symbols-path=%(symbols_path)s",
+                "--quiet",
+                "--log-raw=%(raw_log_file)s",
+                "--log-errorsummary=%(error_summary_file)s",
+                "--screenshot-on-fail",
+                "--total-chunks=4",
+                "--subsuite=webgl",
+            ],
+        },
+        "robocop": {
+            "run_filename": "runrobocop.py",
+            "testsdir": "mochitest",
+            "options": [
+                "--dm_trans=adb",
+                "--app=%(app)s",
+                "--remote-webserver=%(remote_webserver)s",
+                "--xre-path=%(xre_path)s",
+                "--utility-path=%(utility_path)s",
+                "--http-port=%(http_port)s",
+                "--ssl-port=%(ssl_port)s",
+                "--certificate-path=%(certs_path)s",
+                "--symbols-path=%(symbols_path)s",
+                "--quiet",
+                "--log-raw=%(raw_log_file)s",
+                "--log-errorsummary=%(error_summary_file)s",
+                "--total-chunks=4",
+                "--robocop-apk=../../robocop.apk",
+                "--robocop-ini=robocop.ini",
+            ],
+        },
+        "reftest": {
+            "run_filename": "remotereftest.py",
+            "testsdir": "reftest",
+            "options": [
+                "--app=%(app)s",
+                "--ignore-window-size",
+                "--dm_trans=adb",
+                "--bootstrap",
+                "--remote-webserver=%(remote_webserver)s",
+                "--xre-path=%(xre_path)s",
+                "--utility-path=%(utility_path)s",
+                "--http-port=%(http_port)s",
+                "--ssl-port=%(ssl_port)s",
+                "--httpd-path", "%(modules_dir)s",
+                "--symbols-path=%(symbols_path)s",
+                "--total-chunks=16",
+                "--extra-profile-file=fonts",
+                "--suite=reftest",
+            ],
+            "tests": ["tests/layout/reftests/reftest.list",],
+        },
+        "reftest-debug": {
+            "run_filename": "remotereftest.py",
+            "testsdir": "reftest",
+            "options": [
+                "--app=%(app)s",
+                "--ignore-window-size",
+                "--dm_trans=adb",
+                "--bootstrap",
+                "--remote-webserver=%(remote_webserver)s",
+                "--xre-path=%(xre_path)s",
+                "--utility-path=%(utility_path)s",
+                "--http-port=%(http_port)s",
+                "--ssl-port=%(ssl_port)s",
+                "--httpd-path", "%(modules_dir)s",
+                "--symbols-path=%(symbols_path)s",
+                "--total-chunks=48",
+                "--extra-profile-file=fonts",
+                "tests/layout/reftests/reftest.list",
+            ],
+        },
+        "crashtest": {
+            "run_filename": "remotereftest.py",
+            "testsdir": "reftest",
+            "options": [
+                "--app=%(app)s",
+                "--ignore-window-size",
+                "--dm_trans=adb",
+                "--bootstrap",
+                "--remote-webserver=%(remote_webserver)s",
+                "--xre-path=%(xre_path)s",
+                "--utility-path=%(utility_path)s",
+                "--http-port=%(http_port)s",
+                "--ssl-port=%(ssl_port)s",
+                "--httpd-path",
+                "%(modules_dir)s",
+                "--symbols-path=%(symbols_path)s",
+                "--total-chunks=4",
+                "--suite=crashtest",
+            ],
+            "tests": ["tests/testing/crashtest/crashtests.list",],
+        },
+        "crashtest-debug": {
+            "run_filename": "remotereftest.py",
+            "testsdir": "reftest",
+            "options": [
+                "--app=%(app)s",
+                "--ignore-window-size",
+                "--dm_trans=adb",
+                "--bootstrap",
+                "--remote-webserver=%(remote_webserver)s",
+                "--xre-path=%(xre_path)s",
+                "--utility-path=%(utility_path)s",
+                "--http-port=%(http_port)s",
+                "--ssl-port=%(ssl_port)s",
+                "--httpd-path",
+                "%(modules_dir)s",
+                "--symbols-path=%(symbols_path)s",
+                "--total-chunks=10",
+                "tests/testing/crashtest/crashtests.list",
+            ],
+        },
+        "jsreftest": {
+            "run_filename": "remotereftest.py",
+            "testsdir": "reftest",
+            "options": [
+                "--app=%(app)s",
+                "--ignore-window-size",
+                "--dm_trans=adb",
+                "--bootstrap",
+                "--remote-webserver=%(remote_webserver)s", "--xre-path=%(xre_path)s",
+                "--utility-path=%(utility_path)s", "--http-port=%(http_port)s",
+                "--ssl-port=%(ssl_port)s", "--httpd-path", "%(modules_dir)s",
+                "--symbols-path=%(symbols_path)s",
+                "--total-chunks=6",
+                "--extra-profile-file=jsreftest/tests/user.js",
+                "--suite=jstestbrowser",
+            ],
+            "tests": ["../jsreftest/tests/jstests.list",],
+        },
+        "jsreftest-debug": {
+            "run_filename": "remotereftest.py",
+            "testsdir": "reftest",
+            "options": [
+                "--app=%(app)s",
+                "--ignore-window-size",
+                "--dm_trans=adb",
+                "--bootstrap",
+                "--remote-webserver=%(remote_webserver)s", "--xre-path=%(xre_path)s",
+                "--utility-path=%(utility_path)s", "--http-port=%(http_port)s",
+                "--ssl-port=%(ssl_port)s", "--httpd-path", "%(modules_dir)s",
+                "--symbols-path=%(symbols_path)s",
+                "../jsreftest/tests/jstests.list",
+                "--total-chunks=20",
+                "--extra-profile-file=jsreftest/tests/user.js",
+            ],
+        },
+        "xpcshell": {
+            "run_filename": "remotexpcshelltests.py",
+            "testsdir": "xpcshell",
+            "options": [
+                "--dm_trans=adb",
+                "--xre-path=%(xre_path)s",
+                "--testing-modules-dir=%(modules_dir)s",
+                "--apk=%(installer_path)s",
+                "--no-logfiles",
+                "--symbols-path=%(symbols_path)s",
+                "--manifest=tests/xpcshell.ini",
+                "--log-raw=%(raw_log_file)s",
+                "--log-errorsummary=%(error_summary_file)s",
+                "--total-chunks=3",
+            ],
+        },
+        "cppunittest": {
+            "run_filename": "remotecppunittests.py",
+            "testsdir": "cppunittest",
+            "options": [
+                "--symbols-path=%(symbols_path)s",
+                "--xre-path=%(xre_path)s",
+                "--dm_trans=adb",
+                "--localBinDir=../bin",
+                "--apk=%(installer_path)s",
+                ".",
+            ],
+        },
+
+    },  # end suite_definitions
     "test_suite_definitions": {
         "jsreftest-1": {
             "category": "jsreftest",
@@ -85,69 +295,165 @@ config = {
             "category": "jsreftest",
             "extra_args": ["--this-chunk=6"],
         },
+        "jsreftest-debug-1": {
+            "category": "jsreftest-debug",
+            "extra_args": ["--this-chunk=1"],
+        },
+        "jsreftest-debug-2": {
+            "category": "jsreftest-debug",
+            "extra_args": ["--this-chunk=2"],
+        },
+        "jsreftest-debug-3": {
+            "category": "jsreftest-debug",
+            "extra_args": ["--this-chunk=3"],
+        },
+        "jsreftest-debug-4": {
+            "category": "jsreftest-debug",
+            "extra_args": ["--this-chunk=4"],
+        },
+        "jsreftest-debug-5": {
+            "category": "jsreftest-debug",
+            "extra_args": ["--this-chunk=5"],
+        },
+        "jsreftest-debug-6": {
+            "category": "jsreftest-debug",
+            "extra_args": ["--this-chunk=6"],
+        },
+        "jsreftest-debug-7": {
+            "category": "jsreftest-debug",
+            "extra_args": ["--this-chunk=7"],
+        },
+        "jsreftest-debug-8": {
+            "category": "jsreftest-debug",
+            "extra_args": ["--this-chunk=8"],
+        },
+        "jsreftest-debug-9": {
+            "category": "jsreftest-debug",
+            "extra_args": ["--this-chunk=9"],
+        },
+        "jsreftest-debug-10": {
+            "category": "jsreftest-debug",
+            "extra_args": ["--this-chunk=10"],
+        },
+        "jsreftest-debug-11": {
+            "category": "jsreftest-debug",
+            "extra_args": ["--this-chunk=11"],
+        },
+        "jsreftest-debug-12": {
+            "category": "jsreftest-debug",
+            "extra_args": ["--this-chunk=12"],
+        },
+        "jsreftest-debug-13": {
+            "category": "jsreftest-debug",
+            "extra_args": ["--this-chunk=13"],
+        },
+        "jsreftest-debug-14": {
+            "category": "jsreftest-debug",
+            "extra_args": ["--this-chunk=14"],
+        },
+        "jsreftest-debug-15": {
+            "category": "jsreftest-debug",
+            "extra_args": ["--this-chunk=15"],
+        },
+        "jsreftest-debug-16": {
+            "category": "jsreftest-debug",
+            "extra_args": ["--this-chunk=16"],
+        },
+        "jsreftest-debug-17": {
+            "category": "jsreftest-debug",
+            "extra_args": ["--this-chunk=17"],
+        },
+        "jsreftest-debug-18": {
+            "category": "jsreftest-debug",
+            "extra_args": ["--this-chunk=18"],
+        },
+        "jsreftest-debug-19": {
+            "category": "jsreftest-debug",
+            "extra_args": ["--this-chunk=19"],
+        },
+        "jsreftest-debug-20": {
+            "category": "jsreftest-debug",
+            "extra_args": ["--this-chunk=20"],
+        },
         "mochitest-1": {
             "category": "mochitest",
-            "extra_args": ["--total-chunks=16", "--this-chunk=1"],
+            "extra_args": ["--total-chunks=20", "--this-chunk=1"],
         },
         "mochitest-2": {
             "category": "mochitest",
-            "extra_args": ["--total-chunks=16", "--this-chunk=2"],
+            "extra_args": ["--total-chunks=20", "--this-chunk=2"],
         },
         "mochitest-3": {
             "category": "mochitest",
-            "extra_args": ["--total-chunks=16", "--this-chunk=3"],
+            "extra_args": ["--total-chunks=20", "--this-chunk=3"],
         },
         "mochitest-4": {
             "category": "mochitest",
-            "extra_args": ["--total-chunks=16", "--this-chunk=4"],
+            "extra_args": ["--total-chunks=20", "--this-chunk=4"],
         },
         "mochitest-5": {
             "category": "mochitest",
-            "extra_args": ["--total-chunks=16", "--this-chunk=5"],
+            "extra_args": ["--total-chunks=20", "--this-chunk=5"],
         },
         "mochitest-6": {
             "category": "mochitest",
-            "extra_args": ["--total-chunks=16", "--this-chunk=6"],
+            "extra_args": ["--total-chunks=20", "--this-chunk=6"],
         },
         "mochitest-7": {
             "category": "mochitest",
-            "extra_args": ["--total-chunks=16", "--this-chunk=7"],
+            "extra_args": ["--total-chunks=20", "--this-chunk=7"],
         },
         "mochitest-8": {
             "category": "mochitest",
-            "extra_args": ["--total-chunks=16", "--this-chunk=8"],
+            "extra_args": ["--total-chunks=20", "--this-chunk=8"],
         },
         "mochitest-9": {
             "category": "mochitest",
-            "extra_args": ["--total-chunks=16", "--this-chunk=9"],
+            "extra_args": ["--total-chunks=20", "--this-chunk=9"],
         },
         "mochitest-10": {
             "category": "mochitest",
-            "extra_args": ["--total-chunks=16", "--this-chunk=10"],
+            "extra_args": ["--total-chunks=20", "--this-chunk=10"],
         },
         "mochitest-11": {
             "category": "mochitest",
-            "extra_args": ["--total-chunks=16", "--this-chunk=11"],
+            "extra_args": ["--total-chunks=20", "--this-chunk=11"],
         },
         "mochitest-12": {
             "category": "mochitest",
-            "extra_args": ["--total-chunks=16", "--this-chunk=12"],
+            "extra_args": ["--total-chunks=20", "--this-chunk=12"],
         },
         "mochitest-13": {
             "category": "mochitest",
-            "extra_args": ["--total-chunks=16", "--this-chunk=13"],
+            "extra_args": ["--total-chunks=20", "--this-chunk=13"],
         },
         "mochitest-14": {
             "category": "mochitest",
-            "extra_args": ["--total-chunks=16", "--this-chunk=14"],
+            "extra_args": ["--total-chunks=20", "--this-chunk=14"],
         },
         "mochitest-15": {
             "category": "mochitest",
-            "extra_args": ["--total-chunks=16", "--this-chunk=15"],
+            "extra_args": ["--total-chunks=20", "--this-chunk=15"],
         },
         "mochitest-16": {
             "category": "mochitest",
-            "extra_args": ["--total-chunks=16", "--this-chunk=16"],
+            "extra_args": ["--total-chunks=20", "--this-chunk=16"],
+        },
+        "mochitest-17": {
+            "category": "mochitest",
+            "extra_args": ["--total-chunks=20", "--this-chunk=17"],
+        },
+        "mochitest-18": {
+            "category": "mochitest",
+            "extra_args": ["--total-chunks=20", "--this-chunk=18"],
+        },
+        "mochitest-19": {
+            "category": "mochitest",
+            "extra_args": ["--total-chunks=20", "--this-chunk=19"],
+        },
+        "mochitest-20": {
+            "category": "mochitest",
+            "extra_args": ["--total-chunks=20", "--this-chunk=20"],
         },
         "mochitest-chrome": {
             "category": "mochitest",
@@ -171,83 +477,259 @@ config = {
         },
         "reftest-1": {
             "category": "reftest",
-            "extra_args": ["--total-chunks=16", "--this-chunk=1",
-                "tests/layout/reftests/reftest.list"]
+            "extra_args": ["--total-chunks=16", "--this-chunk=1"],
         },
         "reftest-2": {
             "category": "reftest",
-            "extra_args": ["--total-chunks=16", "--this-chunk=2",
-                "tests/layout/reftests/reftest.list"]
+            "extra_args": ["--total-chunks=16", "--this-chunk=2"],
         },
         "reftest-3": {
             "category": "reftest",
-            "extra_args": ["--total-chunks=16", "--this-chunk=3",
-                "tests/layout/reftests/reftest.list"]
+            "extra_args": ["--total-chunks=16", "--this-chunk=3"],
         },
         "reftest-4": {
             "category": "reftest",
-            "extra_args": ["--total-chunks=16", "--this-chunk=4",
-                "tests/layout/reftests/reftest.list"]
+            "extra_args": ["--total-chunks=16", "--this-chunk=4"],
         },
         "reftest-5": {
             "category": "reftest",
-            "extra_args": ["--total-chunks=16", "--this-chunk=5",
-                "tests/layout/reftests/reftest.list"]
+            "extra_args": ["--total-chunks=16", "--this-chunk=5"],
         },
         "reftest-6": {
             "category": "reftest",
-            "extra_args": ["--total-chunks=16", "--this-chunk=6",
-                "tests/layout/reftests/reftest.list"]
+            "extra_args": ["--total-chunks=16", "--this-chunk=6"],
         },
         "reftest-7": {
             "category": "reftest",
-            "extra_args": ["--total-chunks=16", "--this-chunk=7",
-                "tests/layout/reftests/reftest.list"]
+            "extra_args": ["--total-chunks=16", "--this-chunk=7"],
         },
         "reftest-8": {
             "category": "reftest",
-            "extra_args": ["--total-chunks=16", "--this-chunk=8",
-                "tests/layout/reftests/reftest.list"]
+            "extra_args": ["--total-chunks=16", "--this-chunk=8"],
         },
         "reftest-9": {
             "category": "reftest",
-            "extra_args": ["--total-chunks=16", "--this-chunk=9",
-                "tests/layout/reftests/reftest.list"]
+            "extra_args": ["--total-chunks=16", "--this-chunk=9"],
         },
         "reftest-10": {
             "category": "reftest",
-            "extra_args": ["--total-chunks=16", "--this-chunk=10",
-                "tests/layout/reftests/reftest.list"]
+            "extra_args": ["--total-chunks=16", "--this-chunk=10"],
         },
         "reftest-11": {
             "category": "reftest",
-            "extra_args": ["--total-chunks=16", "--this-chunk=11",
-                "tests/layout/reftests/reftest.list"]
+            "extra_args": ["--total-chunks=16", "--this-chunk=11"],
         },
         "reftest-12": {
             "category": "reftest",
-            "extra_args": ["--total-chunks=16", "--this-chunk=12",
-                "tests/layout/reftests/reftest.list"]
+            "extra_args": ["--total-chunks=16", "--this-chunk=12"],
         },
         "reftest-13": {
             "category": "reftest",
-            "extra_args": ["--total-chunks=16", "--this-chunk=13",
-                "tests/layout/reftests/reftest.list"]
+            "extra_args": ["--total-chunks=16", "--this-chunk=13"],
         },
         "reftest-14": {
             "category": "reftest",
-            "extra_args": ["--total-chunks=16", "--this-chunk=14",
-                "tests/layout/reftests/reftest.list"]
+            "extra_args": ["--total-chunks=16", "--this-chunk=14"],
         },
         "reftest-15": {
             "category": "reftest",
-            "extra_args": ["--total-chunks=16", "--this-chunk=15",
-                "tests/layout/reftests/reftest.list"]
+            "extra_args": ["--total-chunks=16", "--this-chunk=15"],
         },
         "reftest-16": {
             "category": "reftest",
-            "extra_args": ["--total-chunks=16", "--this-chunk=16",
-                "tests/layout/reftests/reftest.list"]
+            "extra_args": ["--total-chunks=16", "--this-chunk=16"],
+        },
+        "reftest-debug-1": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=1"],
+        },
+        "reftest-debug-2": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=2"],
+        },
+        "reftest-debug-3": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=3"],
+        },
+        "reftest-debug-4": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=4"],
+        },
+        "reftest-debug-5": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=5"],
+        },
+        "reftest-debug-6": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=6"],
+        },
+        "reftest-debug-7": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=7"],
+        },
+        "reftest-debug-8": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=8"],
+        },
+        "reftest-debug-9": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=9"],
+        },
+        "reftest-debug-10": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=10"],
+        },
+        "reftest-debug-11": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=11"],
+        },
+        "reftest-debug-12": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=12"],
+        },
+        "reftest-debug-13": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=13"],
+        },
+        "reftest-debug-14": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=14"],
+        },
+        "reftest-debug-15": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=15"],
+        },
+        "reftest-debug-16": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=16"],
+        },
+        "reftest-debug-17": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=17"],
+        },
+        "reftest-debug-18": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=18"],
+        },
+        "reftest-debug-19": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=19"],
+        },
+        "reftest-debug-20": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=20"],
+        },
+        "reftest-debug-21": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=21"],
+        },
+        "reftest-debug-22": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=22"],
+        },
+        "reftest-debug-23": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=23"],
+        },
+        "reftest-debug-24": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=24"],
+        },
+        "reftest-debug-25": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=25"],
+        },
+        "reftest-debug-26": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=26"],
+        },
+        "reftest-debug-27": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=27"],
+        },
+        "reftest-debug-28": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=28"],
+        },
+        "reftest-debug-29": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=29"],
+        },
+        "reftest-debug-30": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=30"],
+        },
+        "reftest-debug-31": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=31"],
+        },
+        "reftest-debug-32": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=32"],
+        },
+        "reftest-debug-33": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=33"],
+        },
+        "reftest-debug-34": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=34"],
+        },
+        "reftest-debug-35": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=35"],
+        },
+        "reftest-debug-36": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=36"],
+        },
+        "reftest-debug-37": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=37"],
+        },
+        "reftest-debug-38": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=38"],
+        },
+        "reftest-debug-39": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=39"],
+        },
+        "reftest-debug-40": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=40"],
+        },
+        "reftest-debug-41": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=41"],
+        },
+        "reftest-debug-42": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=42"],
+        },
+        "reftest-debug-43": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=43"],
+        },
+        "reftest-debug-44": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=44"],
+        },
+        "reftest-debug-45": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=45"],
+        },
+        "reftest-debug-46": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=46"],
+        },
+        "reftest-debug-47": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=47"],
+        },
+        "reftest-debug-48": {
+            "category": "reftest-debug",
+            "extra_args": ["--total-chunks=48", "--this-chunk=48"],
         },
         "crashtest-1": {
             "category": "crashtest",
@@ -256,6 +738,54 @@ config = {
         "crashtest-2": {
             "category": "crashtest",
             "extra_args": ["--this-chunk=2"],
+        },
+        "crashtest-3": {
+            "category": "crashtest",
+            "extra_args": ["--this-chunk=3"],
+        },
+        "crashtest-4": {
+            "category": "crashtest",
+            "extra_args": ["--this-chunk=4"],
+        },
+        "crashtest-debug-1": {
+            "category": "crashtest-debug",
+            "extra_args": ["--this-chunk=1"],
+        },
+        "crashtest-debug-2": {
+            "category": "crashtest-debug",
+            "extra_args": ["--this-chunk=2"],
+        },
+        "crashtest-debug-3": {
+            "category": "crashtest-debug",
+            "extra_args": ["--this-chunk=3"],
+        },
+        "crashtest-debug-4": {
+            "category": "crashtest-debug",
+            "extra_args": ["--this-chunk=4"],
+        },
+        "crashtest-debug-5": {
+            "category": "crashtest-debug",
+            "extra_args": ["--this-chunk=5"],
+        },
+        "crashtest-debug-6": {
+            "category": "crashtest-debug",
+            "extra_args": ["--this-chunk=6"],
+        },
+        "crashtest-debug-7": {
+            "category": "crashtest-debug",
+            "extra_args": ["--this-chunk=7"],
+        },
+        "crashtest-debug-8": {
+            "category": "crashtest-debug",
+            "extra_args": ["--this-chunk=8"],
+        },
+        "crashtest-debug-9": {
+            "category": "crashtest-debug",
+            "extra_args": ["--this-chunk=9"],
+        },
+        "crashtest-debug-10": {
+            "category": "crashtest-debug",
+            "extra_args": ["--this-chunk=10"],
         },
         "xpcshell-1": {
             "category": "xpcshell",
@@ -289,12 +819,10 @@ config = {
             "category": "cppunittest",
             "extra_args": [],
         },
-    }, # end of "test_definitions"
-    # test harness options are located in the gecko tree
-    "in_tree_config": "config/mozharness/android_arm_4_3_config.py",
+    },  # end of "test_definitions"
     "download_minidump_stackwalk": True,
     "default_blob_upload_servers": [
-         "https://blobupload.elasticbeanstalk.com",
+        "https://blobupload.elasticbeanstalk.com",
     ],
-    "blob_uploader_auth_file" : os.path.join(os.getcwd(), "oauth.txt"),
+    "blob_uploader_auth_file": os.path.join(os.getcwd(), "oauth.txt"),
 }

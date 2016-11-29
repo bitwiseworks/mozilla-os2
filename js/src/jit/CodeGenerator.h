@@ -18,8 +18,12 @@
 # include "jit/x64/CodeGenerator-x64.h"
 #elif defined(JS_CODEGEN_ARM)
 # include "jit/arm/CodeGenerator-arm.h"
-#elif defined(JS_CODEGEN_MIPS)
-# include "jit/mips/CodeGenerator-mips.h"
+#elif defined(JS_CODEGEN_ARM64)
+# include "jit/arm64/CodeGenerator-arm64.h"
+#elif defined(JS_CODEGEN_MIPS32)
+# include "jit/mips32/CodeGenerator-mips32.h"
+#elif defined(JS_CODEGEN_MIPS64)
+# include "jit/mips64/CodeGenerator-mips64.h"
 #elif defined(JS_CODEGEN_NONE)
 # include "jit/none/CodeGenerator-none.h"
 #else
@@ -37,17 +41,19 @@ class OutOfLineInterruptCheckImplicit;
 class OutOfLineUnboxFloatingPoint;
 class OutOfLineStoreElementHole;
 class OutOfLineTypeOfV;
-class OutOfLineLoadTypedArray;
 class OutOfLineUpdateCache;
 class OutOfLineCallPostWriteBarrier;
 class OutOfLineIsCallable;
 class OutOfLineRegExpExec;
 class OutOfLineRegExpTest;
+class OutOfLineLambdaArrow;
 
 class CodeGenerator : public CodeGeneratorSpecific
 {
     void generateArgumentsChecks(bool bailout = true);
     bool generateBody();
+
+    ConstantOrRegister toConstantOrRegister(LInstruction* lir, size_t n, MIRType type);
 
   public:
     CodeGenerator(MIRGenerator* gen, LIRGraph* graph, MacroAssembler* masm = nullptr);
@@ -55,12 +61,10 @@ class CodeGenerator : public CodeGeneratorSpecific
 
   public:
     bool generate();
-    bool generateAsmJS(AsmJSFunctionLabels* labels);
+    bool generateAsmJS(AsmJSFunctionOffsets *offsets);
     bool link(JSContext* cx, CompilerConstraintList* constraints);
+    bool linkSharedStubs(JSContext* cx);
 
-    void visitLabel(LLabel* lir);
-    void visitNop(LNop* lir);
-    void visitMop(LMop* lir);
     void visitOsiPoint(LOsiPoint* lir);
     void visitGoto(LGoto* lir);
     void visitTableSwitch(LTableSwitch* ins);
@@ -72,6 +76,7 @@ class CodeGenerator : public CodeGeneratorSpecific
     void visitStart(LStart* lir);
     void visitReturn(LReturn* ret);
     void visitDefVar(LDefVar* lir);
+    void visitDefLexical(LDefLexical* lir);
     void visitDefFun(LDefFun* lir);
     void visitOsrEntry(LOsrEntry* lir);
     void visitOsrScopeChain(LOsrScopeChain* lir);
@@ -107,11 +112,14 @@ class CodeGenerator : public CodeGeneratorSpecific
     void visitOutOfLineRegExpTest(OutOfLineRegExpTest* ool);
     void visitRegExpReplace(LRegExpReplace* lir);
     void visitStringReplace(LStringReplace* lir);
+    void emitSharedStub(ICStub::Kind kind, LInstruction* lir);
+    void visitBinarySharedStub(LBinarySharedStub* lir);
+    void visitUnarySharedStub(LUnarySharedStub* lir);
     void visitLambda(LLambda* lir);
+    void visitOutOfLineLambdaArrow(OutOfLineLambdaArrow* ool);
     void visitLambdaArrow(LLambdaArrow* lir);
     void visitLambdaForSingleton(LLambdaForSingleton* lir);
     void visitPointer(LPointer* lir);
-    void visitNurseryObject(LNurseryObject* lir);
     void visitKeepAliveObject(LKeepAliveObject* lir);
     void visitSlots(LSlots* lir);
     void visitLoadSlotT(LLoadSlotT* lir);
@@ -123,7 +131,9 @@ class CodeGenerator : public CodeGeneratorSpecific
     void visitMaybeToDoubleElement(LMaybeToDoubleElement* lir);
     void visitMaybeCopyElementsForWrite(LMaybeCopyElementsForWrite* lir);
     void visitGuardObjectIdentity(LGuardObjectIdentity* guard);
-    void visitGuardShapePolymorphic(LGuardShapePolymorphic* lir);
+    void visitGuardReceiverPolymorphic(LGuardReceiverPolymorphic* lir);
+    void visitGuardUnboxedExpando(LGuardUnboxedExpando* lir);
+    void visitLoadUnboxedExpando(LLoadUnboxedExpando* lir);
     void visitTypeBarrierV(LTypeBarrierV* lir);
     void visitTypeBarrierO(LTypeBarrierO* lir);
     void visitMonitorTypes(LMonitorTypes* lir);
@@ -132,20 +142,29 @@ class CodeGenerator : public CodeGeneratorSpecific
     void visitOutOfLineCallPostWriteBarrier(OutOfLineCallPostWriteBarrier* ool);
     void visitCallNative(LCallNative* call);
     void emitCallInvokeFunction(LInstruction* call, Register callereg,
-                                uint32_t argc, uint32_t unusedStack);
+                                bool isConstructing, uint32_t argc,
+                                uint32_t unusedStack);
     void visitCallGeneric(LCallGeneric* call);
+    void emitCallInvokeFunctionShuffleNewTarget(LCallKnown *call,
+                                                Register calleeReg,
+                                                uint32_t numFormals,
+                                                uint32_t unusedStack);
     void visitCallKnown(LCallKnown* call);
-    void emitCallInvokeFunction(LApplyArgsGeneric* apply, Register extraStackSize);
+    template<typename T> void emitApplyGeneric(T* apply);
+    template<typename T> void emitCallInvokeFunction(T* apply, Register extraStackSize);
+    void emitAllocateSpaceForApply(Register argcreg, Register extraStackSpace, Label* end);
+    void emitCopyValuesForApply(Register argvSrcBase, Register argvIndex, Register copyreg,
+                                size_t argvSrcOffset, size_t argvDstOffset);
+    void emitPopArguments(Register extraStackSize);
     void emitPushArguments(LApplyArgsGeneric* apply, Register extraStackSpace);
-    void emitPopArguments(LApplyArgsGeneric* apply, Register extraStackSize);
     void visitApplyArgsGeneric(LApplyArgsGeneric* apply);
+    void emitPushArguments(LApplyArrayGeneric* apply, Register extraStackSpace);
+    void visitApplyArrayGeneric(LApplyArrayGeneric* apply);
     void visitBail(LBail* lir);
     void visitUnreachable(LUnreachable* unreachable);
+    void visitEncodeSnapshot(LEncodeSnapshot* lir);
     void visitGetDynamicName(LGetDynamicName* lir);
-    void visitFilterArgumentsOrEvalS(LFilterArgumentsOrEvalS* lir);
-    void visitFilterArgumentsOrEvalV(LFilterArgumentsOrEvalV* lir);
-    void visitCallDirectEvalS(LCallDirectEvalS* lir);
-    void visitCallDirectEvalV(LCallDirectEvalV* lir);
+    void visitCallDirectEval(LCallDirectEval* lir);
     void visitDoubleToInt32(LDoubleToInt32* lir);
     void visitFloat32ToInt32(LFloat32ToInt32* lir);
     void visitNewArrayCallVM(LNewArray* lir);
@@ -177,11 +196,11 @@ class CodeGenerator : public CodeGeneratorSpecific
     void visitSetArgumentsObjectArg(LSetArgumentsObjectArg* lir);
     void visitReturnFromCtor(LReturnFromCtor* lir);
     void visitComputeThis(LComputeThis* lir);
-    void visitLoadArrowThis(LLoadArrowThis* lir);
     void visitArrayLength(LArrayLength* lir);
     void visitSetArrayLength(LSetArrayLength* lir);
     void visitTypedArrayLength(LTypedArrayLength* lir);
     void visitTypedArrayElements(LTypedArrayElements* lir);
+    void visitSetDisjointTypedElements(LSetDisjointTypedElements* lir);
     void visitTypedObjectElements(LTypedObjectElements* lir);
     void visitSetTypedObjectOffset(LSetTypedObjectOffset* lir);
     void visitTypedObjectDescr(LTypedObjectDescr* ins);
@@ -189,12 +208,17 @@ class CodeGenerator : public CodeGeneratorSpecific
     void visitSubstr(LSubstr* lir);
     void visitInitializedLength(LInitializedLength* lir);
     void visitSetInitializedLength(LSetInitializedLength* lir);
+    void visitUnboxedArrayLength(LUnboxedArrayLength* lir);
+    void visitUnboxedArrayInitializedLength(LUnboxedArrayInitializedLength* lir);
+    void visitIncrementUnboxedArrayInitializedLength(LIncrementUnboxedArrayInitializedLength* lir);
+    void visitSetUnboxedArrayInitializedLength(LSetUnboxedArrayInitializedLength* lir);
     void visitNotO(LNotO* ins);
     void visitNotV(LNotV* ins);
     void visitBoundsCheck(LBoundsCheck* lir);
     void visitBoundsCheckRange(LBoundsCheckRange* lir);
     void visitBoundsCheckLower(LBoundsCheckLower* lir);
     void visitLoadFixedSlotV(LLoadFixedSlotV* ins);
+    void visitLoadFixedSlotAndUnbox(LLoadFixedSlotAndUnbox* lir);
     void visitLoadFixedSlotT(LLoadFixedSlotT* ins);
     void visitStoreFixedSlotV(LStoreFixedSlotV* ins);
     void visitStoreFixedSlotT(LStoreFixedSlotT* ins);
@@ -212,7 +236,6 @@ class CodeGenerator : public CodeGeneratorSpecific
     void visitHypot(LHypot* lir);
     void visitPowI(LPowI* lir);
     void visitPowD(LPowD* lir);
-    void visitRandom(LRandom* lir);
     void visitMathFunctionD(LMathFunctionD* ins);
     void visitMathFunctionF(LMathFunctionF* ins);
     void visitModD(LModD* ins);
@@ -230,6 +253,7 @@ class CodeGenerator : public CodeGeneratorSpecific
     void visitConcat(LConcat* lir);
     void visitCharCodeAt(LCharCodeAt* lir);
     void visitFromCharCode(LFromCharCode* lir);
+    void visitSinCos(LSinCos *lir);
     void visitStringSplit(LStringSplit* lir);
     void visitFunctionEnvironment(LFunctionEnvironment* lir);
     void visitCallGetProperty(LCallGetProperty* lir);
@@ -262,13 +286,14 @@ class CodeGenerator : public CodeGeneratorSpecific
     void visitArrayPushV(LArrayPushV* lir);
     void visitArrayPushT(LArrayPushT* lir);
     void visitArrayConcat(LArrayConcat* lir);
+    void visitArraySlice(LArraySlice* lir);
     void visitArrayJoin(LArrayJoin* lir);
-    void visitLoadTypedArrayElement(LLoadTypedArrayElement* lir);
+    void visitLoadUnboxedScalar(LLoadUnboxedScalar* lir);
     void visitLoadTypedArrayElementHole(LLoadTypedArrayElementHole* lir);
-    void visitStoreTypedArrayElement(LStoreTypedArrayElement* lir);
+    void visitStoreUnboxedScalar(LStoreUnboxedScalar* lir);
     void visitStoreTypedArrayElementHole(LStoreTypedArrayElementHole* lir);
-    void visitCompareExchangeTypedArrayElement(LCompareExchangeTypedArrayElement* lir);
-    void visitAtomicTypedArrayElementBinop(LAtomicTypedArrayElementBinop* lir);
+    void visitAtomicIsLockFree(LAtomicIsLockFree* lir);
+    void visitGuardSharedTypedArray(LGuardSharedTypedArray* lir);
     void visitClampIToUint8(LClampIToUint8* lir);
     void visitClampDToUint8(LClampDToUint8* lir);
     void visitClampVToUint8(LClampVToUint8* lir);
@@ -313,8 +338,13 @@ class CodeGenerator : public CodeGeneratorSpecific
     void visitAsmJSReturn(LAsmJSReturn* ret);
     void visitAsmJSVoidReturn(LAsmJSVoidReturn* ret);
     void visitLexicalCheck(LLexicalCheck* ins);
-    void visitThrowUninitializedLexical(LThrowUninitializedLexical* ins);
+    void visitThrowRuntimeLexicalError(LThrowRuntimeLexicalError* ins);
+    void visitGlobalNameConflictsCheck(LGlobalNameConflictsCheck* ins);
     void visitDebugger(LDebugger* ins);
+    void visitNewTarget(LNewTarget* ins);
+    void visitArrowNewTarget(LArrowNewTarget* ins);
+    void visitCheckReturn(LCheckReturn* ins);
+    void visitCheckObjCoercible(LCheckObjCoercible* ins);
 
     void visitCheckOverRecursed(LCheckOverRecursed* lir);
     void visitCheckOverRecursedFailure(CheckOverRecursedFailure* ool);
@@ -334,20 +364,13 @@ class CodeGenerator : public CodeGeneratorSpecific
 
     void visitGetPropertyCacheV(LGetPropertyCacheV* ins);
     void visitGetPropertyCacheT(LGetPropertyCacheT* ins);
-    void visitGetElementCacheV(LGetElementCacheV* ins);
-    void visitGetElementCacheT(LGetElementCacheT* ins);
-    void visitSetElementCacheV(LSetElementCacheV* ins);
-    void visitSetElementCacheT(LSetElementCacheT* ins);
     void visitBindNameCache(LBindNameCache* ins);
     void visitCallSetProperty(LInstruction* ins);
-    void visitSetPropertyCacheV(LSetPropertyCacheV* ins);
-    void visitSetPropertyCacheT(LSetPropertyCacheT* ins);
+    void visitSetPropertyCache(LSetPropertyCache* ins);
     void visitGetNameCache(LGetNameCache* ins);
 
     void visitGetPropertyIC(OutOfLineUpdateCache* ool, DataPtr<GetPropertyIC>& ic);
     void visitSetPropertyIC(OutOfLineUpdateCache* ool, DataPtr<SetPropertyIC>& ic);
-    void visitGetElementIC(OutOfLineUpdateCache* ool, DataPtr<GetElementIC>& ic);
-    void visitSetElementIC(OutOfLineUpdateCache* ool, DataPtr<SetElementIC>& ic);
     void visitBindNameIC(OutOfLineUpdateCache* ool, DataPtr<BindNameIC>& ic);
     void visitNameIC(OutOfLineUpdateCache* ool, DataPtr<NameIC>& ic);
 
@@ -356,9 +379,16 @@ class CodeGenerator : public CodeGeneratorSpecific
     void visitAssertRangeF(LAssertRangeF* ins);
     void visitAssertRangeV(LAssertRangeV* ins);
 
+    void visitAssertResultV(LAssertResultV* ins);
+    void visitAssertResultT(LAssertResultT* ins);
+    void emitAssertResultV(const ValueOperand output, const TemporaryTypeSet* typeset);
+    void emitAssertObjectOrStringResult(Register input, MIRType type, const TemporaryTypeSet* typeset);
+
     void visitInterruptCheck(LInterruptCheck* lir);
     void visitAsmJSInterruptCheck(LAsmJSInterruptCheck* lir);
     void visitRecompileCheck(LRecompileCheck* ins);
+
+    void visitRandom(LRandom* ins);
 
     IonScriptCounts* extractScriptCounts() {
         IonScriptCounts* counts = scriptCounts_;
@@ -367,19 +397,15 @@ class CodeGenerator : public CodeGeneratorSpecific
     }
 
   private:
-    void addGetPropertyCache(LInstruction* ins, RegisterSet liveRegs, Register objReg,
-                             PropertyName* name, TypedOrValueRegister output,
-                             bool monitoredResult, jsbytecode* profilerLeavePc);
-    void addGetElementCache(LInstruction* ins, Register obj, ConstantOrRegister index,
-                            TypedOrValueRegister output, bool monitoredResult,
-                            bool allowDoubleResult, jsbytecode* profilerLeavePc);
-    void addSetPropertyCache(LInstruction* ins, RegisterSet liveRegs, Register objReg,
-                             PropertyName* name, ConstantOrRegister value, bool strict,
-                             bool needsTypeBarrier, jsbytecode* profilerLeavePc);
-    void addSetElementCache(LInstruction* ins, Register obj, Register unboxIndex, Register temp,
-                            FloatRegister tempDouble, FloatRegister tempFloat32,
-                            ValueOperand index, ConstantOrRegister value,
-                            bool strict, bool guardHoles, jsbytecode* profilerLeavePc);
+    void addGetPropertyCache(LInstruction* ins, LiveRegisterSet liveRegs, Register objReg,
+                             ConstantOrRegister id, TypedOrValueRegister output,
+                             bool monitoredResult, bool allowDoubleResult,
+                             jsbytecode* profilerLeavePc);
+    void addSetPropertyCache(LInstruction* ins, LiveRegisterSet liveRegs, Register objReg,
+                             Register temp, Register tempUnbox, FloatRegister tempDouble,
+                             FloatRegister tempF32, ConstantOrRegister id, ConstantOrRegister value,
+                             bool strict, bool needsTypeBarrier, bool guardHoles,
+                             jsbytecode* profilerLeavePc);
 
     bool generateBranchV(const ValueOperand& value, Label* ifTrue, Label* ifFalse, FloatRegister fr);
 
@@ -443,6 +469,10 @@ class CodeGenerator : public CodeGeneratorSpecific
                                      Label* ifDoesntEmulateUndefined,
                                      Register scratch, OutOfLineTestObject* ool);
 
+    // Branch to target unless obj has an emptyObjectElements or emptyObjectElementsShared
+    // elements pointer.
+    void branchIfNotEmptyObjectElements(Register obj, Label* target);
+
     // Get a label for the start of block which can be used for jumping, in
     // place of jumpToBlock.
     Label* getJumpLabelForBranch(MBasicBlock* block);
@@ -458,10 +488,23 @@ class CodeGenerator : public CodeGeneratorSpecific
     void emitAssertRangeI(const Range* r, Register input);
     void emitAssertRangeD(const Range* r, FloatRegister input, FloatRegister temp);
 
-    Vector<CodeOffsetLabel, 0, JitAllocPolicy> ionScriptLabels_;
-#ifdef DEBUG
+    Vector<CodeOffset, 0, JitAllocPolicy> ionScriptLabels_;
+
+    struct SharedStub {
+        ICStub::Kind kind;
+        IonICEntry entry;
+        CodeOffset label;
+
+        SharedStub(ICStub::Kind kind, IonICEntry entry, CodeOffset label)
+          : kind(kind), entry(entry), label(label)
+        {}
+    };
+
+    Vector<SharedStub, 0, SystemAllocPolicy> sharedStubs_;
+
     void branchIfInvalidated(Register temp, Label* invalidated);
 
+#ifdef DEBUG
     void emitDebugResultChecks(LInstruction* ins);
     void emitObjectOrStringResultChecks(LInstruction* lir, MDefinition* mir);
     void emitValueResultChecks(LInstruction* lir, MDefinition* mir);
@@ -473,6 +516,22 @@ class CodeGenerator : public CodeGeneratorSpecific
 #if defined(JS_ION_PERF)
     PerfSpewer perfSpewer_;
 #endif
+
+    // This integer is a bit mask of all SimdTypeDescr::Type indexes.  When a
+    // MSimdBox instruction is encoded, it might have either been created by
+    // IonBuilder, or by the Eager Simd Unbox phase.
+    //
+    // As the template objects are weak references, the JitCompartment is using
+    // Read Barriers, but such barrier cannot be used during the compilation. To
+    // work around this issue, the barriers are captured during
+    // CodeGenerator::link.
+    //
+    // Instead of saving the pointers, we just save the index of the Read
+    // Barriered objects in a bit mask.
+    uint32_t simdRefreshTemplatesDuringLink_;
+
+    void registerSimdTemplate(InlineTypedObject* templateObject);
+    void captureSimdTemplate(JSContext* cx);
 };
 
 } // namespace jit

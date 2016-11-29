@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "prlog.h"
+#include "mozilla/Logging.h"
 #include "nsAsyncRedirectVerifyHelper.h"
 #include "nsThreadUtils.h"
 #include "nsNetUtil.h"
@@ -12,21 +12,11 @@
 #include "nsIChannel.h"
 #include "nsIHttpChannelInternal.h"
 #include "nsIAsyncVerifyRedirectCallback.h"
+#include "nsILoadInfo.h"
 
+static mozilla::LazyLogModule gRedirectLog("nsRedirect");
 #undef LOG
-#ifdef PR_LOGGING
-static PRLogModuleInfo *
-GetRedirectLog()
-{
-    static PRLogModuleInfo *sLog;
-    if (!sLog)
-        sLog = PR_NewLogModule("nsRedirect");
-    return sLog;
-}
-#define LOG(args) PR_LOG(GetRedirectLog(), PR_LOG_DEBUG, args)
-#else
-#define LOG(args)
-#endif
+#define LOG(args) MOZ_LOG(gRedirectLog, mozilla::LogLevel::Debug, args)
 
 NS_IMPL_ISUPPORTS(nsAsyncRedirectVerifyHelper,
                   nsIAsyncVerifyRedirectCallback,
@@ -75,6 +65,15 @@ nsAsyncRedirectVerifyHelper::Init(nsIChannel* oldChan, nsIChannel* newChan,
     mNewChan           = newChan;
     mFlags             = flags;
     mCallbackThread    = do_GetCurrentThread();
+
+    if (!(flags & (nsIChannelEventSink::REDIRECT_INTERNAL |
+                   nsIChannelEventSink::REDIRECT_STS_UPGRADE))) {
+      nsCOMPtr<nsILoadInfo> loadInfo = oldChan->GetLoadInfo();
+      if (loadInfo && loadInfo->GetDontFollowRedirects()) {
+        ExplicitCallback(NS_BINDING_ABORTED);
+        return NS_OK;
+      }
+    }
 
     if (synchronize)
       mWaitingForRedirectCallback = true;
@@ -182,7 +181,7 @@ nsAsyncRedirectVerifyHelper::ExplicitCallback(nsresult result)
     mWaitingForRedirectCallback = false;
 
     // Now, dispatch the callback on the event-target which called Init()
-    nsRefPtr<nsIRunnable> event =
+    nsCOMPtr<nsIRunnable> event =
         new nsAsyncVerifyRedirectCallbackEvent(callback, result);
     if (!event) {
         NS_WARNING("nsAsyncRedirectVerifyHelper::ExplicitCallback() "

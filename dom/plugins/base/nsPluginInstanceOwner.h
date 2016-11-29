@@ -24,7 +24,6 @@
 #endif
 
 class nsIInputStream;
-struct nsIntRect;
 class nsPluginDOMContextMenuListener;
 class nsPluginFrame;
 class nsDisplayListBuilder;
@@ -32,16 +31,15 @@ class nsDisplayListBuilder;
 namespace mozilla {
 namespace dom {
 struct MozPluginParameter;
-}
+} // namespace dom
 namespace widget {
 class PuppetWidget;
-}
-}
+} // namespace widget
+} // namespace mozilla
 
 using mozilla::widget::PuppetWidget;
 
 #ifdef MOZ_X11
-class gfxXlibSurface;
 #ifdef MOZ_WIDGET_QT
 #include "gfxQtNativeRenderer.h"
 #else
@@ -50,9 +48,9 @@ class gfxXlibSurface;
 #endif
 
 class nsPluginInstanceOwner final : public nsIPluginInstanceOwner,
-                                        public nsIDOMEventListener,
-                                        public nsIPrivacyTransitionObserver,
-                                        public nsSupportsWeakReference
+                                    public nsIDOMEventListener,
+                                    public nsIPrivacyTransitionObserver,
+                                    public nsSupportsWeakReference
 {
 public:
   nsPluginInstanceOwner();
@@ -63,16 +61,17 @@ public:
   
   NS_IMETHOD GetURL(const char *aURL, const char *aTarget,
                     nsIInputStream *aPostStream, 
-                    void *aHeadersData, uint32_t aHeadersDataLen) override;
-  
-  NS_IMETHOD ShowStatus(const char16_t *aStatusMsg) override;
-  
-  // This can go away, just leaving it here to avoid changing the interface.
-  NPError    ShowNativeContextMenu(NPMenu* menu, void* event) override;
+                    void *aHeadersData, uint32_t aHeadersDataLen,
+                    bool aDoCheckLoadURIChecks) override;
   
   NPBool     ConvertPoint(double sourceX, double sourceY, NPCoordinateSpace sourceSpace,
                           double *destX, double *destY, NPCoordinateSpace destSpace) override;
-  
+
+  NPError InitAsyncSurface(NPSize *size, NPImageFormat format,
+                           void *initData, NPAsyncSurface *surface) override;
+  NPError FinalizeAsyncSurface(NPAsyncSurface *surface) override;
+  void SetCurrentAsyncSurface(NPAsyncSurface *surface, NPRect *changed) override;
+
   /**
    * Get the type of the HTML tag that was used ot instantiate this
    * plugin.  Currently supported tags are EMBED, OBJECT and APPLET.
@@ -118,6 +117,11 @@ public:
   void ReleasePluginPort(void* pluginPort);
 
   nsEventStatus ProcessEvent(const mozilla::WidgetGUIEvent& anEvent);
+
+#if defined(XP_WIN)
+  void SetWidgetWindowAsParent(HWND aWindowToAdopt);
+  nsresult SetNetscapeWindowAsParent(HWND aWindowToAdopt);
+#endif
   
 #ifdef XP_MACOSX
   enum { ePluginPaintEnable, ePluginPaintDisable };
@@ -137,19 +141,9 @@ public:
   // This calls into the plugin (NPP_SetWindow) and can run script.
   void FixUpPluginWindow(int32_t inPaintState);
   void HidePluginWindow();
-  // Return a pointer to the internal nsPluginPort structure that's used to
-  // store a copy of plugin port info and to detect when it's been changed.
-  void* GetPluginPortCopy();
   // Set plugin port info in the plugin (in the 'window' member of the
   // NPWindow structure passed to the plugin by SetWindow()).
   void SetPluginPort();
-  // Flag when we've set up a Thebes (and CoreGraphics) context in
-  // nsPluginFrame::PaintPlugin().  We need to know this in
-  // FixUpPluginWindow() (i.e. we need to know when FixUpPluginWindow() has
-  // been called from nsPluginFrame::PaintPlugin() when we're using the
-  // CoreGraphics drawing model).
-  void BeginCGPaint();
-  void EndCGPaint();
 #else // XP_MACOSX
   void UpdateWindowPositionAndClipRect(bool aSetWindow);
   void UpdateWindowVisibility(bool aVisible);
@@ -224,6 +218,8 @@ public:
   // Returns the image container that has our currently displayed image.
   already_AddRefed<mozilla::layers::ImageContainer> GetImageContainer();
 
+  void DidComposite();
+
   /**
    * Returns the bounds of the current async-rendered surface. This can only
    * change in response to messages received by the event loop (i.e. not during
@@ -260,6 +256,11 @@ public:
   void NotifyHostCreateWidget();
   void NotifyDestroyPending();
 
+#if defined(XP_WIN)
+  // See QUIRK_FLASH_FIXUP_MOUSE_CURSOR
+  void ResetWidgetCursorCaching();
+#endif
+
 private:
   virtual ~nsPluginInstanceOwner();
 
@@ -279,22 +280,21 @@ private:
   bool mFullScreen;
   void* mJavaView;
 #endif 
+
+#if defined(XP_WIN)
+  nsIWidget* GetContainingWidgetIfOffset();
+#endif
  
   nsPluginNativeWindow       *mPluginWindow;
-  nsRefPtr<nsNPAPIPluginInstance> mInstance;
+  RefPtr<nsNPAPIPluginInstance> mInstance;
   nsPluginFrame              *mPluginFrame;
   nsWeakPtr                   mContent; // WEAK, content owns us
   nsCString                   mDocumentBase;
   bool                        mWidgetCreationComplete;
   nsCOMPtr<nsIWidget>         mWidget;
-  nsRefPtr<nsPluginHost>      mPluginHost;
+  RefPtr<nsPluginHost>      mPluginHost;
   
 #ifdef XP_MACOSX
-  NP_CGContext                              mCGPluginPortCopy;
-  int32_t                                   mInCGPaintLevel;
-  mozilla::RefPtr<MacIOSurface>             mIOSurface;
-  mozilla::RefPtr<nsCARenderer>             mCARenderer;
-  CGColorSpaceRef                           mColorProfile;
   static nsCOMPtr<nsITimer>                *sCATimer;
   static nsTArray<nsPluginInstanceOwner*>  *sCARefreshListeners;
   bool                                      mSentInitialTopLevelWindowEvent;
@@ -328,7 +328,7 @@ private:
 #endif
   
   // pointer to wrapper for nsIDOMContextMenuListener
-  nsRefPtr<nsPluginDOMContextMenuListener> mCXMenuListener;
+  RefPtr<nsPluginDOMContextMenuListener> mCXMenuListener;
   
   nsresult DispatchKeyToPlugin(nsIDOMEvent* aKeyEvent);
   nsresult DispatchMouseToPlugin(nsIDOMEvent* aMouseEvent,

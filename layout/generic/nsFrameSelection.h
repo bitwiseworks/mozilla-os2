@@ -20,7 +20,6 @@
 #include "nsBidiPresUtils.h"
 
 class nsRange;
-class nsTableOuterFrame;
 
 // IID for the nsFrameSelection interface
 // 3c6ae2d0-4cf1-44a1-9e9d-2411867f19c6
@@ -168,8 +167,8 @@ struct nsPrevNextBidiLevels
 namespace mozilla {
 namespace dom {
 class Selection;
-}
-}
+} // namespace dom
+} // namespace mozilla
 class nsIScrollableFrame;
 
 /**
@@ -517,6 +516,13 @@ public:
     return mDelayedMouseEventClickCount;
   }
 
+  bool MouseDownRecorded()
+  {
+    return !GetDragState() &&
+           HasDelayedCaretData() &&
+           GetClickCountInDelayedCaretData() < 2;
+  }
+
   /** Get the content node that limits the selection
    *  When searching up a nodes for parents, as in a text edit field
    *    in an browser page, we must stop at this node else we reach into the 
@@ -591,7 +597,8 @@ public:
   nsFrameSelection();
 
   void StartBatchChanges();
-  void EndBatchChanges();
+  void EndBatchChanges(int16_t aReason = nsISelectionListener::NO_REASON);
+
   /*unsafe*/
   nsresult DeleteFromDocument();
 
@@ -673,7 +680,7 @@ private:
   // so remember to use nsCOMPtr when needed.
   nsresult     NotifySelectionListeners(SelectionType aType);     // add parameters to say collapsed etc?
 
-  nsRefPtr<mozilla::dom::Selection> mDomSelections[nsISelectionController::NUM_SELECTIONTYPES];
+  RefPtr<mozilla::dom::Selection> mDomSelections[nsISelectionController::NUM_SELECTIONTYPES];
 
   // Table selection support.
   nsITableCellLayout* GetCellLayout(nsIContent *aCellContent) const;
@@ -711,7 +718,7 @@ private:
   int32_t  mSelectedCellIndex;
 
   // maintain selection
-  nsRefPtr<nsRange> mMaintainRange;
+  RefPtr<nsRange> mMaintainRange;
   nsSelectionAmount mMaintainedAmount;
 
   //batching
@@ -744,6 +751,8 @@ private:
   bool mDesiredPosSet;
 
   int8_t mCaretMovementStyle;
+
+  static bool sSelectionEventsEnabled;
 };
 
 #endif /* nsFrameSelection_h___ */

@@ -14,7 +14,6 @@
 #include "nsITimer.h"
 #include "nsIDOMEventListener.h"
 
-class nsString;
 class nsITimer;
 class nsSliderFrame;
 
@@ -101,6 +100,8 @@ public:
   nsresult StartDrag(nsIDOMEvent* aEvent);
   nsresult StopDrag();
 
+  bool StartAPZDrag(mozilla::WidgetGUIEvent* aEvent);
+
   static int32_t GetCurrentPosition(nsIContent* content);
   static int32_t GetMinPosition(nsIContent* content);
   static int32_t GetMaxPosition(nsIContent* content);
@@ -131,6 +132,10 @@ public:
   NS_IMETHOD HandleRelease(nsPresContext* aPresContext,
                            mozilla::WidgetGUIEvent* aEvent,
                            nsEventStatus* aEventStatus) override;
+
+  // Return the ratio the scrollbar thumb should move in proportion to the
+  // scrolled frame.
+  float GetThumbRatio() const;
 
 private:
 
@@ -166,7 +171,7 @@ private:
   void PageScroll(nscoord aChange);
  
   nsPoint mDestinationPoint;
-  nsRefPtr<nsSliderMediator> mMediator;
+  RefPtr<nsSliderMediator> mMediator;
 
   float mRatio;
 
@@ -183,6 +188,12 @@ private:
   // slider. This allows notifications to tell how a slider's current position
   // was changed.
   bool mUserChanged;
+
+  // true if we've handed off the scrolling to APZ. This means that we should
+  // ignore scrolling events as the position will be updated by APZ. If we were
+  // to process these events then the scroll position update would conflict
+  // causing the scroll position to jump.
+  bool mScrollingWithAPZ;
 
   static bool gMiddlePref;
   static int32_t gSnapMultiplier;

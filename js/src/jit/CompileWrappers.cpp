@@ -189,6 +189,19 @@ CompileRuntime::gcNursery()
     return runtime()->gc.nursery;
 }
 
+void
+CompileRuntime::setMinorGCShouldCancelIonCompilations()
+{
+    MOZ_ASSERT(onMainThread());
+    runtime()->gc.storeBuffer.setShouldCancelIonCompilations();
+}
+
+bool
+CompileRuntime::runtimeMatches(JSRuntime* rt)
+{
+    return rt == runtime();
+}
+
 Zone*
 CompileZone::zone()
 {
@@ -249,6 +262,12 @@ CompileCompartment::addressOfEnumerators()
     return &compartment()->enumerators;
 }
 
+const void*
+CompileCompartment::addressOfRandomNumberGenerator()
+{
+    return compartment()->randomNumberGenerator.ptr();
+}
+
 const JitCompartment*
 CompileCompartment::jitCompartment()
 {
@@ -276,7 +295,8 @@ CompileCompartment::setSingletonsAsValues()
 
 JitCompileOptions::JitCompileOptions()
   : cloneSingletons_(false),
-    spsSlowAssertionsEnabled_(false)
+    spsSlowAssertionsEnabled_(false),
+    offThreadCompilationAvailable_(false)
 {
 }
 
@@ -286,4 +306,5 @@ JitCompileOptions::JitCompileOptions(JSContext* cx)
     cloneSingletons_ = options.cloneSingletons();
     spsSlowAssertionsEnabled_ = cx->runtime()->spsProfiler.enabled() &&
                                 cx->runtime()->spsProfiler.slowAssertionsEnabled();
+    offThreadCompilationAvailable_ = OffThreadCompilationAvailable(cx);
 }

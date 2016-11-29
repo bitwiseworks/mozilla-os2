@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -42,8 +44,8 @@ namespace dom {
 class Geolocation;
 typedef CallbackObjectHolder<PositionCallback, nsIDOMGeoPositionCallback> GeoPositionCallback;
 typedef CallbackObjectHolder<PositionErrorCallback, nsIDOMGeoPositionErrorCallback> GeoPositionErrorCallback;
-}
-}
+} // namespace dom
+} // namespace mozilla
 
 struct CachedPositionAndAccuracy {
   nsCOMPtr<nsIDOMGeoPosition> position;
@@ -53,7 +55,8 @@ struct CachedPositionAndAccuracy {
 /**
  * Singleton that manages the geolocation provider
  */
-class nsGeolocationService final : public nsIGeolocationUpdate, public nsIObserver
+class nsGeolocationService final : public nsIGeolocationUpdate,
+                                   public nsIObserver
 {
 public:
 
@@ -124,8 +127,8 @@ namespace dom {
  * Can return a geolocation info
  */
 class Geolocation final : public nsIDOMGeoGeolocation,
-                              public nsIGeolocationUpdate,
-                              public nsWrapperCache
+                          public nsIGeolocationUpdate,
+                          public nsWrapperCache
 {
 public:
 
@@ -140,7 +143,7 @@ public:
   nsresult Init(nsIDOMWindow* contentDom=nullptr);
 
   nsIDOMWindow* GetParentObject() const;
-  virtual JSObject* WrapObject(JSContext *aCtx) override;
+  virtual JSObject* WrapObject(JSContext *aCtx, JS::Handle<JSObject*> aGivenProto) override;
 
   int32_t WatchPosition(PositionCallback& aCallback, PositionErrorCallback* aErrorCallback, const PositionOptions& aOptions, ErrorResult& aRv);
   void GetCurrentPosition(PositionCallback& aCallback, PositionErrorCallback* aErrorCallback, const PositionOptions& aOptions, ErrorResult& aRv);
@@ -198,8 +201,8 @@ private:
   // there is a page change. All requests held by either array are active, that
   // is, they have been allowed and expect to be fulfilled.
 
-  nsTArray<nsRefPtr<nsGeolocationRequest> > mPendingCallbacks;
-  nsTArray<nsRefPtr<nsGeolocationRequest> > mWatchingCallbacks;
+  nsTArray<RefPtr<nsGeolocationRequest> > mPendingCallbacks;
+  nsTArray<RefPtr<nsGeolocationRequest> > mWatchingCallbacks;
 
   // window that this was created for.  Weak reference.
   nsWeakPtr mOwner;
@@ -207,21 +210,27 @@ private:
   // where the content was loaded from
   nsCOMPtr<nsIPrincipal> mPrincipal;
 
+  // the protocols we want to measure
+  enum class ProtocolType: uint8_t { OTHER, HTTP, HTTPS };
+
+  // the protocol used to load the content
+  ProtocolType mProtocolType;
+
   // owning back pointer.
-  nsRefPtr<nsGeolocationService> mService;
+  RefPtr<nsGeolocationService> mService;
 
   // Watch ID
   uint32_t mLastWatchId;
 
   // Pending requests are used when the service is not ready
-  nsTArray<nsRefPtr<nsGeolocationRequest> > mPendingRequests;
+  nsTArray<RefPtr<nsGeolocationRequest> > mPendingRequests;
 
   // Array containing already cleared watch IDs
   nsTArray<int32_t> mClearedWatchIDs;
 };
 
 class PositionError final : public nsIDOMGeoPositionError,
-                                public nsWrapperCache
+                            public nsWrapperCache
 {
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -233,7 +242,7 @@ public:
 
   Geolocation* GetParentObject() const;
 
-  virtual JSObject* WrapObject(JSContext* aCx) override;
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   int16_t Code() const {
     return mCode;
@@ -243,16 +252,17 @@ public:
 private:
   ~PositionError();
   int16_t mCode;
-  nsRefPtr<Geolocation> mParent;
+  RefPtr<Geolocation> mParent;
 };
 
-}
+} // namespace dom
 
 inline nsISupports*
 ToSupports(dom::Geolocation* aGeolocation)
 {
   return ToSupports(static_cast<nsIDOMGeoGeolocation*>(aGeolocation));
 }
-}
+
+} // namespace mozilla
 
 #endif /* nsGeoLocation_h */

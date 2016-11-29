@@ -7,13 +7,9 @@
 #define WaveReader_h_
 
 #include "MediaDecoderReader.h"
-#include "mozilla/dom/HTMLMediaElement.h"
+#include "MediaResource.h"
 
-namespace mozilla {
-namespace dom {
-class TimeRanges;
-}
-}
+#include "mozilla/dom/HTMLMediaElement.h"
 
 namespace mozilla {
 
@@ -26,34 +22,20 @@ protected:
   ~WaveReader();
 
 public:
-  virtual nsresult Init(MediaDecoderReader* aCloneDonor) override;
   virtual bool DecodeAudioData() override;
   virtual bool DecodeVideoFrame(bool &aKeyframeSkip,
                                   int64_t aTimeThreshold) override;
 
-  virtual bool HasAudio() override
-  {
-    return true;
-  }
-
-  virtual bool HasVideo() override
-  {
-    return false;
-  }
-
   virtual nsresult ReadMetadata(MediaInfo* aInfo,
                                 MetadataTags** aTags) override;
-  virtual nsRefPtr<SeekPromise>
+  virtual RefPtr<SeekPromise>
   Seek(int64_t aTime, int64_t aEndTime) override;
 
-  virtual nsresult GetBuffered(dom::TimeRanges* aBuffered) override;
-
-  virtual bool IsMediaSeekable() override;
+  virtual media::TimeIntervals GetBuffered() override;
 
 private:
   bool ReadAll(char* aBuf, int64_t aSize, int64_t* aBytesRead = nullptr);
   bool LoadRIFFChunk();
-  bool GetNextChunk(uint32_t* aChunk, uint32_t* aChunkSize);
   bool LoadFormatChunk(uint32_t aChunkSize);
   bool FindDataOffset(uint32_t aChunkSize);
   bool LoadListChunk(uint32_t aChunkSize, nsAutoPtr<dom::HTMLMediaElement::MetadataTags> &aTags);
@@ -104,6 +86,8 @@ private:
   // Start offset of the PCM data in the media stream.  Extends mWaveLength
   // bytes.
   int64_t mWavePCMOffset;
+
+  MediaResourceIndex mResource;
 };
 
 } // namespace mozilla

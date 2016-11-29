@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -58,7 +59,7 @@ MediaDocumentStreamListener::OnStartRequest(nsIRequest* request, nsISupports *ct
     return mNextStream->OnStartRequest(request, ctxt);
   }
 
-  return NS_BINDING_ABORTED;
+  return NS_ERROR_PARSED_DATA_CACHED;
 }
 
 NS_IMETHODIMP
@@ -212,12 +213,12 @@ MediaDocument::CreateSyntheticDocument()
   // Synthesize an empty html document
   nsresult rv;
 
-  nsRefPtr<mozilla::dom::NodeInfo> nodeInfo;
+  RefPtr<mozilla::dom::NodeInfo> nodeInfo;
   nodeInfo = mNodeInfoManager->GetNodeInfo(nsGkAtoms::html, nullptr,
                                            kNameSpaceID_XHTML,
                                            nsIDOMNode::ELEMENT_NODE);
 
-  nsRefPtr<nsGenericHTMLElement> root = NS_NewHTMLHtmlElement(nodeInfo.forget());
+  RefPtr<nsGenericHTMLElement> root = NS_NewHTMLHtmlElement(nodeInfo.forget());
   NS_ENSURE_TRUE(root, NS_ERROR_OUT_OF_MEMORY);
 
   NS_ASSERTION(GetChildCount() == 0, "Shouldn't have any kids");
@@ -229,14 +230,14 @@ MediaDocument::CreateSyntheticDocument()
                                            nsIDOMNode::ELEMENT_NODE);
 
   // Create a <head> so our title has somewhere to live
-  nsRefPtr<nsGenericHTMLElement> head = NS_NewHTMLHeadElement(nodeInfo.forget());
+  RefPtr<nsGenericHTMLElement> head = NS_NewHTMLHeadElement(nodeInfo.forget());
   NS_ENSURE_TRUE(head, NS_ERROR_OUT_OF_MEMORY);
 
   nodeInfo = mNodeInfoManager->GetNodeInfo(nsGkAtoms::meta, nullptr,
                                            kNameSpaceID_XHTML,
                                            nsIDOMNode::ELEMENT_NODE);
 
-  nsRefPtr<nsGenericHTMLElement> metaContent = NS_NewHTMLMetaElement(nodeInfo.forget());
+  RefPtr<nsGenericHTMLElement> metaContent = NS_NewHTMLMetaElement(nodeInfo.forget());
   NS_ENSURE_TRUE(metaContent, NS_ERROR_OUT_OF_MEMORY);
   metaContent->SetAttr(kNameSpaceID_None, nsGkAtoms::name,
                        NS_LITERAL_STRING("viewport"),
@@ -253,7 +254,7 @@ MediaDocument::CreateSyntheticDocument()
                                            kNameSpaceID_XHTML,
                                            nsIDOMNode::ELEMENT_NODE);
 
-  nsRefPtr<nsGenericHTMLElement> body = NS_NewHTMLBodyElement(nodeInfo.forget());
+  RefPtr<nsGenericHTMLElement> body = NS_NewHTMLBodyElement(nodeInfo.forget());
   NS_ENSURE_TRUE(body, NS_ERROR_OUT_OF_MEMORY);
 
   root->AppendChildTo(body, false);
@@ -326,12 +327,12 @@ MediaDocument::GetFileName(nsAString& aResult, nsIChannel* aChannel)
 nsresult
 MediaDocument::LinkStylesheet(const nsAString& aStylesheet)
 {
-  nsRefPtr<mozilla::dom::NodeInfo> nodeInfo;
+  RefPtr<mozilla::dom::NodeInfo> nodeInfo;
   nodeInfo = mNodeInfoManager->GetNodeInfo(nsGkAtoms::link, nullptr,
                                            kNameSpaceID_XHTML,
                                            nsIDOMNode::ELEMENT_NODE);
 
-  nsRefPtr<nsGenericHTMLElement> link = NS_NewHTMLLinkElement(nodeInfo.forget());
+  RefPtr<nsGenericHTMLElement> link = NS_NewHTMLLinkElement(nodeInfo.forget());
   NS_ENSURE_TRUE(link, NS_ERROR_OUT_OF_MEMORY);
 
   link->SetAttr(kNameSpaceID_None, nsGkAtoms::rel, 
@@ -341,6 +342,26 @@ MediaDocument::LinkStylesheet(const nsAString& aStylesheet)
 
   Element* head = GetHeadElement();
   return head->AppendChildTo(link, false);
+}
+
+nsresult
+MediaDocument::LinkScript(const nsAString& aScript)
+{
+  RefPtr<mozilla::dom::NodeInfo> nodeInfo;
+  nodeInfo = mNodeInfoManager->GetNodeInfo(nsGkAtoms::script, nullptr,
+                                           kNameSpaceID_XHTML,
+                                           nsIDOMNode::ELEMENT_NODE);
+
+  RefPtr<nsGenericHTMLElement> script = NS_NewHTMLScriptElement(nodeInfo.forget());
+  NS_ENSURE_TRUE(script, NS_ERROR_OUT_OF_MEMORY);
+
+  script->SetAttr(kNameSpaceID_None, nsGkAtoms::type,
+                  NS_LITERAL_STRING("text/javascript;version=1.8"), true);
+
+  script->SetAttr(kNameSpaceID_None, nsGkAtoms::src, aScript, true);
+
+  Element* head = GetHeadElement();
+  return head->AppendChildTo(script, false);
 }
 
 void 

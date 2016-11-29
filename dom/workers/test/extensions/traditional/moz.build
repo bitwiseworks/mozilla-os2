@@ -16,3 +16,11 @@ EXTRA_COMPONENTS += [
 ]
 
 XPI_NAME = 'worker'
+
+FINAL_TARGET_PP_FILES += [
+    'install.rdf',
+]
+
+FINAL_TARGET_FILES += [
+    'worker.js',
+]

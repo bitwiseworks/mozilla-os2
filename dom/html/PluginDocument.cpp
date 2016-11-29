@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -23,7 +24,7 @@ namespace mozilla {
 namespace dom {
 
 class PluginDocument final : public MediaDocument
-                               , public nsIPluginDocument
+                           , public nsIPluginDocument
 {
 public:
   PluginDocument();
@@ -54,7 +55,7 @@ protected:
   nsresult CreateSyntheticPluginDocument();
 
   nsCOMPtr<Element>                        mPluginContent;
-  nsRefPtr<MediaDocumentStreamListener>    mStreamListener;
+  RefPtr<MediaDocumentStreamListener>    mStreamListener;
   nsCString                                mMimeType;
 };
 
@@ -67,7 +68,7 @@ public:
   {}
   NS_IMETHOD OnStartRequest(nsIRequest* request, nsISupports *ctxt);
 private:
-  nsRefPtr<PluginDocument> mPluginDoc;
+  RefPtr<PluginDocument> mPluginDoc;
 };
 
 
@@ -218,7 +219,7 @@ PluginDocument::CreateSyntheticPluginDocument()
 
 
   // make plugin content
-  nsRefPtr<mozilla::dom::NodeInfo> nodeInfo;
+  RefPtr<mozilla::dom::NodeInfo> nodeInfo;
   nodeInfo = mNodeInfoManager->GetNodeInfo(nsGkAtoms::embed, nullptr,
                                            kNameSpaceID_XHTML,
                                            nsIDOMNode::ELEMENT_NODE);
@@ -264,7 +265,7 @@ PluginDocument::Print()
   nsIObjectFrame* objectFrame =
     do_QueryFrame(mPluginContent->GetPrimaryFrame());
   if (objectFrame) {
-    nsRefPtr<nsNPAPIPluginInstance> pi;
+    RefPtr<nsNPAPIPluginInstance> pi;
     objectFrame->GetPluginInstance(getter_AddRefs(pi));
     if (pi) {
       NPPrint npprint;

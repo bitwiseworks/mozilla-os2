@@ -8,6 +8,7 @@
 
 #include "gfxTypes.h"
 #include "nsString.h"
+#include "gfxFontConstants.h"
 #include "gfxFontFeatures.h"
 #include "gfxFontUtils.h"
 #include "nsTArray.h"
@@ -19,6 +20,7 @@
 #include "nsDataHashtable.h"
 #include "harfbuzz/hb.h"
 #include "mozilla/gfx/2D.h"
+#include "mozilla/UniquePtr.h"
 
 typedef struct gr_face gr_face;
 
@@ -121,7 +123,9 @@ public:
     bool IsUserFont() const { return mIsDataUserFont || mIsLocalUserFont; }
     bool IsLocalUserFont() const { return mIsLocalUserFont; }
     bool IsFixedPitch() const { return mFixedPitch; }
-    bool IsItalic() const { return mItalic; }
+    bool IsItalic() const { return mStyle == NS_FONT_STYLE_ITALIC; }
+    bool IsOblique() const { return mStyle == NS_FONT_STYLE_OBLIQUE; }
+    bool IsUpright() const { return mStyle == NS_FONT_STYLE_NORMAL; }
     bool IsBold() const { return mWeight >= 600; } // bold == weights 600 and above
     bool IgnoreGDEF() const { return mIgnoreGDEF; }
     bool IgnoreGSUB() const { return mIgnoreGSUB; }
@@ -358,6 +362,10 @@ public:
     gr_face* GetGrFace();
     virtual void ReleaseGrFace(gr_face* aFace);
 
+    // Does the font have graphite contextuals that involve the space glyph
+    // (and therefore we should bypass the word cache)?
+    bool HasGraphiteSpaceContextuals();
+
     // Release any SVG-glyphs document this font may have loaded.
     void DisconnectSVG();
 
@@ -384,7 +392,7 @@ public:
     nsString         mName;
     nsString         mFamilyName;
 
-    bool             mItalic      : 1;
+    uint8_t          mStyle       : 2; // italic/oblique
     bool             mFixedPitch  : 1;
     bool             mIsValid     : 1;
     bool             mIsBadUnderlineFont : 1;
@@ -402,6 +410,8 @@ public:
     bool             mHasSpaceFeaturesKerning : 1;
     bool             mHasSpaceFeaturesNonKerning : 1;
     bool             mSkipDefaultFeatureSpaceCheck : 1;
+    bool             mGraphiteSpaceContextualsInitialized : 1;
+    bool             mHasGraphiteSpaceContextuals : 1;
     bool             mSpaceGlyphIsInvisible : 1;
     bool             mSpaceGlyphIsInvisibleInitialized : 1;
     bool             mHasGraphiteTables : 1;
@@ -418,9 +428,9 @@ public:
     uint16_t         mWeight;
     int16_t          mStretch;
 
-    nsRefPtr<gfxCharacterMap> mCharacterMap;
+    RefPtr<gfxCharacterMap> mCharacterMap;
     uint32_t         mUVSOffset;
-    nsAutoArrayPtr<uint8_t> mUVSData;
+    mozilla::UniquePtr<uint8_t[]> mUVSData;
     nsAutoPtr<gfxUserFontData> mUserFontData;
     nsAutoPtr<gfxSVGGlyphs> mSVGGlyphs;
     // list of gfxFonts that are using SVG glyphs
@@ -635,8 +645,8 @@ struct GlobalFontMatch {
     int32_t                mRunScript;   // Unicode script for the codepoint
     const gfxFontStyle*    mStyle;       // style to match
     int32_t                mMatchRank;   // metric indicating closest match
-    nsRefPtr<gfxFontEntry> mBestMatch;   // current best match
-    nsRefPtr<gfxFontFamily> mMatchedFamily; // the family it belongs to
+    RefPtr<gfxFontEntry> mBestMatch;   // current best match
+    RefPtr<gfxFontFamily> mMatchedFamily; // the family it belongs to
     uint32_t               mCount;       // number of fonts matched
     uint32_t               mCmapsTested; // number of cmaps tested
 };
@@ -654,7 +664,8 @@ public:
         mIsSimpleFamily(false),
         mIsBadUnderlineFamily(false),
         mFamilyCharacterMapInitialized(false),
-        mSkipDefaultFeatureSpaceCheck(false)
+        mSkipDefaultFeatureSpaceCheck(false),
+        mCheckForFallbackFaces(false)
         { }
 
     const nsString& Name() { return mName; }
@@ -662,9 +673,9 @@ public:
     virtual void LocalizedName(nsAString& aLocalizedName);
     virtual bool HasOtherFamilyNames();
     
-    nsTArray<nsRefPtr<gfxFontEntry> >& GetFontList() { return mAvailableFonts; }
+    nsTArray<RefPtr<gfxFontEntry> >& GetFontList() { return mAvailableFonts; }
     
-    void AddFontEntry(nsRefPtr<gfxFontEntry> aFontEntry) {
+    void AddFontEntry(RefPtr<gfxFontEntry> aFontEntry) {
         // bug 589682 - set the IgnoreGDEF flag on entries for Italic faces
         // of Times New Roman, because of buggy table in those fonts
         if (aFontEntry->IsItalic() && !aFontEntry->IsUserFont() &&
@@ -758,6 +769,7 @@ public:
     }
 
     bool IsBadUnderlineFamily() const { return mIsBadUnderlineFamily; }
+    bool CheckForFallbackFaces() const { return mCheckForFallbackFaces; }
 
     // sort available fonts to put preferred (standard) faces towards the end
     void SortAvailableFonts();
@@ -803,7 +815,7 @@ protected:
     }
 
     nsString mName;
-    nsTArray<nsRefPtr<gfxFontEntry> >  mAvailableFonts;
+    nsTArray<RefPtr<gfxFontEntry> >  mAvailableFonts;
     gfxSparseBitSet mFamilyCharacterMap;
     bool mOtherFamilyNamesInitialized : 1;
     bool mHasOtherFamilyNames : 1;
@@ -813,6 +825,7 @@ protected:
     bool mIsBadUnderlineFamily : 1;
     bool mFamilyCharacterMapInitialized : 1;
     bool mSkipDefaultFeatureSpaceCheck : 1;
+    bool mCheckForFallbackFaces : 1;  // check other faces for character
 
     enum {
         // for "simple" families, the faces are stored in mAvailableFonts

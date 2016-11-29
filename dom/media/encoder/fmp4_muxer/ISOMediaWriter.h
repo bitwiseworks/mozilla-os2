@@ -13,7 +13,6 @@ namespace mozilla {
 
 class ISOControl;
 class FragmentBuffer;
-class ISOMediaWriterRunnable;
 
 class ISOMediaWriter : public ContainerWriter
 {
@@ -26,6 +25,10 @@ public:
   // '5.4.3 Basic profile'.
   // Brand names in 'ftyp' box are '3gp9' and 'isom'.
   const static uint32_t TYPE_FRAG_3GP = 1 << 1;
+
+  // Generate an fragmented 3G2 stream, 3GPP2 C.S0050-B
+  // Brand names in 'ftyp' box are '3g2c' and 'isom'
+  const static uint32_t TYPE_FRAG_3G2 = 1 << 2;
 
   // aType is the combination of CREATE_AUDIO_TRACK and CREATE_VIDEO_TRACK.
   // It is a hint to muxer that the output streaming contains audio, video
@@ -100,4 +103,5 @@ private:
 };
 
 } // namespace mozilla
+
 #endif // ISOMediaWriter_h_

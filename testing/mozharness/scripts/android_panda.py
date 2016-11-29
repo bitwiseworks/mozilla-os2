@@ -217,6 +217,20 @@ class PandaTest(TestingMixin, MercurialScript, BlobUploadMixin, MozpoolMixin, Bu
                                  if self._query_specified_suites(cat) is not None]
         super(PandaTest, self).download_and_extract(suite_categories=target_categories)
 
+    def _query_try_flavor(self, category, suite):
+        flavors = {
+            "mochitest": [("plain.*", "mochitest"),
+                          ("browser-chrome.*", "browser-chrome"),
+                          ("mochitest-devtools-chrome.*", "devtools-chrome"),
+                          ("chrome", "chrome")],
+            "xpcshell": [("xpcshell", "xpcshell")],
+            "reftest": [("reftest", "reftest"),
+                        ("crashtest", "crashtest")]
+        }
+        for suite_pattern, flavor in flavors.get(category, []):
+            if re.compile(suite_pattern).match(suite):
+                return flavor
+
     def _run_category_suites(self, suite_category, preflight_run_method=None):
         """run suite(s) to a specific category"""
 
@@ -246,11 +260,16 @@ class PandaTest(TestingMixin, MercurialScript, BlobUploadMixin, MozpoolMixin, Bu
                 if should_install_app:
                     self._install_app()
                 cmd = abs_base_cmd[:]
-                replace_dict = {}
-                for arg in suites[suite]:
-                    cmd.append(arg % replace_dict)
 
-                cmd = self.append_harness_extra_args(cmd)
+                flavor = self._query_try_flavor(suite_category, suite)
+                try_options, try_tests = self.try_args(flavor)
+
+                cmd.extend(self.query_options(suites[suite],
+                                              try_options))
+                cmd.extend(self.query_tests_args(try_tests))
+
+                tests = self.config["suite_definitions"][suite_category].get("tests", [])
+                cmd += tests
 
                 tbpl_status, log_level = None, None
                 error_list = BaseErrorList + [{
@@ -363,9 +382,8 @@ class PandaTest(TestingMixin, MercurialScript, BlobUploadMixin, MozpoolMixin, Bu
         c = self.config
         dirs = self.query_abs_dirs()
         self.host_utils_url = c['hostutils_url']
-        #create the hostutils dir, get the zip and extract it
-        self.mkdir_p(dirs['abs_hostutils_dir'])
-        self._download_unzip(self.host_utils_url, dirs['abs_hostutils_dir'])
+        # get the zip and extract it
+        self.download_unzip(self.host_utils_url, dirs['abs_hostutils_dir'])
 
     def _install_app(self):
         c = self.config
@@ -432,7 +450,7 @@ class PandaTest(TestingMixin, MercurialScript, BlobUploadMixin, MozpoolMixin, Bu
         c = self.config
         dirs = self.query_abs_dirs()
         options = []
-        run_file = self.tree_config["suite_definitions"][suite_category]["run_filename"]
+        run_file = c["suite_definitions"][suite_category]["run_filename"]
         base_cmd = ['python', '-u']
         base_cmd.append(os.path.join((dirs["abs_%s_dir" % suite_category]), run_file))
         self.device_ip = socket.gethostbyname(self.mozpool_device)
@@ -458,6 +476,8 @@ class PandaTest(TestingMixin, MercurialScript, BlobUploadMixin, MozpoolMixin, Bu
 
         raw_log_file = os.path.join(dirs['abs_blob_upload_dir'],
                                     '%s_raw.log' % suite)
+        error_summary_file = os.path.join(dirs['abs_blob_upload_dir'],
+                                          '%s_errorsummary.log' % suite)
         str_format_values = {
             'device_ip': self.device_ip,
             'hostname': self.mozpool_device,
@@ -468,15 +488,11 @@ class PandaTest(TestingMixin, MercurialScript, BlobUploadMixin, MozpoolMixin, Bu
             'apk_name':  self.filename_apk,
             'apk_path':  self.apk_path,
             'raw_log_file': raw_log_file,
+            'error_summary_file': error_summary_file,
         }
-        if '%s_options' % suite_category in self.tree_config:
-            for option in self.tree_config['%s_options' % suite_category]:
-                options.append(option % str_format_values)
-            abs_base_cmd = base_cmd + options
-            return abs_base_cmd
-        elif "suite_definitions" in self.tree_config and \
-                suite_category in self.tree_config["suite_definitions"]: # new in-tree format
-            for option in self.tree_config["suite_definitions"][suite_category]["options"]:
+        if "suite_definitions" in c and \
+                suite_category in c["suite_definitions"]: # new in-tree format
+            for option in c["suite_definitions"][suite_category]["options"]:
                 options.append(option % str_format_values)
             abs_base_cmd = base_cmd + options
             return abs_base_cmd
@@ -484,8 +500,7 @@ class PandaTest(TestingMixin, MercurialScript, BlobUploadMixin, MozpoolMixin, Bu
             self.warning("Suite options for %s could not be determined."
                          "\nIf you meant to have options for this suite, "
                          "please make sure they are specified in your "
-                         "tree config under %s_options" %
-                         (suite_category, suite_category))
+                         "config." % suite_category)
 
     ###### helper methods
     def _pre_config_lock(self, rw_config):

@@ -5,7 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "pk11pub.h"
-#include "prlog.h"
+#include "mozilla/Logging.h"
 #include "ScopedNSSTypes.h"
 #include "secoidt.h"
 
@@ -33,14 +33,9 @@ namespace mozilla {
 namespace net {
 
 // NSPR_LOG_MODULES=BackgroundFileSaver:5
-#if defined(PR_LOGGING)
-PRLogModuleInfo *BackgroundFileSaver::prlog = nullptr;
-#define LOG(args) PR_LOG(BackgroundFileSaver::prlog, PR_LOG_DEBUG, args)
-#define LOG_ENABLED() PR_LOG_TEST(BackgroundFileSaver::prlog, 4)
-#else
-#define LOG(args)
-#define LOG_ENABLED() (false)
-#endif
+static LazyLogModule prlog("BackgroundFileSaver");
+#define LOG(args) MOZ_LOG(prlog, mozilla::LogLevel::Debug, args)
+#define LOG_ENABLED() MOZ_LOG_TEST(prlog, mozilla::LogLevel::Debug)
 
 ////////////////////////////////////////////////////////////////////////////////
 //// Globals
@@ -82,7 +77,7 @@ public:
   }
 
 private:
-  nsRefPtr<BackgroundFileSaver> mSaver;
+  RefPtr<BackgroundFileSaver> mSaver;
   nsCOMPtr<nsIFile> mTarget;
 };
 
@@ -115,10 +110,6 @@ BackgroundFileSaver::BackgroundFileSaver()
 , mActualTargetKeepPartial(false)
 , mDigestContext(nullptr)
 {
-#if defined(PR_LOGGING)
-  if (!prlog)
-    prlog = PR_NewLogModule("BackgroundFileSaver");
-#endif
   LOG(("Created BackgroundFileSaver [this = %p]", this));
 }
 
@@ -532,7 +523,7 @@ BackgroundFileSaver::ProcessStateChange()
     rv = mActualTarget->Clone(getter_AddRefs(actualTargetToNotify));
     NS_ENSURE_SUCCESS(rv, rv);
 
-    nsRefPtr<NotifyTargetChangeRunnable> event =
+    RefPtr<NotifyTargetChangeRunnable> event =
       new NotifyTargetChangeRunnable(this, actualTargetToNotify);
     NS_ENSURE_TRUE(event, NS_ERROR_FAILURE);
 

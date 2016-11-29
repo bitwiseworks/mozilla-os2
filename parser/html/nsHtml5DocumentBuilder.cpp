@@ -81,7 +81,7 @@ nsHtml5DocumentBuilder::UpdateStyleSheet(nsIContent* aElement)
     mScriptLoader->AddExecuteBlocker();
   }
 
-  if (aElement->IsHTML(nsGkAtoms::link)) {
+  if (aElement->IsHTMLElement(nsGkAtoms::link)) {
     // look for <link rel="next" href="url">
     nsAutoString relVal;
     aElement->GetAttr(kNameSpaceID_None, nsGkAtoms::rel, relVal);
@@ -94,13 +94,6 @@ nsHtml5DocumentBuilder::UpdateStyleSheet(nsIContent* aElement)
         aElement->GetAttr(kNameSpaceID_None, nsGkAtoms::href, hrefVal);
         if (!hrefVal.IsEmpty()) {
           PrefetchHref(hrefVal, aElement, hasPrefetch);
-        }
-      }
-      if (linkTypes & nsStyleLinkElement::eDNS_PREFETCH) {
-        nsAutoString hrefVal;
-        aElement->GetAttr(kNameSpaceID_None, nsGkAtoms::href, hrefVal);
-        if (!hrefVal.IsEmpty()) {
-          PrefetchDNS(hrefVal);
         }
       }
     }

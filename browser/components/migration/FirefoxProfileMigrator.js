@@ -27,8 +27,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "OS",
                                   "resource://gre/modules/osfile.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
                                   "resource://gre/modules/FileUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ProfileTimesAccessor",
-                                  "resource://gre/modules/services/healthreport/profile.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "ProfileAge",
+                                  "resource://gre/modules/ProfileAge.jsm");
 
 
 function FirefoxProfileMigrator() {
@@ -171,7 +171,7 @@ FirefoxProfileMigrator.prototype._getResourcesInternal = function(sourceProfileD
         file.copyTo(currentProfileDir, "");
       }
       // And record the fact a migration (ie, a reset) happened.
-      let timesAccessor = new ProfileTimesAccessor(currentProfileDir.path);
+      let timesAccessor = new ProfileAge(currentProfileDir.path);
       timesAccessor.recordProfileReset().then(
         () => aCallback(true),
         () => aCallback(false)
@@ -239,13 +239,12 @@ FirefoxProfileMigrator.prototype._getResourcesInternal = function(sourceProfileD
     }
   }
 
-  return [r for each (r in [places, cookies, passwords, formData,
-                            dictionary, bookmarksBackups, session,
-                            times, healthReporter]) if (r)];
+  return [places, cookies, passwords, formData, dictionary, bookmarksBackups,
+          session, times, healthReporter].filter(r => r);
 };
 
 Object.defineProperty(FirefoxProfileMigrator.prototype, "startupOnlyMigrator", {
-  get: function() true
+  get: () => true
 });
 
 

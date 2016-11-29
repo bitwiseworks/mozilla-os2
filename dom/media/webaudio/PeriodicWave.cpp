@@ -27,7 +27,6 @@ PeriodicWave::PeriodicWave(AudioContext* aContext,
 
   // Caller should have checked this and thrown.
   MOZ_ASSERT(aLength > 0);
-  MOZ_ASSERT(aLength <= 4096);
   mLength = aLength;
 
   // Copy coefficient data. The two arrays share an allocation.
@@ -63,9 +62,9 @@ PeriodicWave::SizeOfIncludingThisIfNotShared(MallocSizeOf aMallocSizeOf) const
 }
 
 JSObject*
-PeriodicWave::WrapObject(JSContext* aCx)
+PeriodicWave::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return PeriodicWaveBinding::Wrap(aCx, this);
+  return PeriodicWaveBinding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

@@ -192,19 +192,6 @@ typedef nsClassHashtable<nsCStringHashKey, BFSTableData> BFSHashTable;
 
 // nsObjectHashtable enumerator functions.
 
-// Initializes the BFS state table.
-static PLDHashOperator
-InitBFSTable(const nsACString &aKey, nsCOMArray<nsIAtom> *aData, void* aClosure) {
-    MOZ_ASSERT(aData, "no data in the table enumeration");
-
-    BFSHashTable *bfsTable = static_cast<BFSHashTable*>(aClosure);
-    if (!bfsTable) return PL_DHASH_STOP;
-
-    BFSTableData *data = new BFSTableData(aKey);
-    bfsTable->Put(aKey, data);
-    return PL_DHASH_NEXT;
-}
-
 class CStreamConvDeallocator : public nsDequeFunctor {
 public:
     virtual void* operator()(void* anObject) {
@@ -232,7 +219,11 @@ nsStreamConverterService::FindConverter(const char *aContractID, nsTArray<nsCStr
 
     // Create a corresponding color table for each vertex in the graph.
     BFSHashTable lBFSTable;
-    mAdjacencyList.EnumerateRead(InitBFSTable, &lBFSTable);
+    for (auto iter = mAdjacencyList.Iter(); !iter.Done(); iter.Next()) {
+        const nsACString &key = iter.Key();
+        MOZ_ASSERT(iter.UserData(), "no data in the table iteration");
+        lBFSTable.Put(key, new BFSTableData(key));
+    }
 
     NS_ASSERTION(lBFSTable.Count() == vertexCount, "strmconv BFS table init problem");
 
@@ -454,9 +445,7 @@ nsStreamConverterService::Convert(nsIInputStream *aFromStream,
         }
 
         delete converterChain;
-        *_retval = convertedData;
-        NS_ADDREF(*_retval);
-
+        convertedData.forget(_retval);
     } else {
         // we're going direct.
         rv = converter->Convert(aFromStream, aFromType, aToType, aContext, _retval);
@@ -546,15 +535,11 @@ nsStreamConverterService::AsyncConvertData(const char *aFromType,
         }
         delete converterChain;
         // return the first listener in the chain.
-        *_retval = finalListener;
-        NS_ADDREF(*_retval);
-
+        finalListener.forget(_retval);
     } else {
         // we're going direct.
-        *_retval = listener;
-        NS_ADDREF(*_retval);
-
         rv = listener->AsyncConvertData(aFromType, aToType, aListener, aContext);
+        listener.forget(_retval);
     }
 
     return rv;

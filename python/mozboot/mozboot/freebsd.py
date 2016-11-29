@@ -4,15 +4,17 @@
 
 from mozboot.base import BaseBootstrapper
 
+
 class FreeBSDBootstrapper(BaseBootstrapper):
-    def __init__(self, version, flavor):
-        BaseBootstrapper.__init__(self)
+    def __init__(self, version, flavor, **kwargs):
+        BaseBootstrapper.__init__(self, **kwargs)
         self.version = int(version.split('.')[0])
-        self.flavor  = flavor.lower()
+        self.flavor = flavor.lower()
 
         self.packages = [
             'autoconf213',
             'gmake',
+            'gtar',
             'mercurial',
             'pkgconf',
             'zip',
@@ -20,15 +22,17 @@ class FreeBSDBootstrapper(BaseBootstrapper):
 
         self.browser_packages = [
             'dbus-glib',
+            'gconf2',
             'gstreamer-plugins',
             'gtk2',
+            'gtk3',
             'libGL',
             'pulseaudio',
             'v4l_compat',
             'yasm',
         ]
 
-        if self.flavor == 'dragonfly':
+        if not self.which('unzip'):
             self.packages.append('unzip')
 
         # gcc in base is too old
@@ -38,6 +42,8 @@ class FreeBSDBootstrapper(BaseBootstrapper):
     def pkg_install(self, *packages):
         if self.which('pkg'):
             command = ['pkg', 'install']
+            if self.no_interactive:
+                command.append('-y')
         else:
             command = ['pkg_add', '-Fr']
 

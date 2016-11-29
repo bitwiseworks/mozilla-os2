@@ -61,11 +61,10 @@ gfxMacFont::gfxMacFont(MacOSFontEntry *aFontEntry, const gfxFontStyle *aFontStyl
     cairo_matrix_init_scale(&sizeMatrix, mAdjustedSize, mAdjustedSize);
 
     // synthetic oblique by skewing via the font matrix
-    bool needsOblique =
-        (mFontEntry != nullptr) &&
-        (!mFontEntry->IsItalic() &&
-         (mStyle.style & (NS_FONT_STYLE_ITALIC | NS_FONT_STYLE_OBLIQUE))) &&
-        mStyle.allowSyntheticStyle;
+    bool needsOblique = mFontEntry != nullptr &&
+                        mFontEntry->IsUpright() &&
+                        mStyle.style != NS_FONT_STYLE_NORMAL &&
+                        mStyle.allowSyntheticStyle;
 
     if (needsOblique) {
         cairo_matrix_t style;
@@ -254,7 +253,7 @@ gfxMacFont::InitMetrics()
         mMetrics.xHeight = ::CGFontGetXHeight(mCGFont) * cgConvFactor;
     }
 
-    if (mStyle.sizeAdjust != 0.0 && mStyle.size > 0.0 &&
+    if (mStyle.sizeAdjust > 0.0 && mStyle.size > 0.0 &&
         mMetrics.xHeight > 0.0) {
         // apply font-size-adjust, and recalculate metrics
         gfxFloat aspect = mMetrics.xHeight / mStyle.size;
@@ -427,7 +426,7 @@ gfxMacFont::InitMetricsFromPlatform()
     mIsValid = true;
 }
 
-TemporaryRef<ScaledFont>
+already_AddRefed<ScaledFont>
 gfxMacFont::GetScaledFont(DrawTarget *aTarget)
 {
   if (!mAzureScaledFont) {
@@ -437,10 +436,11 @@ gfxMacFont::GetScaledFont(DrawTarget *aTarget)
     mAzureScaledFont = mozilla::gfx::Factory::CreateScaledFontWithCairo(nativeFont, GetAdjustedSize(), mScaledFont);
   }
 
-  return mAzureScaledFont;
+  RefPtr<ScaledFont> scaledFont(mAzureScaledFont);
+  return scaledFont.forget();
 }
 
-TemporaryRef<mozilla::gfx::GlyphRenderingOptions>
+already_AddRefed<mozilla::gfx::GlyphRenderingOptions>
 gfxMacFont::GetGlyphRenderingOptions(const TextRunDrawParams* aRunParams)
 {
     if (aRunParams) {

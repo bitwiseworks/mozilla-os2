@@ -12,6 +12,7 @@
 #include "nsIStringEnumerator.h"
 #include "nsISupportsArray.h"
 #include "nsJSUtils.h"
+#include "nsQueryObject.h"
 #include "nsPIDOMWindow.h"
 #include "nsTArray.h"
 #include "GetUserMediaRequest.h"
@@ -113,7 +114,7 @@ public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSICONTENTPERMISSIONREQUEST
 
-  MediaPermissionRequest(nsRefPtr<dom::GetUserMediaRequest> &aRequest,
+  MediaPermissionRequest(RefPtr<dom::GetUserMediaRequest> &aRequest,
                          nsTArray<nsCOMPtr<nsIMediaDevice> > &aDevices);
 
   already_AddRefed<nsPIDOMWindow> GetOwner();
@@ -126,15 +127,16 @@ private:
 
   bool mAudio; // Request for audio permission
   bool mVideo; // Request for video permission
-  nsRefPtr<dom::GetUserMediaRequest> mRequest;
+  RefPtr<dom::GetUserMediaRequest> mRequest;
   nsTArray<nsCOMPtr<nsIMediaDevice> > mAudioDevices; // candidate audio devices
   nsTArray<nsCOMPtr<nsIMediaDevice> > mVideoDevices; // candidate video devices
+  nsCOMPtr<nsIContentPermissionRequester> mRequester;
 };
 
 // MediaPermissionRequest
 NS_IMPL_ISUPPORTS(MediaPermissionRequest, nsIContentPermissionRequest)
 
-MediaPermissionRequest::MediaPermissionRequest(nsRefPtr<dom::GetUserMediaRequest> &aRequest,
+MediaPermissionRequest::MediaPermissionRequest(RefPtr<dom::GetUserMediaRequest> &aRequest,
                                                nsTArray<nsCOMPtr<nsIMediaDevice> > &aDevices)
   : mRequest(aRequest)
 {
@@ -155,6 +157,9 @@ MediaPermissionRequest::MediaPermissionRequest(nsRefPtr<dom::GetUserMediaRequest
       mVideoDevices.AppendElement(device);
     }
   }
+
+  nsCOMPtr<nsPIDOMWindow> window = GetOwner();
+  mRequester = new nsContentPermissionRequester(window.get());
 }
 
 // nsIContentPermissionRequest methods
@@ -225,7 +230,7 @@ MediaPermissionRequest::Cancel()
 {
   nsString callID;
   mRequest->GetCallID(callID);
-  NotifyPermissionDeny(callID, NS_LITERAL_STRING("PermissionDeniedError"));
+  NotifyPermissionDeny(callID, NS_LITERAL_STRING("SecurityError"));
   return NS_OK;
 }
 
@@ -274,6 +279,16 @@ MediaPermissionRequest::Allow(JS::HandleValue aChoices)
   return DoAllow(audioDevice, videoDevice);
 }
 
+NS_IMETHODIMP
+MediaPermissionRequest::GetRequester(nsIContentPermissionRequester** aRequester)
+{
+  NS_ENSURE_ARG_POINTER(aRequester);
+
+  nsCOMPtr<nsIContentPermissionRequester> requester = mRequester;
+  requester.forget(aRequester);
+  return NS_OK;
+}
+
 nsresult
 MediaPermissionRequest::DoAllow(const nsString &audioDevice,
                                 const nsString &videoDevice)
@@ -315,15 +330,15 @@ public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIGETUSERMEDIADEVICESSUCCESSCALLBACK
 
-  MediaDeviceSuccessCallback(nsRefPtr<dom::GetUserMediaRequest> &aRequest)
+  explicit MediaDeviceSuccessCallback(RefPtr<dom::GetUserMediaRequest> &aRequest)
     : mRequest(aRequest) {}
 
 protected:
   virtual ~MediaDeviceSuccessCallback() {}
 
 private:
-  nsresult DoPrompt(nsRefPtr<MediaPermissionRequest> &req);
-  nsRefPtr<dom::GetUserMediaRequest> mRequest;
+  nsresult DoPrompt(RefPtr<MediaPermissionRequest> &req);
+  RefPtr<dom::GetUserMediaRequest> mRequest;
 };
 
 NS_IMPL_ISUPPORTS(MediaDeviceSuccessCallback, nsIGetUserMediaDevicesSuccessCallback)
@@ -342,7 +357,7 @@ MediaDeviceSuccessCallback::OnSuccess(nsIVariant* aDevices)
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (elementType != nsIDataType::VTYPE_INTERFACE) {
-    NS_Free(rawArray);
+    free(rawArray);
     return NS_ERROR_FAILURE;
   }
 
@@ -355,10 +370,10 @@ MediaDeviceSuccessCallback::OnSuccess(nsIVariant* aDevices)
     devices.AppendElement(device);
     NS_IF_RELEASE(supportsArray[i]); // explicitly decrease reference count for raw pointer
   }
-  NS_Free(rawArray); // explicitly free for the memory from nsIVariant::GetAsArray
+  free(rawArray); // explicitly free for the memory from nsIVariant::GetAsArray
 
   // Send MediaPermissionRequest
-  nsRefPtr<MediaPermissionRequest> req = new MediaPermissionRequest(mRequest, devices);
+  RefPtr<MediaPermissionRequest> req = new MediaPermissionRequest(mRequest, devices);
   rv = DoPrompt(req);
 
   NS_ENSURE_SUCCESS(rv, rv);
@@ -367,7 +382,7 @@ MediaDeviceSuccessCallback::OnSuccess(nsIVariant* aDevices)
 
 // Trigger permission prompt UI
 nsresult
-MediaDeviceSuccessCallback::DoPrompt(nsRefPtr<MediaPermissionRequest> &req)
+MediaDeviceSuccessCallback::DoPrompt(RefPtr<MediaPermissionRequest> &req)
 {
   nsCOMPtr<nsPIDOMWindow> window(req->GetOwner());
   return dom::nsContentPermissionUtils::AskPermission(req, window);
@@ -380,7 +395,7 @@ public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIDOMGETUSERMEDIAERRORCALLBACK
 
-  MediaDeviceErrorCallback(const nsAString &aCallID)
+  explicit MediaDeviceErrorCallback(const nsAString &aCallID)
     : mCallID(aCallID) {}
 
 protected:
@@ -396,7 +411,7 @@ NS_IMPL_ISUPPORTS(MediaDeviceErrorCallback, nsIDOMGetUserMediaErrorCallback)
 NS_IMETHODIMP
 MediaDeviceErrorCallback::OnError(nsISupports* aError)
 {
-  nsRefPtr<MediaStreamError> error = do_QueryObject(aError);
+  RefPtr<MediaStreamError> error = do_QueryObject(aError);
   if (!error) {
     return NS_ERROR_NO_INTERFACE;
   }
@@ -453,7 +468,7 @@ MediaPermissionManager::Observe(nsISupports* aSubject, const char* aTopic,
 {
   nsresult rv;
   if (!strcmp(aTopic, "getUserMedia:request")) {
-    nsRefPtr<dom::GetUserMediaRequest> req =
+    RefPtr<dom::GetUserMediaRequest> req =
         static_cast<dom::GetUserMediaRequest*>(aSubject);
     rv = HandleRequest(req);
 
@@ -473,13 +488,14 @@ MediaPermissionManager::Observe(nsISupports* aSubject, const char* aTopic,
 
 // Handle GetUserMediaRequest, query available media device first.
 nsresult
-MediaPermissionManager::HandleRequest(nsRefPtr<dom::GetUserMediaRequest> &req)
+MediaPermissionManager::HandleRequest(RefPtr<dom::GetUserMediaRequest> &req)
 {
   nsString callID;
   req->GetCallID(callID);
+  uint64_t innerWindowID = req->InnerWindowID();
 
   nsCOMPtr<nsPIDOMWindow> innerWindow = static_cast<nsPIDOMWindow*>
-      (nsGlobalWindow::GetInnerWindowWithId(req->InnerWindowID()));
+      (nsGlobalWindow::GetInnerWindowWithId(innerWindowID));
   if (!innerWindow) {
     MOZ_ASSERT(false, "No inner window");
     return NS_ERROR_FAILURE;
@@ -493,8 +509,10 @@ MediaPermissionManager::HandleRequest(nsRefPtr<dom::GetUserMediaRequest> &req)
   dom::MediaStreamConstraints constraints;
   req->GetConstraints(constraints);
 
-  nsRefPtr<MediaManager> MediaMgr = MediaManager::GetInstance();
-  nsresult rv = MediaMgr->GetUserMediaDevices(innerWindow, constraints, onSuccess, onError);
+  RefPtr<MediaManager> MediaMgr = MediaManager::GetInstance();
+  nsresult rv = MediaMgr->GetUserMediaDevices(innerWindow, constraints,
+                                              onSuccess, onError,
+                                              innerWindowID, callID);
   NS_ENSURE_SUCCESS(rv, rv);
 
   return NS_OK;

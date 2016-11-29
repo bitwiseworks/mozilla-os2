@@ -214,6 +214,21 @@ class LifoAlloc
         curSize_ -= size;
     }
 
+    MOZ_ALWAYS_INLINE
+    void* allocImpl(size_t n) {
+        void* result;
+        if (latest && (result = latest->tryAlloc(n)))
+            return result;
+
+        if (!getOrCreateChunk(n))
+            return nullptr;
+
+        // Since we just created a large enough chunk, this can't fail.
+        result = latest->tryAlloc(n);
+        MOZ_ASSERT(result);
+        return result;
+    }
+
   public:
     explicit LifoAlloc(size_t defaultChunkSize)
       : peakSize_(0)
@@ -257,26 +272,28 @@ class LifoAlloc
     MOZ_ALWAYS_INLINE
     void* alloc(size_t n) {
         JS_OOM_POSSIBLY_FAIL();
+        return allocImpl(n);
+    }
 
-        void* result;
-        if (latest && (result = latest->tryAlloc(n)))
-            return result;
-
-        if (!getOrCreateChunk(n))
-            return nullptr;
-
-        // Since we just created a large enough chunk, this can't fail.
-        result = latest->tryAlloc(n);
-        MOZ_ASSERT(result);
+    MOZ_ALWAYS_INLINE
+    void* allocInfallibleOrAssert(size_t n) {
+        void* result = allocImpl(n);
+        MOZ_RELEASE_ASSERT(result, "[OOM] Is it really infallible?");
         return result;
     }
 
     MOZ_ALWAYS_INLINE
-    void* allocInfallible(size_t n) {
-        if (void* result = alloc(n))
+    void* allocInfallibleOrCrash(size_t n) {
+        AutoEnterOOMUnsafeRegion oomUnsafe;
+        if (void* result = allocImpl(n))
             return result;
-        CrashAtUnhandlableOOM("LifoAlloc::allocInfallible");
+        oomUnsafe.crash("LifoAlloc::allocInfallible");
         return nullptr;
+    }
+
+    MOZ_ALWAYS_INLINE
+    void* allocInfallible(size_t n) {
+        return allocInfallibleOrCrash(n);
     }
 
     // Ensures that enough space exists to satisfy N bytes worth of
@@ -479,7 +496,7 @@ class LifoAlloc
     };
 };
 
-class LifoAllocScope
+class MOZ_NON_TEMPORARY_CLASS LifoAllocScope
 {
     LifoAlloc*      lifoAlloc;
     LifoAlloc::Mark mark;
@@ -527,7 +544,7 @@ class LifoAllocPolicy
       : alloc_(alloc)
     {}
     template <typename T>
-    T* pod_malloc(size_t numElems) {
+    T* maybe_pod_malloc(size_t numElems) {
         size_t bytes;
         if (MOZ_UNLIKELY(!CalculateAllocSize<T>(numElems, &bytes)))
             return nullptr;
@@ -535,25 +552,40 @@ class LifoAllocPolicy
         return static_cast<T*>(p);
     }
     template <typename T>
-    T* pod_calloc(size_t numElems) {
-        T* p = pod_malloc<T>(numElems);
+    T* maybe_pod_calloc(size_t numElems) {
+        T* p = maybe_pod_malloc<T>(numElems);
         if (MOZ_UNLIKELY(!p))
             return nullptr;
         memset(p, 0, numElems * sizeof(T));
         return p;
     }
     template <typename T>
-    T* pod_realloc(T* p, size_t oldSize, size_t newSize) {
-        T* n = pod_malloc<T>(newSize);
+    T* maybe_pod_realloc(T* p, size_t oldSize, size_t newSize) {
+        T* n = maybe_pod_malloc<T>(newSize);
         if (MOZ_UNLIKELY(!n))
             return nullptr;
         MOZ_ASSERT(!(oldSize & mozilla::tl::MulOverflowMask<sizeof(T)>::value));
         memcpy(n, p, Min(oldSize * sizeof(T), newSize * sizeof(T)));
         return n;
     }
+    template <typename T>
+    T* pod_malloc(size_t numElems) {
+        return maybe_pod_malloc<T>(numElems);
+    }
+    template <typename T>
+    T* pod_calloc(size_t numElems) {
+        return maybe_pod_calloc<T>(numElems);
+    }
+    template <typename T>
+    T* pod_realloc(T* p, size_t oldSize, size_t newSize) {
+        return maybe_pod_realloc<T>(p, oldSize, newSize);
+    }
     void free_(void* p) {
     }
     void reportAllocOverflow() const {
+    }
+    bool checkSimulatedOOM() const {
+        return fb == Infallible || !js::oom::ShouldFailWithOOM();
     }
 };
 

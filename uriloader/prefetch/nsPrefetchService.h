@@ -20,7 +20,6 @@
 #include "mozilla/Attributes.h"
 
 class nsPrefetchService;
-class nsPrefetchListener;
 class nsPrefetchNode;
 
 //-----------------------------------------------------------------------------
@@ -28,9 +27,9 @@ class nsPrefetchNode;
 //-----------------------------------------------------------------------------
 
 class nsPrefetchService final : public nsIPrefetchService
-                                  , public nsIWebProgressListener
-                                  , public nsIObserver
-                                  , public nsSupportsWeakReference
+                              , public nsIWebProgressListener
+                              , public nsIObserver
+                              , public nsSupportsWeakReference
 {
 public:
     NS_DECL_ISUPPORTS
@@ -41,10 +40,7 @@ public:
     nsPrefetchService();
 
     nsresult Init();
-    void     ProcessNextURI();
-
-    nsPrefetchNode *GetCurrentNode() { return mCurrentNode.get(); }
-    nsPrefetchNode *GetQueueHead() { return mQueueHead; }
+    void     ProcessNextURI(nsPrefetchNode *aFinished);
 
     void NotifyLoadRequested(nsPrefetchNode *node);
     void NotifyLoadCompleted(nsPrefetchNode *node);
@@ -70,7 +66,8 @@ private:
 
     nsPrefetchNode                   *mQueueHead;
     nsPrefetchNode                   *mQueueTail;
-    nsRefPtr<nsPrefetchNode>          mCurrentNode;
+    nsTArray<RefPtr<nsPrefetchNode>> mCurrentNodes;
+    int32_t                           mMaxParallelism;
     int32_t                           mStopCount;
     // true if pending document loads have ever reached zero.
     int32_t                           mHaveProcessed;
@@ -82,9 +79,9 @@ private:
 //-----------------------------------------------------------------------------
 
 class nsPrefetchNode final : public nsIStreamListener
-                               , public nsIInterfaceRequestor
-                               , public nsIChannelEventSink
-                               , public nsIRedirectResultListener
+                           , public nsIInterfaceRequestor
+                           , public nsIChannelEventSink
+                           , public nsIRedirectResultListener
 {
 public:
     NS_DECL_ISUPPORTS
@@ -110,7 +107,7 @@ public:
 private:
     ~nsPrefetchNode() {}
 
-    nsRefPtr<nsPrefetchService> mService;
+    RefPtr<nsPrefetchService> mService;
     nsCOMPtr<nsIChannel>        mChannel;
     nsCOMPtr<nsIChannel>        mRedirectChannel;
     int64_t                     mBytesRead;

@@ -24,6 +24,10 @@ class ia2AccessibleRelation final : public IAccessibleRelation
 public:
   ia2AccessibleRelation(RelationType aType, Relation* aRel);
 
+  ia2AccessibleRelation(RelationType aType,
+                        nsTArray<RefPtr<Accessible>>&& aTargets) :
+    mType(aType), mTargets(Move(aTargets)) {}
+
   // IUnknown
   DECL_IUNKNOWN
 
@@ -55,7 +59,7 @@ private:
   ia2AccessibleRelation& operator = (const ia2AccessibleRelation&);
 
   RelationType mType;
-  nsTArray<nsRefPtr<Accessible> > mTargets;
+  nsTArray<RefPtr<Accessible> > mTargets;
 };
 
 

@@ -1,5 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -52,12 +52,12 @@ namespace {
 
 const char kPrefIndexedDBEnabled[] = "dom.indexedDB.enabled";
 
-} // anonymous namespace
+} // namespace
 
 class IDBFactory::BackgroundCreateCallback final
   : public nsIIPCBackgroundChildCreateCallback
 {
-  nsRefPtr<IDBFactory> mFactory;
+  RefPtr<IDBFactory> mFactory;
   LoggingInfo mLoggingInfo;
 
 public:
@@ -81,7 +81,7 @@ private:
 
 struct IDBFactory::PendingRequestInfo
 {
-  nsRefPtr<IDBOpenDBRequest> mRequest;
+  RefPtr<IDBOpenDBRequest> mRequest;
   FactoryRequestParams mParams;
 
   PendingRequestInfo(IDBOpenDBRequest* aRequest,
@@ -166,7 +166,7 @@ IDBFactory::CreateForWindow(nsPIDOMWindow* aWindow,
   nsCOMPtr<nsIWebNavigation> webNav = do_GetInterface(aWindow);
   nsCOMPtr<nsILoadContext> loadContext = do_QueryInterface(webNav);
 
-  nsRefPtr<IDBFactory> factory = new IDBFactory();
+  RefPtr<IDBFactory> factory = new IDBFactory();
   factory->mPrincipalInfo = Move(principalInfo);
   factory->mWindow = aWindow;
   factory->mTabChild = TabChild::GetFrom(aWindow);
@@ -180,18 +180,26 @@ IDBFactory::CreateForWindow(nsPIDOMWindow* aWindow,
 
 // static
 nsresult
-IDBFactory::CreateForChromeJS(JSContext* aCx,
-                              JS::Handle<JSObject*> aOwningObject,
-                              IDBFactory** aFactory)
+IDBFactory::CreateForMainThreadJS(JSContext* aCx,
+                                  JS::Handle<JSObject*> aOwningObject,
+                                  IDBFactory** aFactory)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(nsContentUtils::IsCallerChrome());
 
-  nsAutoPtr<PrincipalInfo> principalInfo(
-    new PrincipalInfo(SystemPrincipalInfo()));
+  nsAutoPtr<PrincipalInfo> principalInfo(new PrincipalInfo());
+  nsIPrincipal* principal = nsContentUtils::ObjectPrincipal(aOwningObject);
+  MOZ_ASSERT(principal);
+  bool isSystem;
+  if (!AllowedForPrincipal(principal, &isSystem)) {
+    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+  }
 
-  nsresult rv =
-    CreateForMainThreadJSInternal(aCx, aOwningObject, principalInfo, aFactory);
+  nsresult rv = PrincipalToPrincipalInfo(principal, principalInfo);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = CreateForMainThreadJSInternal(aCx, aOwningObject, principalInfo, aFactory);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -309,11 +317,12 @@ IDBFactory::CreateForJSInternal(JSContext* aCx,
   if (aPrincipalInfo->type() != PrincipalInfo::TContentPrincipalInfo &&
       aPrincipalInfo->type() != PrincipalInfo::TSystemPrincipalInfo) {
     NS_WARNING("IndexedDB not allowed for this principal!");
+    aPrincipalInfo = nullptr;
     *aFactory = nullptr;
     return NS_OK;
   }
 
-  nsRefPtr<IDBFactory> factory = new IDBFactory();
+  RefPtr<IDBFactory> factory = new IDBFactory();
   factory->mPrincipalInfo = aPrincipalInfo.forget();
   factory->mOwningObject = aOwningObject;
   mozilla::HoldJSObjects(factory.get());
@@ -353,8 +362,13 @@ IDBFactory::AllowedForWindowInternal(nsPIDOMWindow* aWindow,
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
-  nsIDocument* document = aWindow->GetExtantDoc();
-  if (document->GetSandboxFlags() & SANDBOXED_ORIGIN) {
+  nsContentUtils::StorageAccess access =
+    nsContentUtils::StorageAllowedForWindow(aWindow);
+
+  // the factory callsite records whether the browser is in private browsing.
+  // and thus we don't have to respect that setting here. IndexedDB has no
+  // concept of session-local storage, and thus ignores it.
+  if (access == nsContentUtils::StorageAccess::eDeny) {
     return NS_ERROR_DOM_SECURITY_ERR;
   }
 
@@ -364,6 +378,7 @@ IDBFactory::AllowedForWindowInternal(nsPIDOMWindow* aWindow,
   nsCOMPtr<nsIPrincipal> principal = sop->GetPrincipal();
   if (NS_WARN_IF(!principal)) {
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+
   }
 
   if (nsContentUtils::IsSystemPrincipal(principal)) {
@@ -371,20 +386,13 @@ IDBFactory::AllowedForWindowInternal(nsPIDOMWindow* aWindow,
     return NS_OK;
   }
 
-  bool isNullPrincipal;
-  if (NS_WARN_IF(NS_FAILED(principal->GetIsNullPrincipal(&isNullPrincipal))) ||
-      isNullPrincipal) {
-    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
-  }
-
-  // Whitelist about:home, since it doesn't have a base domain it would not
-  // pass the ThirdPartyUtil check, though it should be able to use indexedDB.
-  bool skipThirdPartyCheck = false;
-
+  // About URIs shouldn't be able to access IndexedDB unless they have the
+  // nsIAboutModule::ENABLE_INDEXED_DB flag set on them.
   nsCOMPtr<nsIURI> uri;
   MOZ_ALWAYS_TRUE(NS_SUCCEEDED(principal->GetURI(getter_AddRefs(uri))));
+  MOZ_ASSERT(uri);
 
-  bool isAbout;
+  bool isAbout = false;
   MOZ_ALWAYS_TRUE(NS_SUCCEEDED(uri->SchemeIs("about", &isAbout)));
 
   if (isAbout) {
@@ -392,35 +400,49 @@ IDBFactory::AllowedForWindowInternal(nsPIDOMWindow* aWindow,
     if (NS_SUCCEEDED(NS_GetAboutModule(uri, getter_AddRefs(module)))) {
       uint32_t flags;
       if (NS_SUCCEEDED(module->GetURIFlags(uri, &flags))) {
-        skipThirdPartyCheck = flags & nsIAboutModule::ENABLE_INDEXED_DB;
+        if (!(flags & nsIAboutModule::ENABLE_INDEXED_DB)) {
+          return NS_ERROR_DOM_NOT_SUPPORTED_ERR;
+        }
       } else {
-        NS_WARNING("GetURIFlags failed!");
+        return NS_ERROR_DOM_NOT_SUPPORTED_ERR;
       }
     } else {
-      NS_WARNING("NS_GetAboutModule failed!");
-    }
-  }
-
-  if (!skipThirdPartyCheck) {
-    nsCOMPtr<mozIThirdPartyUtil> thirdPartyUtil =
-      do_GetService(THIRDPARTYUTIL_CONTRACTID);
-    MOZ_ASSERT(thirdPartyUtil);
-
-    bool isThirdParty;
-    if (NS_WARN_IF(NS_FAILED(
-          thirdPartyUtil->IsThirdPartyWindow(aWindow,
-                                             nullptr,
-                                             &isThirdParty)))) {
-      return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
-    }
-
-    if (isThirdParty) {
       return NS_ERROR_DOM_NOT_SUPPORTED_ERR;
     }
   }
 
   principal.forget(aPrincipal);
   return NS_OK;
+}
+
+// static
+bool
+IDBFactory::AllowedForPrincipal(nsIPrincipal* aPrincipal,
+                                bool* aIsSystemPrincipal)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aPrincipal);
+
+  if (NS_WARN_IF(!IndexedDatabaseManager::GetOrCreate())) {
+    return false;
+  }
+
+  if (nsContentUtils::IsSystemPrincipal(aPrincipal)) {
+    if (aIsSystemPrincipal) {
+      *aIsSystemPrincipal = true;
+    }
+    return true;
+  } else if (aIsSystemPrincipal) {
+    *aIsSystemPrincipal = false;
+  }
+
+  bool isNullPrincipal;
+  if (NS_WARN_IF(NS_FAILED(aPrincipal->GetIsNullPrincipal(&isNullPrincipal))) ||
+      isNullPrincipal) {
+    return false;
+  }
+
+  return true;
 }
 
 #ifdef DEBUG
@@ -432,6 +454,13 @@ IDBFactory::AssertIsOnOwningThread() const
   MOZ_ASSERT(PR_GetCurrentThread() == mOwningThread);
 }
 
+PRThread*
+IDBFactory::OwningThread() const
+{
+  MOZ_ASSERT(mOwningThread);
+  return mOwningThread;
+}
+
 #endif // DEBUG
 
 bool
@@ -441,16 +470,6 @@ IDBFactory::IsChrome() const
   MOZ_ASSERT(mPrincipalInfo);
 
   return mPrincipalInfo->type() == PrincipalInfo::TSystemPrincipalInfo;
-}
-
-void
-IDBFactory::SetBackgroundActor(BackgroundFactoryChild* aBackgroundActor)
-{
-  AssertIsOnOwningThread();
-  MOZ_ASSERT(aBackgroundActor);
-  MOZ_ASSERT(!mBackgroundActor);
-
-  mBackgroundActor = aBackgroundActor;
 }
 
 void
@@ -628,7 +647,7 @@ IDBFactory::OpenInternal(nsIPrincipal* aPrincipal,
   uint64_t version = 0;
   if (!aDeleting && aVersion.WasPassed()) {
     if (aVersion.Value() < 1) {
-      aRv.ThrowTypeError(MSG_INVALID_VERSION);
+      aRv.ThrowTypeError<MSG_INVALID_VERSION>();
       return nullptr;
     }
     version = aVersion.Value();
@@ -665,8 +684,6 @@ IDBFactory::OpenInternal(nsIPrincipal* aPrincipal,
   }
 
   if (!mBackgroundActor && mPendingRequests.IsEmpty()) {
-    // We need to start the sequence to create a background actor for this
-    // thread.
     BackgroundChildImpl::ThreadLocal* threadLocal =
       BackgroundChildImpl::GetThreadLocalForCurrentThread();
 
@@ -686,12 +703,18 @@ IDBFactory::OpenInternal(nsIPrincipal* aPrincipal,
       newIDBThreadLocal = idbThreadLocal = new ThreadLocal(id);
     }
 
-    nsRefPtr<BackgroundCreateCallback> cb =
-      new BackgroundCreateCallback(this, idbThreadLocal->GetLoggingInfo());
-    if (NS_WARN_IF(!BackgroundChild::GetOrCreateForCurrentThread(cb))) {
-      IDB_REPORT_INTERNAL_ERR();
-      aRv.Throw(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-      return nullptr;
+    if (PBackgroundChild* actor = BackgroundChild::GetForCurrentThread()) {
+      BackgroundActorCreated(actor, idbThreadLocal->GetLoggingInfo());
+    } else {
+      // We need to start the sequence to create a background actor for this
+      // thread.
+      RefPtr<BackgroundCreateCallback> cb =
+        new BackgroundCreateCallback(this, idbThreadLocal->GetLoggingInfo());
+      if (NS_WARN_IF(!BackgroundChild::GetOrCreateForCurrentThread(cb))) {
+        IDB_REPORT_INTERNAL_ERR();
+        aRv.Throw(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+        return nullptr;
+      }
     }
 
     if (newIDBThreadLocal) {
@@ -706,7 +729,7 @@ IDBFactory::OpenInternal(nsIPrincipal* aPrincipal,
   }
 
   AutoJSAPI autoJS;
-  nsRefPtr<IDBOpenDBRequest> request;
+  RefPtr<IDBOpenDBRequest> request;
 
   if (mWindow) {
     AutoJSContext cx;
@@ -726,6 +749,11 @@ IDBFactory::OpenInternal(nsIPrincipal* aPrincipal,
     JS::Rooted<JSObject*> scriptOwner(autoJS.cx(), mOwningObject);
 
     request = IDBOpenDBRequest::CreateForJS(this, scriptOwner);
+    if (!request) {
+      MOZ_ASSERT(!NS_IsMainThread());
+      aRv.ThrowUncatchableException();
+      return nullptr;
+    }
   }
 
   MOZ_ASSERT(request);
@@ -899,9 +927,9 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(IDBFactory)
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 JSObject*
-IDBFactory::WrapObject(JSContext* aCx)
+IDBFactory::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return IDBFactoryBinding::Wrap(aCx, this);
+  return IDBFactoryBinding::Wrap(aCx, this, aGivenProto);
 }
 
 NS_IMPL_ISUPPORTS(IDBFactory::BackgroundCreateCallback,
@@ -913,7 +941,7 @@ IDBFactory::BackgroundCreateCallback::ActorCreated(PBackgroundChild* aActor)
   MOZ_ASSERT(aActor);
   MOZ_ASSERT(mFactory);
 
-  nsRefPtr<IDBFactory> factory;
+  RefPtr<IDBFactory> factory;
   mFactory.swap(factory);
 
   factory->BackgroundActorCreated(aActor, mLoggingInfo);
@@ -924,7 +952,7 @@ IDBFactory::BackgroundCreateCallback::ActorFailed()
 {
   MOZ_ASSERT(mFactory);
 
-  nsRefPtr<IDBFactory> factory;
+  RefPtr<IDBFactory> factory;
   mFactory.swap(factory);
 
   factory->BackgroundActorFailed();

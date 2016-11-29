@@ -37,7 +37,7 @@ assertEq(asmLink(asmCompile(USE_ASM + 'function f(){;} return f'))(), undefined)
 assertAsmTypeFail(USE_ASM + 'function f(i,j){;} return f');
 assertEq(asmLink(asmCompile('"use asm";; function f(){};;; return f;;'))(), undefined);
 assertAsmTypeFail(USE_ASM + 'function f(x){} return f');
-assertAsmTypeFail(USE_ASM + 'function f(){return; return 1} return f');
+assertAsmTypeFail(USE_ASM + 'function f(){if (0) return; return 1} return f');
 assertEq(asmLink(asmCompile(USE_ASM + 'function f(x){x=x|0} return f'))(42), undefined);
 assertEq(asmLink(asmCompile(USE_ASM + 'function f(x){x=x|0; return x|0} return f'))(42), 42);
 assertEq(asmLink(asmCompile(USE_ASM + 'function f(x){x=x|0; return x|0;;;} return f'))(42), 42);
@@ -131,6 +131,10 @@ assertTypeFailInEval('function f(global, {imports}) { "use asm"; function g() {}
 assertTypeFailInEval('function f(g = 2) { "use asm"; function g() {} return g }');
 assertTypeFailInEval('function *f() { "use asm"; function g() {} return g }');
 assertTypeFailInEval('f => { "use asm"; function g() {} return g }');
+assertTypeFailInEval('var f = { method() {"use asm"; return {}} }');
+assertAsmTypeFail(USE_ASM + 'return {m() {}};');
+assertTypeFailInEval('class f { constructor() {"use asm"; return {}} }');
+assertAsmTypeFail(USE_ASM + 'class c { constructor() {}}; return c;');
 
 assertAsmTypeFail(USE_ASM + 'function f(i) {i=i|0; (i for (x in [1,2,3])) } return f');
 assertAsmTypeFail(USE_ASM + 'function f(i) {i=i|0; [i for (x in [1,2,3])] } return f');

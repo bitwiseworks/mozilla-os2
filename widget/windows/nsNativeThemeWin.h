@@ -14,9 +14,7 @@
 #include "gfxTypes.h"
 #include <windows.h>
 #include "mozilla/TimeStamp.h"
-
-struct nsIntRect;
-struct nsIntSize;
+#include "nsSize.h"
 
 class nsNativeThemeWin : private nsNativeTheme,
                          public nsITheme {
@@ -52,7 +50,7 @@ public:
 
   NS_IMETHOD GetMinimumWidgetSize(nsPresContext* aPresContext, nsIFrame* aFrame,
                                   uint8_t aWidgetType,
-                                  nsIntSize* aResult,
+                                  mozilla::LayoutDeviceIntSize* aResult,
                                   bool* aIsOverridable);
 
   virtual Transparency GetWidgetTransparency(nsIFrame* aFrame, uint8_t aWidgetType);
@@ -103,13 +101,10 @@ protected:
                                nsIFrame* aFrame,
                                uint8_t aWidgetType,
                                nsIntMargin* aResult);
-  nsresult ClassicGetMinimumWidgetSize(nsPresContext* aPresContext, nsIFrame* aFrame,
-                                       uint8_t aWidgetType,
-                                       nsIntSize* aResult,
+  nsresult ClassicGetMinimumWidgetSize(nsIFrame* aFrame, uint8_t aWidgetType,
+                                       mozilla::LayoutDeviceIntSize* aResult,
                                        bool* aIsOverridable);
-  bool ClassicThemeSupportsWidget(nsPresContext* aPresContext, 
-                                  nsIFrame* aFrame,
-                                  uint8_t aWidgetType);
+  bool ClassicThemeSupportsWidget(nsIFrame* aFrame, uint8_t aWidgetType);
   void DrawCheckedRect(HDC hdc, const RECT& rc, int32_t fore, int32_t back,
                        HBRUSH defaultBack);
   uint32_t GetWidgetNativeDrawingFlags(uint8_t aWidgetType);

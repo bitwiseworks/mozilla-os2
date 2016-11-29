@@ -11,7 +11,13 @@ function rectangleContains(rect, x, y, width, height) {
     rect.height >= height;
 }
 
-let TESTS = [{
+function sanitizeMarkers(list) {
+  // Worker markers are currently gathered from all docshells, which may
+  // interfere with this test.
+  return list.filter(e => e.name != "Worker")
+}
+
+var TESTS = [{
   desc: "Changing the width of the test element",
   searchFor: "Paint",
   setup: function(docShell) {
@@ -19,6 +25,7 @@ let TESTS = [{
     div.setAttribute("class", "resize-change-color");
   },
   check: function(markers) {
+    markers = sanitizeMarkers(markers);
     ok(markers.length > 0, "markers were returned");
     console.log(markers);
     info(JSON.stringify(markers.filter(m => m.name == "Paint")));
@@ -40,6 +47,7 @@ let TESTS = [{
     div.setAttribute("class", "change-color");
   },
   check: function(markers) {
+    markers = sanitizeMarkers(markers);
     ok(markers.length > 0, "markers were returned");
     ok(!markers.some(m => m.name == "Reflow"), "markers doesn't include Reflow");
     ok(markers.some(m => m.name == "Paint"), "markers includes Paint");
@@ -59,6 +67,7 @@ let TESTS = [{
     div.setAttribute("class", "change-color add-class");
   },
   check: function(markers) {
+    markers = sanitizeMarkers(markers);
     ok(markers.length > 0, "markers were returned");
     ok(!markers.some(m => m.name == "Reflow"), "markers doesn't include Reflow");
     ok(!markers.some(m => m.name == "Paint"), "markers doesn't include Paint");
@@ -84,11 +93,40 @@ let TESTS = [{
     }, 100);
   },
   check: function(markers) {
+    markers = sanitizeMarkers(markers);
     is(markers.length, 2, "Got 2 markers");
     is(markers[0].name, "ConsoleTime", "Got first ConsoleTime marker");
     is(markers[0].causeName, "FOO", "Got ConsoleTime FOO detail");
     is(markers[1].name, "ConsoleTime", "Got second ConsoleTime marker");
     is(markers[1].causeName, "BAR", "Got ConsoleTime BAR detail");
+  }
+}, {
+  desc: "Timestamps created by console.timeStamp()",
+  searchFor: "Timestamp",
+  setup: function(docshell) {
+    content.console.timeStamp("rock");
+    let markers = docShell.popProfileTimelineMarkers();
+    is(markers.length, 1, "Got one marker");
+    is(markers[0].name, "TimeStamp", "Got Timestamp marker");
+    is(markers[0].causeName, "rock", "Got Timestamp label value");
+    content.console.timeStamp("paper");
+    content.console.timeStamp("scissors");
+    content.console.timeStamp();
+    content.console.timeStamp(undefined);
+  },
+  check: function (markers) {
+    markers = sanitizeMarkers(markers);
+    is(markers.length, 4, "Got 4 markers");
+    is(markers[0].name, "TimeStamp", "Got Timestamp marker");
+    is(markers[0].causeName, "paper", "Got Timestamp label value");
+    is(markers[1].name, "TimeStamp", "Got Timestamp marker");
+    is(markers[1].causeName, "scissors", "Got Timestamp label value");
+    is(markers[2].name, "TimeStamp", "Got empty Timestamp marker when no argument given");
+    is(markers[2].causeName, void 0, "Got empty Timestamp label value");
+    is(markers[3].name, "TimeStamp", "Got empty Timestamp marker when argument is undefined");
+    is(markers[3].causeName, void 0, "Got empty Timestamp label value");
+    markers.forEach(m => is(m.end, m.start,
+      "All Timestamp markers should have identical start/end times"));
   }
 }];
 

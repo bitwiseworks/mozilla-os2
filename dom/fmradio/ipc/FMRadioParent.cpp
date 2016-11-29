@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -49,7 +50,7 @@ FMRadioParent::RecvGetStatusInfo(StatusInfo* aStatusInfo)
 PFMRadioRequestParent*
 FMRadioParent::AllocPFMRadioRequestParent(const FMRadioRequestArgs& aArgs)
 {
-  nsRefPtr<FMRadioRequestParent> requestParent = new FMRadioRequestParent();
+  RefPtr<FMRadioRequestParent> requestParent = new FMRadioRequestParent();
 
   switch (aArgs.type()) {
     case FMRadioRequestArgs::TEnableRequestArgs:
@@ -97,41 +98,41 @@ FMRadioParent::Notify(const FMRadioEventType& aType)
 {
   switch (aType) {
     case FrequencyChanged:
-      unused << SendNotifyFrequencyChanged(
+      Unused << SendNotifyFrequencyChanged(
         IFMRadioService::Singleton()->GetFrequency());
       break;
     case EnabledChanged:
-      unused << SendNotifyEnabledChanged(
+      Unused << SendNotifyEnabledChanged(
         IFMRadioService::Singleton()->IsEnabled(),
         IFMRadioService::Singleton()->GetFrequency());
       break;
     case RDSEnabledChanged:
-      unused << SendNotifyRDSEnabledChanged(
+      Unused << SendNotifyRDSEnabledChanged(
         IFMRadioService::Singleton()->IsRDSEnabled());
       break;
     case PIChanged: {
       Nullable<unsigned short> pi =
         IFMRadioService::Singleton()->GetPi();
-      unused << SendNotifyPIChanged(!pi.IsNull(),
+      Unused << SendNotifyPIChanged(!pi.IsNull(),
                                     pi.IsNull() ? 0 : pi.Value());
       break;
     }
     case PTYChanged: {
       Nullable<uint8_t> pty = IFMRadioService::Singleton()->GetPty();
-      unused << SendNotifyPTYChanged(!pty.IsNull(),
+      Unused << SendNotifyPTYChanged(!pty.IsNull(),
                                      pty.IsNull() ? 0 : pty.Value());
       break;
     }
     case PSChanged: {
       nsAutoString psname;
       IFMRadioService::Singleton()->GetPs(psname);
-      unused << SendNotifyPSChanged(psname);
+      Unused << SendNotifyPSChanged(psname);
       break;
     }
     case RadiotextChanged: {
       nsAutoString radiotext;
       IFMRadioService::Singleton()->GetRt(radiotext);
-      unused << SendNotifyRadiotextChanged(radiotext);
+      Unused << SendNotifyRadiotextChanged(radiotext);
       break;
     }
     case NewRDSGroup: {
@@ -139,7 +140,7 @@ FMRadioParent::Notify(const FMRadioEventType& aType)
       DebugOnly<bool> rdsgroupset =
         IFMRadioService::Singleton()->GetRdsgroup(group);
       MOZ_ASSERT(rdsgroupset);
-      unused << SendNotifyNewRDSGroup(group);
+      Unused << SendNotifyNewRDSGroup(group);
       break;
     }
     default:

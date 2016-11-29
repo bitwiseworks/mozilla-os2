@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -70,7 +71,7 @@ public:
   using dom::EventTarget::RemoveEventListener;
   virtual void AddEventListener(const nsAString& aType,
                                 dom::EventListener* aListener,
-                                bool aCapture,
+                                const dom::AddEventListenerOptionsOrBoolean& aOptions,
                                 const dom::Nullable<bool>& aWantsUntrusted,
                                 ErrorResult& aRv) override;
 
@@ -120,7 +121,7 @@ public:
                        JSContext* aCx,
                        JS::Value* aValue);
   using dom::EventTarget::GetEventHandler;
-  virtual nsIDOMWindow* GetOwnerGlobal() override
+  virtual nsIDOMWindow* GetOwnerGlobalForBindings() override
   {
     return nsPIDOMWindow::GetOuterFromCurrentInner(GetOwner());
   }
@@ -139,7 +140,12 @@ public:
   void BindToOwner(nsPIDOMWindow* aOwner);
   void BindToOwner(DOMEventTargetHelper* aOther);
   virtual void DisconnectFromOwner();                   
-  nsIGlobalObject* GetParentObject() const {
+  nsIGlobalObject* GetParentObject() const
+  {
+    return GetOwnerGlobal();
+  }
+  virtual nsIGlobalObject* GetOwnerGlobal() const override
+  {
     nsCOMPtr<nsIGlobalObject> parentObject = do_QueryReferent(mParentObject);
     return parentObject;
   }
@@ -161,7 +167,15 @@ protected:
 
   nsresult WantsUntrusted(bool* aRetVal);
 
-  nsRefPtr<EventListenerManager> mListenerManager;
+  // If this method returns true your object is kept alive until it returns
+  // false. You can use this method instead using
+  // NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_BEGIN macro.
+  virtual bool IsCertainlyAliveForCC() const
+  {
+    return false;
+  }
+
+  RefPtr<EventListenerManager> mListenerManager;
   // Make |event| trusted and dispatch |aEvent| to |this|.
   nsresult DispatchTrustedEvent(nsIDOMEvent* aEvent);
 
@@ -281,11 +295,11 @@ NS_DEFINE_STATIC_IID_ACCESSOR(DOMEventTargetHelper,
   using _class::RemoveEventListener;                \
   NS_FORWARD_NSIDOMEVENTTARGET(_class::)            \
   virtual mozilla::EventListenerManager*            \
-  GetOrCreateListenerManager() override {       \
+  GetOrCreateListenerManager() override {           \
     return _class::GetOrCreateListenerManager();    \
   }                                                 \
   virtual mozilla::EventListenerManager*            \
-  GetExistingListenerManager() const override { \
+  GetExistingListenerManager() const override {     \
     return _class::GetExistingListenerManager();    \
   }
 

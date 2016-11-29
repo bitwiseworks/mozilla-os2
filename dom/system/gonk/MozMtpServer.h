@@ -16,12 +16,6 @@
 #include "nsCOMPtr.h"
 #include "nsIThread.h"
 
-namespace mozilla {
-namespace system {
-  class Volume;
-}
-}
-
 BEGIN_MTP_NAMESPACE
 using namespace android;
 
@@ -35,6 +29,9 @@ public:
     : MtpServer(aFd, aDatabase, aPtp, aFileGroup, aFilePerm, aDirectoryPerm)
   {
   }
+
+protected:
+  virtual ~RefCountedMtpServer() {}
 };
 
 class MozMtpServer
@@ -48,9 +45,12 @@ public:
   already_AddRefed<RefCountedMtpServer> GetMtpServer();
   already_AddRefed<MozMtpDatabase> GetMozMtpDatabase();
 
+protected:
+  virtual ~MozMtpServer() {}
+
 private:
-  nsRefPtr<RefCountedMtpServer> mMtpServer;
-  nsRefPtr<MozMtpDatabase> mMozMtpDatabase;
+  RefPtr<RefCountedMtpServer> mMtpServer;
+  RefPtr<MozMtpDatabase> mMozMtpDatabase;
   nsCOMPtr<nsIThread> mServerThread;
   ScopedClose mMtpUsbFd;
 };

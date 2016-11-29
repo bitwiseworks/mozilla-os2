@@ -1,5 +1,3 @@
-/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set shiftwidth=2 tabstop=2 autoindent cindent expandtab: */
 /* Copyright 2012 Mozilla Foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -63,16 +61,9 @@ function getContainingBrowser(domWindow) {
                   .chromeEventHandler;
 }
 
-function getChromeWindow(domWindow) {
-  if (PdfjsContentUtils.isRemote) {
-    return PdfjsContentUtils.getChromeWindow(domWindow);
-  }
-  return getContainingBrowser(domWindow).ownerDocument.defaultView;
-}
-
 function getFindBar(domWindow) {
   if (PdfjsContentUtils.isRemote) {
-    return PdfjsContentUtils.getFindBar(domWindow);
+    throw new Error('FindBar is not accessible from the content process.');
   }
   var browser = getContainingBrowser(domWindow);
   try {
@@ -163,6 +154,19 @@ function makeContentReadable(obj, window) {
   return Cu.cloneInto(obj, window);
 }
 
+function createNewChannel(uri, node, principal) {
+  return NetUtil.newChannel({
+    uri: uri,
+    loadingNode: node,
+    loadingPrincipal: principal,
+    contentPolicyType: Ci.nsIContentPolicy.TYPE_OTHER,
+  });
+}
+
+function asyncFetchChannel(channel, callback) {
+  return NetUtil.asyncFetch(channel, callback);
+}
+
 // PDF data storage
 function PdfDataListener(length) {
   this.length = length; // less than 0, if length is unknown
@@ -241,15 +245,16 @@ ChromeActions.prototype = {
   download: function(data, sendResponse) {
     var self = this;
     var originalUrl = data.originalUrl;
+    var blobUrl = data.blobUrl || originalUrl;
     // The data may not be downloaded so we need just retry getting the pdf with
     // the original url.
-    var originalUri = NetUtil.newURI(data.originalUrl);
+    var originalUri = NetUtil.newURI(originalUrl);
     var filename = data.filename;
     if (typeof filename !== 'string' ||
         (!/\.pdf$/i.test(filename) && !data.isAttachment)) {
       filename = 'document.pdf';
     }
-    var blobUri = data.blobUrl ? NetUtil.newURI(data.blobUrl) : originalUri;
+    var blobUri = NetUtil.newURI(blobUrl);
     var extHelperAppSvc =
           Cc['@mozilla.org/uriloader/external-helper-app-service;1'].
              getService(Ci.nsIExternalHelperAppService);
@@ -257,12 +262,12 @@ ChromeActions.prototype = {
                          getService(Ci.nsIWindowWatcher).activeWindow;
 
     var docIsPrivate = this.isInPrivateBrowsing();
-    var netChannel = NetUtil.newChannel(blobUri);
+    var netChannel = createNewChannel(blobUri, frontWindow.document, null);
     if ('nsIPrivateBrowsingChannel' in Ci &&
         netChannel instanceof Ci.nsIPrivateBrowsingChannel) {
       netChannel.setPrivate(docIsPrivate);
     }
-    NetUtil.asyncFetch(netChannel, function(aInputStream, aResult) {
+    asyncFetchChannel(netChannel, function(aInputStream, aResult) {
       if (!Components.isSuccessCode(aResult)) {
         if (sendResponse) {
           sendResponse(true);
@@ -339,7 +344,13 @@ ChromeActions.prototype = {
     if (this.domWindow.frameElement !== null) {
       return false;
     }
-    // ... and when the new find events code exists.
+
+    // ... and we are in a child process
+    if (PdfjsContentUtils.isRemote) {
+      return true;
+    }
+
+    // ... or when the new find events code exists.
     var findBar = getFindBar(this.domWindow);
     return findBar && ('updateControlState' in findBar);
   },
@@ -354,6 +365,12 @@ ChromeActions.prototype = {
       return false;
     }
     return true;
+  },
+  supportedMouseWheelZoomModifierKeys: function() {
+    return {
+      ctrlKey: getIntPref('mousewheel.with_control.action', 3) === 3,
+      metaKey: getIntPref('mousewheel.with_meta.action', 1) === 3,
+    };
   },
   reportTelemetry: function (data) {
     var probeInfo = JSON.parse(data);
@@ -425,9 +442,23 @@ ChromeActions.prototype = {
       message = getLocalizedString(strings, 'unsupported_feature');
     }
     PdfJsTelemetry.onFallback();
-    PdfjsContentUtils.displayWarning(domWindow, message, sendResponse,
+    PdfjsContentUtils.displayWarning(domWindow, message,
       getLocalizedString(strings, 'open_with_different_viewer'),
       getLocalizedString(strings, 'open_with_different_viewer', 'accessKey'));
+
+    let winmm = domWindow.QueryInterface(Ci.nsIInterfaceRequestor)
+                         .getInterface(Ci.nsIDocShell)
+                         .QueryInterface(Ci.nsIInterfaceRequestor)
+                         .getInterface(Ci.nsIContentFrameMessageManager);
+
+    winmm.addMessageListener('PDFJS:Child:fallbackDownload',
+      function fallbackDownload(msg) {
+        let data = msg.data;
+        sendResponse(data.download);
+
+        winmm.removeMessageListener('PDFJS:Child:fallbackDownload',
+                                    fallbackDownload);
+      });
   },
   updateFindControlState: function(data) {
     if (!this.supportsIntegratedFind()) {
@@ -441,7 +472,13 @@ ChromeActions.prototype = {
         (findPreviousType !== 'undefined' && findPreviousType !== 'boolean')) {
       return;
     }
-    getFindBar(this.domWindow).updateControlState(result, findPrevious);
+
+    var winmm = this.domWindow.QueryInterface(Ci.nsIInterfaceRequestor)
+                              .getInterface(Ci.nsIDocShell)
+                              .QueryInterface(Ci.nsIInterfaceRequestor)
+                              .getInterface(Ci.nsIContentFrameMessageManager);
+
+    winmm.sendAsyncMessage('PDFJS:Parent:updateControlState', data);
   },
   setPreferences: function(prefs, sendResponse) {
     var defaultBranch = Services.prefs.getDefaultBranch(PREF_PREFIX + '.');
@@ -574,8 +611,8 @@ var RangedChromeActions = (function RangedChromeActionsClosure() {
     // If we are in range request mode, this means we manually issued xhr
     // requests, which we need to abort when we leave the page
     domWindow.addEventListener('unload', function unload(e) {
-      self.networkManager.abortAllRequests();
       domWindow.removeEventListener(e.type, unload);
+      self.abortLoading();
     });
   }
 
@@ -603,7 +640,7 @@ var RangedChromeActions = (function RangedChromeActionsClosure() {
         }, '*');
       };
       this.dataListener.oncomplete = function () {
-        delete self.dataListener;
+        self.dataListener = null;
       };
     }
 
@@ -647,6 +684,15 @@ var RangedChromeActions = (function RangedChromeActionsClosure() {
     });
   };
 
+  proto.abortLoading = function RangedChromeActions_abortLoading() {
+    this.networkManager.abortAllRequests();
+    if (this.originalRequest) {
+      this.originalRequest.cancel(Cr.NS_BINDING_ABORTED);
+      this.originalRequest = null;
+    }
+    this.dataListener = null;
+  };
+
   return RangedChromeActions;
 })();
 
@@ -656,9 +702,10 @@ var StandardChromeActions = (function StandardChromeActionsClosure() {
    * This is for a single network stream
    */
   function StandardChromeActions(domWindow, contentDispositionFilename,
-                                 dataListener) {
+                                 originalRequest, dataListener) {
 
     ChromeActions.call(this, domWindow, contentDispositionFilename);
+    this.originalRequest = originalRequest;
     this.dataListener = dataListener;
   }
 
@@ -684,18 +731,27 @@ var StandardChromeActions = (function StandardChromeActionsClosure() {
       }, '*');
     };
 
-    this.dataListener.oncomplete = function ChromeActions_dataListenerComplete(
-                                      data, errorCode) {
+    this.dataListener.oncomplete =
+        function StandardChromeActions_dataListenerComplete(data, errorCode) {
       self.domWindow.postMessage({
         pdfjsLoadAction: 'complete',
         data: data,
         errorCode: errorCode
       }, '*');
 
-      delete self.dataListener;
+      self.dataListener = null;
+      self.originalRequest = null;
     };
 
     return true;
+  };
+
+  proto.abortLoading = function StandardChromeActions_abortLoading() {
+    if (this.originalRequest) {
+      this.originalRequest.cancel(Cr.NS_BINDING_ABORTED);
+      this.originalRequest = null;
+    }
+    this.dataListener = null;
   };
 
   return StandardChromeActions;
@@ -720,7 +776,7 @@ RequestListener.prototype.receive = function(event) {
   var response;
   if (sync) {
     response = actions[action].call(this.actions, data);
-    event.detail.response = response;
+    event.detail.response = makeContentReadable(response, doc.defaultView);
   } else {
     if (!event.detail.responseExpected) {
       doc.documentElement.removeChild(message);
@@ -746,14 +802,12 @@ RequestListener.prototype.receive = function(event) {
 
 // Forwards events from the eventElement to the contentWindow only if the
 // content window matches the currently selected browser window.
-function FindEventManager(eventElement, contentWindow, chromeWindow) {
-  this.types = ['find',
-                'findagain',
-                'findhighlightallchange',
-                'findcasesensitivitychange'];
-  this.chromeWindow = chromeWindow;
+function FindEventManager(contentWindow) {
   this.contentWindow = contentWindow;
-  this.eventElement = eventElement;
+  this.winmm = contentWindow.QueryInterface(Ci.nsIInterfaceRequestor)
+                            .getInterface(Ci.nsIDocShell)
+                            .QueryInterface(Ci.nsIInterfaceRequestor)
+                            .getInterface(Ci.nsIContentFrameMessageManager);
 }
 
 FindEventManager.prototype.bind = function() {
@@ -763,41 +817,27 @@ FindEventManager.prototype.bind = function() {
   }.bind(this);
   this.contentWindow.addEventListener('unload', unload);
 
-  for (var i = 0; i < this.types.length; i++) {
-    var type = this.types[i];
-    this.eventElement.addEventListener(type, this, true);
-  }
+  // We cannot directly attach listeners to for the find events
+  // since the FindBar is in the parent process. Instead we're
+  // asking the PdfjsChromeUtils to do it for us and forward
+  // all the find events to us.
+  this.winmm.sendAsyncMessage('PDFJS:Parent:addEventListener');
+  this.winmm.addMessageListener('PDFJS:Child:handleEvent', this);
 };
 
-FindEventManager.prototype.handleEvent = function(e) {
-  var chromeWindow = this.chromeWindow;
+FindEventManager.prototype.receiveMessage = function(msg) {
+  var detail = msg.data.detail;
+  var type = msg.data.type;
   var contentWindow = this.contentWindow;
-  // Only forward the events if they are for our dom window.
-  if (chromeWindow.gBrowser.selectedBrowser.contentWindow === contentWindow) {
-    var detail = {
-      query: e.detail.query,
-      caseSensitive: e.detail.caseSensitive,
-      highlightAll: e.detail.highlightAll,
-      findPrevious: e.detail.findPrevious
-    };
-    detail = makeContentReadable(detail, contentWindow);
-    var forward = contentWindow.document.createEvent('CustomEvent');
-    forward.initCustomEvent(e.type, true, true, detail);
-    // Due to restrictions with cpow use, we can't dispatch
-    // dom events with an urgent message on the stack. So bounce
-    // this off the main thread to make it async. 
-    Services.tm.mainThread.dispatch(function () {
-      contentWindow.dispatchEvent(forward);
-    }, Ci.nsIThread.DISPATCH_NORMAL);
-    e.preventDefault();
-  }
+
+  detail = makeContentReadable(detail, contentWindow);
+  var forward = contentWindow.document.createEvent('CustomEvent');
+  forward.initCustomEvent(type, true, true, detail);
+  contentWindow.dispatchEvent(forward);
 };
 
 FindEventManager.prototype.unbind = function() {
-  for (var i = 0; i < this.types.length; i++) {
-    var type = this.types[i];
-    this.eventElement.removeEventListener(type, this, true);
-  }
+  this.winmm.sendAsyncMessage('PDFJS:Parent:removeEventListener');
 };
 
 function PdfStreamConverter() {
@@ -925,9 +965,8 @@ PdfStreamConverter.prototype = {
                         .createInstance(Ci.nsIBinaryInputStream);
 
     // Create a new channel that is viewer loaded as a resource.
-    var ioService = Services.io;
-    var channel = ioService.newChannel(
-                    PDF_VIEWER_WEB_PAGE, null, null);
+    var systemPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
+    var channel = createNewChannel(PDF_VIEWER_WEB_PAGE, null, systemPrincipal);
 
     var listener = this.listener;
     var dataListener = this.dataListener;
@@ -953,18 +992,14 @@ PdfStreamConverter.prototype = {
             rangeRequest, streamRequest, dataListener);
         } else {
           actions = new StandardChromeActions(
-            domWindow, contentDispositionFilename, dataListener);
+            domWindow, contentDispositionFilename, aRequest, dataListener);
         }
         var requestListener = new RequestListener(actions);
         domWindow.addEventListener(PDFJS_EVENT_ID, function(event) {
           requestListener.receive(event);
         }, false, true);
         if (actions.supportsIntegratedFind()) {
-          var chromeWindow = getChromeWindow(domWindow);
-          var findBar = getFindBar(domWindow);
-          var findEventManager = new FindEventManager(findBar,
-                                                      domWindow,
-                                                      chromeWindow);
+          var findEventManager = new FindEventManager(domWindow);
           findEventManager.bind();
         }
         listener.onStopRequest(aRequest, context, statusCode);
@@ -983,14 +1018,11 @@ PdfStreamConverter.prototype = {
 
     // We can use resource principal when data is fetched by the chrome
     // e.g. useful for NoScript
-    var securityManager = Cc['@mozilla.org/scriptsecuritymanager;1']
-                          .getService(Ci.nsIScriptSecurityManager);
-    var uri = ioService.newURI(PDF_VIEWER_WEB_PAGE, null, null);
-    // FF16 and below had getCodebasePrincipal, it was replaced by
-    // getNoAppCodebasePrincipal (bug 758258).
-    var resourcePrincipal = 'getNoAppCodebasePrincipal' in securityManager ?
-                            securityManager.getNoAppCodebasePrincipal(uri) :
-                            securityManager.getCodebasePrincipal(uri);
+    var ssm = Cc['@mozilla.org/scriptsecuritymanager;1']
+                .getService(Ci.nsIScriptSecurityManager);
+    var uri = NetUtil.newURI(PDF_VIEWER_WEB_PAGE, null, null);
+    var resourcePrincipal;
+    resourcePrincipal = ssm.createCodebasePrincipal(uri, {});
     aRequest.owner = resourcePrincipal;
     channel.asyncOpen(proxy, aContext);
   },

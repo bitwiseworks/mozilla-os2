@@ -195,11 +195,9 @@ nsWindowMediator::GetEnumerator(const char16_t* inType, nsISimpleEnumerator** ou
   NS_ENSURE_ARG_POINTER(outEnumerator);
   NS_ENSURE_STATE(mReady);
 
-  nsAppShellWindowEnumerator *enumerator = new nsASDOMWindowEarlyToLateEnumerator(inType, *this);
-  if (enumerator)
-    return enumerator->QueryInterface(NS_GET_IID(nsISimpleEnumerator) , (void**)outEnumerator);
-
-  return NS_ERROR_OUT_OF_MEMORY;
+  RefPtr<nsAppShellWindowEnumerator> enumerator = new nsASDOMWindowEarlyToLateEnumerator(inType, *this);
+  enumerator.forget(outEnumerator);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -209,11 +207,9 @@ nsWindowMediator::GetXULWindowEnumerator(const char16_t* inType, nsISimpleEnumer
   NS_ENSURE_ARG_POINTER(outEnumerator);
   NS_ENSURE_STATE(mReady);
 
-  nsAppShellWindowEnumerator *enumerator = new nsASXULWindowEarlyToLateEnumerator(inType, *this);
-  if (enumerator)
-    return enumerator->QueryInterface(NS_GET_IID(nsISimpleEnumerator) , (void**)outEnumerator);
-
-  return NS_ERROR_OUT_OF_MEMORY;
+  RefPtr<nsAppShellWindowEnumerator> enumerator = new nsASXULWindowEarlyToLateEnumerator(inType, *this);
+  enumerator.forget(outEnumerator);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -225,15 +221,14 @@ nsWindowMediator::GetZOrderDOMWindowEnumerator(
   NS_ENSURE_ARG_POINTER(_retval);
   NS_ENSURE_STATE(mReady);
 
-  nsAppShellWindowEnumerator *enumerator;
+  RefPtr<nsAppShellWindowEnumerator> enumerator;
   if (aFrontToBack)
     enumerator = new nsASDOMWindowFrontToBackEnumerator(aWindowType, *this);
   else
     enumerator = new nsASDOMWindowBackToFrontEnumerator(aWindowType, *this);
-  if (enumerator)
-    return CallQueryInterface(enumerator, _retval);
 
-  return NS_ERROR_OUT_OF_MEMORY;
+  enumerator.forget(_retval);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -245,15 +240,14 @@ nsWindowMediator::GetZOrderXULWindowEnumerator(
   NS_ENSURE_ARG_POINTER(_retval);
   NS_ENSURE_STATE(mReady);
 
-  nsAppShellWindowEnumerator *enumerator;
+  RefPtr<nsAppShellWindowEnumerator> enumerator;
   if (aFrontToBack)
     enumerator = new nsASXULWindowFrontToBackEnumerator(aWindowType, *this);
   else
     enumerator = new nsASXULWindowBackToFrontEnumerator(aWindowType, *this);
-  if (enumerator)
-    return CallQueryInterface(enumerator, _retval);
 
-  return NS_ERROR_OUT_OF_MEMORY;
+  enumerator.forget(_retval);
+  return NS_OK;
 }
 
 int32_t
@@ -281,7 +275,7 @@ nsWindowMediator::GetMostRecentWindow(const char16_t* inType, nsIDOMWindow** out
 
   // Find the most window with the highest time stamp that matches
   // the requested type
-  nsWindowInfo *info = MostRecentWindowInfo(inType);
+  nsWindowInfo* info = MostRecentWindowInfo(inType, false);
   if (info && info->mWindow) {
     nsCOMPtr<nsIDOMWindow> DOMWindow;
     if (NS_SUCCEEDED(GetDOMWindow(info->mWindow, DOMWindow))) {  
@@ -295,31 +289,70 @@ nsWindowMediator::GetMostRecentWindow(const char16_t* inType, nsIDOMWindow** out
   return NS_OK;
 }
 
+NS_IMETHODIMP
+nsWindowMediator::GetMostRecentNonPBWindow(const char16_t* aType, nsIDOMWindow** aWindow)
+{
+  MOZ_RELEASE_ASSERT(NS_IsMainThread());
+  NS_ENSURE_ARG_POINTER(aWindow);
+  *aWindow = nullptr;
+
+  nsWindowInfo *info = MostRecentWindowInfo(aType, true);
+  nsCOMPtr<nsIDOMWindow> domWindow;
+  if (info && info->mWindow) {
+    GetDOMWindow(info->mWindow, domWindow);
+  }
+
+  if (!domWindow) {
+    return NS_ERROR_FAILURE;
+  }
+
+  domWindow.forget(aWindow);
+  return NS_OK;
+}
+
 nsWindowInfo*
-nsWindowMediator::MostRecentWindowInfo(const char16_t* inType)
+nsWindowMediator::MostRecentWindowInfo(const char16_t* inType,
+                                       bool aSkipPrivateBrowsingOrClosed)
 {
   int32_t       lastTimeStamp = -1;
   nsAutoString  typeString(inType);
   bool          allWindows = !inType || typeString.IsEmpty();
 
-  // Find the most window with the highest time stamp that matches
-  // the requested type
-  nsWindowInfo *searchInfo,
-               *listEnd,
-               *foundInfo = nullptr;
-
-  searchInfo = mOldestWindow;
-  listEnd = nullptr;
-  while (searchInfo != listEnd) {
-    if ((allWindows || searchInfo->TypeEquals(typeString)) &&
-        searchInfo->mTimeStamp >= lastTimeStamp) {
-
-      foundInfo = searchInfo;
-      lastTimeStamp = searchInfo->mTimeStamp;
-    }
-    searchInfo = searchInfo->mYounger;
+  // Find the most recent window with the highest time stamp that matches
+  // the requested type and has the correct browsing mode.
+  nsWindowInfo* searchInfo = mOldestWindow;
+  nsWindowInfo* listEnd = nullptr;
+  nsWindowInfo* foundInfo = nullptr;
+  for (; searchInfo != listEnd; searchInfo = searchInfo->mYounger) {
     listEnd = mOldestWindow;
+
+    if (!allWindows && !searchInfo->TypeEquals(typeString)) {
+      continue;
+    }
+    if (searchInfo->mTimeStamp < lastTimeStamp) {
+      continue;
+    }
+    if (!searchInfo->mWindow) {
+      continue;
+    }
+    if (aSkipPrivateBrowsingOrClosed) {
+      nsCOMPtr<nsIDocShell> docShell;
+      searchInfo->mWindow->GetDocShell(getter_AddRefs(docShell));
+      nsCOMPtr<nsILoadContext> loadContext = do_QueryInterface(docShell);
+      if (!loadContext || loadContext->UsePrivateBrowsing()) {
+        continue;
+      }
+
+      nsCOMPtr<nsPIDOMWindow> piwindow = do_QueryInterface(docShell->GetWindow());
+      if (!piwindow || piwindow->Closed()) {
+        continue;
+      }
+    }
+
+    foundInfo = searchInfo;
+    lastTimeStamp = searchInfo->mTimeStamp;
   }
+
   return foundInfo;
 }
 
@@ -747,6 +780,7 @@ nsWindowMediator::SortZOrderBackToFront()
 }
 
 NS_IMPL_ISUPPORTS(nsWindowMediator,
+  nsIWindowMediator_44,
   nsIWindowMediator,
   nsIObserver,
   nsISupportsWeakReference)

@@ -31,7 +31,7 @@ VsyncSource::RemoveCompositorVsyncDispatcher(CompositorVsyncDispatcher* aComposi
   GetGlobalDisplay().RemoveCompositorVsyncDispatcher(aCompositorVsyncDispatcher);
 }
 
-nsRefPtr<RefreshTimerVsyncDispatcher>
+RefPtr<RefreshTimerVsyncDispatcher>
 VsyncSource::GetRefreshTimerVsyncDispatcher()
 {
   MOZ_ASSERT(XRE_IsParentProcess());
@@ -66,6 +66,13 @@ VsyncSource::Display::NotifyVsync(TimeStamp aVsyncTimestamp)
   }
 
   mRefreshTimerVsyncDispatcher->NotifyVsync(aVsyncTimestamp);
+}
+
+TimeDuration
+VsyncSource::Display::GetVsyncRate()
+{
+  // If hardware queries fail / are unsupported, we have to just guess.
+  return TimeDuration::FromMilliseconds(1000.0 / 60.0);
 }
 
 void
@@ -124,9 +131,13 @@ VsyncSource::Display::UpdateVsyncStatus()
   } else {
     DisableVsync();
   }
+
+  if (IsVsyncEnabled() != enableVsync) {
+    NS_WARNING("Vsync status did not change.");
+  }
 }
 
-nsRefPtr<RefreshTimerVsyncDispatcher>
+RefPtr<RefreshTimerVsyncDispatcher>
 VsyncSource::Display::GetRefreshTimerVsyncDispatcher()
 {
   return mRefreshTimerVsyncDispatcher;

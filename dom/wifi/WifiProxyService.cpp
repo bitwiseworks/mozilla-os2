@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -65,9 +67,6 @@ public:
   NS_IMETHOD Run()
   {
     MOZ_ASSERT(!NS_IsMainThread());
-#ifdef MOZ_NUWA_PROCESS
-    NS_SetIgnoreStatusOfCurrentThread();
-#endif
     nsAutoString event;
     gWpaSupplicant->WaitForEvent(event, mInterface);
     if (!event.IsEmpty()) {
@@ -151,7 +150,7 @@ WifiProxyService::~WifiProxyService()
 already_AddRefed<WifiProxyService>
 WifiProxyService::FactoryCreate()
 {
-  if (XRE_GetProcessType() != GeckoProcessType_Default) {
+  if (!XRE_IsParentProcess()) {
     return nullptr;
   }
 
@@ -165,7 +164,7 @@ WifiProxyService::FactoryCreate()
     ClearOnShutdown(&gWpaSupplicant);
   }
 
-  nsRefPtr<WifiProxyService> service = gWifiProxyService.get();
+  RefPtr<WifiProxyService> service = gWifiProxyService.get();
   return service.forget();
 }
 
@@ -249,6 +248,10 @@ WifiProxyService::SendCommand(JS::Handle<JS::Value> aOptions,
     return NS_ERROR_FAILURE;
   }
 
+  if (!mControlThread) {
+    return NS_ERROR_FAILURE;
+  }
+
   // Dispatch the command to the control thread.
   CommandOptions commandOptions(options);
   nsCOMPtr<nsIRunnable> runnable = new ControlRunnable(commandOptions, aInterface);
@@ -294,8 +297,10 @@ WifiProxyService::DispatchWifiResult(const WifiResultOptions& aOptions, const ns
     return;
   }
 
-  // Call the listener with a JS value.
-  mListener->OnCommand(val, aInterface);
+  if (mListener) {
+    // Call the listener with a JS value.
+    mListener->OnCommand(val, aInterface);
+  }
 }
 
 void

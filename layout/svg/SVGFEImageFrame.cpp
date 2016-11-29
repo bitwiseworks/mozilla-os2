@@ -94,7 +94,7 @@ SVGFEImageFrame::Init(nsIContent*       aContent,
                       nsContainerFrame* aParent,
                       nsIFrame*         aPrevInFlow)
 {
-  NS_ASSERTION(aContent->IsSVG(nsGkAtoms::feImage),
+  NS_ASSERTION(aContent->IsSVGElement(nsGkAtoms::feImage),
                "Trying to construct an SVGFEImageFrame for a "
                "content element that doesn't support the right interfaces");
 
@@ -130,12 +130,6 @@ SVGFEImageFrame::AttributeChanged(int32_t  aNameSpaceID,
   }
   if (aNameSpaceID == kNameSpaceID_XLink &&
       aAttribute == nsGkAtoms::href) {
-
-    // Prevent setting image.src by exiting early
-    if (nsContentUtils::IsImageSrcSetDisabled()) {
-      return NS_OK;
-    }
-
     if (element->mStringAttributes[SVGFEImageElement::HREF].IsExplicitlySet()) {
       element->LoadSVGImage(true, true);
     } else {

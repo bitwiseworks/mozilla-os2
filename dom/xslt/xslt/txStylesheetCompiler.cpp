@@ -85,8 +85,6 @@ txStylesheetCompiler::startElement(int32_t aNamespaceID, nsIAtom* aLocalName,
             if (!hasOwnNamespaceMap) {
                 mElementContext->mMappings =
                     new txNamespaceMap(*mElementContext->mMappings);
-                NS_ENSURE_TRUE(mElementContext->mMappings,
-                               NS_ERROR_OUT_OF_MEMORY);
                 hasOwnNamespaceMap = true;
             }
 
@@ -121,7 +119,6 @@ txStylesheetCompiler::startElement(const char16_t *aName,
     nsAutoArrayPtr<txStylesheetAttr> atts;
     if (aAttrCount > 0) {
         atts = new txStylesheetAttr[aAttrCount];
-        NS_ENSURE_TRUE(atts, NS_ERROR_OUT_OF_MEMORY);
     }
 
     bool hasOwnNamespaceMap = false;
@@ -149,8 +146,6 @@ txStylesheetCompiler::startElement(const char16_t *aName,
             if (!hasOwnNamespaceMap) {
                 mElementContext->mMappings =
                     new txNamespaceMap(*mElementContext->mMappings);
-                NS_ENSURE_TRUE(mElementContext->mMappings,
-                               NS_ERROR_OUT_OF_MEMORY);
                 hasOwnNamespaceMap = true;
             }
 
@@ -336,8 +331,6 @@ txStylesheetCompiler::endElement()
         txInScopeVariable* var = mInScopeVariables[i];
         if (!--(var->mLevel)) {
             nsAutoPtr<txInstruction> instr(new txRemoveVariable(var->mName));
-            NS_ENSURE_TRUE(instr, NS_ERROR_OUT_OF_MEMORY);
-
             rv = addInstruction(Move(instr));
             NS_ENSURE_SUCCESS(rv, rv);
             
@@ -377,7 +370,7 @@ txStylesheetCompiler::characters(const nsAString& aStr)
 nsresult
 txStylesheetCompiler::doneLoading()
 {
-    PR_LOG(txLog::xslt, PR_LOG_ALWAYS,
+    MOZ_LOG(txLog::xslt, LogLevel::Info,
            ("Compiler::doneLoading: %s\n",
             NS_LossyConvertUTF16toASCII(mStylesheetURI).get()));
     if (NS_FAILED(mStatus)) {
@@ -393,7 +386,7 @@ void
 txStylesheetCompiler::cancel(nsresult aError, const char16_t *aErrorText,
                              const char16_t *aParam)
 {
-    PR_LOG(txLog::xslt, PR_LOG_ALWAYS,
+    MOZ_LOG(txLog::xslt, LogLevel::Info,
            ("Compiler::cancel: %s, module: %d, code %d\n",
             NS_LossyConvertUTF16toASCII(mStylesheetURI).get(),
             NS_ERROR_GET_MODULE(aError),
@@ -422,7 +415,7 @@ txStylesheetCompiler::loadURI(const nsAString& aUri,
                               ReferrerPolicy aReferrerPolicy,
                               txStylesheetCompiler* aCompiler)
 {
-    PR_LOG(txLog::xslt, PR_LOG_ALWAYS,
+    MOZ_LOG(txLog::xslt, LogLevel::Info,
            ("Compiler::loadURI forwards %s thru %s\n",
             NS_LossyConvertUTF16toASCII(aUri).get(),
             NS_LossyConvertUTF16toASCII(mStylesheetURI).get()));
@@ -482,8 +475,6 @@ txStylesheetCompiler::ensureNewElementContext()
     
     nsAutoPtr<txElementContext>
         context(new txElementContext(*mElementContext));
-    NS_ENSURE_TRUE(context, NS_ERROR_OUT_OF_MEMORY);
-
     nsresult rv = pushObject(mElementContext);
     NS_ENSURE_SUCCESS(rv, rv);
 
@@ -528,6 +519,7 @@ txStylesheetCompilerState::txStylesheetCompilerState(txACompileObserver* aObserv
       mSorter(nullptr),
       mDOE(false),
       mSearchingForFallback(false),
+      mDisAllowed(0),
       mObserver(aObserver),
       mEmbedStatus(eNoEmbed),
       mDoneWithThisStylesheet(false),
@@ -571,8 +563,6 @@ txStylesheetCompilerState::init(const nsAString& aStylesheetURI,
     }
     else {
         mStylesheet = new txStylesheet;
-        NS_ENSURE_TRUE(mStylesheet, NS_ERROR_OUT_OF_MEMORY);
-        
         rv = mStylesheet->init();
         NS_ENSURE_SUCCESS(rv, rv);
         
@@ -583,8 +573,7 @@ txStylesheetCompilerState::init(const nsAString& aStylesheetURI,
     }
    
     mElementContext = new txElementContext(aStylesheetURI);
-    NS_ENSURE_TRUE(mElementContext && mElementContext->mMappings,
-                   NS_ERROR_OUT_OF_MEMORY);
+    NS_ENSURE_TRUE(mElementContext->mMappings, NS_ERROR_OUT_OF_MEMORY);
 
     // Push the "old" txElementContext
     rv = pushObject(0);
@@ -648,7 +637,6 @@ txStylesheetCompilerState::pushChooseGotoList()
 
     mChooseGotoList.forget();
     mChooseGotoList = new txList;
-    NS_ENSURE_TRUE(mChooseGotoList, NS_ERROR_OUT_OF_MEMORY);
 
     return NS_OK;
 }
@@ -676,7 +664,7 @@ nsresult
 txStylesheetCompilerState::pushPtr(void* aPtr, enumStackType aType)
 {
 #ifdef TX_DEBUG_STACK
-    PR_LOG(txLog::xslt, PR_LOG_DEBUG, ("pushPtr: 0x%x type %u\n", aPtr, aType));
+    MOZ_LOG(txLog::xslt, LogLevel::Debug, ("pushPtr: 0x%x type %u\n", aPtr, aType));
 #endif
     mTypeStack.AppendElement(aType);
     return mOtherStack.push(aPtr);
@@ -695,7 +683,7 @@ txStylesheetCompilerState::popPtr(enumStackType aType)
     void* value = mOtherStack.pop();
     
 #ifdef TX_DEBUG_STACK
-    PR_LOG(txLog::xslt, PR_LOG_DEBUG, ("popPtr: 0x%x type %u requested %u\n", value, type, aType));
+    MOZ_LOG(txLog::xslt, LogLevel::Debug, ("popPtr: 0x%x type %u requested %u\n", value, type, aType));
 #endif
     
     if (type != aType) {
@@ -750,7 +738,7 @@ txStylesheetCompilerState::addInstruction(nsAutoPtr<txInstruction>&& aInstructio
 nsresult
 txStylesheetCompilerState::loadIncludedStylesheet(const nsAString& aURI)
 {
-    PR_LOG(txLog::xslt, PR_LOG_ALWAYS,
+    MOZ_LOG(txLog::xslt, LogLevel::Info,
            ("CompilerState::loadIncludedStylesheet: %s\n",
             NS_LossyConvertUTF16toASCII(aURI).get()));
     if (mStylesheetURI.Equals(aURI)) {
@@ -771,7 +759,7 @@ txStylesheetCompilerState::loadIncludedStylesheet(const nsAString& aURI)
     
     txACompileObserver* observer = static_cast<txStylesheetCompiler*>(this);
 
-    nsRefPtr<txStylesheetCompiler> compiler =
+    RefPtr<txStylesheetCompiler> compiler =
         new txStylesheetCompiler(aURI, mStylesheet, &mToplevelIterator,
                                  mReferrerPolicy, observer);
     NS_ENSURE_TRUE(compiler, NS_ERROR_OUT_OF_MEMORY);
@@ -795,7 +783,7 @@ nsresult
 txStylesheetCompilerState::loadImportedStylesheet(const nsAString& aURI,
                                                   txStylesheet::ImportFrame* aFrame)
 {
-    PR_LOG(txLog::xslt, PR_LOG_ALWAYS,
+    MOZ_LOG(txLog::xslt, LogLevel::Info,
            ("CompilerState::loadImportedStylesheet: %s\n",
             NS_LossyConvertUTF16toASCII(aURI).get()));
     if (mStylesheetURI.Equals(aURI)) {
@@ -808,7 +796,7 @@ txStylesheetCompilerState::loadImportedStylesheet(const nsAString& aURI,
 
     txACompileObserver* observer = static_cast<txStylesheetCompiler*>(this);
 
-    nsRefPtr<txStylesheetCompiler> compiler =
+    RefPtr<txStylesheetCompiler> compiler =
         new txStylesheetCompiler(aURI, mStylesheet, &iter, mReferrerPolicy,
                                  observer);
     NS_ENSURE_TRUE(compiler, NS_ERROR_OUT_OF_MEMORY);
@@ -840,8 +828,6 @@ nsresult
 txStylesheetCompilerState::addVariable(const txExpandedName& aName)
 {
     txInScopeVariable* var = new txInScopeVariable(aName);
-    NS_ENSURE_TRUE(var, NS_ERROR_OUT_OF_MEMORY);
-
     if (!mInScopeVariables.AppendElement(var)) {
         delete var;
         return NS_ERROR_OUT_OF_MEMORY;
@@ -923,6 +909,9 @@ TX_ConstructXSLTFunction(nsIAtom* aName, int32_t aNamespaceID,
             new DocumentFunctionCall(aState->mElementContext->mBaseURI);
     }
     else if (aName == nsGkAtoms::key) {
+        if (!aState->allowed(txIParseContext::KEY_FUNCTION)) {
+            return NS_ERROR_XSLT_CALL_TO_KEY_NOT_ALLOWED;
+        }
         *aFunction =
             new txKeyFunctionCall(aState->mElementContext->mMappings);
     }
@@ -959,7 +948,8 @@ TX_ConstructXSLTFunction(nsIAtom* aName, int32_t aNamespaceID,
         return NS_ERROR_XPATH_UNKNOWN_FUNCTION;
     }
 
-    return *aFunction ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
+    MOZ_ASSERT(*aFunction);
+    return NS_OK;
 }
 
 typedef nsresult (*txFunctionFactory)(nsIAtom* aName,
@@ -1030,9 +1020,6 @@ findFunction(nsIAtom* aName, int32_t aNamespaceID,
 
     if (!sXPCOMFunctionMappings) {
         sXPCOMFunctionMappings = new nsTArray<txXPCOMFunctionMapping>;
-        if (!sXPCOMFunctionMappings) {
-            return NS_ERROR_OUT_OF_MEMORY;
-        }
     }
 
     txXPCOMFunctionMapping *map = nullptr;
@@ -1079,7 +1066,7 @@ findFunction(nsIAtom* aName, int32_t aNamespaceID,
 extern bool
 TX_XSLTFunctionAvailable(nsIAtom* aName, int32_t aNameSpaceID)
 {
-    nsRefPtr<txStylesheetCompiler> compiler =
+    RefPtr<txStylesheetCompiler> compiler =
         new txStylesheetCompiler(EmptyString(),
                                  mozilla::net::RP_Default, nullptr);
     NS_ENSURE_TRUE(compiler, false);
@@ -1100,7 +1087,7 @@ txStylesheetCompilerState::resolveFunctionCall(nsIAtom* aName, int32_t aID,
     if (rv == NS_ERROR_XPATH_UNKNOWN_FUNCTION &&
         (aID != kNameSpaceID_None || fcp())) {
         *aFunction = new txErrorFunctionCall(aName);
-        rv = *aFunction ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
+        rv = NS_OK;
     }
 
     return rv;

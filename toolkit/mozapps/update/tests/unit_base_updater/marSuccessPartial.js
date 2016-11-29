@@ -6,7 +6,9 @@
 /* General Partial MAR File Patch Apply Test */
 
 function run_test() {
-  setupTestCommon();
+  if (!setupTestCommon()) {
+    return;
+  }
   gTestFiles = gTestFilesPartialSuccess;
   gTestFiles[gTestFiles.length - 1].originalContents = null;
   gTestFiles[gTestFiles.length - 1].compareContents = "FromPartial\n";
@@ -15,7 +17,49 @@ function run_test() {
   gTestFiles[gTestFiles.length - 2].compareContents = "FromPartial\n";
   gTestFiles[gTestFiles.length - 2].comparePerms = 0o644;
   gTestDirs = gTestDirsPartialSuccess;
-  setupUpdaterTest(FILE_PARTIAL_MAR);
+  setupDistributionDir();
+  setupUpdaterTest(FILE_PARTIAL_MAR, false);
+}
+
+/**
+ * Called after the call to setupUpdaterTest finishes.
+ */
+function setupUpdaterTestFinished() {
+  runUpdate(STATE_SUCCEEDED, false, 0, true);
+}
+
+/**
+ * Called after the call to runUpdate finishes.
+ */
+function runUpdateFinished() {
+  checkPostUpdateAppLog();
+}
+
+/**
+ * Called after the call to checkPostUpdateAppLog finishes.
+ */
+function checkPostUpdateAppLogFinished() {
+  checkAppBundleModTime();
+  standardInit();
+  Assert.equal(readStatusState(), STATE_NONE,
+               "the status file state" + MSG_SHOULD_EQUAL);
+  Assert.ok(!gUpdateManager.activeUpdate,
+            "the active update should not be defined");
+  Assert.equal(gUpdateManager.updateCount, 1,
+               "the update manager updateCount attribute" + MSG_SHOULD_EQUAL);
+  Assert.equal(gUpdateManager.getUpdateAt(0).state, STATE_SUCCEEDED,
+               "the update state" + MSG_SHOULD_EQUAL);
+  checkPostUpdateRunningFile(true);
+  checkFilesAfterUpdateSuccess(getApplyDirFile);
+  checkUpdateLogContents(LOG_PARTIAL_SUCCESS);
+  checkDistributionDir();
+  checkCallbackLog();
+}
+
+/**
+ * Setup the state of the distribution directory for the test.
+ */
+function setupDistributionDir() {
   if (IS_MACOSX) {
     // Create files in the old distribution directory location to verify that
     // the directory and its contents are removed when there is a distribution
@@ -25,61 +69,16 @@ function run_test() {
     testFile = getApplyDirFile(DIR_MACOS + "distribution/test/testFile", true);
     writeFile(testFile, "test\n");
   }
-
-  createUpdaterINI(true);
-
-  // For Mac OS X set the last modified time for the root directory to a date in
-  // the past to test that the last modified time is updated on all updates since
-  // the precomplete file in the root of the bundle is renamed, etc. (bug 600098).
-  if (IS_MACOSX) {
-    let now = Date.now();
-    let yesterday = now - (1000 * 60 * 60 * 24);
-    let applyToDir = getApplyDirFile();
-    applyToDir.lastModifiedTime = yesterday;
-  }
-
-  runUpdate(0, STATE_SUCCEEDED);
 }
 
 /**
- * Checks if the post update binary was properly launched for the platforms that
- * support launching post update process.
+ * Checks the state of the distribution directory.
  */
-function checkUpdateApplied() {
-  if (IS_WIN || IS_MACOSX) {
-    gCheckFunc = finishCheckUpdateApplied;
-    checkPostUpdateAppLog();
-  } else {
-    finishCheckUpdateApplied();
-  }
-}
-
-/**
- * Checks if the update has finished and if it has finished performs checks for
- * the test.
- */
-function finishCheckUpdateApplied() {
+function checkDistributionDir() {
   if (IS_MACOSX) {
-    logTestInfo("testing last modified time on the apply to directory has " +
-                "changed after a successful update (bug 600098)");
-    let now = Date.now();
-    let applyToDir = getApplyDirFile();
-    let timeDiff = Math.abs(applyToDir.lastModifiedTime - now);
-    do_check_true(timeDiff < MAC_MAX_TIME_DIFFERENCE);
-  }
-
-  if (IS_MACOSX) {
-    logTestInfo("testing that the distribution directory is removed from the " +
-                "old location when there is a distribution directory in the " +
-                "new location");
     let distributionDir = getApplyDirFile(DIR_MACOS + "distribution", true);
-    logTestInfo("testing " + distributionDir.path + " shouldn't exist");
-    do_check_false(distributionDir.exists());
-
-    checkUpdateLogContains("removing old distribution directory");
+    Assert.ok(!distributionDir.exists(),
+              MSG_SHOULD_NOT_EXIST + getMsgPath(distributionDir.path));
+    checkUpdateLogContains(REMOVE_OLD_DIST_DIR);
   }
-
-  checkFilesAfterUpdateSuccess(getApplyDirFile, false, false);
-  checkUpdateLogContents(LOG_PARTIAL_SUCCESS);
-  checkCallbackAppLog();
 }

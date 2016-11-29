@@ -3,6 +3,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "nsWindowsShellService.h"
+
 #include "imgIContainer.h"
 #include "imgIRequest.h"
 #include "mozilla/gfx/2D.h"
@@ -15,8 +17,8 @@
 #include "nsIServiceManager.h"
 #include "nsIStringBundle.h"
 #include "nsNetUtil.h"
+#include "nsServiceManagerUtils.h"
 #include "nsShellService.h"
-#include "nsWindowsShellService.h"
 #include "nsIProcess.h"
 #include "nsICategoryManager.h"
 #include "nsBrowserCompsCID.h"
@@ -27,6 +29,7 @@
 #include "nsUnicharUtils.h"
 #include "nsIWinTaskbar.h"
 #include "nsISupportsPrimitives.h"
+#include "nsIURLFormatter.h"
 #include "nsThreadUtils.h"
 #include "nsXULAppAPI.h"
 #include "mozilla/WindowsVersion.h"
@@ -39,6 +42,9 @@
 #endif
 #define _WIN32_WINNT 0x0600
 #define INITGUID
+#undef NTDDI_VERSION
+#define NTDDI_VERSION NTDDI_WIN8
+// Needed for access to IApplicationActivationManager
 #include <shlobj.h>
 
 #include <mbstring.h>
@@ -317,38 +323,47 @@ nsWindowsShellService::ShortcutMaintenance()
 }
 
 static bool
-IsAARDefaultHTTP(IApplicationAssociationRegistration* pAAR,
-                 bool* aIsDefaultBrowser)
+IsAARDefault(const RefPtr<IApplicationAssociationRegistration>& pAAR,
+             LPCWSTR aClassName)
 {
   // Make sure the Prog ID matches what we have
   LPWSTR registeredApp;
-  HRESULT hr = pAAR->QueryCurrentDefault(L"http", AT_URLPROTOCOL, AL_EFFECTIVE,
+  bool isProtocol = *aClassName != L'.';
+  ASSOCIATIONTYPE queryType = isProtocol ? AT_URLPROTOCOL : AT_FILEEXTENSION;
+  HRESULT hr = pAAR->QueryCurrentDefault(aClassName, queryType, AL_EFFECTIVE,
                                          &registeredApp);
-  if (SUCCEEDED(hr)) {
-    LPCWSTR firefoxHTTPProgID = L"FirefoxURL";
-    *aIsDefaultBrowser = !wcsicmp(registeredApp, firefoxHTTPProgID);
-    CoTaskMemFree(registeredApp);
-  } else {
-    *aIsDefaultBrowser = false;
+  if (FAILED(hr)) {
+    return false;
   }
-  return SUCCEEDED(hr);
+
+  LPCWSTR progID = isProtocol ? L"FirefoxURL" : L"FirefoxHTML";
+  bool isDefault = !wcsicmp(registeredApp, progID);
+  CoTaskMemFree(registeredApp);
+
+  return isDefault;
 }
 
-static bool
-IsAARDefaultHTML(IApplicationAssociationRegistration* pAAR,
-                 bool* aIsDefaultBrowser)
+static void
+IsDefaultBrowserWin8(bool aCheckAllTypes, bool* aIsDefaultBrowser)
 {
-  LPWSTR registeredApp;
-  HRESULT hr = pAAR->QueryCurrentDefault(L".html", AT_FILEEXTENSION, AL_EFFECTIVE,
-                                         &registeredApp);
-  if (SUCCEEDED(hr)) {
-    LPCWSTR firefoxHTMLProgID = L"FirefoxHTML";
-    *aIsDefaultBrowser = !wcsicmp(registeredApp, firefoxHTMLProgID);
-    CoTaskMemFree(registeredApp);
-  } else {
-    *aIsDefaultBrowser = false;
+  RefPtr<IApplicationAssociationRegistration> pAAR;
+  HRESULT hr = CoCreateInstance(CLSID_ApplicationAssociationRegistration,
+                                nullptr,
+                                CLSCTX_INPROC,
+                                IID_IApplicationAssociationRegistration,
+                                getter_AddRefs(pAAR));
+  if (FAILED(hr)) {
+    return;
   }
-  return SUCCEEDED(hr);
+
+  bool res = IsAARDefault(pAAR, L"http");
+  if (*aIsDefaultBrowser) {
+    *aIsDefaultBrowser = res;
+  }
+  res = IsAARDefault(pAAR, L".html");
+  if (*aIsDefaultBrowser && aCheckAllTypes) {
+    *aIsDefaultBrowser = res;
+  }
 }
 
 /*
@@ -361,37 +376,27 @@ bool
 nsWindowsShellService::IsDefaultBrowserVista(bool aCheckAllTypes,
                                              bool* aIsDefaultBrowser)
 {
-  IApplicationAssociationRegistration* pAAR;
+  RefPtr<IApplicationAssociationRegistration> pAAR;
   HRESULT hr = CoCreateInstance(CLSID_ApplicationAssociationRegistration,
                                 nullptr,
                                 CLSCTX_INPROC,
                                 IID_IApplicationAssociationRegistration,
-                                (void**)&pAAR);
-
-  if (SUCCEEDED(hr)) {
-    if (aCheckAllTypes) {
-      BOOL res;
-      hr = pAAR->QueryAppIsDefaultAll(AL_EFFECTIVE,
-                                      APP_REG_NAME,
-                                      &res);
-      *aIsDefaultBrowser = res;
-
-      // If we have all defaults, let's make sure that our ProgID
-      // is explicitly returned as well. Needed only for Windows 8.
-      if (*aIsDefaultBrowser && IsWin8OrLater()) {
-        IsAARDefaultHTTP(pAAR, aIsDefaultBrowser);
-        if (*aIsDefaultBrowser) {
-          IsAARDefaultHTML(pAAR, aIsDefaultBrowser);
-        }
-      }
-    } else {
-      IsAARDefaultHTTP(pAAR, aIsDefaultBrowser);
-    }
-
-    pAAR->Release();
-    return true;
+                                getter_AddRefs(pAAR));
+  if (FAILED(hr)) {
+    return false;
   }
-  return false;
+
+  if (aCheckAllTypes) {
+    BOOL res;
+    hr = pAAR->QueryAppIsDefaultAll(AL_EFFECTIVE,
+                                    APP_REG_NAME,
+                                    &res);
+    *aIsDefaultBrowser = res;
+  } else if (!IsWin8OrLater()) {
+    *aIsDefaultBrowser = IsAARDefault(pAAR, L"http");
+  }
+
+  return true;
 }
 
 NS_IMETHODIMP
@@ -491,6 +496,9 @@ nsWindowsShellService::IsDefaultBrowser(bool aStartupCheck,
   // previous checks show that Firefox is the default browser.
   if (*aIsDefaultBrowser) {
     IsDefaultBrowserVista(aForAllTypes, aIsDefaultBrowser);
+    if (IsWin8OrLater()) {
+      IsDefaultBrowserWin8(aForAllTypes, aIsDefaultBrowser);
+    }
   }
 
   // To handle the case where DDE isn't disabled due for a user because there
@@ -620,41 +628,82 @@ DynSHOpenWithDialog(HWND hwndParent, const OPENASINFO *poainfo)
     return NS_ERROR_FAILURE;
   }
 
-  nsresult rv = 
-    SUCCEEDED(SHOpenWithDialogFn(hwndParent, poainfo)) ? NS_OK :
-                                                         NS_ERROR_FAILURE;
+  nsresult rv;
+  HRESULT hr = SHOpenWithDialogFn(hwndParent, poainfo);
+  if (SUCCEEDED(hr) || (hr == HRESULT_FROM_WIN32(ERROR_CANCELLED))) {
+    rv = NS_OK;
+  } else {
+    rv = NS_ERROR_FAILURE;
+  }
   FreeLibrary(shellDLL);
   return rv;
 }
 
 nsresult
-nsWindowsShellService::LaunchControlPanelDefaultPrograms()
+nsWindowsShellService::LaunchControlPanelDefaultsSelectionUI()
 {
-  // Build the path control.exe path safely
-  WCHAR controlEXEPath[MAX_PATH + 1] = { '\0' };
-  if (!GetSystemDirectoryW(controlEXEPath, MAX_PATH)) {
-    return NS_ERROR_FAILURE;
+  IApplicationAssociationRegistrationUI* pAARUI;
+  HRESULT hr = CoCreateInstance(CLSID_ApplicationAssociationRegistrationUI,
+                                NULL,
+                                CLSCTX_INPROC,
+                                IID_IApplicationAssociationRegistrationUI,
+                                (void**)&pAARUI);
+  if (SUCCEEDED(hr)) {
+    hr = pAARUI->LaunchAdvancedAssociationUI(APP_REG_NAME);
+    pAARUI->Release();
   }
-  LPCWSTR controlEXE = L"control.exe";
-  if (wcslen(controlEXEPath) + wcslen(controlEXE) >= MAX_PATH) {
-    return NS_ERROR_FAILURE;
+  return SUCCEEDED(hr) ? NS_OK : NS_ERROR_FAILURE;
+}
+
+nsresult
+nsWindowsShellService::LaunchModernSettingsDialogDefaultApps()
+{
+  IApplicationActivationManager* pActivator;
+  HRESULT hr = CoCreateInstance(CLSID_ApplicationActivationManager,
+                                nullptr,
+                                CLSCTX_INPROC,
+                                IID_IApplicationActivationManager,
+                                (void**)&pActivator);
+
+  if (SUCCEEDED(hr)) {
+    DWORD pid;
+    hr = pActivator->ActivateApplication(
+           L"windows.immersivecontrolpanel_cw5n1h2txyewy"
+           L"!microsoft.windows.immersivecontrolpanel",
+           L"page=SettingsPageAppsDefaults", AO_NONE, &pid);
+    pActivator->Release();
+    return SUCCEEDED(hr) ? NS_OK : NS_ERROR_FAILURE;
   }
-  if (!PathAppendW(controlEXEPath, controlEXE)) {
-    return NS_ERROR_FAILURE;
+  return NS_OK;
+}
+
+nsresult
+nsWindowsShellService::InvokeHTTPOpenAsVerb()
+{
+  nsCOMPtr<nsIURLFormatter> formatter(
+    do_GetService("@mozilla.org/toolkit/URLFormatterService;1"));
+  if (!formatter) {
+    return NS_ERROR_UNEXPECTED;
   }
 
-  WCHAR params[] = L"control.exe /name Microsoft.DefaultPrograms /page pageDefaultProgram";
-  STARTUPINFOW si = {sizeof(si), 0};
-  si.dwFlags = STARTF_USESHOWWINDOW;
-  si.wShowWindow = SW_SHOWDEFAULT;
-  PROCESS_INFORMATION pi = {0};
-  if (!CreateProcessW(controlEXEPath, params, nullptr, nullptr, FALSE,
-                      0, nullptr, nullptr, &si, &pi)) {
+  nsString urlStr;
+  nsresult rv = formatter->FormatURLPref(
+    NS_LITERAL_STRING("app.support.baseURL"), urlStr);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  if (!StringBeginsWith(urlStr, NS_LITERAL_STRING("https://"))) {
     return NS_ERROR_FAILURE;
   }
-  CloseHandle(pi.hProcess);
-  CloseHandle(pi.hThread);
+  urlStr.AppendLiteral("win10-default-browser");
 
+  SHELLEXECUTEINFOW seinfo = { sizeof(SHELLEXECUTEINFOW) };
+  seinfo.lpVerb = L"openas";
+  seinfo.lpFile = urlStr.get();
+  seinfo.nShow = SW_SHOWNORMAL;
+  if (!ShellExecuteExW(&seinfo)) {
+    return NS_ERROR_FAILURE;
+  }
   return NS_OK;
 }
 
@@ -686,18 +735,33 @@ nsWindowsShellService::SetDefaultBrowser(bool aClaimAllTypes, bool aForAllUsers)
   nsresult rv = LaunchHelper(appHelperPath);
   if (NS_SUCCEEDED(rv) && IsWin8OrLater()) {
     if (aClaimAllTypes) {
-      rv = LaunchControlPanelDefaultPrograms();
+      if (IsWin10OrLater()) {
+        rv = LaunchModernSettingsDialogDefaultApps();
+      } else {
+        rv = LaunchControlPanelDefaultsSelectionUI();
+      }
       // The above call should never really fail, but just in case
       // fall back to showing the HTTP association screen only.
       if (NS_FAILED(rv)) {
-        rv = LaunchHTTPHandlerPane();
+        if (IsWin10OrLater()) {
+          rv = InvokeHTTPOpenAsVerb();
+        } else {
+          rv = LaunchHTTPHandlerPane();
+        }
       }
     } else {
-      rv = LaunchHTTPHandlerPane();
-      // The above calls hould never really fail, but just in case
-      // fallb ack to showing control panel for all defaults
+      // Windows 10 blocks attempts to load the
+      // HTTP Handler association dialog.
+      if (IsWin10OrLater()) {
+        rv = LaunchModernSettingsDialogDefaultApps();
+      } else {
+        rv = LaunchHTTPHandlerPane();
+      }
+
+      // The above call should never really fail, but just in case
+      // fall back to showing control panel for all defaults
       if (NS_FAILED(rv)) {
-        rv = LaunchControlPanelDefaultPrograms();
+        rv = LaunchControlPanelDefaultsSelectionUI();
       }
     }
   }
@@ -705,6 +769,9 @@ nsWindowsShellService::SetDefaultBrowser(bool aClaimAllTypes, bool aForAllUsers)
   nsCOMPtr<nsIPrefBranch> prefs(do_GetService(NS_PREFSERVICE_CONTRACTID));
   if (prefs) {
     (void) prefs->SetBoolPref(PREF_CHECKDEFAULTBROWSER, true);
+    // Reset the number of times the dialog should be shown
+    // before it is silenced.
+    (void) prefs->SetIntPref(PREF_DEFAULTBROWSERCHECKCOUNT, 0);
   }
 
   return rv;
@@ -715,7 +782,7 @@ nsWindowsShellService::GetShouldCheckDefaultBrowser(bool* aResult)
 {
   NS_ENSURE_ARG_POINTER(aResult);
 
-  // If we've already checked, the browser has been started and this is a 
+  // If we've already checked, the browser has been started and this is a
   // new window open, and we don't want to check again.
   if (mCheckedThisSession) {
     *aResult = false;

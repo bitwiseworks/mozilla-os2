@@ -1,4 +1,6 @@
-/*
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
+ *
  * Copyright (C) 2008 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -33,16 +35,16 @@
 
 using namespace js::jit;
 
-uint64_t ExecutableAllocator::rngSeed;
-
-size_t ExecutableAllocator::determinePageSize()
+size_t
+ExecutableAllocator::determinePageSize()
 {
     SYSTEM_INFO system_info;
     GetSystemInfo(&system_info);
     return system_info.dwPageSize;
 }
 
-void* ExecutableAllocator::computeRandomAllocationAddress()
+void*
+ExecutableAllocator::computeRandomAllocationAddress()
 {
     /*
      * Inspiration is V8's OS::Allocate in platform-win32.cc.
@@ -55,7 +57,6 @@ void* ExecutableAllocator::computeRandomAllocationAddress()
      * bits of randomness in our selection.
      * x64: [2GiB, 4TiB), with 25 bits of randomness.
      */
-    static const unsigned chunkBits = 16;
 #ifdef JS_CPU_X64
     static const uintptr_t base = 0x0000000080000000;
     static const uintptr_t mask = 0x000003ffffff0000;
@@ -65,7 +66,14 @@ void* ExecutableAllocator::computeRandomAllocationAddress()
 #else
 # error "Unsupported architecture"
 #endif
-    uint64_t rand = random_next(&rngSeed, 32) << chunkBits;
+
+    if (randomNumberGenerator.isNothing()) {
+        mozilla::Array<uint64_t, 2> seed;
+        js::GenerateXorShift128PlusSeed(seed);
+        randomNumberGenerator.emplace(seed[0], seed[1]);
+    }
+
+    uint64_t rand = randomNumberGenerator.ref().next();
     return (void*) (base | (rand & mask));
 }
 
@@ -186,7 +194,6 @@ js::jit::AllocateExecutableMemory(void* addr, size_t bytes, unsigned permissions
                                   size_t pageSize)
 {
     MOZ_ASSERT(bytes % pageSize == 0);
-    MOZ_ASSERT(permissions == PAGE_EXECUTE_READWRITE);
 
 #ifdef JS_CPU_X64
     if (sJitExceptionHandler)
@@ -226,31 +233,57 @@ js::jit::DeallocateExecutableMemory(void* addr, size_t bytes, size_t pageSize)
     VirtualFree(addr, 0, MEM_RELEASE);
 }
 
-ExecutablePool::Allocation ExecutableAllocator::systemAlloc(size_t n)
+ExecutablePool::Allocation
+ExecutableAllocator::systemAlloc(size_t n)
 {
     void* allocation = nullptr;
-    // Randomization disabled to avoid a performance fault on x64 builds.
-    // See bug 728623.
-#ifndef JS_CPU_X64
     if (!RandomizeIsBroken()) {
         void* randomAddress = computeRandomAllocationAddress();
-        allocation = AllocateExecutableMemory(randomAddress, n, PAGE_EXECUTE_READWRITE,
+        allocation = AllocateExecutableMemory(randomAddress, n, initialProtectionFlags(Executable),
                                               "js-jit-code", pageSize);
     }
-#endif
     if (!allocation) {
-        allocation = AllocateExecutableMemory(nullptr, n, PAGE_EXECUTE_READWRITE,
+        allocation = AllocateExecutableMemory(nullptr, n, initialProtectionFlags(Executable),
                                               "js-jit-code", pageSize);
     }
     ExecutablePool::Allocation alloc = { reinterpret_cast<char*>(allocation), n };
     return alloc;
 }
 
-void ExecutableAllocator::systemRelease(const ExecutablePool::Allocation& alloc)
+void
+ExecutableAllocator::systemRelease(const ExecutablePool::Allocation& alloc)
 {
     DeallocateExecutableMemory(alloc.pages, alloc.size, pageSize);
 }
 
-#if ENABLE_ASSEMBLER_WX_EXCLUSIVE
-#error "ASSEMBLER_WX_EXCLUSIVE not yet suported on this platform."
-#endif
+void
+ExecutableAllocator::reprotectRegion(void* start, size_t size, ProtectionSetting setting)
+{
+    MOZ_ASSERT(nonWritableJitCode);
+    MOZ_ASSERT(pageSize);
+
+    // Calculate the start of the page containing this region,
+    // and account for this extra memory within size.
+    intptr_t startPtr = reinterpret_cast<intptr_t>(start);
+    intptr_t pageStartPtr = startPtr & ~(pageSize - 1);
+    void* pageStart = reinterpret_cast<void*>(pageStartPtr);
+    size += (startPtr - pageStartPtr);
+
+    // Round size up
+    size += (pageSize - 1);
+    size &= ~(pageSize - 1);
+
+    DWORD oldProtect;
+    int flags = (setting == Writable) ? PAGE_READWRITE : PAGE_EXECUTE_READ;
+    if (!VirtualProtect(pageStart, size, flags, &oldProtect))
+        MOZ_CRASH();
+}
+
+/* static */ unsigned
+ExecutableAllocator::initialProtectionFlags(ProtectionSetting protection)
+{
+    if (!nonWritableJitCode)
+        return PAGE_EXECUTE_READWRITE;
+
+    return (protection == Writable) ? PAGE_READWRITE : PAGE_EXECUTE_READ;
+}

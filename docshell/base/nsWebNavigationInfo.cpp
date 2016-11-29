@@ -51,6 +51,13 @@ nsWebNavigationInfo::IsTypeSupported(const nsACString& aType,
     return NS_OK;
   }
 
+  // We want to claim that the type for SWF movies is unsupported,
+  // so that the internal SWF player's stream converter will get used.
+  if (aType.LowerCaseEqualsLiteral("application/x-shockwave-flash") &&
+      nsContentUtils::IsSWFPlayerEnabled()) {
+    return NS_OK;
+  }
+
   const nsCString& flatType = PromiseFlatCString(aType);
   nsresult rv = IsTypeSupportedInternal(flatType, aIsTypeSupported);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -96,7 +103,7 @@ nsWebNavigationInfo::IsTypeSupportedInternal(const nsCString& aType,
   nsContentUtils::ContentViewerType vtype = nsContentUtils::TYPE_UNSUPPORTED;
 
   nsCOMPtr<nsIDocumentLoaderFactory> docLoaderFactory =
-    nsContentUtils::FindInternalContentViewer(aType.get(), &vtype);
+    nsContentUtils::FindInternalContentViewer(aType, &vtype);
 
   switch (vtype) {
     case nsContentUtils::TYPE_UNSUPPORTED:

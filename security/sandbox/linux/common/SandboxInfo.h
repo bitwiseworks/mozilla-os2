@@ -31,6 +31,16 @@ public:
     kEnabledForMedia   = 1 << 2,
     // Env var MOZ_SANDBOX_VERBOSE.
     kVerbose           = 1 << 3,
+    // Kernel can atomically set system call filtering on entire thread group.
+    kHasSeccompTSync   = 1 << 4,
+    // Can this process create user namespaces? (Man page user_namespaces(7).)
+    kHasUserNamespaces = 1 << 5,
+    // Could a more privileged process have user namespaces, even if we can't?
+    kHasPrivilegedUserNamespaces = 1 << 6,
+    // Env var MOZ_PERMISSIVE_CONTENT_SANDBOX
+    kPermissive        = 1 << 7,
+    // Something is creating threads when we need to still be single-threaded.
+    kUnexpectedThreads = 1 << 8,
   };
 
   bool Test(Flags aFlag) const { return (mFlags & aFlag) == aFlag; }
@@ -46,9 +56,18 @@ public:
   {
     return !Test(kEnabledForMedia) || Test(kHasSeccompBPF);
   }
+
+  // For bug 1222500 or anything else like it: On desktop, this is
+  // called in the parent process at a point when it should still be
+  // single-threaded, to check that the SandboxEarlyInit() call in a
+  // child process is early enough to be single-threaded.  If not,
+  // kUnexpectedThreads is set and affected flags (user namespaces;
+  // possibly others in the future) are cleared.
+  static void ThreadingCheck();
 private:
   enum Flags mFlags;
-  static MOZ_EXPORT const SandboxInfo sSingleton;
+  // This should be const, but has to allow for ThreadingCheck.
+  static MOZ_EXPORT SandboxInfo sSingleton;
   SandboxInfo();
 };
 

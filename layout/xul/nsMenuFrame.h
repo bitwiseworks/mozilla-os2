@@ -25,7 +25,6 @@ nsIFrame* NS_NewMenuFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 nsIFrame* NS_NewMenuItemFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 
 class nsIContent;
-class nsMenuBarFrame;
 
 #define NS_STATE_ACCELTEXT_IS_DERIVED  NS_STATE_BOX_CHILD_RESERVED
 
@@ -236,10 +235,10 @@ protected:
 
   // Update the menu's type (normal, checkbox, radio).
   // This method can destroy the frame.
-  void UpdateMenuType(nsPresContext* aPresContext);
+  void UpdateMenuType();
   // Update the checked state of the menu, and for radios, clear any other
   // checked items. This method can destroy the frame.
-  void UpdateMenuSpecialState(nsPresContext* aPresContext);
+  void UpdateMenuSpecialState();
 
   // Examines the key node and builds the accelerator.
   void BuildAcceleratorText(bool aNotify);
@@ -274,13 +273,13 @@ protected:
   nsMenuType mType;
 
   // Reference to the mediator which wraps this frame.
-  nsRefPtr<nsMenuTimerMediator> mTimerMediator;
+  RefPtr<nsMenuTimerMediator> mTimerMediator;
 
   nsCOMPtr<nsITimer> mOpenTimer;
   nsCOMPtr<nsITimer> mBlinkTimer;
 
   uint8_t mBlinkState; // 0: not blinking, 1: off, 2: on
-  nsRefPtr<nsXULMenuCommandEvent> mDelayedMenuCommandEvent;
+  RefPtr<nsXULMenuCommandEvent> mDelayedMenuCommandEvent;
 
   nsString mGroupName;
 

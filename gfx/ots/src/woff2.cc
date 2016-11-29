@@ -43,75 +43,72 @@ const size_t kCheckSumAdjustmentOffset = 8;
 const size_t kEndPtsOfContoursOffset = 10;
 const size_t kCompositeGlyphBegin = 10;
 
-// Note that the byte order is big-endian, not the same as ots.cc
-#define TAG(a, b, c, d) ((a << 24) | (b << 16) | (c << 8) | d)
-
 const unsigned int kWoff2FlagsTransform = 1 << 5;
 
 const uint32_t kKnownTags[] = {
-  TAG('c', 'm', 'a', 'p'),  // 0
-  TAG('h', 'e', 'a', 'd'),  // 1
-  TAG('h', 'h', 'e', 'a'),  // 2
-  TAG('h', 'm', 't', 'x'),  // 3
-  TAG('m', 'a', 'x', 'p'),  // 4
-  TAG('n', 'a', 'm', 'e'),  // 5
-  TAG('O', 'S', '/', '2'),  // 6
-  TAG('p', 'o', 's', 't'),  // 7
-  TAG('c', 'v', 't', ' '),  // 8
-  TAG('f', 'p', 'g', 'm'),  // 9
-  TAG('g', 'l', 'y', 'f'),  // 10
-  TAG('l', 'o', 'c', 'a'),  // 11
-  TAG('p', 'r', 'e', 'p'),  // 12
-  TAG('C', 'F', 'F', ' '),  // 13
-  TAG('V', 'O', 'R', 'G'),  // 14
-  TAG('E', 'B', 'D', 'T'),  // 15
-  TAG('E', 'B', 'L', 'C'),  // 16
-  TAG('g', 'a', 's', 'p'),  // 17
-  TAG('h', 'd', 'm', 'x'),  // 18
-  TAG('k', 'e', 'r', 'n'),  // 19
-  TAG('L', 'T', 'S', 'H'),  // 20
-  TAG('P', 'C', 'L', 'T'),  // 21
-  TAG('V', 'D', 'M', 'X'),  // 22
-  TAG('v', 'h', 'e', 'a'),  // 23
-  TAG('v', 'm', 't', 'x'),  // 24
-  TAG('B', 'A', 'S', 'E'),  // 25
-  TAG('G', 'D', 'E', 'F'),  // 26
-  TAG('G', 'P', 'O', 'S'),  // 27
-  TAG('G', 'S', 'U', 'B'),  // 28
-  TAG('E', 'B', 'S', 'C'),  // 29
-  TAG('J', 'S', 'T', 'F'),  // 30
-  TAG('M', 'A', 'T', 'H'),  // 31
-  TAG('C', 'B', 'D', 'T'),  // 32
-  TAG('C', 'B', 'L', 'C'),  // 33
-  TAG('C', 'O', 'L', 'R'),  // 34
-  TAG('C', 'P', 'A', 'L'),  // 35
-  TAG('S', 'V', 'G', ' '),  // 36
-  TAG('s', 'b', 'i', 'x'),  // 37
-  TAG('a', 'c', 'n', 't'),  // 38
-  TAG('a', 'v', 'a', 'r'),  // 39
-  TAG('b', 'd', 'a', 't'),  // 40
-  TAG('b', 'l', 'o', 'c'),  // 41
-  TAG('b', 's', 'l', 'n'),  // 42
-  TAG('c', 'v', 'a', 'r'),  // 43
-  TAG('f', 'd', 's', 'c'),  // 44
-  TAG('f', 'e', 'a', 't'),  // 45
-  TAG('f', 'm', 't', 'x'),  // 46
-  TAG('f', 'v', 'a', 'r'),  // 47
-  TAG('g', 'v', 'a', 'r'),  // 48
-  TAG('h', 's', 't', 'y'),  // 49
-  TAG('j', 'u', 's', 't'),  // 50
-  TAG('l', 'c', 'a', 'r'),  // 51
-  TAG('m', 'o', 'r', 't'),  // 52
-  TAG('m', 'o', 'r', 'x'),  // 53
-  TAG('o', 'p', 'b', 'd'),  // 54
-  TAG('p', 'r', 'o', 'p'),  // 55
-  TAG('t', 'r', 'a', 'k'),  // 56
-  TAG('Z', 'a', 'p', 'f'),  // 57
-  TAG('S', 'i', 'l', 'f'),  // 58
-  TAG('G', 'l', 'a', 't'),  // 59
-  TAG('G', 'l', 'o', 'c'),  // 60
-  TAG('F', 'e', 'a', 't'),  // 61
-  TAG('S', 'i', 'l', 'l'),  // 62
+  OTS_TAG('c','m','a','p'),  // 0
+  OTS_TAG('h','e','a','d'),  // 1
+  OTS_TAG('h','h','e','a'),  // 2
+  OTS_TAG('h','m','t','x'),  // 3
+  OTS_TAG('m','a','x','p'),  // 4
+  OTS_TAG('n','a','m','e'),  // 5
+  OTS_TAG('O','S','/','2'),  // 6
+  OTS_TAG('p','o','s','t'),  // 7
+  OTS_TAG('c','v','t',' '),  // 8
+  OTS_TAG('f','p','g','m'),  // 9
+  OTS_TAG('g','l','y','f'),  // 10
+  OTS_TAG('l','o','c','a'),  // 11
+  OTS_TAG('p','r','e','p'),  // 12
+  OTS_TAG('C','F','F',' '),  // 13
+  OTS_TAG('V','O','R','G'),  // 14
+  OTS_TAG('E','B','D','T'),  // 15
+  OTS_TAG('E','B','L','C'),  // 16
+  OTS_TAG('g','a','s','p'),  // 17
+  OTS_TAG('h','d','m','x'),  // 18
+  OTS_TAG('k','e','r','n'),  // 19
+  OTS_TAG('L','T','S','H'),  // 20
+  OTS_TAG('P','C','L','T'),  // 21
+  OTS_TAG('V','D','M','X'),  // 22
+  OTS_TAG('v','h','e','a'),  // 23
+  OTS_TAG('v','m','t','x'),  // 24
+  OTS_TAG('B','A','S','E'),  // 25
+  OTS_TAG('G','D','E','F'),  // 26
+  OTS_TAG('G','P','O','S'),  // 27
+  OTS_TAG('G','S','U','B'),  // 28
+  OTS_TAG('E','B','S','C'),  // 29
+  OTS_TAG('J','S','T','F'),  // 30
+  OTS_TAG('M','A','T','H'),  // 31
+  OTS_TAG('C','B','D','T'),  // 32
+  OTS_TAG('C','B','L','C'),  // 33
+  OTS_TAG('C','O','L','R'),  // 34
+  OTS_TAG('C','P','A','L'),  // 35
+  OTS_TAG('S','V','G',' '),  // 36
+  OTS_TAG('s','b','i','x'),  // 37
+  OTS_TAG('a','c','n','t'),  // 38
+  OTS_TAG('a','v','a','r'),  // 39
+  OTS_TAG('b','d','a','t'),  // 40
+  OTS_TAG('b','l','o','c'),  // 41
+  OTS_TAG('b','s','l','n'),  // 42
+  OTS_TAG('c','v','a','r'),  // 43
+  OTS_TAG('f','d','s','c'),  // 44
+  OTS_TAG('f','e','a','t'),  // 45
+  OTS_TAG('f','m','t','x'),  // 46
+  OTS_TAG('f','v','a','r'),  // 47
+  OTS_TAG('g','v','a','r'),  // 48
+  OTS_TAG('h','s','t','y'),  // 49
+  OTS_TAG('j','u','s','t'),  // 50
+  OTS_TAG('l','c','a','r'),  // 51
+  OTS_TAG('m','o','r','t'),  // 52
+  OTS_TAG('m','o','r','x'),  // 53
+  OTS_TAG('o','p','b','d'),  // 54
+  OTS_TAG('p','r','o','p'),  // 55
+  OTS_TAG('t','r','a','k'),  // 56
+  OTS_TAG('Z','a','p','f'),  // 57
+  OTS_TAG('S','i','l','f'),  // 58
+  OTS_TAG('G','l','a','t'),  // 59
+  OTS_TAG('G','l','o','c'),  // 60
+  OTS_TAG('F','e','a','t'),  // 61
+  OTS_TAG('S','i','l','l'),  // 62
 };
 
 struct Point {
@@ -135,6 +132,10 @@ struct Table {
         transform_length(0),
         dst_offset(0),
         dst_length(0) {}
+
+  bool operator<(const Table& other) const {
+    return tag < other.tag;
+  }
 };
 
 // Based on section 6.1.1 of MicroType Express draft spec
@@ -181,8 +182,11 @@ bool ReadBase128(ots::Buffer* buf, uint32_t* value) {
     if (!buf->ReadU8(&code)) {
       return OTS_FAILURE();
     }
+    if (i == 0 && code == 0x80) {
+      return OTS_FAILURE();
+    }
     // If any of the top seven bits are set then we're about to overflow.
-    if (result & 0xe0000000U) {
+    if (result & 0xfe000000U) {
       return OTS_FAILURE();
     }
     result = (result << 7) | (code & 0x7f);
@@ -509,35 +513,38 @@ bool StoreLoca(const std::vector<uint32_t>& loca_values, int index_format,
 }
 
 // Reconstruct entire glyf table based on transformed original
-bool ReconstructGlyf(const uint8_t* data, size_t data_size,
+bool ReconstructGlyf(ots::Font *font,
+    const uint8_t* data, size_t data_size,
     uint8_t* dst, size_t dst_size,
     uint8_t* loca_buf, size_t loca_size) {
   static const int kNumSubStreams = 7;
-  ots::Buffer file(data, data_size);
+  ots::Buffer buffer(data, data_size);
   uint32_t version;
   std::vector<std::pair<const uint8_t*, size_t> > substreams(kNumSubStreams);
 
-  if (!file.ReadU32(&version)) {
-    return OTS_FAILURE();
+  if (!buffer.ReadU32(&version)) {
+    return OTS_FAILURE_MSG("Failed to read 'version' of transformed 'glyf' table");
   }
   uint16_t num_glyphs;
+  if (!buffer.ReadU16(&num_glyphs)) {
+    return OTS_FAILURE_MSG("Failed to read 'numGlyphs' from transformed 'glyf' table");
+  }
   uint16_t index_format;
-  if (!file.ReadU16(&num_glyphs) ||
-      !file.ReadU16(&index_format)) {
-    return OTS_FAILURE();
+  if (!buffer.ReadU16(&index_format)) {
+    return OTS_FAILURE_MSG("Failed to read 'indexFormat' from transformed 'glyf' table");
   }
   unsigned int offset = (2 + kNumSubStreams) * 4;
   if (offset > data_size) {
-    return OTS_FAILURE();
+    return OTS_FAILURE_MSG("Size of transformed 'glyf' table is too small to fit its data");
   }
   // Invariant from here on: data_size >= offset
   for (int i = 0; i < kNumSubStreams; ++i) {
     uint32_t substream_size;
-    if (!file.ReadU32(&substream_size)) {
-      return OTS_FAILURE();
+    if (!buffer.ReadU32(&substream_size)) {
+      return OTS_FAILURE_MSG("Failed to read substream size %d of transformed 'glyf' table", i);
     }
     if (substream_size > data_size - offset) {
-      return OTS_FAILURE();
+      return OTS_FAILURE_MSG("Size of substream %d of transformed 'glyf' table does not fit in table size");
     }
     substreams.at(i) = std::make_pair(data + offset, substream_size);
     offset += substream_size;
@@ -556,34 +563,38 @@ bool ReconstructGlyf(const uint8_t* data, size_t data_size,
   std::vector<uint16_t> n_points_vec;
   std::vector<Point> points;
   uint32_t loca_offset = 0;
+  const uint8_t* bbox_bitmap = bbox_stream.buffer();
   for (unsigned int i = 0; i < num_glyphs; ++i) {
     size_t glyph_size = 0;
     uint16_t n_contours = 0;
     if (!n_contour_stream.ReadU16(&n_contours)) {
-      return OTS_FAILURE();
+      return OTS_FAILURE_MSG("Filed to read 'numberOfContours' of glyph %d from transformed 'glyf' table", i);
     }
     uint8_t* glyf_dst = dst + loca_offset;
     size_t glyf_dst_size = dst_size - loca_offset;
     if (n_contours == 0xffff) {
       // composite glyph
+      if (!(bbox_bitmap[i >> 3] & (0x80 >> (i & 7)))) {
+        return OTS_FAILURE_MSG("Composite glyph %d without bbox", i);
+      }
       bool have_instructions = false;
       uint16_t instruction_size = 0;
       if (!ProcessComposite(&composite_stream, glyf_dst, glyf_dst_size,
             &glyph_size, &have_instructions)) {
-        return OTS_FAILURE();
+        return OTS_FAILURE_MSG("Filed to process composite glyph %d from transformed 'glyf' table", i);
       }
       if (have_instructions) {
         if (!Read255UShort(&glyph_stream, &instruction_size)) {
-          return OTS_FAILURE();
+          return OTS_FAILURE_MSG("Failed to read 'instructionLength' of glyph %d from transformed 'glyf' table", i);
         }
         // No integer overflow here (instruction_size < 2^16).
         if (instruction_size + 2U > glyf_dst_size - glyph_size) {
-          return OTS_FAILURE();
+          return OTS_FAILURE_MSG("'instructionLength' of glyph %d from transformed 'glyf' table does not fit in the destination glyph size", i);
         }
         StoreU16(glyf_dst, glyph_size, instruction_size);
         if (!instruction_stream.Read(glyf_dst + glyph_size + 2,
               instruction_size)) {
-          return OTS_FAILURE();
+          return OTS_FAILURE_MSG("Filed to read instructions of glyph %d from transformed 'glyf' table", i);
         }
         glyph_size += instruction_size + 2;
       }
@@ -595,11 +606,11 @@ bool ReconstructGlyf(const uint8_t* data, size_t data_size,
       uint16_t n_points_contour;
       for (uint32_t j = 0; j < n_contours; ++j) {
         if (!Read255UShort(&n_points_stream, &n_points_contour)) {
-          return OTS_FAILURE();
+          return OTS_FAILURE_MSG("Filed to read number of points of contour %d of glyph %d from transformed 'glyf' table", j, i);
         }
         n_points_vec.push_back(n_points_contour);
         if (total_n_points + n_points_contour < total_n_points) {
-          return OTS_FAILURE();
+          return OTS_FAILURE_MSG("Negative number of points of contour %d of glyph %d from transformed 'glyf' table", j, i);
         }
         total_n_points += n_points_contour;
       }
@@ -654,7 +665,7 @@ bool ReconstructGlyf(const uint8_t* data, size_t data_size,
       }
       if (!StorePoints(points, n_contours, instruction_size,
             glyf_dst, glyf_dst_size, &glyph_size)) {
-        return OTS_FAILURE();
+        return OTS_FAILURE_MSG("Failed to store points of glyph %d from the transformed 'glyf' table", i);
       }
     } else {
       glyph_size = 0;
@@ -675,7 +686,7 @@ bool ReconstructGlyf(const uint8_t* data, size_t data_size,
   assert(loca_values.size() == static_cast<size_t>(num_glyphs + 1));
   if (!ProcessBboxStream(&bbox_stream, num_glyphs, loca_values,
           dst, dst_size)) {
-    return OTS_FAILURE();
+    return OTS_FAILURE_MSG("Filed to process 'bboxStream' from the transformed 'glyf' table");
   }
   return StoreLoca(loca_values, index_format, loca_buf, loca_size);
 }
@@ -693,12 +704,13 @@ const Table* FindTable(const std::vector<Table>& tables, uint32_t tag) {
   return NULL;
 }
 
-bool ReconstructTransformed(const std::vector<Table>& tables, uint32_t tag,
+bool ReconstructTransformed(ots::Font *font,
+    const std::vector<Table>& tables, uint32_t tag,
     const uint8_t* transformed_buf, size_t transformed_size,
     uint8_t* dst, size_t dst_length) {
-  if (tag == TAG('g', 'l', 'y', 'f')) {
+  if (tag == OTS_TAG('g','l','y','f')) {
     const Table* glyf_table = FindTable(tables, tag);
-    const Table* loca_table = FindTable(tables, TAG('l', 'o', 'c', 'a'));
+    const Table* loca_table = FindTable(tables, OTS_TAG('l','o','c','a'));
     if (glyf_table == NULL || loca_table == NULL) {
       return OTS_FAILURE();
     }
@@ -710,12 +722,12 @@ bool ReconstructTransformed(const std::vector<Table>& tables, uint32_t tag,
         dst_length) {
       return OTS_FAILURE();
     }
-    return ReconstructGlyf(transformed_buf, transformed_size,
+    return ReconstructGlyf(font, transformed_buf, transformed_size,
         dst + glyf_table->dst_offset, glyf_table->dst_length,
         dst + loca_table->dst_offset, loca_table->dst_length);
-  } else if (tag == TAG('l', 'o', 'c', 'a')) {
+  } else if (tag == OTS_TAG('l','o','c','a')) {
     // processing was already done by glyf table, but validate
-    if (!FindTable(tables, TAG('g', 'l', 'y', 'f'))) {
+    if (!FindTable(tables, OTS_TAG('g','l','y','f'))) {
       return OTS_FAILURE();
     }
   } else {
@@ -736,7 +748,7 @@ uint32_t ComputeChecksum(const uint8_t* buf, size_t size) {
 }
 
 bool FixChecksums(const std::vector<Table>& tables, uint8_t* dst) {
-  const Table* head_table = FindTable(tables, TAG('h', 'e', 'a', 'd'));
+  const Table* head_table = FindTable(tables, OTS_TAG('h','e','a','d'));
   if (head_table == NULL ||
       head_table->dst_length < kCheckSumAdjustmentOffset + 4) {
     return OTS_FAILURE();
@@ -763,18 +775,7 @@ bool FixChecksums(const std::vector<Table>& tables, uint8_t* dst) {
   return true;
 }
 
-bool Woff2Uncompress(uint8_t* dst_buf, size_t dst_size,
-    const uint8_t* src_buf, size_t src_size) {
-  size_t uncompressed_size = dst_size;
-  int ok = BrotliDecompressBuffer(src_size, src_buf,
-                                  &uncompressed_size, dst_buf);
-  if (!ok || uncompressed_size != dst_size) {
-    return OTS_FAILURE();
-  }
-  return true;
-}
-
-bool ReadShortDirectory(ots::OpenTypeFile* file,
+bool ReadTableDirectory(ots::Font *font,
     ots::Buffer* buffer, std::vector<Table>* tables,
     size_t num_tables) {
   for (size_t i = 0; i < num_tables; ++i) {
@@ -797,24 +798,28 @@ bool ReadShortDirectory(ots::OpenTypeFile* file,
     }
     uint32_t flags = 0;
     // Always transform the glyf and loca tables
-    if (tag == TAG('g', 'l', 'y', 'f') ||
-        tag == TAG('l', 'o', 'c', 'a')) {
+    if (tag == OTS_TAG('g','l','y','f') ||
+        tag == OTS_TAG('l','o','c','a')) {
       flags |= kWoff2FlagsTransform;
     }
     uint32_t dst_length;
     if (!ReadBase128(buffer, &dst_length)) {
-      return OTS_FAILURE_MSG("Failed to read \"origLength\" for table %4.4s", (char*)&tag);
+      return OTS_FAILURE_MSG("Failed to read 'origLength' for table '%c%c%c%c'", OTS_UNTAG(tag));
     }
     uint32_t transform_length = dst_length;
     if ((flags & kWoff2FlagsTransform) != 0) {
       if (!ReadBase128(buffer, &transform_length)) {
-        return OTS_FAILURE_MSG("Failed to read \"transformLength\" for table %4.4s", (char*)&tag);
+        return OTS_FAILURE_MSG("Failed to read 'transformLength' for table '%c%c%c%c'", OTS_UNTAG(tag));
+      }
+
+      if (tag == OTS_TAG('l','o','c','a') && transform_length != 0) {
+        return OTS_FAILURE_MSG("The 'transformLength' of 'loca' table must be zero: %d", transform_length);
       }
     }
     // Disallow huge numbers (> 1GB) for sanity.
     if (transform_length > 1024 * 1024 * 1024 ||
         dst_length > 1024 * 1024 * 1024) {
-      return OTS_FAILURE_MSG("\"origLength\" or \"transformLength\" > 1GB");
+      return OTS_FAILURE_MSG("'origLength' or 'transformLength' > 1GB");
     }
     table->tag = tag;
     table->flags = flags;
@@ -839,9 +844,9 @@ size_t ComputeWOFF2FinalSize(const uint8_t* data, size_t length) {
   return total_length;
 }
 
-bool ConvertWOFF2ToTTF(ots::OpenTypeFile* file,
-                       uint8_t* result, size_t result_length,
-                       const uint8_t* data, size_t length) {
+bool ConvertWOFF2ToSFNT(ots::Font *font,
+                        uint8_t* result, size_t result_length,
+                        const uint8_t* data, size_t length) {
   static const uint32_t kWoff2Signature = 0x774f4632;  // "wOF2"
   ots::Buffer buffer(data, length);
 
@@ -849,30 +854,35 @@ bool ConvertWOFF2ToTTF(ots::OpenTypeFile* file,
   uint32_t flavor = 0;
   if (!buffer.ReadU32(&signature) || signature != kWoff2Signature ||
       !buffer.ReadU32(&flavor)) {
-    return OTS_FAILURE_MSG("Failed to read \"signature\" or \"flavor\", or not WOFF2 signature");
+    return OTS_FAILURE_MSG("Failed to read 'signature' or 'flavor', or not WOFF2 signature");
   }
 
-  if (!IsValidVersionTag(ntohl(flavor))) {
-    return OTS_FAILURE_MSG("Invalid \"flavor\"");
+  if (!IsValidVersionTag(flavor)) {
+    return OTS_FAILURE_MSG("Invalid 'flavor'");
   }
 
   uint32_t reported_length;
   if (!buffer.ReadU32(&reported_length) || length != reported_length) {
-    return OTS_FAILURE_MSG("Failed to read \"length\" or it does not match the actual file size");
+    return OTS_FAILURE_MSG("Failed to read 'length' or it does not match the actual file size");
   }
   uint16_t num_tables;
   if (!buffer.ReadU16(&num_tables) || !num_tables) {
-    return OTS_FAILURE_MSG("Failed to read \"numTables\"");
+    return OTS_FAILURE_MSG("Failed to read 'numTables'");
   }
+
+  uint16_t reserved_value;
+  if (!buffer.ReadU16(&reserved_value)) {
+    return OTS_FAILURE_MSG("Failed to read 'reserved' field");
+  }
+
   // We don't care about these fields of the header:
-  //   uint16_t reserved
-  //   uint32_t total_sfnt_size
-  if (!buffer.Skip(6)) {
-    return OTS_FAILURE_MSG("Failed to read \"reserve\" or \"totalSfntSize\"");
+  //   uint32_t total_sfnt_size, the caller already passes it as result_length
+  if (!buffer.Skip(4)) {
+    return OTS_FAILURE_MSG("Failed to read 'totalSfntSize'");
   }
   uint32_t compressed_length;
   if (!buffer.ReadU32(&compressed_length)) {
-    return OTS_FAILURE_MSG("Failed to read \"totalCompressedSize\"");
+    return OTS_FAILURE_MSG("Failed to read 'totalCompressedSize'");
   }
   if (compressed_length > std::numeric_limits<uint32_t>::max()) {
     return OTS_FAILURE();
@@ -880,13 +890,40 @@ bool ConvertWOFF2ToTTF(ots::OpenTypeFile* file,
 
   // We don't care about these fields of the header:
   //   uint16_t major_version, minor_version
-  //   uint32_t meta_offset, meta_length, meta_orig_length
-  //   uint32_t priv_offset, priv_length
-  if (!buffer.Skip(24)) {
-    return OTS_FAILURE();
+  if (!buffer.Skip(2 * 2)) {
+    return OTS_FAILURE_MSG("Failed to read 'majorVersion' or 'minorVersion'");
   }
+
+  // Checks metadata block size.
+  uint32_t meta_offset;
+  uint32_t meta_length;
+  uint32_t meta_length_orig;
+  if (!buffer.ReadU32(&meta_offset) ||
+      !buffer.ReadU32(&meta_length) ||
+      !buffer.ReadU32(&meta_length_orig)) {
+    return OTS_FAILURE_MSG("Failed to read header metadata block fields");
+  }
+  if (meta_offset) {
+    if (meta_offset >= length || length - meta_offset < meta_length) {
+      return OTS_FAILURE_MSG("Invalid metadata block offset or length");
+    }
+  }
+
+  // Checks private data block size.
+  uint32_t priv_offset;
+  uint32_t priv_length;
+  if (!buffer.ReadU32(&priv_offset) ||
+      !buffer.ReadU32(&priv_length)) {
+    return OTS_FAILURE_MSG("Failed to read header private block fields");
+  }
+  if (priv_offset) {
+    if (priv_offset >= length || length - priv_offset < priv_length) {
+      return OTS_FAILURE_MSG("Invalid private block offset or length");
+    }
+  }
+
   std::vector<Table> tables(num_tables);
-  if (!ReadShortDirectory(file, &buffer, &tables, num_tables)) {
+  if (!ReadTableDirectory(font, &buffer, &tables, num_tables)) {
     return OTS_FAILURE_MSG("Failed to read table directory");
   }
   uint64_t compressed_offset = buffer.offset();
@@ -904,13 +941,41 @@ bool ConvertWOFF2ToTTF(ots::OpenTypeFile* file,
     }
     dst_offset = ots::Round4(dst_offset);
   }
-  if (ots::Round4(compressed_offset + compressed_length) > length || dst_offset > result_length) {
-    return OTS_FAILURE();
+
+  uint64_t block_end = ots::Round4(compressed_offset + compressed_length);
+  if (block_end > length || dst_offset != result_length) {
+    return OTS_FAILURE_MSG("Uncompressed sfnt size mismatch");
   }
 
   const uint32_t sfnt_header_and_table_directory_size = 12 + 16 * num_tables;
   if (sfnt_header_and_table_directory_size > result_length) {
     return OTS_FAILURE();
+  }
+
+  if (meta_offset) {
+    if (block_end != meta_offset) {
+      return OTS_FAILURE_MSG("Invalid metadata block offset");
+    }
+    block_end = ots::Round4(static_cast<uint64_t>(meta_offset) +
+                            static_cast<uint64_t>(meta_length));
+    if (block_end > std::numeric_limits<uint32_t>::max()) {
+      return OTS_FAILURE_MSG("Invalid metadata block length");
+    }
+  }
+
+  if (priv_offset) {
+    if (block_end != priv_offset) {
+      return OTS_FAILURE_MSG("Invalid private block offset");
+    }
+    block_end = ots::Round4(static_cast<uint64_t>(priv_offset) +
+                            static_cast<uint64_t>(priv_length));
+    if (block_end > std::numeric_limits<uint32_t>::max()) {
+      return OTS_FAILURE_MSG("Invalid private block length");
+    }
+  }
+
+  if (block_end != ots::Round4(length)) {
+    return OTS_FAILURE_MSG("File length mismatch (trailing junk?)");
   }
 
   // Start building the font
@@ -925,8 +990,13 @@ bool ConvertWOFF2ToTTF(ots::OpenTypeFile* file,
   offset = StoreU16(result, offset, output_search_range);
   offset = StoreU16(result, offset, max_pow2);
   offset = StoreU16(result, offset, (num_tables << 4) - output_search_range);
+
+  // sort tags in the table directory in ascending alphabetical order
+  std::vector<Table> sorted_tables(tables);
+  std::sort(sorted_tables.begin(), sorted_tables.end());
+
   for (uint16_t i = 0; i < num_tables; ++i) {
-    const Table* table = &tables.at(i);
+    const Table* table = &sorted_tables.at(i);
     offset = StoreU32(result, offset, table->tag);
     offset = StoreU32(result, offset, 0);  // checksum, to fill in later
     offset = StoreU32(result, offset, table->dst_offset);
@@ -946,12 +1016,15 @@ bool ConvertWOFF2ToTTF(ots::OpenTypeFile* file,
   if (total_size > 30 * 1024 * 1024) {
     return OTS_FAILURE();
   }
-  const size_t total_size_size_t = static_cast<size_t>(total_size);
-  uncompressed_buf.resize(total_size_size_t);
-  const uint8_t* src_buf = data + compressed_offset;
-  if (!Woff2Uncompress(&uncompressed_buf[0], total_size_size_t,
-      src_buf, compressed_length)) {
-    return OTS_FAILURE();
+  size_t uncompressed_size = static_cast<size_t>(total_size);
+  uncompressed_buf.resize(uncompressed_size);
+  const uint8_t* compressed_buf = data + compressed_offset;
+  if (!BrotliDecompressBuffer(compressed_length, compressed_buf,
+                              &uncompressed_size, &uncompressed_buf[0])) {
+    return OTS_FAILURE_MSG("Failed to uncompress font data");
+  }
+  if (uncompressed_size != static_cast<size_t>(total_size)) {
+    return OTS_FAILURE_MSG("Decompressed font data size does not match the sum of 'origLength' and 'transformLength'");
   }
   transform_buf = &uncompressed_buf[0];
 
@@ -971,9 +1044,9 @@ bool ConvertWOFF2ToTTF(ots::OpenTypeFile* file,
       std::memcpy(result + table->dst_offset, transform_buf,
           transform_length);
     } else {
-      if (!ReconstructTransformed(tables, table->tag,
+      if (!ReconstructTransformed(font, tables, table->tag,
             transform_buf, transform_length, result, result_length)) {
-        return OTS_FAILURE();
+        return OTS_FAILURE_MSG("Failed to reconstruct '%c%c%c%c' table", OTS_UNTAG(table->tag));
       }
     }
 
@@ -983,7 +1056,7 @@ bool ConvertWOFF2ToTTF(ots::OpenTypeFile* file,
     }
   }
 
-  return FixChecksums(tables, result);
+  return FixChecksums(sorted_tables, result);
 }
 
 }  // namespace ots

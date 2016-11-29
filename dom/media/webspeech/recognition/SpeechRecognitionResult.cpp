@@ -30,9 +30,9 @@ SpeechRecognitionResult::~SpeechRecognitionResult()
 }
 
 JSObject*
-SpeechRecognitionResult::WrapObject(JSContext* aCx)
+SpeechRecognitionResult::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SpeechRecognitionResultBinding::Wrap(aCx, this);
+  return SpeechRecognitionResultBinding::Wrap(aCx, this, aGivenProto);
 }
 
 nsISupports*
@@ -62,14 +62,15 @@ SpeechRecognitionResult::Length() const
 already_AddRefed<SpeechRecognitionAlternative>
 SpeechRecognitionResult::Item(uint32_t aIndex)
 {
-  nsRefPtr<SpeechRecognitionAlternative> alternative = mItems.ElementAt(aIndex);
+  RefPtr<SpeechRecognitionAlternative> alternative = mItems.ElementAt(aIndex);
   return alternative.forget();
 }
 
 bool
-SpeechRecognitionResult::Final() const
+SpeechRecognitionResult::IsFinal() const
 {
   return true; // TODO
 }
+
 } // namespace dom
 } // namespace mozilla

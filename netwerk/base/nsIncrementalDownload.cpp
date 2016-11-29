@@ -5,6 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/Attributes.h"
+#include "mozilla/UniquePtrExtensions.h"
 
 #include "nsIIncrementalDownload.h"
 #include "nsIRequestObserver.h"
@@ -14,10 +15,12 @@
 #include "nsIInterfaceRequestor.h"
 #include "nsIObserverService.h"
 #include "nsIObserver.h"
+#include "nsIStreamListener.h"
 #include "nsIFile.h"
 #include "nsITimer.h"
+#include "nsIURI.h"
+#include "nsIInputStream.h"
 #include "nsNetUtil.h"
-#include "nsAutoPtr.h"
 #include "nsWeakReference.h"
 #include "prio.h"
 #include "prprf.h"
@@ -144,7 +147,7 @@ private:
   nsCOMPtr<nsIFile>                        mDest;
   nsCOMPtr<nsIChannel>                     mChannel;
   nsCOMPtr<nsITimer>                       mTimer;
-  nsAutoArrayPtr<char>                     mChunk;
+  UniquePtr<char[]>                        mChunk;
   int32_t                                  mChunkLen;
   int32_t                                  mChunkSize;
   int32_t                                  mInterval;
@@ -188,7 +191,7 @@ nsIncrementalDownload::FlushChunk()
   if (mChunkLen == 0)
     return NS_OK;
 
-  nsresult rv = AppendToFile(mDest, mChunk, mChunkLen);
+  nsresult rv = AppendToFile(mDest, mChunk.get(), mChunkLen);
   if (NS_FAILED(rv))
     return rv;
 
@@ -265,7 +268,7 @@ nsIncrementalDownload::ProcessTimeout()
   nsresult rv = NS_NewChannel(getter_AddRefs(channel),
                               mFinalURI,
                               nsContentUtils::GetSystemPrincipal(),
-                              nsILoadInfo::SEC_NORMAL,
+                              nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
                               nsIContentPolicy::TYPE_OTHER,
                               nullptr,   // loadGroup
                               this,      // aCallbacks
@@ -307,7 +310,7 @@ nsIncrementalDownload::ProcessTimeout()
     }
   }
 
-  rv = channel->AsyncOpen(this, nullptr);
+  rv = channel->AsyncOpen2(this);
   if (NS_FAILED(rv))
     return rv;
 
@@ -706,7 +709,7 @@ nsIncrementalDownload::OnStartRequest(nsIRequest *request,
   if (diff < int64_t(mChunkSize))
     mChunkSize = uint32_t(diff);
 
-  mChunk = new char[mChunkSize];
+  mChunk = MakeUniqueFallible<char[]>(mChunkSize);
   if (!mChunk)
     rv = NS_ERROR_OUT_OF_MEMORY;
 
@@ -763,7 +766,7 @@ nsIncrementalDownload::OnDataAvailable(nsIRequest *request,
     uint32_t space = mChunkSize - mChunkLen;
     uint32_t n, len = std::min(space, count);
 
-    nsresult rv = input->Read(mChunk + mChunkLen, len, &n);
+    nsresult rv = input->Read(&mChunk[mChunkLen], len, &n);
     if (NS_FAILED(rv))
       return rv;
     if (n != len)

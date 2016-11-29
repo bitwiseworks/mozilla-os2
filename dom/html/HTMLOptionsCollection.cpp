@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -107,9 +108,9 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(HTMLOptionsCollection)
 
 
 JSObject*
-HTMLOptionsCollection::WrapObject(JSContext* aCx)
+HTMLOptionsCollection::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLOptionsCollectionBinding::Wrap(aCx, this);
+  return HTMLOptionsCollectionBinding::Wrap(aCx, this, aGivenProto);
 }
 
 NS_IMETHODIMP
@@ -168,7 +169,7 @@ HTMLOptionsCollection::SetOption(uint32_t aIndex,
   } else {
     // Find the option they're talking about and replace it
     // hold a strong reference to follow COM rules.
-    nsRefPtr<HTMLOptionElement> refChild = ItemAsOption(index);
+    RefPtr<HTMLOptionElement> refChild = ItemAsOption(index);
     NS_ENSURE_TRUE(refChild, NS_ERROR_UNEXPECTED);
 
     nsCOMPtr<nsINode> parent = refChild->GetParent();
@@ -176,7 +177,7 @@ HTMLOptionsCollection::SetOption(uint32_t aIndex,
       nsCOMPtr<nsINode> node = do_QueryInterface(aOption);
       ErrorResult res;
       parent->ReplaceChild(*node, *refChild, res);
-      rv = res.ErrorCode();
+      rv = res.StealNSResult();
     }
   }
 
@@ -201,7 +202,7 @@ HTMLOptionsCollection::GetSelectedIndex(int32_t* aSelectedIndex)
 {
   ErrorResult rv;
   *aSelectedIndex = GetSelectedIndex(rv);
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -221,7 +222,7 @@ HTMLOptionsCollection::SetSelectedIndex(int32_t aSelectedIndex)
 {
   ErrorResult rv;
   SetSelectedIndex(aSelectedIndex, rv);
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 NS_IMETHODIMP
@@ -308,9 +309,10 @@ HTMLOptionsCollection::GetSupportedNames(unsigned aFlags,
     }
   }
 
-  aNames.SetCapacity(atoms.Length());
-  for (uint32_t i = 0; i < atoms.Length(); ++i) {
-    aNames.AppendElement(nsDependentAtomString(atoms[i]));
+  uint32_t atomsLen = atoms.Length();
+  nsString* names = aNames.AppendElements(atomsLen);
+  for (uint32_t i = 0; i < atomsLen; ++i) {
+    atoms[i]->ToString(names[i]);
   }
 }
 
@@ -371,7 +373,7 @@ HTMLOptionsCollection::Remove(int32_t aIndex)
 {
   ErrorResult rv;
   Remove(aIndex, rv);
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 } // namespace dom

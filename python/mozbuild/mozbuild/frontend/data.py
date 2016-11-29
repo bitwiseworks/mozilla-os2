@@ -15,15 +15,12 @@ contains the code for converting executed mozbuild files into these data
 structures.
 """
 
-from __future__ import unicode_literals
+from __future__ import absolute_import, unicode_literals
 
-import os
+from mozbuild.util import StrictOrderingOnAppendList
+from mozbuild.shellutil import quote as shell_quote
+from mozpack.chrome.manifest import ManifestEntry
 
-from collections import OrderedDict
-from mozbuild.util import (
-    shell_quote,
-    StrictOrderingOnAppendList,
-)
 import mozpack.path as mozpath
 from .context import FinalTargetValue
 
@@ -31,26 +28,13 @@ from ..util import (
     group_unified_files,
 )
 
+from ..testing import (
+    all_test_flavors,
+)
+
 
 class TreeMetadata(object):
     """Base class for all data being captured."""
-
-    def __init__(self):
-        self._ack = False
-
-    def ack(self):
-        self._ack = True
-
-
-class ReaderSummary(TreeMetadata):
-    """A summary of what the reader did."""
-
-    def __init__(self, total_file_count, total_sandbox_execution_time,
-        total_emitter_execution_time):
-        TreeMetadata.__init__(self)
-        self.total_file_count = total_file_count
-        self.total_sandbox_execution_time = total_sandbox_execution_time
-        self.total_emitter_execution_time = total_emitter_execution_time
 
 
 class ContextDerived(TreeMetadata):
@@ -86,6 +70,12 @@ class ContextDerived(TreeMetadata):
         self.objdir = context.objdir
 
         self.config = context.config
+
+        self._context = context
+
+    @property
+    def install_target(self):
+        return self._context['FINAL_TARGET']
 
     @property
     def relobjdir(self):
@@ -160,22 +150,22 @@ class XPIDLFile(ContextDerived):
     """Describes an XPIDL file to be compiled."""
 
     __slots__ = (
+        'add_to_manifest',
         'basename',
-        'install_target',
         'source_path',
     )
 
-    def __init__(self, context, source, module):
+    def __init__(self, context, source, module, add_to_manifest):
         ContextDerived.__init__(self, context)
 
         self.source_path = source
         self.basename = mozpath.basename(source)
         self.module = module
+        self.add_to_manifest = add_to_manifest
 
-        self.install_target = context['FINAL_TARGET']
-
-class Defines(ContextDerived):
-    """Context derived container object for DEFINES, which is an OrderedDict.
+class BaseDefines(ContextDerived):
+    """Context derived container object for DEFINES/HOST_DEFINES,
+    which are OrderedDicts.
     """
     __slots__ = ('defines')
 
@@ -198,20 +188,11 @@ class Defines(ContextDerived):
         else:
             self.defines.update(more_defines)
 
-class Exports(ContextDerived):
-    """Context derived container object for EXPORTS, which is a
-    HierarchicalStringList.
+class Defines(BaseDefines):
+    pass
 
-    We need an object derived from ContextDerived for use in the backend, so
-    this object fills that role. It just has a reference to the underlying
-    HierarchicalStringList, which is created when parsing EXPORTS.
-    """
-    __slots__ = ('exports', 'dist_install')
-
-    def __init__(self, context, exports, dist_install=True):
-        ContextDerived.__init__(self, context)
-        self.exports = exports
-        self.dist_install = dist_install
+class HostDefines(BaseDefines):
+    pass
 
 class TestHarnessFiles(ContextDerived):
     """Sandbox container object for TEST_HARNESS_FILES,
@@ -229,34 +210,19 @@ class TestHarnessFiles(ContextDerived):
         self.srcdir_pattern_files = srcdir_pattern_files
         self.objdir_files = objdir_files
 
-class Resources(ContextDerived):
-    """Context derived container object for RESOURCE_FILES, which is a
-    HierarchicalStringList, with an extra ``.preprocess`` property on each
-    entry.
+class BrandingFiles(ContextDerived):
+    """Sandbox container object for BRANDING_FILES, which is a
+    HierarchicalStringList.
 
-    The local defines plus anything in ACDEFINES are stored in ``defines`` as a
-    dictionary, for any files that need preprocessing.
+    We need an object derived from ContextDerived for use in the backend, so
+    this object fills that role. It just has a reference to the underlying
+    HierarchicalStringList, which is created when parsing BRANDING_FILES.
     """
-    __slots__ = ('resources', 'defines')
+    __slots__ = ('files')
 
-    def __init__(self, context, resources, defines=None):
-        ContextDerived.__init__(self, context)
-        self.resources = resources
-        defs = {}
-        defs.update(context.config.defines)
-        if defines:
-            defs.update(defines)
-        self.defines = defs
-
-class JsPreferenceFile(ContextDerived):
-    """Context derived container object for a Javascript preference file.
-
-    Paths are assumed to be relative to the srcdir."""
-    __slots__ = ('path')
-
-    def __init__(self, context, path):
-        ContextDerived.__init__(self, context)
-        self.path = path
+    def __init__(self, sandbox, files):
+        ContextDerived.__init__(self, sandbox)
+        self.files = files
 
 class IPDLFile(ContextDerived):
     """Describes an individual .ipdl source file."""
@@ -488,12 +454,14 @@ class StaticLibrary(Library):
     """Context derived container object for a static library"""
     __slots__ = (
         'link_into',
+        'no_expand_lib',
     )
 
     def __init__(self, context, basename, real_name=None, is_sdk=False,
-        link_into=None):
+        link_into=None, no_expand_lib=False):
         Library.__init__(self, context, basename, real_name, is_sdk)
         self.link_into = link_into
+        self.no_expand_lib = no_expand_lib
 
 
 class SharedLibrary(Library):
@@ -608,6 +576,8 @@ class TestManifest(ContextDerived):
             install_prefix=None, relpath=None, dupe_manifest=False):
         ContextDerived.__init__(self, context)
 
+        assert flavor in all_test_flavors()
+
         self.path = path
         self.directory = mozpath.dirname(path)
         self.manifest = manifest
@@ -624,18 +594,6 @@ class TestManifest(ContextDerived):
 
 class LocalInclude(ContextDerived):
     """Describes an individual local include path."""
-
-    __slots__ = (
-        'path',
-    )
-
-    def __init__(self, context, path):
-        ContextDerived.__init__(self, context)
-
-        self.path = path
-
-class GeneratedInclude(ContextDerived):
-    """Describes an individual generated include path."""
 
     __slots__ = (
         'path',
@@ -677,21 +635,6 @@ class JARManifest(ContextDerived):
         ContextDerived.__init__(self, context)
 
         self.path = path
-
-
-class JavaScriptModules(ContextDerived):
-    """Describes a JavaScript module."""
-
-    __slots__ = (
-        'modules',
-        'flavor',
-    )
-
-    def __init__(self, context, modules, flavor):
-        super(JavaScriptModules, self).__init__(context)
-
-        self.modules = modules
-        self.flavor = flavor
 
 
 class ContextWrapped(ContextDerived):
@@ -826,7 +769,7 @@ class InstallationTarget(ContextDerived):
         self.xpiname = context.get('XPI_NAME', '')
         self.subdir = context.get('DIST_SUBDIR', '')
         self.target = context['FINAL_TARGET']
-        self.enabled = not context.get('NO_DIST_INSTALL', False)
+        self.enabled = context['DIST_INSTALL'] is not False
 
     def is_custom(self):
         """Returns whether or not the target is not derived from the default
@@ -847,10 +790,44 @@ class FinalTargetFiles(ContextDerived):
     """
     __slots__ = ('files', 'target')
 
-    def __init__(self, sandbox, files, target):
+    def __init__(self, sandbox, files):
         ContextDerived.__init__(self, sandbox)
         self.files = files
-        self.target = target
+
+
+class FinalTargetPreprocessedFiles(ContextDerived):
+    """Sandbox container object for FINAL_TARGET_PP_FILES, which is a
+    HierarchicalStringList.
+
+    We need an object derived from ContextDerived for use in the backend, so
+    this object fills that role. It just has a reference to the underlying
+    HierarchicalStringList, which is created when parsing
+    FINAL_TARGET_PP_FILES.
+    """
+    __slots__ = ('files', 'target')
+
+    def __init__(self, sandbox, files):
+        ContextDerived.__init__(self, sandbox)
+        self.files = files
+
+
+class TestingFiles(FinalTargetFiles):
+    @property
+    def install_target(self):
+        return '_tests'
+
+
+class Exports(FinalTargetFiles):
+    """Context derived container object for EXPORTS, which is a
+    HierarchicalStringList.
+
+    We need an object derived from ContextDerived for use in the backend, so
+    this object fills that role. It just has a reference to the underlying
+    HierarchicalStringList, which is created when parsing EXPORTS.
+    """
+    @property
+    def install_target(self):
+        return 'dist/include'
 
 
 class GeneratedFile(ContextDerived):
@@ -858,13 +835,15 @@ class GeneratedFile(ContextDerived):
 
     __slots__ = (
         'script',
+        'method',
         'output',
         'inputs',
     )
 
-    def __init__(self, context, script, output, inputs):
+    def __init__(self, context, script, method, output, inputs):
         ContextDerived.__init__(self, context)
         self.script = script
+        self.method = method
         self.output = output
         self.inputs = inputs
 
@@ -930,3 +909,70 @@ class AndroidEclipseProjectData(object):
         cpe.ignore_warnings = ignore_warnings
         self._classpathentries.append(cpe)
         return cpe
+
+
+class AndroidResDirs(ContextDerived):
+    """Represents Android resource directories."""
+
+    __slots__ = (
+        'paths',
+    )
+
+    def __init__(self, context, paths):
+        ContextDerived.__init__(self, context)
+        self.paths = paths
+
+class AndroidAssetsDirs(ContextDerived):
+    """Represents Android assets directories."""
+
+    __slots__ = (
+        'paths',
+    )
+
+    def __init__(self, context, paths):
+        ContextDerived.__init__(self, context)
+        self.paths = paths
+
+class AndroidExtraResDirs(ContextDerived):
+    """Represents Android extra resource directories.
+
+    Extra resources are resources provided by libraries and including in a
+    packaged APK, but not otherwise redistributed.  In practice, this means
+    resources included in Fennec but not in GeckoView.
+    """
+
+    __slots__ = (
+        'paths',
+    )
+
+    def __init__(self, context, paths):
+        ContextDerived.__init__(self, context)
+        self.paths = paths
+
+class AndroidExtraPackages(ContextDerived):
+    """Represents Android extra packages."""
+
+    __slots__ = (
+        'packages',
+    )
+
+    def __init__(self, context, packages):
+        ContextDerived.__init__(self, context)
+        self.packages = packages
+
+class ChromeManifestEntry(ContextDerived):
+    """Represents a chrome.manifest entry."""
+
+    __slots__ = (
+        'entry',
+    )
+
+    def __init__(self, context, manifest_path, entry):
+        ContextDerived.__init__(self, context)
+        assert isinstance(entry, ManifestEntry)
+        self.path = mozpath.join(self.install_target, manifest_path)
+        # Ensure the entry is relative to the directory containing the
+        # manifest path.
+        entry = entry.rebase(mozpath.dirname(manifest_path))
+        # Then add the install_target to the entry base directory.
+        self.entry = entry.move(mozpath.dirname(self.path))

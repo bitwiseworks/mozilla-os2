@@ -109,7 +109,6 @@ nsHTMLEditor::HideInlineTableEditingUI()
 
   // get the root content node.
   nsCOMPtr<nsIContent> bodyContent = GetRoot();
-  NS_ENSURE_TRUE(bodyContent, NS_ERROR_FAILURE);
 
   DeleteRefToAnonymousNode(mAddColumnBeforeButton, bodyContent, ps);
   mAddColumnBeforeButton = nullptr;
@@ -149,7 +148,7 @@ nsHTMLEditor::DoInlineTableEditingAction(nsIDOMElement * aElement)
     NS_ENSURE_SUCCESS(res, res);
 
     bool hideUI = false;
-    bool hideResizersWithInlineTableUI = (mResizedObject == tableElement);
+    bool hideResizersWithInlineTableUI = (GetAsDOMNode(mResizedObject) == tableElement);
 
     if (anonclass.EqualsLiteral("mozTableAddColumnBefore"))
       InsertTableColumn(1, false);

@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -110,7 +111,7 @@ nsSVGNumber2::SetAnimValue(float aValue, nsSVGElement *aSVGElement)
 already_AddRefed<SVGAnimatedNumber>
 nsSVGNumber2::ToDOMAnimatedNumber(nsSVGElement* aSVGElement)
 {
-  nsRefPtr<DOMAnimatedNumber> domAnimatedNumber =
+  RefPtr<DOMAnimatedNumber> domAnimatedNumber =
     sSVGAnimatedNumberTearoffTable.GetTearoff(this);
   if (!domAnimatedNumber) {
     domAnimatedNumber = new DOMAnimatedNumber(this, aSVGElement);

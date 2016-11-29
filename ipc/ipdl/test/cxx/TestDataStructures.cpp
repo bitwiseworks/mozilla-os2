@@ -452,7 +452,7 @@ bool TestDataStructuresParent::RecvTest18(RegionArray&& ra)
         // if |ra| has been realloc()d and given a different allocator
         // chunk, this next line will nondeterministically crash or
         // iloop
-        while (const nsIntRect* sr = it.Next()) unused << sr;
+        while (const nsIntRect* sr = it.Next()) Unused << sr;
     }
 
     return true;
@@ -494,7 +494,7 @@ TestDataStructuresChild::RecvStart()
     Test15();
     Test16();
     Test17();
-    if (OtherProcess() != 0) {
+    if (OtherPid() != base::GetCurrentProcId()) {
         //FIXME/bug 703317 allocation of nsIntRegion uses a global
         //region pool which breaks threads
         Test18();
@@ -971,7 +971,7 @@ TestDataStructuresChild::Test18()
     ra.SetCapacity(nelements);
     for (int i = 0; i < nelements; ++i) {
         nsIntRegion r;
-        r = r.Or(nsIntRect(0, 0, 10, 10), nsIntRect(10, 10, 10, 10));
+        r.Or(nsIntRect(0, 0, 10, 10), nsIntRect(10, 10, 10, 10));
         ra.AppendElement(r);
     }
 

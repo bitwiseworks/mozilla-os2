@@ -16,7 +16,7 @@ interface nsIDOMElement;
 interface nsITabParent;
 interface nsILoadContext;
 
-[scriptable, builtinclass, uuid(28b6b043-46ec-412f-9be9-db22938b0d6d)]
+[scriptable, builtinclass, uuid(1645af04-1bc7-4363-8f2c-eb9679220ab1)]
 interface nsIFrameLoader : nsISupports
 {
   /**
@@ -48,6 +48,15 @@ interface nsIFrameLoader : nsISupports
    * except that this method allows specifying the URI to load.
    */
   void loadURI(in nsIURI aURI);
+
+  /**
+   * Loads the specified URI in this frame but using a different process.
+   * Behaves identically to loadURI, except that this method only works
+   * with remote frame. For a signed package, we need to specifiy the
+   * package identifier.
+   * Throws an exception with non-remote frames.
+   */
+  void switchProcessAndLoadURI(in nsIURI aURI, in ACString aPackageId);
 
   /**
    * Puts the frameloader in prerendering mode.
@@ -120,6 +129,14 @@ interface nsIFrameLoader : nsISupports
    * to the window.
    */
   void requestNotifyAfterRemotePaint();
+
+  /**
+   * Request an event when the layer tree from the remote tab becomes
+   * available or unavailable. When this happens, a mozLayerTreeReady
+   * or mozLayerTreeCleared event is fired.
+   */
+  void requestNotifyLayerTreeReady();
+  void requestNotifyLayerTreeCleared();
 
   /**
    * The default event mode automatically forwards the events

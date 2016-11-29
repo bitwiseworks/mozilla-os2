@@ -19,14 +19,13 @@ namespace mp4_demuxer
 class BitReader
 {
 public:
-  explicit BitReader(const ByteBuffer& aBuffer)
-  : mBitReader(aBuffer.Elements(), aBuffer.Length())
+  explicit BitReader(const mozilla::MediaByteBuffer* aBuffer)
+    : mBitReader(aBuffer->Elements(), aBuffer->Length())
   {
   }
 
   uint32_t ReadBits(size_t aNum)
   {
-    MOZ_ASSERT(mBitReader.numBitsLeft());
     MOZ_ASSERT(aNum <= 32);
     if (mBitReader.numBitsLeft() < aNum) {
       return 0;
@@ -48,7 +47,10 @@ public:
       i++;
     }
     if (i == 32) {
-      MOZ_ASSERT(false);
+      // This can happen if the data is invalid, or if it's
+      // short, since ReadBit() will return 0 when it runs
+      // off the end of the buffer.
+      NS_WARNING("Invalid H.264 data");
       return 0;
     }
     uint32_t r = ReadBits(i);
@@ -82,8 +84,8 @@ SPSData::SPSData()
   sample_ratio = 1.0;
 }
 
-/* static */ already_AddRefed<ByteBuffer>
-H264::DecodeNALUnit(const ByteBuffer* aNAL)
+/* static */ already_AddRefed<mozilla::MediaByteBuffer>
+H264::DecodeNALUnit(const mozilla::MediaByteBuffer* aNAL)
 {
   MOZ_ASSERT(aNAL);
 
@@ -91,8 +93,8 @@ H264::DecodeNALUnit(const ByteBuffer* aNAL)
     return nullptr;
   }
 
-  nsRefPtr<ByteBuffer> rbsp = new ByteBuffer;
-  ByteReader reader(*aNAL);
+  RefPtr<mozilla::MediaByteBuffer> rbsp = new mozilla::MediaByteBuffer;
+  ByteReader reader(aNAL);
   uint8_t nal_unit_type = reader.ReadU8() & 0x1f;
   uint32_t nalUnitHeaderBytes = 1;
   if (nal_unit_type == 14 || nal_unit_type == 20 || nal_unit_type == 21) {
@@ -138,10 +140,12 @@ ConditionDimension(float aValue)
 }
 
 /* static */ bool
-H264::DecodeSPS(const ByteBuffer* aSPS, SPSData& aDest)
+H264::DecodeSPS(const mozilla::MediaByteBuffer* aSPS, SPSData& aDest)
 {
-  MOZ_ASSERT(aSPS);
-  BitReader br(*aSPS);
+  if (!aSPS) {
+    return false;
+  }
+  BitReader br(aSPS);
 
   int32_t lastScale;
   int32_t nextScale;
@@ -461,12 +465,12 @@ H264::vui_parameters(BitReader& aBr, SPSData& aDest)
 }
 
 /* static */ bool
-H264::DecodeSPSFromExtraData(const ByteBuffer* aExtraData, SPSData& aDest)
+H264::DecodeSPSFromExtraData(const mozilla::MediaByteBuffer* aExtraData, SPSData& aDest)
 {
   if (!AnnexB::HasSPS(aExtraData)) {
     return false;
   }
-  ByteReader reader(*aExtraData);
+  ByteReader reader(aExtraData);
 
   if (!reader.Read(5)) {
     return false;
@@ -490,12 +494,16 @@ H264::DecodeSPSFromExtraData(const ByteBuffer* aExtraData, SPSData& aDest)
     return false;
   }
 
-  nsRefPtr<ByteBuffer> rawNAL = new ByteBuffer;
+  reader.DiscardRemaining();
+
+  RefPtr<mozilla::MediaByteBuffer> rawNAL = new mozilla::MediaByteBuffer;
   rawNAL->AppendElements(ptr, length);
 
-  nsRefPtr<ByteBuffer> sps = DecodeNALUnit(rawNAL);
+  RefPtr<mozilla::MediaByteBuffer> sps = DecodeNALUnit(rawNAL);
 
-  reader.DiscardRemaining();
+  if (!sps) {
+    return false;
+  }
 
   return DecodeSPS(sps, aDest);
 }

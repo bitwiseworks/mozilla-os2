@@ -183,13 +183,13 @@ app/Message.h
 app/MessageRunner.h
 arpa/inet.h
 arpa/nameser.h
+array
 asm/page.h
 asm/sigcontext.h
 asm/signal.h
 ASRegistry.h
 assert.h
 atk/atk.h
-atk-bridge.h
 atlcom.h
 atlconv.h
 atlctl.cpp
@@ -239,10 +239,6 @@ bstring.h
 builtin.h
 Button.h
 byteswap.h
-#if MOZ_TREE_CAIRO!=1
-#define WRAP_CAIRO_HEADERS
-#endif
-#ifdef WRAP_CAIRO_HEADERS
 pixman.h
 cairo.h
 cairo-atsui.h
@@ -259,7 +255,6 @@ cairo-xlib-xrender.h
 cairo-directfb.h
 cairo-qpainter.h
 cairo-qt.h
-#endif
 dfiff.h
 exception
 ffi.h
@@ -401,6 +396,9 @@ DiskInit.h
 dlfcn.h
 dlgs.h
 dl.h
+#ifdef MOZ_WIDGET_GONK
+dns_sd.h
+#endif
 docobj.h
 dos/dosextens.h
 dos.h
@@ -630,14 +628,6 @@ libgnome/libgnome.h
 libgnomeui/gnome-icon-lookup.h
 libgnomeui/gnome-icon-theme.h
 libgnomeui/gnome-ui-init.h
-libgnomevfs/gnome-vfs-file-info.h
-libgnomevfs/gnome-vfs.h
-libgnomevfs/gnome-vfs-init.h
-libgnomevfs/gnome-vfs-mime.h
-libgnomevfs/gnome-vfs-mime-handlers.h
-libgnomevfs/gnome-vfs-mime-utils.h
-libgnomevfs/gnome-vfs-ops.h
-libgnomevfs/gnome-vfs-standard-callbacks.h
 lib$routines.h
 limits
 limits.h
@@ -759,6 +749,7 @@ media/stagefright/foundation/hexdump.h
 media/stagefright/MediaBuffer.h
 media/stagefright/MediaBufferGroup.h
 media/stagefright/MediaCodec.h
+media/stagefright/MediaCodecSource.h
 media/stagefright/MediaDefs.h
 media/stagefright/MediaErrors.h
 media/stagefright/MediaExtractor.h
@@ -1269,6 +1260,10 @@ X11/Xos.h
 X11/Xutil.h
 zmouse.h
 soundtouch/SoundTouch.h
+soundtouch/SoundTouchFactory.h
+#if MOZ_LIBAV_FFT==1
+libavcodec/avfft.h
+#endif
 #if MOZ_NATIVE_PNG==1
 png.h
 #endif
@@ -1319,22 +1314,6 @@ vpx/vp8cx.h
 vpx/vp8dx.h
 vpx_mem/vpx_mem.h
 #endif
-#ifdef GKMEDIAS_SHARED_LIBRARY
-vpx/vpx_codec.h
-vpx/vpx_decoder.h
-vpx/vpx_encoder.h
-vpx/vp8cx.h
-vpx/vp8dx.h
-vpx_mem/vpx_mem.h
-vorbis/codec.h
-theora/theoradec.h
-tremor/ivorbiscodec.h
-speex/speex_resampler.h
-ogg/ogg.h
-ogg/os_types.h
-nestegg/nestegg.h
-cubeb/cubeb.h
-#endif
 gst/gst.h
 gst/app/gstappsink.h
 gst/app/gstappsrc.h
@@ -1350,12 +1329,15 @@ xlocale.h
 #ifdef MOZ_SHARED_ICU
 unicode/locid.h
 unicode/numsys.h
+unicode/timezone.h
 unicode/ucal.h
+unicode/uchar.h
 unicode/uclean.h
 unicode/ucol.h
 unicode/udat.h
 unicode/udatpg.h
 unicode/uenum.h
+unicode/unorm.h
 unicode/unum.h
 unicode/ustring.h
 unicode/utypes.h

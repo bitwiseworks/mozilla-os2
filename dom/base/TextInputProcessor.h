@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -8,6 +9,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/EventForwards.h"
+#include "mozilla/TextEventDispatcher.h"
 #include "mozilla/TextEventDispatcherListener.h"
 #include "nsAutoPtr.h"
 #include "nsITextInputProcessor.h"
@@ -16,12 +18,8 @@
 
 namespace mozilla {
 
-namespace widget{
-class TextEventDispatcher;
-} // namespace widget
-
 class TextInputProcessor final : public nsITextInputProcessor
-                                   , public widget::TextEventDispatcherListener
+                               , public widget::TextEventDispatcherListener
 {
   typedef mozilla::widget::IMENotification IMENotification;
   typedef mozilla::widget::TextEventDispatcher TextEventDispatcher;
@@ -59,10 +57,11 @@ private:
   nsresult KeydownInternal(const WidgetKeyboardEvent& aKeyboardEvent,
                            uint32_t aKeyFlags,
                            bool aAllowToDispatchKeypress,
-                           bool& aDoDefault);
+                           uint32_t& aConsumedFlags);
   nsresult KeyupInternal(const WidgetKeyboardEvent& aKeyboardEvent,
                          uint32_t aKeyFlags,
                          bool& aDoDefault);
+  TextEventDispatcher::DispatchTo GetDispatchTo() const;
   nsresult IsValidStateForComposition();
   void UnlinkFromTextEventDispatcher();
   nsresult PrepareKeyboardEventToDispatch(WidgetKeyboardEvent& aKeyboardEvent,
@@ -106,7 +105,7 @@ private:
     ~AutoPendingCompositionResetter();
 
   private:
-    nsRefPtr<TextInputProcessor> mTIP;
+    RefPtr<TextInputProcessor> mTIP;
   };
 
   /**
@@ -178,7 +177,7 @@ private:
 
   TextEventDispatcher* mDispatcher; // [Weak]
   nsCOMPtr<nsITextInputProcessorCallback> mCallback;
-  nsRefPtr<ModifierKeyDataArray> mModifierKeyDataArray;
+  RefPtr<ModifierKeyDataArray> mModifierKeyDataArray;
 
   bool mForTests;
 };

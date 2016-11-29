@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -15,10 +16,7 @@
 
 class nsIAtom;
 class nsIContent;
-class nsIDocument;
-class nsPIDOMWindow;
 class nsXBLPrototypeBinding;
-class nsTagNameMapEntry;
 
 namespace mozilla {
 namespace dom {
@@ -28,8 +26,8 @@ class HTMLContentElement;
 class HTMLShadowElement;
 class ShadowRootStyleSheetList;
 
-class ShadowRoot : public DocumentFragment,
-                   public nsStubMutationObserver
+class ShadowRoot final : public DocumentFragment,
+                         public nsStubMutationObserver
 {
   friend class ShadowRootStyleSheetList;
 public:
@@ -103,7 +101,7 @@ public:
   nsIContent* GetPoolHost() { return mPoolHost; }
   nsTArray<HTMLShadowElement*>& ShadowDescendants() { return mShadowDescendants; }
 
-  JSObject* WrapObject(JSContext* aCx) override;
+  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   static bool IsPooledNode(nsIContent* aChild, nsIContent* aContainer,
                            nsIContent* aHost);
@@ -133,6 +131,8 @@ public:
   {
     mIsComposedDocParticipant = aIsComposedDocParticipant;
   }
+
+  virtual void DestroyContent() override;
 protected:
   virtual ~ShadowRoot();
 
@@ -157,20 +157,20 @@ protected:
   // It is necessary to hold a reference to the associated nsXBLBinding
   // because the binding holds a reference on the nsXBLDocumentInfo that
   // owns |mProtoBinding|.
-  nsRefPtr<nsXBLBinding> mAssociatedBinding;
+  RefPtr<nsXBLBinding> mAssociatedBinding;
 
-  nsRefPtr<ShadowRootStyleSheetList> mStyleSheetList;
+  RefPtr<ShadowRootStyleSheetList> mStyleSheetList;
 
   // The current shadow insertion point of this ShadowRoot.
   HTMLShadowElement* mShadowElement;
 
   // The ShadowRoot that was created by the host element before
   // this ShadowRoot was created.
-  nsRefPtr<ShadowRoot> mOlderShadow;
+  RefPtr<ShadowRoot> mOlderShadow;
 
   // The ShadowRoot that was created by the host element after
   // this ShadowRoot was created.
-  nsRefPtr<ShadowRoot> mYoungerShadow;
+  RefPtr<ShadowRoot> mYoungerShadow;
 
   // A boolean that indicates that an insertion point was added or removed
   // from this ShadowRoot and that the nodes need to be redistributed into
@@ -183,6 +183,8 @@ protected:
   // mark whether it is in the composed document, but we have run out of flags
   // so instead we track it here.
   bool mIsComposedDocParticipant;
+
+  nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const override;
 };
 
 class ShadowRootStyleSheetList : public StyleSheetList
@@ -204,7 +206,7 @@ public:
 protected:
   virtual ~ShadowRootStyleSheetList();
 
-  nsRefPtr<ShadowRoot> mShadowRoot;
+  RefPtr<ShadowRoot> mShadowRoot;
 };
 
 } // namespace dom

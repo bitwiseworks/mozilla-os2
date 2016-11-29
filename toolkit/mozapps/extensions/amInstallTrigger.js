@@ -18,7 +18,7 @@ const MSG_INSTALL_ADDONS   = "WebInstallerInstallAddonsFromWebpage";
 const MSG_INSTALL_CALLBACK = "WebInstallerInstallCallback";
 
 
-let log = Log.repository.getLogger("AddonManager.InstallTrigger");
+var log = Log.repository.getLogger("AddonManager.InstallTrigger");
 log.level = Log.Level[Preferences.get("extensions.logging.enabled", false) ? "Warn" : "Trace"];
 
 function CallbackObject(id, callback, urls, mediator) {
@@ -165,12 +165,12 @@ InstallTrigger.prototype = {
         item = { URL: item };
       }
       if (!item.URL) {
-        throw new this._window.DOMError("Error", "Missing URL property for '" + name + "'");
+        throw new this._window.Error("Missing URL property for '" + name + "'");
       }
 
       let url = this._resolveURL(item.URL);
       if (!this._checkLoadURIFromScript(url)) {
-        throw new this._window.DOMError("SecurityError", "Insufficient permissions to install: " + url.spec);
+        throw new this._window.Error("Insufficient permissions to install: " + url.spec);
       }
 
       let iconUrl = null;
@@ -203,7 +203,7 @@ InstallTrigger.prototype = {
     return this.startSoftwareUpdate(url);
   },
 
-  _resolveURL: function (url) {
+  _resolveURL: function(url) {
     return Services.io.newURI(url, null, this._url);
   },
 

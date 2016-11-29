@@ -181,7 +181,8 @@ AppendEllipseToPath(PathBuilder* aPathBuilder,
 
 bool
 SnapLineToDevicePixelsForStroking(Point& aP1, Point& aP2,
-                                  const DrawTarget& aDrawTarget)
+                                  const DrawTarget& aDrawTarget,
+                                  Float aLineWidth)
 {
   Matrix mat = aDrawTarget.GetTransform();
   if (mat.HasNonTranslation()) {
@@ -196,14 +197,21 @@ SnapLineToDevicePixelsForStroking(Point& aP1, Point& aP2,
   p2.Round();
   p1 -= mat.GetTranslation(); // back into user space
   p2 -= mat.GetTranslation();
-  if (aP1.x == aP2.x) {
-    // snap vertical line, adding 0.5 to align it to be mid-pixel:
-    aP1 = p1 + Point(0.5, 0);
-    aP2 = p2 + Point(0.5, 0);
-  } else {
-    // snap horizontal line, adding 0.5 to align it to be mid-pixel:
-    aP1 = p1 + Point(0, 0.5);
-    aP2 = p2 + Point(0, 0.5);
+
+  aP1 = p1;
+  aP2 = p2;
+
+  bool lineWidthIsOdd = (int(aLineWidth) % 2) == 1;
+  if (lineWidthIsOdd) {
+    if (aP1.x == aP2.x) {
+      // snap vertical line, adding 0.5 to align it to be mid-pixel:
+      aP1 += Point(0.5, 0);
+      aP2 += Point(0.5, 0);
+    } else {
+      // snap horizontal line, adding 0.5 to align it to be mid-pixel:
+      aP1 += Point(0, 0.5);
+      aP2 += Point(0, 0.5);
+    }
   }
   return true;
 }
@@ -219,25 +227,51 @@ StrokeSnappedEdgesOfRect(const Rect& aRect, DrawTarget& aDrawTarget,
 
   Point p1 = aRect.TopLeft();
   Point p2 = aRect.BottomLeft();
-  SnapLineToDevicePixelsForStroking(p1, p2, aDrawTarget);
+  SnapLineToDevicePixelsForStroking(p1, p2, aDrawTarget,
+                                    aStrokeOptions.mLineWidth);
   aDrawTarget.StrokeLine(p1, p2, aColor, aStrokeOptions);
 
   p1 = aRect.BottomLeft();
   p2 = aRect.BottomRight();
-  SnapLineToDevicePixelsForStroking(p1, p2, aDrawTarget);
+  SnapLineToDevicePixelsForStroking(p1, p2, aDrawTarget,
+                                    aStrokeOptions.mLineWidth);
   aDrawTarget.StrokeLine(p1, p2, aColor, aStrokeOptions);
 
   p1 = aRect.TopLeft();
   p2 = aRect.TopRight();
-  SnapLineToDevicePixelsForStroking(p1, p2, aDrawTarget);
+  SnapLineToDevicePixelsForStroking(p1, p2, aDrawTarget,
+                                    aStrokeOptions.mLineWidth);
   aDrawTarget.StrokeLine(p1, p2, aColor, aStrokeOptions);
 
   p1 = aRect.TopRight();
   p2 = aRect.BottomRight();
-  SnapLineToDevicePixelsForStroking(p1, p2, aDrawTarget);
+  SnapLineToDevicePixelsForStroking(p1, p2, aDrawTarget,
+                                    aStrokeOptions.mLineWidth);
   aDrawTarget.StrokeLine(p1, p2, aColor, aStrokeOptions);
+}
+
+// The logic for this comes from _cairo_stroke_style_max_distance_from_path
+Margin
+MaxStrokeExtents(const StrokeOptions& aStrokeOptions,
+                 const Matrix& aTransform)
+{
+  double styleExpansionFactor = 0.5f;
+
+  if (aStrokeOptions.mLineCap == CapStyle::SQUARE) {
+    styleExpansionFactor = M_SQRT1_2;
+  }
+
+  if (aStrokeOptions.mLineJoin == JoinStyle::MITER &&
+      styleExpansionFactor < M_SQRT2 * aStrokeOptions.mMiterLimit) {
+    styleExpansionFactor = M_SQRT2 * aStrokeOptions.mMiterLimit;
+  }
+
+  styleExpansionFactor *= aStrokeOptions.mLineWidth;
+
+  double dx = styleExpansionFactor * hypot(aTransform._11, aTransform._21);
+  double dy = styleExpansionFactor * hypot(aTransform._22, aTransform._12);
+  return Margin(dy, dx, dy, dx);
 }
 
 } // namespace gfx
 } // namespace mozilla
-

@@ -4,7 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-// Local Includes
 #include "nsDocShellLoadInfo.h"
 #include "nsISHEntry.h"
 #include "nsIInputStream.h"
@@ -12,12 +11,9 @@
 #include "nsIDocShell.h"
 #include "mozilla/net/ReferrerPolicy.h"
 
-//*****************************************************************************
-//***    nsDocShellLoadInfo: Object Management
-//*****************************************************************************
-
 nsDocShellLoadInfo::nsDocShellLoadInfo()
-  : mInheritOwner(false)
+  : mLoadReplace(false)
+  , mInheritOwner(false)
   , mOwnerIsExplicit(false)
   , mSendReferrer(true)
   , mReferrerPolicy(mozilla::net::RP_Default)
@@ -30,22 +26,13 @@ nsDocShellLoadInfo::~nsDocShellLoadInfo()
 {
 }
 
-//*****************************************************************************
-// nsDocShellLoadInfo::nsISupports
-//*****************************************************************************
-
 NS_IMPL_ADDREF(nsDocShellLoadInfo)
 NS_IMPL_RELEASE(nsDocShellLoadInfo)
 
 NS_INTERFACE_MAP_BEGIN(nsDocShellLoadInfo)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDocShellLoadInfo)
-  NS_INTERFACE_MAP_ENTRY(nsIDocShellLoadInfo_ESR38)
   NS_INTERFACE_MAP_ENTRY(nsIDocShellLoadInfo)
 NS_INTERFACE_MAP_END
-
-//*****************************************************************************
-// nsDocShellLoadInfo::nsIDocShellLoadInfo
-//*****************************************************************************
 
 NS_IMETHODIMP
 nsDocShellLoadInfo::GetReferrer(nsIURI** aReferrer)
@@ -210,7 +197,6 @@ nsDocShellLoadInfo::SetPostDataStream(nsIInputStream* aStream)
   return NS_OK;
 }
 
-/* attribute nsIInputStream headersStream; */
 NS_IMETHODIMP
 nsDocShellLoadInfo::GetHeadersStream(nsIInputStream** aHeadersStream)
 {

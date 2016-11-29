@@ -35,7 +35,7 @@ interface nsIDocumentEncoderNodeFixup : nsISupports
   nsIDOMNode fixupNode(in nsIDOMNode aNode, out boolean aSerializeCloneKids);
 };
 
-[scriptable, uuid(1158bd7e-a08b-4ff6-9417-6f99144cfccc)]
+[scriptable, uuid(21f112df-d96f-47da-bfcb-5331273003d1)]
 interface nsIDocumentEncoder : nsISupports
 {
   // Output methods flag bits. There are a frightening number of these,
@@ -233,6 +233,19 @@ interface nsIDocumentEncoder : nsISupports
    * injected at preformatted block element boundaries.
    */
   const unsigned long OutputForPlainTextClipboardCopy = (1 << 25);
+
+  /**
+   * Include ruby annotations and ruby parentheses in the output.
+   * PlainText output only.
+   */
+  const unsigned long OutputRubyAnnotation = (1 << 26);
+
+  /**
+   * Disallow breaking of long character strings. This is important
+   * for serializing e-mail which contains CJK strings. These must
+   * not be broken just as "normal" longs strings aren't broken.
+   */
+  const unsigned long OutputDisallowLineBreaking = (1 << 27);
 
   /**
    * Initialize with a pointer to the document and the mime type.

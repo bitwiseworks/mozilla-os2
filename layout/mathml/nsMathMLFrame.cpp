@@ -100,7 +100,7 @@ nsMathMLFrame::ResolveMathMLCharStyle(nsPresContext*  aPresContext,
 {
   nsCSSPseudoElements::Type pseudoType =
     nsCSSPseudoElements::ePseudo_mozMathAnonymous; // savings
-  nsRefPtr<nsStyleContext> newStyleContext;
+  RefPtr<nsStyleContext> newStyleContext;
   newStyleContext = aPresContext->StyleSet()->
     ResolvePseudoElementStyle(aContent->AsElement(), pseudoType,
                               aParentStyleContext, nullptr);
@@ -158,7 +158,7 @@ nsMathMLFrame::GetPresentationDataFrom(nsIFrame*           aFrame,
     if (!content)
       break;
 
-    if (content->Tag() == nsGkAtoms::math) {
+    if (content->IsMathMLElement(nsGkAtoms::math)) {
       break;
     }
     frame = frame->GetParent();
@@ -231,7 +231,8 @@ nsMathMLFrame::CalcLength(nsPresContext*   aPresContext,
     return NSToCoordRound(aCSSValue.GetFloatValue() * (float)font->mFont.size);
   }
   else if (eCSSUnit_XHeight == unit) {
-    nsRefPtr<nsFontMetrics> fm;
+    aPresContext->SetUsesExChUnits(true);
+    RefPtr<nsFontMetrics> fm;
     nsLayoutUtils::GetFontMetricsForStyleContext(aStyleContext,
                                                  getter_AddRefs(fm),
                                                  aFontSizeInflation);
@@ -362,9 +363,10 @@ void nsDisplayMathMLBar::Paint(nsDisplayListBuilder* aBuilder,
 {
   // paint the bar with the current text color
   DrawTarget* drawTarget = aCtx->GetDrawTarget();
-  Rect rect = NSRectToSnappedRect(mRect + ToReferenceFrame(),
-                                  mFrame->PresContext()->AppUnitsPerDevPixel(),
-                                  *drawTarget);
+  Rect rect =
+    NSRectToNonEmptySnappedRect(mRect + ToReferenceFrame(),
+                                mFrame->PresContext()->AppUnitsPerDevPixel(),
+                                *drawTarget);
   ColorPattern color(ToDeviceColor(
                        mFrame->GetVisitedDependentColor(eCSSProperty_color)));
   drawTarget->FillRect(rect, color);

@@ -8,6 +8,7 @@
 
 #include "mozilla/LinkedList.h"
 #include "nsWrapperCache.h"
+
 #include "WebGLObjectModel.h"
 
 namespace mozilla {
@@ -32,11 +33,11 @@ public:
 
     // nsWrapperCache
     WebGLContext* GetParentObject() const {
-        return Context();
+        return mContext;
     }
 
     // NS
-    virtual JSObject* WrapObject(JSContext* cx) override;
+    virtual JSObject* WrapObject(JSContext* cx, JS::Handle<JSObject*> givenProto) override;
 
     NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(WebGLQuery)
     NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(WebGLQuery)

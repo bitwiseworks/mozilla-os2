@@ -19,7 +19,6 @@
 namespace mozilla {
 
 class MediaDecoder;
-class StateMachineThread;
 
 // The MediaShutdownManager manages shutting down the MediaDecoder
 // infrastructure in response to an xpcom-shutdown notification. This happens
@@ -82,6 +81,7 @@ private:
   virtual ~MediaShutdownManager();
 
   void Shutdown();
+  void FinishShutdown();
 
   // Ensures we have a shutdown listener if we need one, and removes the
   // listener and destroys the singleton if we don't.
@@ -98,6 +98,10 @@ private:
   bool mIsObservingShutdown;
 
   bool mIsDoingXPCOMShutDown;
+
+  // Will be set to true once all registered MediaDecoders have completed their
+  // shutdown.
+  bool mCompletedShutdown;
 };
 
 } // namespace mozilla

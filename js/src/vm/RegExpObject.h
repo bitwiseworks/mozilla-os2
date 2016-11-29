@@ -41,6 +41,7 @@ namespace js {
 struct MatchPair;
 class MatchPairs;
 class RegExpShared;
+class RegExpStatics;
 
 namespace frontend { class TokenStream; }
 
@@ -62,28 +63,15 @@ enum RegExpRunStatus
     RegExpRunStatus_Success_NotFound
 };
 
-class RegExpObjectBuilder
-{
-    ExclusiveContext* cx;
-    Rooted<RegExpObject*> reobj_;
+extern RegExpObject*
+RegExpAlloc(ExclusiveContext* cx, HandleObject proto = nullptr);
 
-    bool getOrCreate();
-    bool getOrCreateClone(HandleObjectGroup group);
+// |regexp| is under-typed because this function's used in the JIT.
+extern JSObject*
+CloneRegExpObject(JSContext* cx, JSObject* regexp);
 
-  public:
-    explicit RegExpObjectBuilder(ExclusiveContext* cx, RegExpObject* reobj = nullptr);
-
-    RegExpObject* reobj() { return reobj_; }
-
-    RegExpObject* build(HandleAtom source, RegExpFlag flags);
-    RegExpObject* build(HandleAtom source, RegExpShared& shared);
-
-    /* Perform a VM-internal clone. */
-    RegExpObject* clone(Handle<RegExpObject*> other);
-};
-
-JSObject*
-CloneRegExpObject(JSContext* cx, JSObject* obj);
+extern JSObject*
+CreateRegExpPrototype(JSContext* cx, JSProtoKey key);
 
 /*
  * A RegExpShared is the compiled representation of a regexp. A RegExpShared is
@@ -359,6 +347,10 @@ class RegExpObject : public NativeObject
 
     static const Class class_;
 
+    // The maximum number of pairs a MatchResult can have, without having to
+    // allocate a bigger MatchResult.
+    static const size_t MaxPairCount = 14;
+
     /*
      * Note: The regexp statics flags are OR'd into the provided flags,
      * so this function is really meant for object creation during code
@@ -376,6 +368,14 @@ class RegExpObject : public NativeObject
     createNoStatics(ExclusiveContext* cx, HandleAtom atom, RegExpFlag flags,
                     frontend::TokenStream* ts, LifoAlloc& alloc);
 
+    /*
+     * Compute the initial shape to associate with fresh RegExp objects,
+     * encoding their initial properties. Return the shape after
+     * changing |obj|'s last property to it.
+     */
+    static Shape*
+    assignInitialShape(ExclusiveContext* cx, Handle<RegExpObject*> obj);
+
     /* Accessors. */
 
     static unsigned lastIndexSlot() { return LAST_INDEX_SLOT; }
@@ -386,7 +386,10 @@ class RegExpObject : public NativeObject
         setSlot(LAST_INDEX_SLOT, NumberValue(d));
     }
 
-    void zeroLastIndex() {
+    void zeroLastIndex(ExclusiveContext* cx) {
+        MOZ_ASSERT(lookupPure(cx->names().lastIndex)->writable(),
+                   "can't infallibly zero a non-writable lastIndex on a "
+                   "RegExp that's been exposed to script");
         setSlot(LAST_INDEX_SLOT, Int32Value(0));
     }
 
@@ -443,24 +446,11 @@ class RegExpObject : public NativeObject
 
     static void trace(JSTracer* trc, JSObject* obj);
 
+    void initIgnoringLastIndex(HandleAtom source, RegExpFlag flags);
+
+    void initAndZeroLastIndex(HandleAtom source, RegExpFlag flags, ExclusiveContext* cx);
+
   private:
-    friend class RegExpObjectBuilder;
-
-    /* For access to assignInitialShape. */
-    friend bool
-    EmptyShape::ensureInitialCustomShape<RegExpObject>(ExclusiveContext* cx,
-                                                       Handle<RegExpObject*> obj);
-
-    /*
-     * Compute the initial shape to associate with fresh RegExp objects,
-     * encoding their initial properties. Return the shape after
-     * changing |obj|'s last property to it.
-     */
-    static Shape*
-    assignInitialShape(ExclusiveContext* cx, Handle<RegExpObject*> obj);
-
-    bool init(ExclusiveContext* cx, HandleAtom source, RegExpFlag flags);
-
     /*
      * Precondition: the syntax for |source| has already been validated.
      * Side effect: sets the private field.
@@ -474,6 +464,10 @@ class RegExpObject : public NativeObject
     void setPrivate(void* priv) = delete;
 };
 
+JSString*
+str_replace_regexp_raw(JSContext* cx, HandleString string, Handle<RegExpObject*> regexp,
+                       HandleString replacement);
+
 /*
  * Parse regexp flags. Report an error and return false if an invalid
  * sequence of flags is encountered (repeat/invalid flag).
@@ -483,13 +477,13 @@ class RegExpObject : public NativeObject
 bool
 ParseRegExpFlags(JSContext* cx, JSString* flagStr, RegExpFlag* flagsOut);
 
-/* Assuming ObjectClassIs(obj, ESClass_RegExp), return a RegExpShared for obj. */
+/* Assuming GetBuiltinClass(obj) is ESClass_RegExp, return a RegExpShared for obj. */
 inline bool
 RegExpToShared(JSContext* cx, HandleObject obj, RegExpGuard* g)
 {
     if (obj->is<RegExpObject>())
         return obj->as<RegExpObject>().getShared(cx, g);
-    MOZ_ASSERT(Proxy::objectClassIs(obj, ESClass_RegExp, cx));
+
     return Proxy::regexp_toShared(cx, obj, g);
 }
 

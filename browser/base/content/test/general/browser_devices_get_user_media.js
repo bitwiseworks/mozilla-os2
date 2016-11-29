@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+requestLongerTimeout(2);
+
 const kObservedTopics = [
   "getUserMedia:response:allow",
   "getUserMedia:revoke",
@@ -154,7 +156,7 @@ function activateSecondaryAction(aAction) {
 
   // One down event to open the popup
   EventUtils.synthesizeKey("VK_DOWN",
-                           { altKey: !navigator.platform.contains("Mac") });
+                           { altKey: !navigator.platform.includes("Mac") });
 }
 
 registerCleanupFunction(function() {
@@ -223,9 +225,9 @@ function* checkNotSharing() {
   yield* assertWebRTCIndicatorStatus(null);
 }
 
-const permissionError = "error: PermissionDeniedError: The user did not grant permission for the operation.";
+const permissionError = "error: SecurityError: The operation is insecure.";
 
-let gTests = [
+var gTests = [
 
 {
   desc: "getUserMedia audio+video",
@@ -567,7 +569,7 @@ let gTests = [
           is(devicePerms, aExpected ? Perms.ALLOW_ACTION : Perms.DENY_ACTION,
              aDevice + " persistently " + (aExpected ? "allowed" : "denied"));
         }
-        Perms.remove(uri.host, aDevice);
+        Perms.remove(uri, aDevice);
       }
       checkDevicePermissions("microphone", aExpectedAudioPerm);
       checkDevicePermissions("camera", aExpectedVideoPerm);
@@ -673,8 +675,8 @@ let gTests = [
         }
       }
 
-      Perms.remove(uri.host, "camera");
-      Perms.remove(uri.host, "microphone");
+      Perms.remove(uri, "camera");
+      Perms.remove(uri, "microphone");
     }
 
     // Set both permissions identically
@@ -794,8 +796,8 @@ let gTests = [
       // Cleanup.
       yield closeStream(true);
 
-      Perms.remove(uri.host, "camera");
-      Perms.remove(uri.host, "microphone");
+      Perms.remove(uri, "camera");
+      Perms.remove(uri, "microphone");
     }
 
     info("request audio+video, stop sharing resets both");
@@ -888,8 +890,8 @@ let gTests = [
 
     // Cleanup.
     yield closeStream(true);
-    Perms.remove(uri.host, "camera");
-    Perms.remove(uri.host, "microphone");
+    Perms.remove(uri, "camera");
+    Perms.remove(uri, "microphone");
   }
 }
 

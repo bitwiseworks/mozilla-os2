@@ -18,8 +18,6 @@
 #include "nsRegion.h"                   // for nsIntRegion
 #include "mozilla/layers/PLayerTransaction.h" // for PaintedLayerAttributes
 
-class gfxContext;
-
 namespace mozilla {
 namespace layers {
 
@@ -28,7 +26,7 @@ class ShadowableLayer;
 class SpecificLayerAttributes;
 
 class ClientPaintedLayer : public PaintedLayer,
-                          public ClientLayer {
+                           public ClientLayer {
 public:
   typedef RotatedContentBuffer::PaintState PaintState;
   typedef RotatedContentBuffer::ContentType ContentType;
@@ -52,7 +50,7 @@ protected:
   }
 
 public:
-  virtual void SetVisibleRegion(const nsIntRegion& aRegion) override
+  virtual void SetVisibleRegion(const LayerIntRegion& aRegion) override
   {
     NS_ASSERTION(ClientManager()->InConstruction(),
                  "Can only set properties in construction phase");
@@ -117,7 +115,7 @@ protected:
   RefPtr<ContentClient> mContentClient;
 };
 
-}
-}
+} // namespace layers
+} // namespace mozilla
 
 #endif

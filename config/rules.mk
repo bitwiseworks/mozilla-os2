@@ -16,10 +16,6 @@ $(error Do not include rules.mk twice!)
 endif
 INCLUDED_RULES_MK = 1
 
-# Make sure that anything that needs to be defined in moz.build wasn't
-# overwritten after including config.mk.
-_eval_for_side_effects := $(CHECK_MOZBUILD_VARIABLES)
-
 ifndef INCLUDED_CONFIG_MK
 include $(topsrcdir)/config/config.mk
 endif
@@ -218,6 +214,12 @@ endif # !GNU_CC
 
 endif # WINNT
 
+ifeq (arm-Darwin,$(CPU_ARCH)-$(OS_TARGET))
+ifdef PROGRAM
+MOZ_PROGRAM_LDFLAGS += -Wl,-rpath -Wl,@executable_path/Frameworks
+endif
+endif
+
 ifeq ($(SOLARIS_SUNPRO_CXX),1)
 ifeq (86,$(findstring 86,$(OS_TEST)))
 OS_LDFLAGS += -M $(MOZILLA_DIR)/config/solaris_ia32.map
@@ -248,8 +250,9 @@ CPPOBJS = $(notdir $(addsuffix .$(OBJ_SUFFIX),$(basename $(CPPSRCS))))
 CMOBJS = $(notdir $(CMSRCS:.m=.$(OBJ_SUFFIX)))
 CMMOBJS = $(notdir $(CMMSRCS:.mm=.$(OBJ_SUFFIX)))
 ASOBJS = $(notdir $(ASFILES:.$(ASM_SUFFIX)=.$(OBJ_SUFFIX)))
+RSOBJS = $(addprefix lib,$(notdir $(RSSRCS:.rs=.$(LIB_SUFFIX))))
 ifndef OBJS
-_OBJS = $(COBJS) $(SOBJS) $(CPPOBJS) $(CMOBJS) $(CMMOBJS) $(ASOBJS)
+_OBJS = $(COBJS) $(SOBJS) $(CPPOBJS) $(CMOBJS) $(CMMOBJS) $(ASOBJS) $(RSOBJS)
 OBJS = $(strip $(_OBJS))
 endif
 
@@ -393,7 +396,12 @@ ifdef SHARED_LIBRARY
 ifdef IS_COMPONENT
 EXTRA_DSO_LDOPTS	+= -bundle
 else
-EXTRA_DSO_LDOPTS	+= -dynamiclib -install_name @executable_path/$(SHARED_LIBRARY) -compatibility_version 1 -current_version 1 -single_module
+ifdef MOZ_IOS
+_LOADER_PATH := @rpath
+else
+_LOADER_PATH := @executable_path
+endif
+EXTRA_DSO_LDOPTS	+= -dynamiclib -install_name $(_LOADER_PATH)/$(SHARED_LIBRARY) -compatibility_version 1 -current_version 1 -single_module
 endif
 endif
 endif
@@ -496,10 +504,8 @@ endif
 
 ifeq (_WINNT,$(GNU_CC)_$(OS_ARCH))
 OUTOPTION = -Fo# eol
-PREPROCESS_OPTION = -P -Fi# eol
 else
 OUTOPTION = -o # eol
-PREPROCESS_OPTION = -E -o #eol
 endif # WINNT && !GNU_CC
 
 ifneq (,$(filter ml%,$(AS)))
@@ -715,6 +721,9 @@ else
 	$(EXPAND_LIBS_EXEC) -- $(HOST_CC) -o $@ $(HOST_CFLAGS) $(HOST_LDFLAGS) $(HOST_PROGOBJS) $(HOST_LIBS) $(HOST_EXTRA_LIBS)
 endif # HOST_CPP_PROG_LINK
 endif
+ifndef CROSS_COMPILE
+	$(call CHECK_STDCXX,$@)
+endif
 
 #
 # This is an attempt to support generation of multiple binaries
@@ -756,6 +765,9 @@ ifneq (,$(HOST_CPPSRCS)$(USE_HOST_CXX))
 else
 	$(EXPAND_LIBS_EXEC) -- $(HOST_CC) $(HOST_OUTOPTION)$@ $(HOST_CFLAGS) $(INCLUDES) $< $(HOST_LIBS) $(HOST_EXTRA_LIBS)
 endif
+endif
+ifndef CROSS_COMPILE
+	$(call CHECK_STDCXX,$@)
 endif
 
 ifdef DTRACE_PROBE_OBJ
@@ -875,6 +887,12 @@ endef
 $(foreach f,$(CSRCS) $(SSRCS) $(CPPSRCS) $(CMSRCS) $(CMMSRCS) $(ASFILES),$(eval $(call src_objdep,$(f))))
 $(foreach f,$(HOST_CSRCS) $(HOST_CPPSRCS) $(HOST_CMSRCS) $(HOST_CMMSRCS),$(eval $(call src_objdep,$(f),host_)))
 
+# The Rust compiler only outputs library objects, and so we need different
+# mangling to generate dependency rules for it.
+mk_libname = $(basename lib$(notdir $1)).$(LIB_SUFFIX)
+src_libdep = $(call mk_libname,$1): $1 $$(call mkdir_deps,$$(MDDEPDIR))
+$(foreach f,$(RSSRCS),$(eval $(call src_libdep,$(f))))
+
 $(OBJS) $(HOST_OBJS) $(PROGOBJS) $(HOST_PROGOBJS): $(GLOBAL_DEPS)
 
 # Rules for building native targets must come first because of the host_ prefix
@@ -920,6 +938,14 @@ ifdef ASFILES
 $(ASOBJS):
 	$(REPORT_BUILD)
 	$(AS) $(ASOUTOPTION)$@ $(ASFLAGS) $($(notdir $<)_FLAGS) $(AS_DASH_C_FLAG) $(_VPATH_SRCS)
+endif
+
+ifdef MOZ_RUST
+# Assume any system libraries rustc links against are already
+# in the target's LIBS.
+$(RSOBJS):
+	$(REPORT_BUILD)
+	$(RUSTC) $(RUSTFLAGS) --crate-type staticlib -o $(call mk_libname,$<) $(_VPATH_SRCS)
 endif
 
 $(SOBJS):
@@ -1112,31 +1138,15 @@ export:: $(FINAL_TARGET)
 endif
 
 ################################################################################
-# Copy each element of PREF_JS_EXPORTS
-
-# The default location for PREF_JS_EXPORTS is the gre prefs directory.
+# The default location for prefs is the gre prefs directory.
+# PREF_DIR is used for L10N_PREF_JS_EXPORTS in various locales/ directories.
 PREF_DIR = defaults/pref
 
 # If DIST_SUBDIR is defined it indicates that app and gre dirs are
 # different and that we are building app related resources. Hence,
 # PREF_DIR should point to the app prefs location.
-ifneq (,$(DIST_SUBDIR)$(XPI_NAME)$(LIBXUL_SDK))
+ifneq (,$(DIST_SUBDIR)$(XPI_NAME))
 PREF_DIR = defaults/preferences
-endif
-
-# on win32, pref files need CRLF line endings... see bug 206029
-ifeq (WINNT,$(OS_ARCH))
-PREF_PPFLAGS += --line-endings=crlf
-endif
-
-ifneq ($(PREF_JS_EXPORTS),)
-ifndef NO_DIST_INSTALL
-PREF_JS_EXPORTS_PATH := $(FINAL_TARGET)/$(PREF_DIR)
-# We preprocess these, but they don't necessarily have preprocessor directives,
-# so tell them preprocessor to not complain about that.
-PREF_JS_EXPORTS_FLAGS := $(PREF_PPFLAGS) --silence-missing-directive-warnings
-PP_TARGETS += PREF_JS_EXPORTS
-endif
 endif
 
 ################################################################################
@@ -1149,56 +1159,6 @@ AUTOCFG_JS_EXPORTS_DEST := $(FINAL_TARGET)/defaults/autoconfig
 AUTOCFG_JS_EXPORTS_TARGET := export
 INSTALL_TARGETS += AUTOCFG_JS_EXPORTS
 endif
-endif
-
-################################################################################
-# Install a linked .xpt into the appropriate place.
-# This should ideally be performed by the non-recursive idl make file. Some day.
-ifdef XPT_NAME #{
-
-ifndef NO_DIST_INSTALL
-ifndef NO_INTERFACES_MANIFEST
-export:: $(call mkdir_deps,$(FINAL_TARGET)/components)
-	$(call py_action,buildlist,$(FINAL_TARGET)/components/interfaces.manifest 'interfaces $(XPT_NAME)')
-	$(call py_action,buildlist,$(FINAL_TARGET)/chrome.manifest 'manifest components/interfaces.manifest')
-endif
-endif
-
-endif #} XPT_NAME
-
-################################################################################
-# Copy each element of EXTRA_COMPONENTS to $(FINAL_TARGET)/components
-ifneq (,$(filter %.js,$(EXTRA_COMPONENTS) $(EXTRA_PP_COMPONENTS)))
-ifeq (,$(filter %.manifest,$(EXTRA_COMPONENTS) $(EXTRA_PP_COMPONENTS)))
-ifndef NO_JS_MANIFEST
-$(error .js component without matching .manifest. See https://developer.mozilla.org/en/XPCOM/XPCOM_changes_in_Gecko_2.0)
-endif
-endif
-endif
-
-ifdef EXTRA_COMPONENTS
-misc:: $(EXTRA_COMPONENTS)
-ifndef NO_DIST_INSTALL
-EXTRA_COMPONENTS_FILES := $(EXTRA_COMPONENTS)
-EXTRA_COMPONENTS_DEST := $(FINAL_TARGET)/components
-EXTRA_COMPONENTS_TARGET := misc
-INSTALL_TARGETS += EXTRA_COMPONENTS
-endif
-
-endif
-
-ifdef EXTRA_PP_COMPONENTS
-ifndef NO_DIST_INSTALL
-EXTRA_PP_COMPONENTS_PATH := $(FINAL_TARGET)/components
-EXTRA_PP_COMPONENTS_TARGET := misc
-PP_TARGETS += EXTRA_PP_COMPONENTS
-endif
-endif
-
-EXTRA_MANIFESTS = $(filter %.manifest,$(EXTRA_COMPONENTS) $(EXTRA_PP_COMPONENTS))
-ifneq (,$(EXTRA_MANIFESTS))
-misc:: $(call mkdir_deps,$(FINAL_TARGET))
-	$(call py_action,buildlist,$(FINAL_TARGET)/chrome.manifest $(patsubst %,'manifest components/%',$(notdir $(EXTRA_MANIFESTS))))
 endif
 
 ################################################################################
@@ -1256,8 +1216,8 @@ endif
 
 libs realchrome:: $(FINAL_TARGET)/chrome
 	$(call py_action,jar_maker,\
-	  $(QUIET) -j $(FINAL_TARGET)/chrome \
-	  $(MAKE_JARS_FLAGS) $(XULPPFLAGS) $(DEFINES) $(ACDEFINES) \
+	  $(QUIET) -d $(FINAL_TARGET) \
+	  $(MAKE_JARS_FLAGS) $(DEFINES) $(ACDEFINES) $(MOZ_DEBUG_DEFINES) \
 	  $(JAR_MANIFEST))
 
 endif
@@ -1268,14 +1228,6 @@ else # No JAR_MANIFEST
 ifneq (,$(wildcard $(srcdir)/jar.mn))
 $(error $(srcdir) contains a jar.mn file but this file is not declared in a JAR_MANIFESTS variable in a moz.build file)
 endif
-endif
-
-ifneq ($(DIST_FILES),)
-DIST_FILES_PATH := $(FINAL_TARGET)
-# We preprocess these, but they don't necessarily have preprocessor directives,
-# so tell them preprocessor to not complain about that.
-DIST_FILES_FLAGS := $(XULAPP_DEFINES) --silence-missing-directive-warnings
-PP_TARGETS += DIST_FILES
 endif
 
 # When you move this out of the tools tier, please remove the corresponding
@@ -1312,7 +1264,7 @@ ifndef MOZ_DEBUG
 endif
 endif
 	@echo 'Packaging $(XPI_PKGNAME).xpi...'
-	cd $(FINAL_TARGET) && $(ZIP) -qr ../$(XPI_PKGNAME).xpi *
+	$(call py_action,zip,-C $(FINAL_TARGET) ../$(XPI_PKGNAME).xpi '*')
 endif
 
 # See comment above about moving this out of the tools tier.
@@ -1341,22 +1293,18 @@ endif
 #   it.
 
 ifneq (,$(filter-out all chrome default export realchrome clean clobber clobber_all distclean realclean,$(MAKECMDGOALS)))
-MDDEPEND_FILES		:= $(strip $(wildcard $(addprefix $(MDDEPDIR)/,$(EXTRA_MDDEPEND_FILES) $(addsuffix .pp,$(notdir $(sort $(OBJS) $(PROGOBJS) $(HOST_OBJS) $(HOST_PROGOBJS)))))))
+MDDEPEND_FILES		:= $(strip $(wildcard $(addprefix $(MDDEPDIR)/,$(addsuffix .pp,$(notdir $(sort $(OBJS) $(PROGOBJS) $(HOST_OBJS) $(HOST_PROGOBJS)))))))
 
 ifneq (,$(MDDEPEND_FILES))
-$(call include_deps,$(MDDEPEND_FILES))
+-include $(MDDEPEND_FILES)
 endif
 
 endif
 
-
-ifneq (,$(filter export,$(MAKECMDGOALS)))
-MDDEPEND_FILES		:= $(strip $(wildcard $(addprefix $(MDDEPDIR)/,$(EXTRA_EXPORT_MDDEPEND_FILES))))
+MDDEPEND_FILES		:= $(strip $(wildcard $(addprefix $(MDDEPDIR)/,$(EXTRA_MDDEPEND_FILES))))
 
 ifneq (,$(MDDEPEND_FILES))
-$(call include_deps,$(MDDEPEND_FILES))
-endif
-
+-include $(MDDEPEND_FILES)
 endif
 
 #############################################################################
@@ -1511,7 +1459,7 @@ PP_TARGETS_ALL_RESULTS := $(sort $(foreach tier,$(PP_TARGETS_TIERS),$(PP_TARGETS
 $(PP_TARGETS_ALL_RESULTS):
 	$(if $(filter-out $(notdir $@),$(notdir $(<:.in=))),$(error Looks like $@ has an unexpected dependency on $< which breaks PP_TARGETS))
 	$(RM) '$@'
-	$(call py_action,preprocessor,--depend $(MDDEPDIR)/$(@F).pp $(PP_TARGET_FLAGS) $(DEFINES) $(ACDEFINES) $(XULPPFLAGS) '$<' -o '$@')
+	$(call py_action,preprocessor,--depend $(MDDEPDIR)/$(@F).pp $(PP_TARGET_FLAGS) $(DEFINES) $(ACDEFINES) $(MOZ_DEBUG_DEFINES) '$<' -o '$@')
 
 # The depfile is based on the filename, and we don't want conflicts. So check
 # there's only one occurrence of any given filename in PP_TARGETS_ALL_RESULTS.
@@ -1535,7 +1483,7 @@ $(foreach file,$(PP_TARGETS_ALL_RESULTS), \
 MDDEPEND_FILES := $(strip $(wildcard $(addprefix $(MDDEPDIR)/,$(addsuffix .pp,$(notdir $(PP_TARGETS_ALL_RESULTS))))))
 
 ifneq (,$(MDDEPEND_FILES))
-$(call include_deps,$(MDDEPEND_FILES))
+-include $(MDDEPEND_FILES)
 endif
 
 endif
@@ -1598,8 +1546,6 @@ FREEZE_VARIABLES = \
   DIRS \
   LIBRARY \
   MODULE \
-  EXTRA_COMPONENTS \
-  EXTRA_PP_COMPONENTS \
   $(NULL)
 
 $(foreach var,$(FREEZE_VARIABLES),$(eval $(var)_FROZEN := '$($(var))'))
@@ -1635,10 +1581,3 @@ endif
 export:: $(GENERATED_FILES)
 
 GARBAGE += $(GENERATED_FILES)
-
-# We may have modified "frozen" variables in rules.mk (we do that), but we don't
-# want Makefile.in doing that, so collect the possibly modified variables here,
-# and check them again in recurse.mk, which is always included after Makefile.in
-# contents.
-$(foreach var,$(_MOZBUILD_EXTERNAL_VARIABLES),$(eval $(var)_FROZEN := '$($(var))'))
-$(foreach var,$(_DEPRECATED_VARIABLES),$(eval $(var)_FROZEN := '$($(var))'))

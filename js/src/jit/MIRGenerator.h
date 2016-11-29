@@ -20,6 +20,7 @@
 #include "jit/CompileInfo.h"
 #include "jit/JitAllocPolicy.h"
 #include "jit/JitCompartment.h"
+#include "jit/MIR.h"
 #ifdef JS_ION_PERF
 # include "jit/PerfSpewer.h"
 #endif
@@ -28,9 +29,7 @@
 namespace js {
 namespace jit {
 
-class MBasicBlock;
 class MIRGraph;
-class MStart;
 class OptimizationInfo;
 
 class MIRGenerator
@@ -38,7 +37,8 @@ class MIRGenerator
   public:
     MIRGenerator(CompileCompartment* compartment, const JitCompileOptions& options,
                  TempAllocator* alloc, MIRGraph* graph,
-                 CompileInfo* info, const OptimizationInfo* optimizationInfo);
+                 const CompileInfo* info, const OptimizationInfo* optimizationInfo,
+                 bool usesSignalHandlersForAsmJSOOB = false);
 
     TempAllocator& alloc() {
         return *alloc_;
@@ -52,7 +52,7 @@ class MIRGenerator
     const JitRuntime* jitRuntime() const {
         return GetJitContext()->runtime->jitRuntime();
     }
-    CompileInfo& info() {
+    const CompileInfo& info() const {
         return *info_;
     }
     const OptimizationInfo& optimizationInfo() const {
@@ -90,6 +90,13 @@ class MIRGenerator
 
     bool isOptimizationTrackingEnabled() {
         return isProfilerInstrumentationEnabled() && !info().isAnalysis();
+    }
+
+    bool safeForMinorGC() const {
+        return safeForMinorGC_;
+    }
+    void setNotSafeForMinorGC() {
+        safeForMinorGC_ = false;
     }
 
     // Whether the main thread is trying to cancel this build.
@@ -143,13 +150,6 @@ class MIRGenerator
     // Traverses the graph to find if there's any SIMD instruction. Costful but
     // the value is cached, so don't worry about calling it several times.
     bool usesSimd();
-    void initMinAsmJSHeapLength(uint32_t len) {
-        MOZ_ASSERT(minAsmJSHeapLength_ == 0);
-        minAsmJSHeapLength_ = len;
-    }
-    uint32_t minAsmJSHeapLength() const {
-        return minAsmJSHeapLength_;
-    }
 
     bool modifiesFrameArguments() const {
         return modifiesFrameArguments_;
@@ -157,17 +157,17 @@ class MIRGenerator
 
     typedef Vector<ObjectGroup*, 0, JitAllocPolicy> ObjectGroupVector;
 
-    // When abortReason() == AbortReason_NewScriptProperties, all types which
-    // the new script properties analysis hasn't been performed on yet.
-    const ObjectGroupVector& abortedNewScriptPropertiesGroups() const {
-        return abortedNewScriptPropertiesGroups_;
+    // When abortReason() == AbortReason_PreliminaryObjects, all groups with
+    // preliminary objects which haven't been analyzed yet.
+    const ObjectGroupVector& abortedPreliminaryGroups() const {
+        return abortedPreliminaryGroups_;
     }
 
   public:
     CompileCompartment* compartment;
 
   protected:
-    CompileInfo* info_;
+    const CompileInfo* info_;
     const OptimizationInfo* optimizationInfo_;
     TempAllocator* alloc_;
     JSFunction* fun_;
@@ -175,7 +175,7 @@ class MIRGenerator
     MIRGraph* graph_;
     AbortReason abortReason_;
     bool shouldForceAbort_; // Force AbortReason_Disable
-    ObjectGroupVector abortedNewScriptPropertiesGroups_;
+    ObjectGroupVector abortedPreliminaryGroups_;
     bool error_;
     mozilla::Atomic<bool, mozilla::Relaxed>* pauseBuild_;
     mozilla::Atomic<bool, mozilla::Relaxed> cancelBuild_;
@@ -184,7 +184,6 @@ class MIRGenerator
     bool performsCall_;
     bool usesSimd_;
     bool usesSimdCached_;
-    uint32_t minAsmJSHeapLength_;
 
     // Keep track of whether frame arguments are modified during execution.
     // RegAlloc needs to know this as spilling values back to their register
@@ -193,14 +192,14 @@ class MIRGenerator
 
     bool instrumentedProfiling_;
     bool instrumentedProfilingIsCached_;
+    bool safeForMinorGC_;
 
-    // List of nursery objects used by this compilation. Can be traced by a
-    // minor GC while compilation happens off-thread. This Vector should only
-    // be accessed on the main thread (IonBuilder, nursery GC or
-    // CodeGenerator::link).
-    ObjectVector nurseryObjects_;
+    void addAbortedPreliminaryGroup(ObjectGroup* group);
 
-    void addAbortedNewScriptPropertiesGroup(ObjectGroup* type);
+#if defined(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB)
+    bool usesSignalHandlersForAsmJSOOB_;
+#endif
+
     void setForceAbort() {
         shouldForceAbort_ = true;
     }
@@ -218,10 +217,15 @@ class MIRGenerator
   public:
     const JitCompileOptions options;
 
-    void traceNurseryObjects(JSTracer* trc);
+    bool needsAsmJSBoundsCheckBranch(const MAsmJSHeapAccess* access) const;
+    size_t foldableOffsetRange(const MAsmJSHeapAccess* access) const;
 
-    const ObjectVector& nurseryObjects() const {
-        return nurseryObjects_;
+  private:
+    GraphSpewer gs_;
+
+  public:
+    GraphSpewer& graphSpewer() {
+        return gs_;
     }
 };
 

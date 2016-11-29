@@ -27,7 +27,6 @@
 //#define FORCE_ALOG 1
 
 class nsIAndroidDisplayport;
-class nsIAndroidViewport;
 class nsIWidget;
 
 namespace mozilla {
@@ -35,15 +34,6 @@ namespace mozilla {
 class AutoLocalJNIFrame;
 
 void InitAndroidJavaWrappers(JNIEnv *jEnv);
-
-/*
- * Note: do not store global refs to any WrappedJavaObject;
- * these are live only during a particular JNI method, as
- * NewGlobalRef is -not- called on the jobject.
- *
- * If this is needed, WrappedJavaObject can be extended to
- * handle it.
- */
 
 class RefCountedJavaObject {
 public:
@@ -66,6 +56,14 @@ private:
     jobject mObject;
 };
 
+/*
+ * Note: do not store global refs to any WrappedJavaObject;
+ * these are live only during a particular JNI method, as
+ * NewGlobalRef is -not- called on the jobject.
+ *
+ * If this is needed, WrappedJavaObject can be extended to
+ * handle it.
+ */
 class WrappedJavaObject {
 public:
     WrappedJavaObject() :
@@ -373,16 +371,16 @@ class nsAndroidDisplayport final : public nsIAndroidDisplayport
 {
 public:
     NS_DECL_ISUPPORTS
-    virtual nsresult GetLeft(float *aLeft) { *aLeft = mLeft; return NS_OK; }
-    virtual nsresult GetTop(float *aTop) { *aTop = mTop; return NS_OK; }
-    virtual nsresult GetRight(float *aRight) { *aRight = mRight; return NS_OK; }
-    virtual nsresult GetBottom(float *aBottom) { *aBottom = mBottom; return NS_OK; }
-    virtual nsresult GetResolution(float *aResolution) { *aResolution = mResolution; return NS_OK; }
-    virtual nsresult SetLeft(float aLeft) { mLeft = aLeft; return NS_OK; }
-    virtual nsresult SetTop(float aTop) { mTop = aTop; return NS_OK; }
-    virtual nsresult SetRight(float aRight) { mRight = aRight; return NS_OK; }
-    virtual nsresult SetBottom(float aBottom) { mBottom = aBottom; return NS_OK; }
-    virtual nsresult SetResolution(float aResolution) { mResolution = aResolution; return NS_OK; }
+    virtual nsresult GetLeft(float *aLeft) override { *aLeft = mLeft; return NS_OK; }
+    virtual nsresult GetTop(float *aTop) override { *aTop = mTop; return NS_OK; }
+    virtual nsresult GetRight(float *aRight) override { *aRight = mRight; return NS_OK; }
+    virtual nsresult GetBottom(float *aBottom) override { *aBottom = mBottom; return NS_OK; }
+    virtual nsresult GetResolution(float *aResolution) override { *aResolution = mResolution; return NS_OK; }
+    virtual nsresult SetLeft(float aLeft) override { mLeft = aLeft; return NS_OK; }
+    virtual nsresult SetTop(float aTop) override { mTop = aTop; return NS_OK; }
+    virtual nsresult SetRight(float aRight) override { mRight = aRight; return NS_OK; }
+    virtual nsresult SetBottom(float aBottom) override { mBottom = aBottom; return NS_OK; }
+    virtual nsresult SetResolution(float aResolution) override { mResolution = aResolution; return NS_OK; }
 
     nsAndroidDisplayport(AndroidRectF aRect, float aResolution):
         mLeft(aRect.Left()), mTop(aRect.Top()), mRight(aRect.Right()), mBottom(aRect.Bottom()), mResolution(aResolution) {}
@@ -461,13 +459,6 @@ public:
         return event;
     }
 
-    static AndroidGeckoEvent* MakeIMEEvent(int aAction) {
-        AndroidGeckoEvent *event = new AndroidGeckoEvent();
-        event->Init(IME_EVENT);
-        event->mAction = aAction;
-        return event;
-    }
-
     static AndroidGeckoEvent* MakeFromJavaObject(JNIEnv *jenv, jobject jobj) {
         AndroidGeckoEvent *event = new AndroidGeckoEvent();
         event->Init(jenv, jobj);
@@ -496,13 +487,21 @@ public:
         return event;
     }
 
-    static AndroidGeckoEvent* MakeApzInputEvent(const MultiTouchInput& aInput, const mozilla::layers::ScrollableLayerGuid& aGuid, uint64_t aInputBlockId) {
+    static AndroidGeckoEvent* MakeApzInputEvent(const MultiTouchInput& aInput, const mozilla::layers::ScrollableLayerGuid& aGuid, uint64_t aInputBlockId, nsEventStatus aEventStatus) {
         AndroidGeckoEvent* event = new AndroidGeckoEvent();
         event->Init(APZ_INPUT_EVENT);
         event->mApzInput = aInput;
         event->mApzGuid = aGuid;
         event->mApzInputBlockId = aInputBlockId;
+        event->mApzEventStatus = aEventStatus;
         return event;
+    }
+
+    bool IsInputEvent() const {
+        return mType == AndroidGeckoEvent::MOTION_EVENT ||
+            mType == AndroidGeckoEvent::NATIVE_GESTURE_EVENT ||
+            mType == AndroidGeckoEvent::LONG_PRESS ||
+            mType == AndroidGeckoEvent::APZ_INPUT_EVENT;
     }
 
     int Action() { return mAction; }
@@ -515,16 +514,14 @@ public:
     const nsTArray<int>& ToolTypes() { return mToolTypes; }
     const nsTArray<float>& Orientations() { return mOrientations; }
     const nsTArray<nsIntPoint>& PointRadii() { return mPointRadii; }
-    const nsTArray<nsString>& PrefNames() { return mPrefNames; }
     double X() { return mX; }
     double Y() { return mY; }
     double Z() { return mZ; }
+    double W() { return mW; }
     const nsIntRect& Rect() { return mRect; }
     nsAString& Characters() { return mCharacters; }
     nsAString& CharactersExtra() { return mCharactersExtra; }
     nsAString& Data() { return mData; }
-    int KeyCode() { return mKeyCode; }
-    int ScanCode() { return mScanCode; }
     int MetaState() { return mMetaState; }
     Modifiers DOMModifiers() const;
     bool IsAltPressed() const { return (mMetaState & AMETA_ALT_MASK) != 0; }
@@ -532,26 +529,14 @@ public:
     bool IsCtrlPressed() const { return (mMetaState & AMETA_CTRL_MASK) != 0; }
     bool IsMetaPressed() const { return (mMetaState & AMETA_META_MASK) != 0; }
     int Flags() { return mFlags; }
-    int UnicodeChar() { return mUnicodeChar; }
-    int BaseUnicodeChar() { return mBaseUnicodeChar; }
-    int DOMPrintableKeyValue() { return mDOMPrintableKeyValue; }
-    int RepeatCount() const { return mRepeatCount; }
     int Count() { return mCount; }
-    int Start() { return mStart; }
-    int End() { return mEnd; }
     int PointerIndex() { return mPointerIndex; }
-    int RangeType() { return mRangeType; }
-    int RangeStyles() { return mRangeStyles; }
-    int RangeLineStyle() { return mRangeLineStyle; }
-    bool RangeBoldLine() { return mRangeBoldLine; }
-    int RangeForeColor() { return mRangeForeColor; }
-    int RangeBackColor() { return mRangeBackColor; }
-    int RangeLineColor() { return mRangeLineColor; }
     nsGeoPosition* GeoPosition() { return mGeoPosition; }
     int ConnectionType() { return mConnectionType; }
     bool IsWifi() { return mIsWifi; }
     int DHCPGateway() { return mDHCPGateway; }
     short ScreenOrientation() { return mScreenOrientation; }
+    short ScreenAngle() { return mScreenAngle; }
     RefCountedJavaObject* ByteBuffer() { return mByteBuffer; }
     int Width() { return mWidth; }
     int Height() { return mHeight; }
@@ -561,7 +546,6 @@ public:
     float GamepadButtonValue() { return mGamepadButtonValue; }
     const nsTArray<float>& GamepadValues() { return mGamepadValues; }
     int RequestId() { return mCount; } // for convenience
-    const AutoGlobalWrappedJavaObject& Object() { return mObject; }
     bool CanCoalesceWith(AndroidGeckoEvent* ae);
     WidgetTouchEvent MakeTouchEvent(nsIWidget* widget);
     MultiTouchInput MakeMultiTouchInput(nsIWidget* widget);
@@ -570,6 +554,7 @@ public:
     nsIObserver *Observer() { return mObserver; }
     mozilla::layers::ScrollableLayerGuid ApzGuid();
     uint64_t ApzInputBlockId();
+    nsEventStatus ApzEventStatus();
 
 protected:
     int mAction;
@@ -584,23 +569,17 @@ protected:
     nsTArray<int> mToolTypes;
     nsIntRect mRect;
     int mFlags, mMetaState;
-    int mKeyCode, mScanCode;
-    int mUnicodeChar, mBaseUnicodeChar, mDOMPrintableKeyValue;
-    int mRepeatCount;
     int mCount;
-    int mStart, mEnd;
-    int mRangeType, mRangeStyles, mRangeLineStyle;
-    bool mRangeBoldLine;
-    int mRangeForeColor, mRangeBackColor, mRangeLineColor;
-    double mX, mY, mZ;
+    double mX, mY, mZ, mW;
     int mPointerIndex;
     nsString mCharacters, mCharactersExtra, mData;
-    nsRefPtr<nsGeoPosition> mGeoPosition;
+    RefPtr<nsGeoPosition> mGeoPosition;
     int mConnectionType;
     bool mIsWifi;
     int mDHCPGateway;
     short mScreenOrientation;
-    nsRefPtr<RefCountedJavaObject> mByteBuffer;
+    short mScreenAngle;
+    RefPtr<RefCountedJavaObject> mByteBuffer;
     int mWidth, mHeight;
     int mID;
     int mGamepadButton;
@@ -608,11 +587,10 @@ protected:
     float mGamepadButtonValue;
     nsTArray<float> mGamepadValues;
     nsCOMPtr<nsIObserver> mObserver;
-    nsTArray<nsString> mPrefNames;
     MultiTouchInput mApzInput;
     mozilla::layers::ScrollableLayerGuid mApzGuid;
     uint64_t mApzInputBlockId;
-    AutoGlobalWrappedJavaObject mObject;
+    nsEventStatus mApzEventStatus;
 
     void ReadIntArray(nsTArray<int> &aVals,
                       JNIEnv *jenv,
@@ -649,40 +627,25 @@ protected:
     static jfieldID jXField;
     static jfieldID jYField;
     static jfieldID jZField;
+    static jfieldID jWField;
     static jfieldID jDistanceField;
     static jfieldID jRectField;
-    static jfieldID jNativeWindowField;
 
     static jfieldID jCharactersField;
     static jfieldID jCharactersExtraField;
     static jfieldID jDataField;
-    static jfieldID jDOMPrintableKeyValueField;
-    static jfieldID jKeyCodeField;
-    static jfieldID jScanCodeField;
     static jfieldID jMetaStateField;
     static jfieldID jFlagsField;
     static jfieldID jCountField;
-    static jfieldID jStartField;
-    static jfieldID jEndField;
     static jfieldID jPointerIndexField;
-    static jfieldID jUnicodeCharField;
-    static jfieldID jBaseUnicodeCharField;
-    static jfieldID jRepeatCountField;
-    static jfieldID jRangeTypeField;
-    static jfieldID jRangeStylesField;
-    static jfieldID jRangeLineStyleField;
-    static jfieldID jRangeBoldLineField;
-    static jfieldID jRangeForeColorField;
-    static jfieldID jRangeBackColorField;
-    static jfieldID jRangeLineColorField;
     static jfieldID jLocationField;
-    static jfieldID jPrefNamesField;
 
     static jfieldID jConnectionTypeField;
     static jfieldID jIsWifiField;
     static jfieldID jDHCPGatewayField;
 
     static jfieldID jScreenOrientationField;
+    static jfieldID jScreenAngleField;
     static jfieldID jByteBufferField;
 
     static jfieldID jWidthField;
@@ -694,17 +657,12 @@ protected:
     static jfieldID jGamepadButtonValueField;
     static jfieldID jGamepadValuesField;
 
-    static jfieldID jObjectField;
-
 public:
     enum {
         NATIVE_POKE = 0,
-        KEY_EVENT = 1,
         MOTION_EVENT = 2,
         SENSOR_EVENT = 3,
-        PROCESS_OBJECT = 4,
         LOCATION_EVENT = 5,
-        IME_EVENT = 6,
         SIZE_CHANGED = 8,
         APP_BACKGROUNDING = 9,
         APP_FOREGROUNDING = 10,
@@ -722,16 +680,12 @@ public:
         COMPOSITOR_PAUSE = 29,
         COMPOSITOR_RESUME = 30,
         NATIVE_GESTURE_EVENT = 31,
-        IME_KEY_EVENT = 32,
         CALL_OBSERVER = 33,
         REMOVE_OBSERVER = 34,
         LOW_MEMORY = 35,
         NETWORK_LINK_CHANGE = 36,
         TELEMETRY_HISTOGRAM_ADD = 37,
         ADD_OBSERVER = 38,
-        PREFERENCES_OBSERVE = 39,
-        PREFERENCES_GET = 40,
-        PREFERENCES_REMOVE_OBSERVERS = 41,
         TELEMETRY_UI_SESSION_START = 42,
         TELEMETRY_UI_SESSION_STOP = 43,
         TELEMETRY_UI_EVENT = 44,
@@ -752,22 +706,6 @@ public:
     };
 
     enum {
-        // Internal Gecko events
-        IME_FLUSH_CHANGES = -2,
-        IME_UPDATE_CONTEXT = -1,
-        // Events from Java to Gecko
-        IME_SYNCHRONIZE = 0,
-        IME_REPLACE_TEXT = 1,
-        IME_SET_SELECTION = 2,
-        IME_ADD_COMPOSITION_RANGE = 3,
-        IME_UPDATE_COMPOSITION = 4,
-        IME_REMOVE_COMPOSITION = 5,
-        IME_ACKNOWLEDGE_FOCUS = 6,
-        IME_COMPOSE_TEXT = 7,
-        dummy_ime_enum_list_end
-    };
-
-    enum {
         ACTION_GAMEPAD_ADDED = 1,
         ACTION_GAMEPAD_REMOVED = 2
     };
@@ -775,11 +713,6 @@ public:
     enum {
         ACTION_GAMEPAD_BUTTON = 1,
         ACTION_GAMEPAD_AXES = 2
-    };
-
-    enum {
-        ACTION_OBJECT_LAYER_CLIENT = 1,
-        dummy_object_enum_list_end
     };
 };
 

@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -143,7 +144,7 @@ Attr::SetOwnerDocument(nsIDocument* aDocument)
   NS_ASSERTION(doc != aDocument, "bad call to Attr::SetOwnerDocument");
   doc->DeleteAllPropertiesFor(this);
 
-  nsRefPtr<mozilla::dom::NodeInfo> newNodeInfo;
+  RefPtr<mozilla::dom::NodeInfo> newNodeInfo;
   newNodeInfo = aDocument->NodeInfoManager()->
     GetNodeInfo(mNodeInfo->NameAtom(), mNodeInfo->GetPrefixAtom(),
                 mNodeInfo->NamespaceID(),
@@ -161,29 +162,12 @@ Attr::GetName(nsAString& aName)
   return NS_OK;
 }
 
-already_AddRefed<nsIAtom>
-Attr::GetNameAtom(nsIContent* aContent)
-{
-  if (!mNsAware &&
-      mNodeInfo->NamespaceID() == kNameSpaceID_None &&
-      aContent->IsInHTMLDocument() &&
-      aContent->IsHTML()) {
-    nsString name;
-    mNodeInfo->GetName(name);
-    nsAutoString lowercaseName;
-    nsContentUtils::ASCIIToLower(name, lowercaseName);
-    return do_GetAtom(lowercaseName);
-  }
-  nsCOMPtr<nsIAtom> nameAtom = mNodeInfo->NameAtom();
-  return nameAtom.forget();
-}
-
 NS_IMETHODIMP
 Attr::GetValue(nsAString& aValue)
 {
   Element* element = GetElement();
   if (element) {
-    nsCOMPtr<nsIAtom> nameAtom = GetNameAtom(element);
+    nsCOMPtr<nsIAtom> nameAtom = mNodeInfo->NameAtom();
     element->GetAttr(mNodeInfo->NamespaceID(), nameAtom, aValue);
   }
   else {
@@ -202,7 +186,7 @@ Attr::SetValue(const nsAString& aValue, ErrorResult& aRv)
     return;
   }
 
-  nsCOMPtr<nsIAtom> nameAtom = GetNameAtom(element);
+  nsCOMPtr<nsIAtom> nameAtom = mNodeInfo->NameAtom();
   aRv = element->SetAttr(mNodeInfo->NamespaceID(),
                          nameAtom,
                          mNodeInfo->GetPrefixAtom(),
@@ -215,7 +199,7 @@ Attr::SetValue(const nsAString& aValue)
 {
   ErrorResult rv;
   SetValue(aValue, rv);
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 bool
@@ -277,7 +261,7 @@ Attr::Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const
   nsAutoString value;
   const_cast<Attr*>(this)->GetValue(value);
 
-  nsRefPtr<mozilla::dom::NodeInfo> ni = aNodeInfo;
+  RefPtr<mozilla::dom::NodeInfo> ni = aNodeInfo;
   *aResult = new Attr(nullptr, ni.forget(), value, mNsAware);
   if (!*aResult) {
     return NS_ERROR_OUT_OF_MEMORY;
@@ -384,9 +368,9 @@ Attr::Shutdown()
 }
 
 JSObject*
-Attr::WrapNode(JSContext* aCx)
+Attr::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return AttrBinding::Wrap(aCx, this);
+  return AttrBinding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

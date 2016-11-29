@@ -13,6 +13,7 @@
 #include "jsstr.h"
 
 #include "builtin/RegExp.h"
+#include "builtin/SIMD.h"
 #include "builtin/TypedObject.h"
 
 #include "gc/Heap.h"
@@ -23,6 +24,7 @@
 #include "jit/MIRGraph.h"
 #include "jit/VMFunctions.h"
 #include "vm/Interpreter.h"
+#include "vm/String.h"
 
 #include "vm/Interpreter-inl.h"
 #include "vm/NativeObject-inl.h"
@@ -115,7 +117,9 @@ MResumePoint::writeRecoverData(CompactBufferWriter& writer) const
     // arguments_object.
     MOZ_ASSERT(CountArgSlots(script, fun) < SNAPSHOT_MAX_NARGS + 4);
 
+#ifdef JS_JITSPEW
     uint32_t implicit = StartArgSlot(script);
+#endif
     uint32_t formalArgs = CountArgSlots(script, fun);
     uint32_t nallocs = formalArgs + script->nfixed() + exprStack;
 
@@ -402,12 +406,15 @@ MMul::writeRecoverData(CompactBufferWriter& writer) const
     MOZ_ASSERT(canRecoverOnBailout());
     writer.writeUnsigned(uint32_t(RInstruction::Recover_Mul));
     writer.writeByte(specialization_ == MIRType_Float32);
+    MOZ_ASSERT(Mode(uint8_t(mode_)) == mode_);
+    writer.writeByte(uint8_t(mode_));
     return true;
 }
 
 RMul::RMul(CompactBufferReader& reader)
 {
     isFloatOperation_ = reader.readByte();
+    mode_ = reader.readByte();
 }
 
 bool
@@ -417,13 +424,19 @@ RMul::recover(JSContext* cx, SnapshotIterator& iter) const
     RootedValue rhs(cx, iter.read());
     RootedValue result(cx);
 
-    if (!js::MulValues(cx, &lhs, &rhs, &result))
-        return false;
+    if (MMul::Mode(mode_) == MMul::Normal) {
+        if (!js::MulValues(cx, &lhs, &rhs, &result))
+            return false;
 
-    // MIRType_Float32 is a specialization embedding the fact that the result is
-    // rounded to a Float32.
-    if (isFloatOperation_ && !RoundFloat32(cx, result, &result))
-        return false;
+        // MIRType_Float32 is a specialization embedding the fact that the
+        // result is rounded to a Float32.
+        if (isFloatOperation_ && !RoundFloat32(cx, result, &result))
+            return false;
+    } else {
+        MOZ_ASSERT(MMul::Mode(mode_) == MMul::Integer);
+        if (!js::math_imul_handle(cx, lhs, rhs, &result))
+            return false;
+    }
 
     iter.storeInstructionResult(result);
     return true;
@@ -1048,14 +1061,14 @@ bool
 RRegExpReplace::recover(JSContext* cx, SnapshotIterator& iter) const
 {
     RootedString string(cx, iter.read().toString());
-    RootedObject regexp(cx, &iter.read().toObject());
+    Rooted<RegExpObject*> regexp(cx, &iter.read().toObject().as<RegExpObject>());
     RootedString repl(cx, iter.read().toString());
-    RootedValue result(cx);
 
-    if (!js::str_replace_regexp_raw(cx, string, regexp, repl, &result))
+    JSString* result = js::str_replace_regexp_raw(cx, string, regexp, repl);
+    if (!result)
         return false;
 
-    iter.storeInstructionResult(result);
+    iter.storeInstructionResult(StringValue(result));
     return true;
 }
 
@@ -1094,10 +1107,18 @@ RToDouble::RToDouble(CompactBufferReader& reader)
 bool
 RToDouble::recover(JSContext* cx, SnapshotIterator& iter) const
 {
-    Value v = iter.read();
+    RootedValue v(cx, iter.read());
+    RootedValue result(cx);
 
     MOZ_ASSERT(!v.isObject());
-    iter.storeInstructionResult(v);
+    MOZ_ASSERT(!v.isSymbol());
+
+    double dbl;
+    if (!ToNumber(cx, v, &dbl))
+        return false;
+
+    result.setDouble(dbl);
+    iter.storeInstructionResult(result);
     return true;
 }
 
@@ -1170,16 +1191,16 @@ RNewObject::RNewObject(CompactBufferReader& reader)
 bool
 RNewObject::recover(JSContext* cx, SnapshotIterator& iter) const
 {
-    RootedPlainObject templateObject(cx, &iter.read().toObject().as<PlainObject>());
+    RootedObject templateObject(cx, &iter.read().toObject());
     RootedValue result(cx);
     JSObject* resultObject = nullptr;
 
     // See CodeGenerator::visitNewObjectVMCall
     if (mode_ == MNewObject::ObjectLiteral) {
-        resultObject = NewInitObject(cx, templateObject);
+        resultObject = NewObjectOperationWithTemplate(cx, templateObject);
     } else {
         MOZ_ASSERT(mode_ == MNewObject::ObjectCreate);
-        resultObject = ObjectCreateWithTemplate(cx, templateObject);
+        resultObject = ObjectCreateWithTemplate(cx, templateObject.as<PlainObject>());
     }
 
     if (!resultObject)
@@ -1195,15 +1216,13 @@ MNewArray::writeRecoverData(CompactBufferWriter& writer) const
 {
     MOZ_ASSERT(canRecoverOnBailout());
     writer.writeUnsigned(uint32_t(RInstruction::Recover_NewArray));
-    writer.writeUnsigned(count());
-    writer.writeByte(uint8_t(allocatingBehaviour()));
+    writer.writeUnsigned(length());
     return true;
 }
 
 RNewArray::RNewArray(CompactBufferReader& reader)
 {
     count_ = reader.readUnsigned();
-    allocatingBehaviour_ = AllocatingBehaviour(reader.readByte());
 }
 
 bool
@@ -1211,13 +1230,9 @@ RNewArray::recover(JSContext* cx, SnapshotIterator& iter) const
 {
     RootedObject templateObject(cx, &iter.read().toObject());
     RootedValue result(cx);
-    RootedObjectGroup group(cx);
+    RootedObjectGroup group(cx, templateObject->group());
 
-    // See CodeGenerator::visitNewArrayCallVM
-    if (!templateObject->isSingleton())
-        group = templateObject->group();
-
-    JSObject* resultObject = NewDenseArray(cx, count_, group, allocatingBehaviour_);
+    JSObject* resultObject = NewFullyAllocatedArrayTryUseGroup(cx, group, count_);
     if (!resultObject)
         return false;
 
@@ -1258,24 +1273,20 @@ MCreateThisWithTemplate::writeRecoverData(CompactBufferWriter& writer) const
 {
     MOZ_ASSERT(canRecoverOnBailout());
     writer.writeUnsigned(uint32_t(RInstruction::Recover_CreateThisWithTemplate));
-    writer.writeByte(bool(initialHeap() == gc::TenuredHeap));
     return true;
 }
 
 RCreateThisWithTemplate::RCreateThisWithTemplate(CompactBufferReader& reader)
 {
-    tenuredHeap_ = reader.readByte();
 }
 
 bool
 RCreateThisWithTemplate::recover(JSContext* cx, SnapshotIterator& iter) const
 {
-    RootedPlainObject templateObject(cx, &iter.read().toObject().as<PlainObject>());
+    RootedObject templateObject(cx, &iter.read().toObject());
 
     // See CodeGenerator::visitCreateThisWithTemplate
-    gc::AllocKind allocKind = templateObject->asTenured().getAllocKind();
-    gc::InitialHeap initialHeap = tenuredHeap_ ? gc::TenuredHeap : gc::DefaultHeap;
-    JSObject* resultObject = NativeObject::copy(cx, allocKind, initialHeap, templateObject);
+    JSObject* resultObject = NewObjectOperationWithTemplate(cx, templateObject);
     if (!resultObject)
         return false;
 
@@ -1314,6 +1325,60 @@ RLambda::recover(JSContext* cx, SnapshotIterator& iter) const
 }
 
 bool
+MSimdBox::writeRecoverData(CompactBufferWriter& writer) const
+{
+    MOZ_ASSERT(canRecoverOnBailout());
+    writer.writeUnsigned(uint32_t(RInstruction::Recover_SimdBox));
+    SimdTypeDescr& simdTypeDescr = templateObject()->typeDescr().as<SimdTypeDescr>();
+    SimdTypeDescr::Type type = simdTypeDescr.type();
+    writer.writeByte(uint8_t(type));
+    return true;
+}
+
+RSimdBox::RSimdBox(CompactBufferReader& reader)
+{
+    type_ = reader.readByte();
+}
+
+bool
+RSimdBox::recover(JSContext* cx, SnapshotIterator& iter) const
+{
+    JSObject* resultObject = nullptr;
+    RValueAllocation a = iter.readAllocation();
+    MOZ_ASSERT(iter.allocationReadable(a));
+    const FloatRegisters::RegisterContent* raw = iter.floatAllocationPointer(a);
+    switch (SimdTypeDescr::Type(type_)) {
+      case SimdTypeDescr::Int32x4:
+        MOZ_ASSERT_IF(a.mode() == RValueAllocation::ANY_FLOAT_REG,
+                      a.fpuReg().isSimd128());
+        resultObject = js::CreateSimd<Int32x4>(cx, (const Int32x4::Elem*) raw);
+        break;
+      case SimdTypeDescr::Float32x4:
+        MOZ_ASSERT_IF(a.mode() == RValueAllocation::ANY_FLOAT_REG,
+                      a.fpuReg().isSimd128());
+        resultObject = js::CreateSimd<Float32x4>(cx, (const Float32x4::Elem*) raw);
+        break;
+      case SimdTypeDescr::Float64x2:
+        MOZ_CRASH("NYI, RSimdBox of Float64x2");
+        break;
+      case SimdTypeDescr::Int8x16:
+        MOZ_CRASH("NYI, RSimdBox of Int8x16");
+        break;
+      case SimdTypeDescr::Int16x8:
+        MOZ_CRASH("NYI, RSimdBox of Int16x8");
+        break;
+    }
+
+    if (!resultObject)
+        return false;
+
+    RootedValue result(cx);
+    result.setObject(*resultObject);
+    iter.storeInstructionResult(result);
+    return true;
+}
+
+bool
 MObjectState::writeRecoverData(CompactBufferWriter& writer) const
 {
     MOZ_ASSERT(canRecoverOnBailout());
@@ -1330,13 +1395,40 @@ RObjectState::RObjectState(CompactBufferReader& reader)
 bool
 RObjectState::recover(JSContext* cx, SnapshotIterator& iter) const
 {
-    RootedNativeObject object(cx, &iter.read().toObject().as<NativeObject>());
-    MOZ_ASSERT(object->slotSpan() == numSlots());
-
+    RootedObject object(cx, &iter.read().toObject());
     RootedValue val(cx);
-    for (size_t i = 0; i < numSlots(); i++) {
-        val = iter.read();
-        object->setSlot(i, val);
+
+    if (object->is<UnboxedPlainObject>()) {
+        const UnboxedLayout& layout = object->as<UnboxedPlainObject>().layout();
+
+        RootedId id(cx);
+        RootedValue receiver(cx, ObjectValue(*object));
+        const UnboxedLayout::PropertyVector& properties = layout.properties();
+        for (size_t i = 0; i < properties.length(); i++) {
+            val = iter.read();
+
+            // This is the default placeholder value of MObjectState, when no
+            // properties are defined yet.
+            if (val.isUndefined())
+                continue;
+
+            id = NameToId(properties[i].name);
+            ObjectOpResult result;
+
+            // SetProperty can only fail due to OOM.
+            if (!SetProperty(cx, object, id, val, receiver, result))
+                return false;
+            if (!result)
+                return result.reportError(cx, object, id);
+        }
+    } else {
+        RootedNativeObject nativeObject(cx, &object->as<NativeObject>());
+        MOZ_ASSERT(nativeObject->slotSpan() == numSlots());
+
+        for (size_t i = 0; i < numSlots(); i++) {
+            val = iter.read();
+            nativeObject->setSlot(i, val);
+        }
     }
 
     val.setObject(*object);
@@ -1383,6 +1475,27 @@ RArrayState::recover(JSContext* cx, SnapshotIterator& iter) const
 }
 
 bool
+MAssertRecoveredOnBailout::writeRecoverData(CompactBufferWriter& writer) const
+{
+    MOZ_ASSERT(canRecoverOnBailout());
+    MOZ_RELEASE_ASSERT(input()->isRecoveredOnBailout() == mustBeRecovered_,
+        "assertRecoveredOnBailout failed during compilation");
+    writer.writeUnsigned(uint32_t(RInstruction::Recover_AssertRecoveredOnBailout));
+    return true;
+}
+
+RAssertRecoveredOnBailout::RAssertRecoveredOnBailout(CompactBufferReader& reader)
+{ }
+
+bool RAssertRecoveredOnBailout::recover(JSContext* cx, SnapshotIterator& iter) const
+{
+    RootedValue result(cx);
+    result.setUndefined();
+    iter.storeInstructionResult(result);
+    return true;
+}
+
+bool
 MStringReplace::writeRecoverData(CompactBufferWriter& writer) const
 {
     MOZ_ASSERT(canRecoverOnBailout());
@@ -1398,11 +1511,37 @@ bool RStringReplace::recover(JSContext* cx, SnapshotIterator& iter) const
     RootedString string(cx, iter.read().toString());
     RootedString pattern(cx, iter.read().toString());
     RootedString replace(cx, iter.read().toString());
-    RootedValue result(cx);
 
-    if (!js::str_replace_string_raw(cx, string, pattern, replace, &result))
+    JSString* result = js::str_replace_string_raw(cx, string, pattern, replace);
+    if (!result)
         return false;
 
-    iter.storeInstructionResult(result);
+    iter.storeInstructionResult(StringValue(result));
+    return true;
+}
+
+bool
+MAtomicIsLockFree::writeRecoverData(CompactBufferWriter& writer) const
+{
+    MOZ_ASSERT(canRecoverOnBailout());
+    writer.writeUnsigned(uint32_t(RInstruction::Recover_AtomicIsLockFree));
+    return true;
+}
+
+RAtomicIsLockFree::RAtomicIsLockFree(CompactBufferReader& reader)
+{ }
+
+bool
+RAtomicIsLockFree::recover(JSContext* cx, SnapshotIterator& iter) const
+{
+    RootedValue operand(cx, iter.read());
+    MOZ_ASSERT(operand.isInt32());
+
+    int32_t result;
+    if (!js::AtomicIsLockFree(cx, operand, &result))
+        return false;
+
+    RootedValue rootedResult(cx, js::Int32Value(result));
+    iter.storeInstructionResult(rootedResult);
     return true;
 }

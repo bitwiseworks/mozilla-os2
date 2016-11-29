@@ -8,6 +8,7 @@
 
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/Maybe.h"
 #include "nsBoundingMetrics.h"
 #include "nsChangeHint.h"
 #include "nsAutoPtr.h"
@@ -15,10 +16,8 @@
 #include "mozilla/layout/FrameChildList.h"
 #include "nsThreadUtils.h"
 #include "nsIPrincipal.h"
-#include "GraphicsFilter.h"
 #include "nsCSSPseudoElements.h"
 #include "FrameMetrics.h"
-#include "gfx3DMatrix.h"
 #include "nsIWidget.h"
 #include "nsCSSProperty.h"
 #include "nsStyleCoord.h"
@@ -30,11 +29,11 @@
 #include "Units.h"
 #include "mozilla/ToString.h"
 #include "nsHTMLReflowMetrics.h"
+#include "ImageContainer.h"
 
 #include <limits>
 #include <algorithm>
 
-class nsIFormControlFrame;
 class nsPresContext;
 class nsIContent;
 class nsIAtom;
@@ -69,20 +68,22 @@ struct IntrinsicSize;
 struct ContainerLayerParameters;
 class WritingMode;
 namespace dom {
+class CanvasRenderingContext2D;
 class DOMRectList;
 class Element;
 class HTMLImageElement;
 class HTMLCanvasElement;
 class HTMLVideoElement;
+class Selection;
 } // namespace dom
 namespace gfx {
 struct RectCornerRadii;
 } // namespace gfx
 namespace layers {
+class Image;
 class Layer;
-class ClientLayerManager;
-}
-}
+} // namespace layers
+} // namespace mozilla
 
 namespace mozilla {
 
@@ -114,7 +115,6 @@ struct DisplayPortMarginsPropertyData {
  */
 class nsLayoutUtils
 {
-  typedef ::GraphicsFilter GraphicsFilter;
   typedef mozilla::dom::DOMRectList DOMRectList;
   typedef mozilla::layers::Layer Layer;
   typedef mozilla::ContainerLayerParameters ContainerLayerParameters;
@@ -122,9 +122,12 @@ class nsLayoutUtils
   typedef mozilla::gfx::SourceSurface SourceSurface;
   typedef mozilla::gfx::Color Color;
   typedef mozilla::gfx::DrawTarget DrawTarget;
+  typedef mozilla::gfx::ExtendMode ExtendMode;
+  typedef mozilla::gfx::Filter Filter;
   typedef mozilla::gfx::Float Float;
   typedef mozilla::gfx::Point Point;
   typedef mozilla::gfx::Rect Rect;
+  typedef mozilla::gfx::RectDouble RectDouble;
   typedef mozilla::gfx::Matrix4x4 Matrix4x4;
   typedef mozilla::gfx::RectCornerRadii RectCornerRadii;
   typedef mozilla::gfx::StrokeOptions StrokeOptions;
@@ -135,6 +138,7 @@ public:
   typedef FrameMetrics::ViewID ViewID;
   typedef mozilla::CSSPoint CSSPoint;
   typedef mozilla::CSSSize CSSSize;
+  typedef mozilla::CSSIntSize CSSIntSize;
   typedef mozilla::ScreenMargin ScreenMargin;
   typedef mozilla::LayoutDeviceIntSize LayoutDeviceIntSize;
 
@@ -164,6 +168,16 @@ public:
    * Get display port for the given element.
    */
   static bool GetDisplayPort(nsIContent* aContent, nsRect *aResult = nullptr);
+
+  /**
+   * @return the display port for the given element which should be used for
+   * visibility testing purposes.
+   *
+   * If low-precision buffers are enabled, this is the critical display port;
+   * otherwise, it's the same display port returned by GetDisplayPort().
+   */
+  static bool GetDisplayPortForVisibilityTesting(nsIContent* aContent,
+                                                 nsRect* aResult = nullptr);
 
   enum class RepaintMode : uint8_t {
     Repaint,
@@ -263,10 +277,13 @@ public:
    *
    * @param aFrame the frame to start at
    * @param aFrameType the frame type to look for
+   * @param aStopAt a frame to stop at after we checked it
    * @return a frame of the given type or nullptr if no
    *         such ancestor exists
    */
-  static nsIFrame* GetClosestFrameOfType(nsIFrame* aFrame, nsIAtom* aFrameType);
+  static nsIFrame* GetClosestFrameOfType(nsIFrame* aFrame,
+                                         nsIAtom* aFrameType,
+                                         nsIFrame* aStopAt = nullptr);
 
   /**
    * Given a frame, search up the frame tree until we find an
@@ -486,12 +503,16 @@ public:
    * properties (top, left, right, bottom) are auto. aAnchorRect is in the
    * coordinate space of aLayer's container layer (i.e. relative to the reference
    * frame of the display item which is building aLayer's container layer).
+   * aIsClipFixed is true if the layer's clip rect should also remain fixed
+   * during async-scrolling (true for fixed position elements, false for
+   * fixed backgrounds).
    */
   static void SetFixedPositionLayerData(Layer* aLayer, const nsIFrame* aViewportFrame,
                                         const nsRect& aAnchorRect,
                                         const nsIFrame* aFixedPosFrame,
                                         nsPresContext* aPresContext,
-                                        const ContainerLayerParameters& aContainerParameters);
+                                        const ContainerLayerParameters& aContainerParameters,
+                                        bool aIsClipFixed);
 
   /**
    * Return true if aPresContext's viewport has a displayport.
@@ -520,33 +541,6 @@ public:
    * SetScrollbarThumbLayerization.
    */
   static bool IsScrollbarThumbLayerized(nsIFrame* aThumbFrame);
-
-  /**
-   * Finds the nearest ancestor frame to aItem that is considered to have (or
-   * will have) "animated geometry". For example the scrolled frames of
-   * scrollframes which are actively being scrolled fall into this category.
-   * Frames with certain CSS properties that are being animated (e.g.
-   * 'left'/'top' etc) are also placed in this category.
-   * Frames with different active geometry roots are in different PaintedLayers,
-   * so that we can animate the geometry root by changing its transform (either
-   * on the main thread or in the compositor).
-   * The animated geometry root is required to be a descendant (or equal to)
-   * aItem's ReferenceFrame(), which means that we will fall back to
-   * returning aItem->ReferenceFrame() when we can't find another animated
-   * geometry root.
-   */
-  static nsIFrame* GetAnimatedGeometryRootFor(nsDisplayItem* aItem,
-                                              nsDisplayListBuilder* aBuilder,
-                                              mozilla::layers::LayerManager* aManager);
-
-  /**
-   * Finds the nearest ancestor frame to aFrame that is considered to have (or
-   * will have) "animated geometry". This could be aFrame. Returns
-   * aStopAtAncestor if no closer ancestor is found.
-   */
-  static nsIFrame* GetAnimatedGeometryRootForFrame(nsDisplayListBuilder* aBuilder,
-                                                   nsIFrame* aFrame,
-                                                   const nsIFrame* aStopAtAncestor);
 
   /**
     * GetScrollableFrameFor returns the scrollable frame for a scrolled frame
@@ -587,11 +581,18 @@ public:
      */
     SCROLLABLE_ONLY_ASYNC_SCROLLABLE = 0x04,
     /**
-     * If the SCROLLABLE_ALWAYS_MATCH_ROOT flag is set, then return the
-     * root scrollable frame for the root content document if we don't hit
-     * anything else.
+     * If the SCROLLABLE_ALWAYS_MATCH_ROOT flag is set, then we will always
+     * return the root scrollable frame for the root document (in the current
+     * process) if we encounter it, whether or not it is async scrollable or
+     * overflow: hidden.
      */
     SCROLLABLE_ALWAYS_MATCH_ROOT = 0x08,
+    /**
+     * If the SCROLLABLE_FIXEDPOS_FINDS_ROOT flag is set, then for fixed-pos
+     * frames that are in the root document (in the current process) return the
+     * root scrollable frame for that document.
+     */
+    SCROLLABLE_FIXEDPOS_FINDS_ROOT = 0x10
   };
   /**
    * GetNearestScrollableFrame locates the first ancestor of aFrame
@@ -799,6 +800,14 @@ public:
   static gfxSize GetTransformToAncestorScale(nsIFrame* aFrame);
 
   /**
+   * Gets the scale factors of the transform for aFrame relative to the root
+   * frame if this transform is 2D, or the identity scale factors otherwise.
+   * If some frame on the path from aFrame to the display root frame may have an
+   * animated scale, returns the identity scale factors.
+   */
+  static gfxSize GetTransformToAncestorScaleExcludingAnimated(nsIFrame* aFrame);
+
+  /**
    * Find the nearest common ancestor frame for aFrame1 and aFrame2. The
    * ancestor frame could be cross-doc.
    */
@@ -860,6 +869,13 @@ public:
                                           const nsRect& aRect);
 
   /**
+   * Clamp aRect relative to aFrame to the scroll frames boundary searching from
+   * aFrame.
+   */
+  static nsRect ClampRectToScrollFrames(nsIFrame* aFrame,
+                                        const nsRect& aRect);
+
+  /**
    * Return true if a "layer transform" could be computed for aFrame,
    * and optionally return the computed transform.  The returned
    * transform is what would be set on the layer currently if a layers
@@ -901,7 +917,7 @@ public:
    * @return The smallest rect that contains the image of aBounds.
    */
   static nsRect MatrixTransformRect(const nsRect &aBounds,
-                                    const gfx3DMatrix &aMatrix, float aFactor);
+                                    const Matrix4x4 &aMatrix, float aFactor);
 
   /**
    * Helper function that, given a rectangle and a matrix, returns the smallest
@@ -914,7 +930,7 @@ public:
    * @return The smallest rect that contains the image of aBounds.
    */
   static nsRect MatrixTransformRectOut(const nsRect &aBounds,
-                                    const gfx3DMatrix &aMatrix, float aFactor);
+                                       const Matrix4x4 &aMatrix, float aFactor);
   /**
    * Helper function that, given a point and a matrix, returns the image
    * of that point under the matrix transform.
@@ -925,7 +941,7 @@ public:
    * @return The image of the point under the transform.
    */
   static nsPoint MatrixTransformPoint(const nsPoint &aPoint,
-                                      const gfx3DMatrix &aMatrix, float aFactor);
+                                      const Matrix4x4 &aMatrix, float aFactor);
 
   /**
    * Given a graphics rectangle in graphics space, return a rectangle in
@@ -975,11 +991,10 @@ public:
     PAINT_IGNORE_SUPPRESSION = 0x08,
     PAINT_DOCUMENT_RELATIVE = 0x10,
     PAINT_HIDE_CARET = 0x20,
-    PAINT_ALL_CONTINUATIONS = 0x40,
-    PAINT_TO_WINDOW = 0x80,
-    PAINT_EXISTING_TRANSACTION = 0x100,
-    PAINT_NO_COMPOSITE = 0x200,
-    PAINT_COMPRESSED = 0x400
+    PAINT_TO_WINDOW = 0x40,
+    PAINT_EXISTING_TRANSACTION = 0x80,
+    PAINT_NO_COMPOSITE = 0x100,
+    PAINT_COMPRESSED = 0x200
   };
 
   /**
@@ -1004,9 +1019,11 @@ public:
    * to force rendering to use the widget's layer manager for testing
    * or speed. PAINT_WIDGET_LAYERS must be set if aRenderingContext is null.
    * If PAINT_DOCUMENT_RELATIVE is used, the visible region is interpreted
-   * as being relative to the document.  (Normally it's relative to the CSS
-   * viewport.) PAINT_TO_WINDOW sets painting to window to true on the display
-   * list builder even if we can't tell that we are painting to the window.
+   * as being relative to the document (normally it's relative to the CSS
+   * viewport) and the document is painted as if no scrolling has occured.
+   * Only considered if nsIPresShell::IgnoringViewportScrolling is true.
+   * PAINT_TO_WINDOW sets painting to window to true on the display list
+   * builder even if we can't tell that we are painting to the window.
    * If PAINT_EXISTING_TRANSACTION is set, then BeginTransaction() has already
    * been called on aFrame's widget's layer manager and should not be
    * called again.
@@ -1203,6 +1220,23 @@ public:
                                                 float aSizeInflation = 1.0f);
 
   /**
+   * Get the font metrics of emphasis marks corresponding to the given
+   * style data. The result is same as GetFontMetricsForStyleContext
+   * except that the font size is scaled down to 50%.
+   * @param aStyleContext the style data
+   * @param aFontMetrics the font metrics result
+   * @param aInflation number to multiple font size by
+   * @return success or failure code
+   */
+  static nsresult GetFontMetricsOfEmphasisMarks(nsStyleContext* aStyleContext,
+                                                nsFontMetrics** aFontMetrics,
+                                                float aInflation)
+  {
+    return GetFontMetricsForStyleContext(aStyleContext, aFontMetrics,
+                                         aInflation * 0.5f);
+  }
+
+  /**
    * Find the immediate child of aParent whose frame subtree contains
    * aDescendantFrame. Returns null if aDescendantFrame is not a descendant
    * of aParent.
@@ -1282,18 +1316,73 @@ public:
 
   /**
    * Get the contribution of aFrame to its containing block's intrinsic
-   * width.  This considers the child's intrinsic width, its 'width',
-   * 'min-width', and 'max-width' properties, and its padding, border,
-   * and margin.
+   * size for the given physical axis.  This considers the child's intrinsic
+   * width, its 'width', 'min-width', and 'max-width' properties (or 'height'
+   * variations if that's what matches aAxis) and its padding, border and margin
+   * in the corresponding dimension.
    */
-  enum IntrinsicISizeType { MIN_ISIZE, PREF_ISIZE };
+  enum class IntrinsicISizeType { MIN_ISIZE, PREF_ISIZE };
+  static const auto MIN_ISIZE = IntrinsicISizeType::MIN_ISIZE;
+  static const auto PREF_ISIZE = IntrinsicISizeType::PREF_ISIZE;
   enum {
-    IGNORE_PADDING = 0x01
+    IGNORE_PADDING = 0x01,
+    BAIL_IF_REFLOW_NEEDED = 0x02, // returns NS_INTRINSIC_WIDTH_UNKNOWN if so
+    MIN_INTRINSIC_ISIZE = 0x04, // use min-width/height instead of width/height
   };
+  static nscoord IntrinsicForAxis(mozilla::PhysicalAxis aAxis,
+                                  nsRenderingContext*   aRenderingContext,
+                                  nsIFrame*             aFrame,
+                                  IntrinsicISizeType    aType,
+                                  uint32_t              aFlags = 0);
+  /**
+   * Calls IntrinsicForAxis with aFrame's parent's inline physical axis.
+   */
   static nscoord IntrinsicForContainer(nsRenderingContext* aRenderingContext,
-                                       nsIFrame* aFrame,
-                                       IntrinsicISizeType aType,
-                                       uint32_t aFlags = 0);
+                                       nsIFrame*           aFrame,
+                                       IntrinsicISizeType  aType,
+                                       uint32_t            aFlags = 0);
+
+  /**
+   * Get the definite size contribution of aFrame for the given physical axis.
+   * This considers the child's 'min-width' property (or 'min-height' if the
+   * given axis is vertical), and its padding, border, and margin in the
+   * corresponding dimension.  If the 'min-' property is 'auto' (and 'overflow'
+   * is 'visible') and the corresponding 'width'/'height' is definite it returns
+   * the "specified / transferred size" for:
+   * https://drafts.csswg.org/css-grid/#min-size-auto
+   * Note that any percentage in 'width'/'height' makes it count as indefinite.
+   * If the 'min-' property is 'auto' and 'overflow' is not 'visible', then it
+   * calculates the result as if the 'min-' computed value is zero.
+   * Otherwise, return NS_UNCONSTRAINEDSIZE.
+   *
+   * @note this behavior is specific to Grid/Flexbox (currently) so aFrame
+   * should be a grid/flex item.
+   */
+  static nscoord MinSizeContributionForAxis(mozilla::PhysicalAxis aAxis,
+                                            nsRenderingContext*   aRC,
+                                            nsIFrame*             aFrame,
+                                            IntrinsicISizeType    aType,
+                                            uint32_t              aFlags = 0);
+
+  /**
+   * This function increases an initial intrinsic size, 'aCurrent', according
+   * to the given 'aPercent', such that the size-increase makes up exactly
+   * 'aPercent' percent of the returned value.  If 'aPercent' is less than
+   * or equal to zero the original 'aCurrent' value is returned. If 'aPercent'
+   * is greater than or equal to 1.0 the value nscoord_MAX is returned.
+   * (We don't increase the size if MIN_ISIZE is passed in, though.)
+   */
+  static nscoord AddPercents(IntrinsicISizeType aType, nscoord aCurrent,
+                             float aPercent)
+  {
+    if (aPercent > 0.0f && aType == nsLayoutUtils::PREF_ISIZE) {
+      // XXX Should we also consider percentages for min widths, up to a
+      // limit?
+      return MOZ_UNLIKELY(aPercent >= 1.0f) ? nscoord_MAX
+        : NSToCoordRound(float(aCurrent) / (1.0f - aPercent));
+    }
+    return aCurrent;
+  }
 
   /*
    * Convert nsStyleCoord to nscoord when percentages depend on the
@@ -1636,7 +1725,7 @@ public:
   /**
    * Gets the graphics filter for the frame
    */
-  static GraphicsFilter GetGraphicsFilterForFrame(nsIFrame* aFrame);
+  static Filter GetGraphicsFilterForFrame(nsIFrame* aFrame);
 
   /* N.B. The only difference between variants of the Draw*Image
    * functions below is the type of the aImage argument.
@@ -1661,18 +1750,20 @@ public:
    *   @param aAnchor           A point in aFill which we will ensure is
    *                            pixel-aligned in the output.
    *   @param aDirty            Pixels outside this area may be skipped.
-   *   @param aImageFlags       Image flags of the imgIContainer::FLAG_* variety
+   *   @param aImageFlags       Image flags of the imgIContainer::FLAG_* variety.
+   *   @param aExtendMode       How to extend the image over the dest rect.
    */
   static DrawResult DrawBackgroundImage(gfxContext&         aContext,
                                         nsPresContext*      aPresContext,
                                         imgIContainer*      aImage,
-                                        const nsIntSize&    aImageSize,
-                                        GraphicsFilter      aGraphicsFilter,
+                                        const CSSIntSize&   aImageSize,
+                                        Filter              aGraphicsFilter,
                                         const nsRect&       aDest,
                                         const nsRect&       aFill,
                                         const nsPoint&      aAnchor,
                                         const nsRect&       aDirty,
-                                        uint32_t            aImageFlags);
+                                        uint32_t            aImageFlags,
+                                        ExtendMode          aExtendMode);
 
   /**
    * Draw an image.
@@ -1692,7 +1783,7 @@ public:
   static DrawResult DrawImage(gfxContext&         aContext,
                               nsPresContext*      aPresContext,
                               imgIContainer*      aImage,
-                              GraphicsFilter      aGraphicsFilter,
+                              Filter              aGraphicsFilter,
                               const nsRect&       aDest,
                               const nsRect&       aFill,
                               const nsPoint&      aAnchor,
@@ -1746,7 +1837,7 @@ public:
   static DrawResult DrawSingleUnscaledImage(gfxContext&          aContext,
                                             nsPresContext*       aPresContext,
                                             imgIContainer*       aImage,
-                                            GraphicsFilter       aGraphicsFilter,
+                                            Filter               aGraphicsFilter,
                                             const nsPoint&       aDest,
                                             const nsRect*        aDirty,
                                             uint32_t             aImageFlags,
@@ -1777,7 +1868,7 @@ public:
   static DrawResult DrawSingleImage(gfxContext&         aContext,
                                     nsPresContext*      aPresContext,
                                     imgIContainer*      aImage,
-                                    GraphicsFilter      aGraphicsFilter,
+                                    Filter              aGraphicsFilter,
                                     const nsRect&       aDest,
                                     const nsRect&       aDirty,
                                     const mozilla::SVGImageContext* aSVGContext,
@@ -1802,7 +1893,7 @@ public:
    * have less information about the frame tree.
    */
   static void ComputeSizeForDrawing(imgIContainer* aImage,
-                                    nsIntSize&     aImageSize,
+                                    CSSIntSize&    aImageSize,
                                     nsSize&        aIntrinsicRatio,
                                     bool&          aGotWidth,
                                     bool&          aGotHeight);
@@ -1815,8 +1906,9 @@ public:
    * after trying all these methods, no value is available for one or both
    * dimensions, the corresponding dimension of aFallbackSize is used instead.
    */
-  static nsIntSize ComputeSizeForDrawingWithFallback(imgIContainer* aImage,
-                                                     const nsSize&  aFallbackSize);
+  static CSSIntSize
+  ComputeSizeForDrawingWithFallback(imgIContainer* aImage,
+                                    const nsSize&  aFallbackSize);
 
   /**
    * Given a source area of an image (in appunits) and a destination area
@@ -1825,10 +1917,6 @@ public:
    * the aDest parameter of DrawImage, when we want to draw a subimage
    * of an overall image.
    */
-  static nsRect GetWholeImageDestination(const nsIntSize& aWholeImageSize,
-                                         const nsRect& aImageSourceArea,
-                                         const nsRect& aDestArea);
-
   static nsRect GetWholeImageDestination(const nsSize& aWholeImageSize,
                                          const nsRect& aImageSourceArea,
                                          const nsRect& aDestArea);
@@ -1928,6 +2016,11 @@ public:
                                           nscoord aLetterSpacing);
 
   /**
+   * Get orientation flags for textrun construction.
+   */
+  static uint32_t GetTextRunOrientFlagsForStyle(nsStyleContext* aStyleContext);
+
+  /**
    * Takes two rectangles whose origins must be the same, and computes
    * the difference between their union and their intersection as two
    * rectangles. (This difference is a superset of the difference
@@ -1997,15 +2090,30 @@ public:
   };
 
   struct SurfaceFromElementResult {
-    SurfaceFromElementResult();
+    friend class mozilla::dom::CanvasRenderingContext2D;
+    friend class nsLayoutUtils;
 
-    /* mSourceSurface will contain the resulting surface, or will be nullptr on error */
-    mozilla::RefPtr<SourceSurface> mSourceSurface;
+    /* If SFEResult contains a valid surface, it either mLayersImage or mSourceSurface
+     * will be non-null, and GetSourceSurface() will not be null.
+     *
+     * For valid surfaces, mSourceSurface may be null if mLayersImage is non-null, but
+     * GetSourceSurface() will create mSourceSurface from mLayersImage when called.
+     */
+
+    /* Video elements (at least) often are already decoded as layers::Images. */
+    RefPtr<mozilla::layers::Image> mLayersImage;
+
+protected:
+    /* GetSourceSurface() fills this and returns its non-null value if this SFEResult
+     * was successful. */
+    RefPtr<mozilla::gfx::SourceSurface> mSourceSurface;
+
+public:
     /* Contains info for drawing when there is no mSourceSurface. */
     DirectDrawInfo mDrawInfo;
 
     /* The size of the surface */
-    gfxIntSize mSize;
+    mozilla::gfx::IntSize mSize;
     /* The principal associated with the element whose surface was returned.
        If there is a surface, this will never be null. */
     nsCOMPtr<nsIPrincipal> mPrincipal;
@@ -2016,36 +2124,46 @@ public:
     /* Whether the element was still loading.  Some consumers need to handle
        this case specially. */
     bool mIsStillLoading;
+    /* Whether the element has a valid size. */
+    bool mHasSize;
     /* Whether the element used CORS when loading. */
     bool mCORSUsed;
     /* Whether the returned image contains premultiplied pixel data */
     bool mIsPremultiplied;
+
+    // Methods:
+
+    SurfaceFromElementResult();
+
+    // Gets mSourceSurface, or makes a SourceSurface from mLayersImage.
+    const RefPtr<mozilla::gfx::SourceSurface>& GetSourceSurface();
   };
 
   static SurfaceFromElementResult SurfaceFromElement(mozilla::dom::Element *aElement,
                                                      uint32_t aSurfaceFlags,
-                                                     mozilla::RefPtr<DrawTarget>& aTarget);
+                                                     RefPtr<DrawTarget>& aTarget);
+
   static SurfaceFromElementResult SurfaceFromElement(mozilla::dom::Element *aElement,
                                                      uint32_t aSurfaceFlags = 0) {
-    mozilla::RefPtr<DrawTarget> target = nullptr;
+    RefPtr<DrawTarget> target = nullptr;
     return SurfaceFromElement(aElement, aSurfaceFlags, target);
   }
 
   static SurfaceFromElementResult SurfaceFromElement(nsIImageLoadingContent *aElement,
                                                      uint32_t aSurfaceFlags,
-                                                     mozilla::RefPtr<DrawTarget>& aTarget);
+                                                     RefPtr<DrawTarget>& aTarget);
   // Need an HTMLImageElement overload, because otherwise the
   // nsIImageLoadingContent and mozilla::dom::Element overloads are ambiguous
   // for HTMLImageElement.
   static SurfaceFromElementResult SurfaceFromElement(mozilla::dom::HTMLImageElement *aElement,
                                                      uint32_t aSurfaceFlags,
-                                                     mozilla::RefPtr<DrawTarget>& aTarget);
+                                                     RefPtr<DrawTarget>& aTarget);
   static SurfaceFromElementResult SurfaceFromElement(mozilla::dom::HTMLCanvasElement *aElement,
                                                      uint32_t aSurfaceFlags,
-                                                     mozilla::RefPtr<DrawTarget>& aTarget);
+                                                     RefPtr<DrawTarget>& aTarget);
   static SurfaceFromElementResult SurfaceFromElement(mozilla::dom::HTMLVideoElement *aElement,
                                                      uint32_t aSurfaceFlags,
-                                                     mozilla::RefPtr<DrawTarget>& aTarget);
+                                                     RefPtr<DrawTarget>& aTarget);
 
   /**
    * When the document is editable by contenteditable attribute of its root
@@ -2111,33 +2229,37 @@ public:
                                         bool clear);
 
   /**
-   * Returns true if the content node has animations or transitions that can be
-   * performed on the compositor.
+   * Given a frame with possibly animated content, finds the content node
+   * that contains its animations as well as the frame's pseudo-element type
+   * relative to the resulting content node. Returns true if animated content
+   * was found, otherwise it returns false and the output parameters are
+   * undefined.
    */
-  static bool HasAnimationsForCompositor(nsIContent* aContent,
-                                         nsCSSProperty aProperty);
+  static bool GetAnimationContent(const nsIFrame* aFrame,
+                                  nsIContent* &aContentResult,
+                                  nsCSSPseudoElements::Type &aPseudoTypeResult);
 
   /**
-   * Returns true if the content node has animations or transitions for the
-   * property.
+   * Returns true if the frame has current (i.e. running or scheduled-to-run)
+   * animations or transitions for the property.
    */
-  static bool HasAnimations(nsIContent* aContent, nsCSSProperty aProperty);
+  static bool HasCurrentAnimationOfProperty(const nsIFrame* aFrame,
+                                            nsCSSProperty aProperty);
 
   /**
-   * Returns true if the content node has any current animations or transitions
-   * (depending on the value of |aAnimationProperty|).
-   * A current animation is any animation that has not yet finished playing
-   * including paused animations.
+   * Returns true if the frame has any current CSS transitions.
+   * A current transition is any transition that has not yet finished playing
+   * including paused transitions.
    */
-  static bool HasCurrentAnimations(nsIContent* aContent,
-                                   nsIAtom* aAnimationProperty);
+  static bool HasCurrentTransitions(const nsIFrame* aFrame);
 
   /**
-   * Returns true if the content node has any current animations or transitions
-   * for the specified property.
+   * Returns true if the frame has any current animations or transitions
+   * for any of the specified properties.
    */
-  static bool HasCurrentAnimationsForProperty(nsIContent* aContent,
-                                              nsCSSProperty aProperty);
+  static bool HasCurrentAnimationsForProperties(const nsIFrame* aFrame,
+                                                const nsCSSProperty* aProperties,
+                                                size_t aPropertyCount);
 
   /**
    * Checks if off-main-thread animations are enabled.
@@ -2150,14 +2272,19 @@ public:
   static bool IsAnimationLoggingEnabled();
 
   /**
-   * Find a suitable scale for an element (aContent) over the course of any
-   * animations and transitions on the element.
+   * Find a suitable scale for a element (aFrame's content) over the course of any
+   * animations and transitions of the CSS transform property on the
+   * element that run on the compositor thread.
    * It will check the maximum and minimum scale during the animations and
    * transitions and return a suitable value for performance and quality.
-   * Will return scale(1,1) if there is no animated scaling.
-   * Always return positive value.
+   * Will return scale(1,1) if there are no such animations.
+   * Always returns a positive value.
+   * @param aVisibleSize is the size of the area we want to paint
+   * @param aDisplaySize is the size of the display area of the pres context
    */
-  static gfxSize ComputeSuitableScaleForAnimation(nsIContent* aContent);
+  static gfxSize ComputeSuitableScaleForAnimation(const nsIFrame* aFrame,
+                                                  const nsSize& aVisibleSize,
+                                                  const nsSize& aDisplaySize);
 
   /**
    * Checks if we should forcibly use nearest pixel filtering for the
@@ -2190,6 +2317,12 @@ public:
    * Checks whether support for the CSS-wide "unset" value is enabled.
    */
   static bool UnsetValueEnabled();
+
+  /**
+   * Checks whether support for the CSS grid-template-{columns,rows} 'subgrid X'
+   * value is enabled.
+   */
+  static bool IsGridTemplateSubgridValueEnabled();
 
   /**
    * Checks whether support for the CSS text-align (and -moz-text-align-last)
@@ -2292,6 +2425,10 @@ public:
 
   static bool FontSizeInflationDisabledInMasterProcess() {
     return sFontSizeInflationDisabledInMasterProcess;
+  }
+
+  static bool SVGTransformBoxEnabled() {
+    return sSVGTransformBoxEnabled;
   }
 
   /**
@@ -2424,6 +2561,25 @@ public:
 #endif
 
   /**
+   * Helper method to get touch action behaviour from the frame
+   */
+  static uint32_t
+  GetTouchActionFromFrame(nsIFrame* aFrame);
+
+  /**
+   * Helper method to transform |aBounds| from aFrame to aAncestorFrame,
+   * and combine it with |aPreciseTargetDest| if it is axis-aligned, or
+   * combine it with |aImpreciseTargetDest| if not.
+   */
+  static void
+  TransformToAncestorAndCombineRegions(
+    const nsRect& aBounds,
+    nsIFrame* aFrame,
+    const nsIFrame* aAncestorFrame,
+    nsRegion* aPreciseTargetDest,
+    nsRegion* aImpreciseTargetDest);
+
+  /**
    * Determine if aImageFrame (which is an nsImageFrame, nsImageControlFrame, or
    * nsSVGImageFrame) is visible or close to being visible via scrolling and
    * update the presshell with this knowledge.
@@ -2450,7 +2606,7 @@ public:
   * are likely to need special-case handling of the RCD-RSF.
   */
   static nsSize
-  CalculateCompositionSizeForFrame(nsIFrame* aFrame);
+  CalculateCompositionSizeForFrame(nsIFrame* aFrame, bool aSubtractScrollbars = true);
 
  /**
   * Calculate the composition size for the root scroll frame of the root
@@ -2485,14 +2641,26 @@ public:
   CalculateExpandedScrollableRect(nsIFrame* aFrame);
 
   /**
-   * Returns true if we're using asynchronous scrolling (either through
-   * APZ or the android frontend).
+   * Returns true if the widget owning the given frame uses asynchronous
+   * scrolling.
    */
-  static bool UsesAsyncScrolling();
+  static bool UsesAsyncScrolling(nsIFrame* aFrame);
+
+  /**
+   * Returns true if the widget owning the given frame has builtin APZ support
+   * enabled.
+   */
+  static bool AsyncPanZoomEnabled(nsIFrame* aFrame);
+
+  /**
+   * Returns the current APZ Resolution Scale. When Java Pan/Zoom is
+   * enabled in Fennec it will always return 1.0.
+   */
+  static float GetCurrentAPZResolutionScale(nsIPresShell* aShell);
 
   /**
    * Log a key/value pair for APZ testing during a paint.
-   * @param aManager   The data will be written to the APZTestData associated 
+   * @param aManager   The data will be written to the APZTestData associated
    *                   with this layer manager.
    * @param aScrollId Identifies the scroll frame to which the data pertains.
    * @param aKey The key under which to log the data.
@@ -2522,6 +2690,17 @@ public:
           mozilla::ToString(aValue));
     }
   }
+
+  /**
+   * Calculate a basic FrameMetrics with enough fields set to perform some
+   * layout calculations. The fields set are dev-to-css ratio, pres shell
+   * resolution, cumulative resolution, zoom, composition size, root
+   * composition size, scroll offset and scrollable rect.
+   *
+   * By contrast, ComputeFrameMetrics() computes all the fields, but requires
+   * extra inputs and can only be called during frame layer building.
+   */
+  static FrameMetrics CalculateBasicFrameMetrics(nsIScrollableFrame* aScrollFrame);
 
   /**
    * Calculate a default set of displayport margins for the given scrollframe
@@ -2554,6 +2733,15 @@ public:
                                           nsRect aDisplayPortBase,
                                           nsRect* aOutDisplayport);
 
+  static nsIScrollableFrame* GetAsyncScrollableAncestorFrame(nsIFrame* aTarget);
+
+  /**
+   * Sets a zero margin display port on all proper ancestors of aFrame that
+   * are async scrollable.
+   */
+  static void SetZeroMarginDisplayPortOnAsyncScrollableAncestors(nsIFrame* aFrame,
+                                                                 RepaintMode aRepaintMode);
+
   static bool IsOutlineStyleAutoEnabled();
 
   static void SetBSizeFromFontMetrics(const nsIFrame* aFrame,
@@ -2562,8 +2750,81 @@ public:
                                       mozilla::WritingMode aLineWM,
                                       mozilla::WritingMode aFrameWM);
 
-  static bool HasApzAwareListeners(mozilla::EventListenerManager* aElm);
   static bool HasDocumentLevelListenersForApzAwareEvents(nsIPresShell* aShell);
+
+  /**
+   * Set the scroll port size for the purpose of clamping the scroll position
+   * for the root scroll frame of this document
+   * (see nsIDOMWindowUtils.setScrollPositionClampingScrollPortSize).
+   */
+  static void SetScrollPositionClampingScrollPortSize(nsIPresShell* aPresShell,
+                                                      CSSSize aSize);
+
+  static FrameMetrics ComputeFrameMetrics(nsIFrame* aForFrame,
+                                          nsIFrame* aScrollFrame,
+                                          nsIContent* aContent,
+                                          const nsIFrame* aReferenceFrame,
+                                          Layer* aLayer,
+                                          ViewID aScrollParentId,
+                                          const nsRect& aViewport,
+                                          const mozilla::Maybe<nsRect>& aClipRect,
+                                          bool aIsRoot,
+                                          const ContainerLayerParameters& aContainerParameters);
+
+  /**
+   * If the given scroll frame needs an area excluded from its composition
+   * bounds due to scrollbars, return that area, otherwise return an empty
+   * margin.
+   * There is no need to exclude scrollbars in the following cases:
+   *   - If the scroll frame is not the RCD-RSF; in that case, the composition
+   *     bounds is calculated based on the scroll port which already excludes
+   *     the scrollbar area.
+   *   - If the scrollbars are overlay, since then they are drawn on top of the
+   *     scrollable content.
+   */
+  static nsMargin ScrollbarAreaToExcludeFromCompositionBoundsFor(nsIFrame* aScrollFrame);
+
+  /**
+   * Looks in the layer subtree rooted at aLayer for a metrics with scroll id
+   * aScrollId. Returns true if such is found.
+   */
+  static bool ContainsMetricsWithId(const Layer* aLayer, const ViewID& aScrollId);
+
+  static bool ShouldUseNoScriptSheet(nsIDocument* aDocument);
+  static bool ShouldUseNoFramesSheet(nsIDocument* aDocument);
+
+  /**
+   * Get the text content inside the frame. This methods traverse the
+   * frame tree and collect the content from text frames. Note that this
+   * method is similiar to nsContentUtils::GetNodeTextContent, but it at
+   * least differs from that method in the following things:
+   * 1. it skips text content inside nodes like style, script, textarea
+   *    which don't generate an in-tree text frame for the text;
+   * 2. it skips elements with display property set to none;
+   * 3. it skips out-of-flow elements;
+   * 4. it includes content inside pseudo elements;
+   * 5. it may include part of text content of a node if a text frame
+   *    inside is split to different continuations.
+   */
+  static void GetFrameTextContent(nsIFrame* aFrame, nsAString& aResult);
+
+  /**
+   * Same as GetFrameTextContent but appends the result rather than sets it.
+   */
+  static void AppendFrameTextContent(nsIFrame* aFrame, nsAString& aResult);
+
+  /**
+   * Takes a selection, and returns selection's bounding rect which is relative
+   * to its root frame.
+   *
+   * @param aSel      Selection to check
+   */
+  static nsRect GetSelectionBoundingRect(mozilla::dom::Selection* aSel);
+
+  /**
+   * Returns true if the given frame is a scrollframe and it has snap points.
+   */
+  static bool IsScrollFrameWithSnapping(nsIFrame* aFrame);
 
 private:
   static uint32_t sFontSizeInflationEmPerLine;
@@ -2576,6 +2837,7 @@ private:
   static bool sInvalidationDebuggingIsEnabled;
   static bool sCSSVariablesEnabled;
   static bool sInterruptibleReflowEnabled;
+  static bool sSVGTransformBoxEnabled;
 
   /**
    * Helper function for LogTestDataForPaint().
@@ -2662,6 +2924,17 @@ gfx::Rect NSRectToRect(const nsRect& aRect, double aAppUnitsPerPixel);
 gfx::Rect NSRectToSnappedRect(const nsRect& aRect, double aAppUnitsPerPixel,
                               const gfx::DrawTarget& aSnapDT);
 
+/**
+* Converts, where possible, an nsRect in app units to a Moz2D Rect in pixels
+* (whether those are device pixels or CSS px depends on what the caller
+*  chooses to pass as aAppUnitsPerPixel).
+*
+* If snapping results in a rectangle with zero width or height, the affected
+* coordinates are left unsnapped
+*/
+gfx::Rect NSRectToNonEmptySnappedRect(const nsRect& aRect, double aAppUnitsPerPixel,
+                                      const gfx::DrawTarget& aSnapDT);
+
 void StrokeLineWithSnapping(const nsPoint& aP1, const nsPoint& aP2,
                             int32_t aAppUnitsPerDevPixel,
                             gfx::DrawTarget& aDrawTarget,
@@ -2689,8 +2962,8 @@ void StrokeLineWithSnapping(const nsPoint& aP1, const nsPoint& aP2,
 
     void MaybeSetupTransactionIdAllocator(layers::LayerManager* aManager, nsView* aView);
 
-  }
-}
+  } // namespace layout
+} // namespace mozilla
 
 class nsSetAttrRunnable : public nsRunnable
 {

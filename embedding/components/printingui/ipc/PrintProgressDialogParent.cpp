@@ -7,20 +7,20 @@
 #include "nsIWebProgressListener.h"
 #include "PrintProgressDialogParent.h"
 
-using mozilla::unused;
+using mozilla::Unused;
 
 namespace mozilla {
 namespace embedding {
 
 NS_IMPL_ISUPPORTS(PrintProgressDialogParent, nsIObserver)
 
-MOZ_IMPLICIT PrintProgressDialogParent::PrintProgressDialogParent() :
+PrintProgressDialogParent::PrintProgressDialogParent() :
   mActive(true)
 {
   MOZ_COUNT_CTOR(PrintProgressDialogParent);
 }
 
-MOZ_IMPLICIT PrintProgressDialogParent::~PrintProgressDialogParent()
+PrintProgressDialogParent::~PrintProgressDialogParent()
 {
   MOZ_COUNT_DTOR(PrintProgressDialogParent);
 }
@@ -99,7 +99,7 @@ PrintProgressDialogParent::Observe(nsISupports *aSubject, const char *aTopic,
                                    const char16_t *aData)
 {
   if (mActive) {
-    unused << SendDialogOpened();
+    Unused << SendDialogOpened();
   } else {
     NS_WARNING("The print progress dialog finished opening, but communications "
                "with the child have been closed.");

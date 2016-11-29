@@ -27,7 +27,7 @@ function run_test() {
   run_next_test();
 }
 
-add_task(function test() {
+add_task(function* test() {
   let testFolder = PlacesUtils.bookmarks.createFolder(
     PlacesUtils.bookmarks.placesRoot,
     "Result-sort functionality tests root",
@@ -86,8 +86,8 @@ add_task(function test() {
   do_print("Sort by keyword asc");
   result.sortingMode = NHQO.SORT_BY_KEYWORD_ASCENDING;
   checkOrder(id3, id2, id1);  // no keywords set - falling back to title sort
-  PlacesUtils.bookmarks.setKeywordForBookmark(id1, "a");
-  PlacesUtils.bookmarks.setKeywordForBookmark(id2, "z");
+  yield PlacesUtils.keywords.insert({ url: uri1.spec, keyword: "a" });
+  yield PlacesUtils.keywords.insert({ url: uri2.spec, keyword: "z" });
   checkOrder(id3, id1, id2);
 
   // XXXtodo: test history sortings (visit count, visit date)

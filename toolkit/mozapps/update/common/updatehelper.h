@@ -7,6 +7,7 @@ DWORD LaunchServiceSoftwareUpdateCommand(int argc, LPCWSTR *argv);
 BOOL WriteStatusFailure(LPCWSTR updateDirPath, int errorCode);
 DWORD WaitForServiceStop(LPCWSTR serviceName, DWORD maxWaitSeconds);
 DWORD WaitForProcessExit(LPCWSTR filename, DWORD maxSeconds);
+DWORD IsProcessRunning(LPCWSTR filename);
 BOOL DoesFallbackKeyExist();
 BOOL IsLocalFile(LPCWSTR file, BOOL &isLocal);
 DWORD StartServiceCommand(int argc, LPCWSTR* argv);
@@ -25,9 +26,4 @@ BOOL IsUnpromptedElevation(BOOL &isUnpromptedElevation);
 // code can still be run unchanged.
 #define TEST_ONLY_FALLBACK_KEY_PATH \
   BASE_SERVICE_REG_KEY L"\\3932ecacee736d366d6436db0f55bce4"
-
-#ifdef MOZ_METRO
-  bool GetDefaultBrowserAppModelID(WCHAR* aIDBuffer, long aCharLength);
-  HRESULT LaunchDefaultMetroBrowser();
-#endif
 

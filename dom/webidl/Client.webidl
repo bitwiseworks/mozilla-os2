@@ -10,8 +10,26 @@
 
 [Exposed=ServiceWorker]
 interface Client {
-  readonly attribute unsigned long id;
+  readonly attribute USVString url;
+  readonly attribute FrameType frameType;
+  readonly attribute DOMString id;
 
   [Throws]
   void postMessage(any message, optional sequence<Transferable> transfer);
+};
+
+[Exposed=ServiceWorker]
+interface WindowClient : Client {
+  readonly attribute VisibilityState visibilityState;
+  readonly attribute boolean focused;
+
+  [Throws, NewObject]
+  Promise<WindowClient> focus();
+};
+
+enum FrameType {
+  "auxiliary",
+  "top-level",
+  "nested",
+  "none"
 };

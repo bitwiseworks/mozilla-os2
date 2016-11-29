@@ -7,20 +7,16 @@
 #include "nsTemplateRule.h"
 #include "nsXULTemplateQueryProcessorRDF.h"
 
-#include "prlog.h"
-#ifdef PR_LOGGING
-extern PRLogModuleInfo* gXULTemplateLog;
-#endif
+#include "mozilla/Logging.h"
+extern mozilla::LazyLogModule gXULTemplateLog;
 
 nsInstantiationNode::nsInstantiationNode(nsXULTemplateQueryProcessorRDF* aProcessor,
                                          nsRDFQuery* aQuery)
         : mProcessor(aProcessor),
           mQuery(aQuery)
 {
-#ifdef PR_LOGGING
-    PR_LOG(gXULTemplateLog, PR_LOG_DEBUG,
+    MOZ_LOG(gXULTemplateLog, LogLevel::Debug,
            ("nsInstantiationNode[%p] query=%p", this, aQuery));
-#endif
 
     MOZ_COUNT_CTOR(nsInstantiationNode);
 }
@@ -63,7 +59,7 @@ nsInstantiationNode::Propagate(InstantiationSet& aInstantiations,
             if (node) {
                 nsCOMPtr<nsIRDFResource> resource = do_QueryInterface(node);
                 if (resource) {
-                    nsRefPtr<nsXULTemplateResultRDF> nextresult =
+                    RefPtr<nsXULTemplateResultRDF> nextresult =
                         new nsXULTemplateResultRDF(mQuery, *inst, resource);
                     if (! nextresult)
                         return NS_ERROR_OUT_OF_MEMORY;

@@ -36,9 +36,6 @@
 
 class nsOfflineCacheUpdate;
 
-class nsIUTF8StringEnumerator;
-class nsILoadContext;
-
 class nsOfflineCacheUpdateItem : public nsIStreamListener
                                , public nsIRunnable
                                , public nsIInterfaceRequestor
@@ -54,16 +51,18 @@ public:
 
     nsOfflineCacheUpdateItem(nsIURI *aURI,
                              nsIURI *aReferrerURI,
+                             nsIPrincipal* aLoadingPrincipal,
                              nsIApplicationCache *aApplicationCache,
                              nsIApplicationCache *aPreviousApplicationCache,
                              uint32_t aType);
 
-    nsCOMPtr<nsIURI>           mURI;
-    nsCOMPtr<nsIURI>           mReferrerURI;
+    nsCOMPtr<nsIURI>              mURI;
+    nsCOMPtr<nsIURI>              mReferrerURI;
+    nsCOMPtr<nsIPrincipal>        mLoadingPrincipal;
     nsCOMPtr<nsIApplicationCache> mApplicationCache;
     nsCOMPtr<nsIApplicationCache> mPreviousApplicationCache;
-    nsCString                  mCacheKey;
-    uint32_t                   mItemType;
+    nsCString                     mCacheKey;
+    uint32_t                      mItemType;
 
     nsresult OpenChannel(nsOfflineCacheUpdate *aUpdate);
     nsresult Cancel();
@@ -83,7 +82,7 @@ private:
       LOADED = 3U
     };
 
-    nsRefPtr<nsOfflineCacheUpdate> mUpdate;
+    RefPtr<nsOfflineCacheUpdate> mUpdate;
     nsCOMPtr<nsIChannel>           mChannel;
     uint16_t                       mState;
 
@@ -102,6 +101,7 @@ public:
 
     nsOfflineManifestItem(nsIURI *aURI,
                           nsIURI *aReferrerURI,
+                          nsIPrincipal* aLoadingPrincipal,
                           nsIApplicationCache *aApplicationCache,
                           nsIApplicationCache *aPreviousApplicationCache);
     virtual ~nsOfflineManifestItem();
@@ -194,9 +194,9 @@ public:
 };
 
 class nsOfflineCacheUpdate final : public nsIOfflineCacheUpdate
-                                     , public nsIOfflineCacheUpdateObserver
-                                     , public nsIRunnable
-                                     , public nsOfflineCacheUpdateOwner
+                                 , public nsIOfflineCacheUpdateObserver
+                                 , public nsIRunnable
+                                 , public nsOfflineCacheUpdateOwner
 {
 public:
     NS_DECL_ISUPPORTS
@@ -231,7 +231,7 @@ protected:
     void OnByteProgress(uint64_t byteIncrement);
 
 private:
-    nsresult InitInternal(nsIURI *aManifestURI);
+    nsresult InitInternal(nsIURI *aManifestURI, nsIPrincipal* aPrincipal);
     nsresult HandleManifest(bool *aDoUpdate);
     nsresult AddURI(nsIURI *aURI, uint32_t aItemType);
 
@@ -278,6 +278,7 @@ private:
     nsCString mGroupID;
     nsCOMPtr<nsIURI> mManifestURI;
     nsCOMPtr<nsIURI> mDocumentURI;
+    nsCOMPtr<nsIPrincipal> mLoadingPrincipal;
     nsCOMPtr<nsIFile> mCustomProfileDir;
 
     uint32_t mAppID;
@@ -290,11 +291,11 @@ private:
 
     nsCOMPtr<nsIObserverService> mObserverService;
 
-    nsRefPtr<nsOfflineManifestItem> mManifestItem;
+    RefPtr<nsOfflineManifestItem> mManifestItem;
 
     /* Items being updated */
     uint32_t mItemsInProgress;
-    nsTArray<nsRefPtr<nsOfflineCacheUpdateItem> > mItems;
+    nsTArray<RefPtr<nsOfflineCacheUpdateItem> > mItems;
 
     /* Clients watching this update for changes */
     nsCOMArray<nsIWeakReference> mWeakObservers;
@@ -311,7 +312,7 @@ private:
      * increaded. */
     uint32_t mPinnedEntryRetriesCount;
 
-    nsRefPtr<nsOfflineCacheUpdate> mImplicitUpdate;
+    RefPtr<nsOfflineCacheUpdate> mImplicitUpdate;
 
     bool                           mPinned;
 
@@ -319,9 +320,9 @@ private:
 };
 
 class nsOfflineCacheUpdateService final : public nsIOfflineCacheUpdateService
-                                            , public nsIObserver
-                                            , public nsOfflineCacheUpdateOwner
-                                            , public nsSupportsWeakReference
+                                        , public nsIObserver
+                                        , public nsOfflineCacheUpdateOwner
+                                        , public nsSupportsWeakReference
 {
 public:
     NS_DECL_ISUPPORTS
@@ -341,6 +342,7 @@ public:
 
     nsresult Schedule(nsIURI *aManifestURI,
                       nsIURI *aDocumentURI,
+                      nsIPrincipal* aLoadingPrincipal,
                       nsIDOMDocument *aDocument,
                       nsIDOMWindow* aWindow,
                       nsIFile* aCustomProfileDir,
@@ -370,7 +372,7 @@ private:
 
     nsresult ProcessNextUpdate();
 
-    nsTArray<nsRefPtr<nsOfflineCacheUpdate> > mUpdates;
+    nsTArray<RefPtr<nsOfflineCacheUpdate> > mUpdates;
     static nsTHashtable<nsCStringHashKey>* mAllowedDomains;
 
     bool mDisabled;

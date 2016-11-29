@@ -10,6 +10,7 @@
 
 #include "harfbuzz/hb.h"
 #include "nsUnicodeProperties.h"
+#include "mozilla/gfx/2D.h"
 
 class gfxHarfBuzzShaper : public gfxFontShaper {
 public:
@@ -21,8 +22,8 @@ public:
      * FontCallbackData struct
      */
     struct FontCallbackData {
-        gfxHarfBuzzShaper *mShaper;
-        gfxContext        *mContext;
+        gfxHarfBuzzShaper* mShaper;
+        mozilla::gfx::DrawTarget* mDrawTarget;
     };
 
     bool Initialize();
@@ -75,6 +76,11 @@ public:
 
     hb_bool_t GetGlyphExtents(hb_codepoint_t aGlyph,
                               hb_glyph_extents_t *aExtents) const;
+
+    bool UseVerticalPresentationForms() const
+    {
+        return mUseVerticalPresentationForms;
+    }
 
     static hb_script_t
     GetHBScriptUsedForShaping(int32_t aScript) {
@@ -175,6 +181,10 @@ protected:
 
     bool mInitialized;
     bool mVerticalInitialized;
+
+    // Whether to use vertical presentation forms for CJK characters
+    // when available (only set if the 'vert' feature is not available).
+    bool mUseVerticalPresentationForms;
 
     // these are set from the FindGlyf callback on first use of the glyf data
     mutable bool mLoadedLocaGlyf;

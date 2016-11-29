@@ -15,7 +15,7 @@ namespace dom {
 
 class AudioContext;
 
-class DynamicsCompressorNode : public AudioNode
+class DynamicsCompressorNode final : public AudioNode
 {
 public:
   explicit DynamicsCompressorNode(AudioContext* aContext);
@@ -23,7 +23,7 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(DynamicsCompressorNode, AudioNode)
 
-  virtual JSObject* WrapObject(JSContext* aCx) override;
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   AudioParam* Threshold() const
   {
@@ -40,11 +40,6 @@ public:
     return mRatio;
   }
 
-  AudioParam* Reduction() const
-  {
-    return mReduction;
-  }
-
   AudioParam* Attack() const
   {
     return mAttack;
@@ -56,6 +51,11 @@ public:
     return mRelease;
   }
 
+  float Reduction() const
+  {
+    return mReduction;
+  }
+
   virtual const char* NodeType() const override
   {
     return "DynamicsCompressorNode";
@@ -64,27 +64,26 @@ public:
   virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override;
   virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override;
 
+  void SetReduction(float aReduction)
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+    mReduction = aReduction;
+  }
+
 protected:
   virtual ~DynamicsCompressorNode();
 
 private:
-  static void SendThresholdToStream(AudioNode* aNode);
-  static void SendKneeToStream(AudioNode* aNode);
-  static void SendRatioToStream(AudioNode* aNode);
-  static void SendAttackToStream(AudioNode* aNode);
-  static void SendReleaseToStream(AudioNode* aNode);
-
-private:
-  nsRefPtr<AudioParam> mThreshold;
-  nsRefPtr<AudioParam> mKnee;
-  nsRefPtr<AudioParam> mRatio;
-  nsRefPtr<AudioParam> mReduction;
-  nsRefPtr<AudioParam> mAttack;
-  nsRefPtr<AudioParam> mRelease;
+  RefPtr<AudioParam> mThreshold;
+  RefPtr<AudioParam> mKnee;
+  RefPtr<AudioParam> mRatio;
+  float mReduction;
+  RefPtr<AudioParam> mAttack;
+  RefPtr<AudioParam> mRelease;
 };
 
-}
-}
+} // namespace dom
+} // namespace mozilla
 
 #endif
 

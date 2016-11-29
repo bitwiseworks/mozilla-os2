@@ -1,10 +1,6 @@
-/*
-#ifdef 0
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/.
-#endif
- */
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /**
  * Tab previews utility, produces thumbnails
@@ -571,8 +567,13 @@ var ctrlTab = {
  * All Tabs menu
  */
 var allTabs = {
-  get toolbarButton() document.getElementById("alltabs-button"),
-  get canOpen() isElementVisible(this.toolbarButton),
+  get toolbarButton() {
+    return document.getElementById("alltabs-button");
+  },
+
+  get canOpen() {
+    return isElementVisible(this.toolbarButton);
+  },
 
   open: function allTabs_open() {
     if (this.canOpen) {

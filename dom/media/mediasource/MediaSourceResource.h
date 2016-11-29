@@ -9,15 +9,11 @@
 
 #include "MediaResource.h"
 #include "mozilla/Monitor.h"
-#include "prlog.h"
+#include "mozilla/Logging.h"
 
-#ifdef PR_LOGGING
-extern PRLogModuleInfo* GetMediaSourceLog();
+extern mozilla::LogModule* GetMediaSourceLog();
 
-#define MSE_DEBUG(arg, ...) PR_LOG(GetMediaSourceLog(), PR_LOG_DEBUG, ("MediaSourceResource(%p:%s)::%s: " arg, this, mType.get(), __func__, ##__VA_ARGS__))
-#else
-#define MSE_DEBUG(...)
-#endif
+#define MSE_DEBUG(arg, ...) MOZ_LOG(GetMediaSourceLog(), mozilla::LogLevel::Debug, ("MediaSourceResource(%p:%s)::%s: " arg, this, mType.get(), __func__, ##__VA_ARGS__))
 
 #define UNIMPLEMENTED() MSE_DEBUG("UNIMPLEMENTED FUNCTION at %s:%d", __FILE__, __LINE__)
 
@@ -36,12 +32,10 @@ public:
   virtual void Suspend(bool aCloseImmediately) override { UNIMPLEMENTED(); }
   virtual void Resume() override { UNIMPLEMENTED(); }
   virtual bool CanClone() override { UNIMPLEMENTED(); return false; }
-  virtual already_AddRefed<MediaResource> CloneData(MediaDecoder* aDecoder) override { UNIMPLEMENTED(); return nullptr; }
+  virtual already_AddRefed<MediaResource> CloneData(MediaResourceCallback*) override { UNIMPLEMENTED(); return nullptr; }
   virtual void SetReadMode(MediaCacheStream::ReadMode aMode) override { UNIMPLEMENTED(); }
   virtual void SetPlaybackRate(uint32_t aBytesPerSecond) override  { UNIMPLEMENTED(); }
-  virtual nsresult Read(char* aBuffer, uint32_t aCount, uint32_t* aBytes) override { UNIMPLEMENTED(); return NS_ERROR_FAILURE; }
   virtual nsresult ReadAt(int64_t aOffset, char* aBuffer, uint32_t aCount, uint32_t* aBytes) override { UNIMPLEMENTED(); return NS_ERROR_FAILURE; }
-  virtual nsresult Seek(int32_t aWhence, int64_t aOffset) override { UNIMPLEMENTED(); return NS_ERROR_FAILURE; }
   virtual int64_t Tell() override { UNIMPLEMENTED(); return -1; }
   virtual void Pin() override { UNIMPLEMENTED(); }
   virtual void Unpin() override { UNIMPLEMENTED(); }
@@ -57,13 +51,13 @@ public:
 
   virtual already_AddRefed<nsIPrincipal> GetCurrentPrincipal() override
   {
-    return nsRefPtr<nsIPrincipal>(mPrincipal).forget();
+    return RefPtr<nsIPrincipal>(mPrincipal).forget();
   }
 
-  virtual nsresult GetCachedRanges(nsTArray<MediaByteRange>& aRanges) override
+  virtual nsresult GetCachedRanges(MediaByteRangeSet& aRanges) override
   {
     UNIMPLEMENTED();
-    aRanges.AppendElement(MediaByteRange(0, GetLength()));
+    aRanges += MediaByteRange(0, GetLength());
     return NS_OK;
   }
 
@@ -81,6 +75,12 @@ public:
     mEnded = aEnded;
   }
 
+  virtual bool IsExpectingMoreData() override
+  {
+    MonitorAutoLock mon(mMonitor);
+    return !mEnded;
+  }
+
 private:
   virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override
   {
@@ -95,7 +95,7 @@ private:
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }
 
-  nsRefPtr<nsIPrincipal> mPrincipal;
+  RefPtr<nsIPrincipal> mPrincipal;
   const nsCString mType;
   Monitor mMonitor;
   bool mEnded; // protected by mMonitor

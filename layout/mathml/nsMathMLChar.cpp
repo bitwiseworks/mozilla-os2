@@ -9,6 +9,7 @@
 #include "gfxUtils.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/MathAlgorithms.h"
+#include "mozilla/unused.h"
 
 #include "nsCOMPtr.h"
 #include "nsDeviceContext.h"
@@ -29,7 +30,7 @@
 
 #include "mozilla/LookAndFeel.h"
 #include "nsCSSRendering.h"
-#include "prprf.h"         // For PR_snprintf()
+#include "mozilla/Snprintf.h"
 
 #include "nsDisplayList.h"
 
@@ -163,9 +164,7 @@ LoadProperties(const nsString& aName,
   uriStr.StripWhitespace(); // that may come from aName
   uriStr.AppendLiteral(".properties");
   return NS_LoadPersistentPropertiesFromURISpec(getter_AddRefs(aProperties),
-                                                NS_ConvertUTF16toUTF8(uriStr),
-                                                nsContentUtils::GetSystemPrincipal(),
-                                                nsIContentPolicy::TYPE_OTHER);
+                                                NS_ConvertUTF16toUTF8(uriStr));
 }
 
 class nsPropertiesTable final : public nsGlyphTable {
@@ -315,7 +314,7 @@ nsPropertiesTable::ElementAt(gfxContext*   /* aThebesContext */,
   if (mCharCache != aChar) {
     // The key in the property file is interpreted as ASCII and kept
     // as such ...
-    char key[10]; PR_snprintf(key, sizeof(key), "\\u%04X", aChar);
+    char key[10]; snprintf_literal(key, "\\u%04X", aChar);
     nsAutoString value;
     nsresult rv = mGlyphProperties->GetStringProperty(nsDependentCString(key),
                                                       value);
@@ -447,7 +446,7 @@ public:
   }
 
 private:
-  nsRefPtr<gfxFontEntry> mFontEntry;
+  RefPtr<gfxFontEntry> mFontEntry;
   FontFamilyName mFontFamilyName;
   uint32_t mGlyphID;
 
@@ -716,14 +715,14 @@ nsGlyphTableList::GetGlyphTableFor(const nsAString& aFamily)
 // -----------------------------------------------------------------------------
 
 static nsresult
-InitGlobals(nsPresContext* aPresContext)
+InitCharGlobals()
 {
   NS_ASSERTION(!gGlyphTableInitialized, "Error -- already initialized");
   gGlyphTableInitialized = true;
 
   // Allocate the placeholders for the preferred parts and variants
   nsresult rv = NS_ERROR_OUT_OF_MEMORY;
-  nsRefPtr<nsGlyphTableList> glyphTableList = new nsGlyphTableList();
+  RefPtr<nsGlyphTableList> glyphTableList = new nsGlyphTableList();
   if (glyphTableList) {
     rv = glyphTableList->Initialize();
   }
@@ -734,9 +733,7 @@ InitGlobals(nsPresContext* aPresContext)
   // observer and will be deleted at shutdown. We now add some private
   // per font-family tables for stretchy operators, in order of preference.
   // Do not include the Unicode table in this list.
-  if (!glyphTableList->AddGlyphTable(NS_LITERAL_STRING("MathJax_Main")) ||
-      !glyphTableList->AddGlyphTable(NS_LITERAL_STRING("STIXGeneral")) ||
-      !glyphTableList->AddGlyphTable(NS_LITERAL_STRING("Standard Symbols L"))
+  if (!glyphTableList->AddGlyphTable(NS_LITERAL_STRING("STIXGeneral"))
 #ifdef XP_WIN
       || !glyphTableList->AddGlyphTable(NS_LITERAL_STRING("Symbol"))
 #endif
@@ -779,11 +776,10 @@ nsMathMLChar::SetStyleContext(nsStyleContext* aStyleContext)
 }
 
 void
-nsMathMLChar::SetData(nsPresContext* aPresContext,
-                      nsString&       aData)
+nsMathMLChar::SetData(nsString& aData)
 {
   if (!gGlyphTableInitialized) {
-    InitGlobals(aPresContext);
+    InitCharGlobals();
   }
   mData = aData;
   // some assumptions until proven otherwise
@@ -881,7 +877,7 @@ nsMathMLChar::SetData(nsPresContext* aPresContext,
 #define NS_MATHML_DELIMITER_SHORTFALL_POINTS   5.0f
 
 static bool
-IsSizeOK(nsPresContext* aPresContext, nscoord a, nscoord b, uint32_t aHint)
+IsSizeOK(nscoord a, nscoord b, uint32_t aHint)
 {
   // Normal: True if 'a' is around +/-10% of the target 'b' (10% is
   // 1-DelimiterFactor). This often gives a chance to the base size to
@@ -982,7 +978,7 @@ nsMathMLChar::SetFontFamily(nsPresContext*          aPresContext,
                             const nsGlyphCode&      aGlyphCode,
                             const FontFamilyList&   aDefaultFamilyList,
                             nsFont&                 aFont,
-                            nsRefPtr<gfxFontGroup>* aFontGroup)
+                            RefPtr<gfxFontGroup>* aFontGroup)
 {
   FontFamilyList glyphCodeFont;
 
@@ -997,7 +993,7 @@ nsMathMLChar::SetFontFamily(nsPresContext*          aPresContext,
     nsFont font = aFont;
     font.fontlist = familyList;
     const nsStyleFont* styleFont = mStyleContext->StyleFont();
-    nsRefPtr<nsFontMetrics> fm;
+    RefPtr<nsFontMetrics> fm;
     aPresContext->DeviceContext()->
       GetMetricsFor(font,
                     styleFont->mLanguage,
@@ -1071,10 +1067,10 @@ public:
 
 private:
   bool TryVariants(nsGlyphTable* aGlyphTable,
-                   nsRefPtr<gfxFontGroup>* aFontGroup,
+                   RefPtr<gfxFontGroup>* aFontGroup,
                    const FontFamilyList& aFamilyList);
   bool TryParts(nsGlyphTable* aGlyphTable,
-                nsRefPtr<gfxFontGroup>* aFontGroup,
+                RefPtr<gfxFontGroup>* aFontGroup,
                 const FontFamilyList& aFamilyList);
 
   nsMathMLChar* mChar;
@@ -1104,7 +1100,7 @@ private:
 bool
 nsMathMLChar::
 StretchEnumContext::TryVariants(nsGlyphTable* aGlyphTable,
-                                nsRefPtr<gfxFontGroup>* aFontGroup,
+                                RefPtr<gfxFontGroup>* aFontGroup,
                                 const FontFamilyList& aFamilyList)
 {
   // Use our stretchy style context now that stretching is in progress
@@ -1246,8 +1242,7 @@ StretchEnumContext::TryVariants(nsGlyphTable* aGlyphTable,
   }
 
   return haveBetter &&
-    (largeopOnly ||
-     IsSizeOK(mPresContext, bestSize, mTargetSize, mStretchHint));
+    (largeopOnly || IsSizeOK(bestSize, mTargetSize, mStretchHint));
 }
 
 // 3. Build by parts.
@@ -1255,7 +1250,7 @@ StretchEnumContext::TryVariants(nsGlyphTable* aGlyphTable,
 // Always updates the char if a better match is found.
 bool
 nsMathMLChar::StretchEnumContext::TryParts(nsGlyphTable* aGlyphTable,
-                                           nsRefPtr<gfxFontGroup>* aFontGroup,
+                                           RefPtr<gfxFontGroup>* aFontGroup,
                                            const FontFamilyList& aFamilyList)
 {
   // Use our stretchy style context now that stretching is in progress
@@ -1418,7 +1413,7 @@ nsMathMLChar::StretchEnumContext::TryParts(nsGlyphTable* aGlyphTable,
     mChar->mBmData[i] = bmdata[i];
   }
 
-  return IsSizeOK(mPresContext, computedSize, mTargetSize, mStretchHint);
+  return IsSizeOK(computedSize, mTargetSize, mStretchHint);
 }
 
 // This is called for each family, whether it exists or not
@@ -1439,7 +1434,7 @@ nsMathMLChar::StretchEnumContext::EnumCallback(const FontFamilyName& aFamily,
   nsStyleContext *sc = context->mChar->mStyleContext;
   nsFont font = sc->StyleFont()->mFont;
   NormalizeDefaultFont(font, context->mFontSizeInflation);
-  nsRefPtr<gfxFontGroup> fontGroup;
+  RefPtr<gfxFontGroup> fontGroup;
   FontFamilyList family;
   family.Append(unquotedFamilyName);
   if (!aGeneric && !context->mChar->SetFontFamily(context->mPresContext,
@@ -1542,7 +1537,7 @@ nsMathMLChar::StretchInternal(nsPresContext*           aPresContext,
   NormalizeDefaultFont(font, aFontSizeInflation);
 
   const nsStyleFont* styleFont = mStyleContext->StyleFont();
-  nsRefPtr<nsFontMetrics> fm;
+  RefPtr<nsFontMetrics> fm;
   aPresContext->DeviceContext()->
     GetMetricsFor(font,
                   styleFont->mLanguage,
@@ -1643,7 +1638,7 @@ nsMathMLChar::StretchInternal(nsPresContext*           aPresContext,
     // and not a largeop in display mode; we're done if size fits
     if ((targetSize <= 0) || 
         ((isVertical && charSize >= targetSize) ||
-         IsSizeOK(aPresContext, charSize, targetSize, aStretchHint)))
+         IsSizeOK(charSize, targetSize, aStretchHint)))
       done = true;
   }
 
@@ -1660,8 +1655,10 @@ nsMathMLChar::StretchInternal(nsPresContext*           aPresContext,
 
     // really shouldn't be doing things this way but for now
     // insert fallbacks into the list
-    nsAutoTArray<nsString, 10> mathFallbacks;
-    gfxFontUtils::GetPrefsFontList("font.mathfont-family", mathFallbacks);
+    nsAutoTArray<nsString, 16> mathFallbacks;
+    gfxFontUtils::GetPrefsFontList("font.name.serif.x-math", mathFallbacks);
+    gfxFontUtils::AppendPrefsFontList("font.name-list.serif.x-math",
+                                      mathFallbacks);
     InsertMathFallbacks(font.fontlist, mathFallbacks);
 
 
@@ -1704,6 +1701,11 @@ nsMathMLChar::StretchInternal(nsPresContext*           aPresContext,
     MFR->RecordScript(MOZ_SCRIPT_MATHEMATICAL_NOTATION);
   }
 
+  // If the scale_stretchy_operators option is disabled, we are done.
+  if (!Preferences::GetBool("mathml.scale_stretchy_operators.enabled", true)) {
+    return NS_OK;
+  }
+  
   // stretchy character
   if (stretchy) {
     if (isVertical) {
@@ -1823,8 +1825,7 @@ nscoord
 nsMathMLChar::GetMaxWidth(nsPresContext* aPresContext,
                           nsRenderingContext& aRenderingContext,
                           float aFontSizeInflation,
-                          uint32_t aStretchHint,
-                          float aMaxSize, bool aMaxSizeIsAbsolute)
+                          uint32_t aStretchHint)
 {
   nsBoundingMetrics bm;
   nsStretchDirection direction = NS_STRETCH_DIRECTION_VERTICAL;
@@ -2021,8 +2022,17 @@ void nsDisplayMathMLCharDebug::Paint(nsDisplayListBuilder* aBuilder,
   nsPresContext* presContext = mFrame->PresContext();
   nsStyleContext* styleContext = mFrame->StyleContext();
   nsRect rect = mRect + ToReferenceFrame();
-  nsCSSRendering::PaintBorder(presContext, *aCtx, mFrame,
-                              mVisibleRect, rect, styleContext, skipSides);
+
+  PaintBorderFlags flags = aBuilder->ShouldSyncDecodeImages()
+                         ? PaintBorderFlags::SYNC_DECODE_IMAGES
+                         : PaintBorderFlags();
+
+  // Since this is used only for debugging, we don't need to worry about
+  // tracking the DrawResult.
+  Unused <<
+    nsCSSRendering::PaintBorder(presContext, *aCtx, mFrame, mVisibleRect,
+                                rect, styleContext, flags, skipSides);
+
   nsCSSRendering::PaintOutline(presContext, *aCtx, mFrame,
                                mVisibleRect, rect, styleContext);
 }
@@ -2123,7 +2133,7 @@ nsMathMLChar::PaintForeground(nsPresContext* aPresContext,
     styleContext = parentContext;
   }
 
-  nsRefPtr<gfxContext> thebesContext = aRenderingContext.ThebesContext();
+  RefPtr<gfxContext> thebesContext = aRenderingContext.ThebesContext();
 
   // Set color ...
   nscolor fgColor = styleContext->GetVisitedDependentColor(eCSSProperty_color);
@@ -2132,7 +2142,7 @@ nsMathMLChar::PaintForeground(nsPresContext* aPresContext,
     fgColor = LookAndFeel::GetColor(LookAndFeel::eColorID_TextSelectForeground,
                                     fgColor);
   }
-  thebesContext->SetColor(fgColor);
+  thebesContext->SetColor(Color::FromABGR(fgColor));
   thebesContext->Save();
   nsRect r = mRect + aPt;
   ApplyTransforms(thebesContext, aPresContext->AppUnitsPerDevPixel(), r);

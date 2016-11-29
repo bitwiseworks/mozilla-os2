@@ -15,18 +15,18 @@
 namespace mozilla {
 
 nsresult
-CaptureTask::TaskComplete(already_AddRefed<dom::File> aBlob, nsresult aRv)
+CaptureTask::TaskComplete(already_AddRefed<dom::Blob> aBlob, nsresult aRv)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
   DetachStream();
 
   nsresult rv;
-  nsRefPtr<dom::File> blob(aBlob);
+  RefPtr<dom::Blob> blob(aBlob);
 
   // We have to set the parent because the blob has been generated with a valid one.
   if (blob) {
-    blob = new dom::File(mImageCapture->GetParentObject(), blob->Impl());
+    blob = dom::Blob::Create(mImageCapture->GetParentObject(), blob->Impl());
   }
 
   if (mPrincipalChanged) {
@@ -52,12 +52,12 @@ CaptureTask::AttachStream()
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  nsRefPtr<dom::VideoStreamTrack> track = mImageCapture->GetVideoStreamTrack();
+  RefPtr<dom::VideoStreamTrack> track = mImageCapture->GetVideoStreamTrack();
 
-  nsRefPtr<DOMMediaStream> domStream = track->GetStream();
+  RefPtr<DOMMediaStream> domStream = track->GetStream();
   domStream->AddPrincipalChangeObserver(this);
 
-  nsRefPtr<MediaStream> stream = domStream->GetStream();
+  RefPtr<MediaStream> stream = domStream->GetPlaybackStream();
   stream->AddListener(this);
 }
 
@@ -66,12 +66,12 @@ CaptureTask::DetachStream()
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  nsRefPtr<dom::VideoStreamTrack> track = mImageCapture->GetVideoStreamTrack();
+  RefPtr<dom::VideoStreamTrack> track = mImageCapture->GetVideoStreamTrack();
 
-  nsRefPtr<DOMMediaStream> domStream = track->GetStream();
+  RefPtr<DOMMediaStream> domStream = track->GetStream();
   domStream->RemovePrincipalChangeObserver(this);
 
-  nsRefPtr<MediaStream> stream = domStream->GetStream();
+  RefPtr<MediaStream> stream = domStream->GetPlaybackStream();
   stream->RemoveListener(this);
 }
 
@@ -86,7 +86,9 @@ void
 CaptureTask::NotifyQueuedTrackChanges(MediaStreamGraph* aGraph, TrackID aID,
                                       StreamTime aTrackOffset,
                                       uint32_t aTrackEvents,
-                                      const MediaSegment& aQueuedMedia)
+                                      const MediaSegment& aQueuedMedia,
+                                      MediaStream* aInputStream,
+                                      TrackID aInputTrackID)
 {
   if (mImageGrabbedOrTrackEnd) {
     return;
@@ -103,16 +105,16 @@ CaptureTask::NotifyQueuedTrackChanges(MediaStreamGraph* aGraph, TrackID aID,
   public:
     explicit EncodeComplete(CaptureTask* aTask) : mTask(aTask) {}
 
-    nsresult ReceiveBlob(already_AddRefed<dom::File> aBlob) override
+    nsresult ReceiveBlob(already_AddRefed<dom::Blob> aBlob) override
     {
-      nsRefPtr<dom::File> blob(aBlob);
+      RefPtr<dom::Blob> blob(aBlob);
       mTask->TaskComplete(blob.forget(), NS_OK);
       mTask = nullptr;
       return NS_OK;
     }
 
   protected:
-    nsRefPtr<CaptureTask> mTask;
+    RefPtr<CaptureTask> mTask;
   };
 
   if (aQueuedMedia.GetType() == MediaSegment::VIDEO && mTrackID == aID) {
@@ -124,7 +126,7 @@ CaptureTask::NotifyQueuedTrackChanges(MediaStreamGraph* aGraph, TrackID aID,
       // Extract the first valid video frame.
       VideoFrame frame;
       if (!chunk.IsNull()) {
-        nsRefPtr<layers::Image> image;
+        RefPtr<layers::Image> image;
         if (chunk.mFrame.GetForceBlack()) {
           // Create a black image.
           image = VideoFrame::CreateBlackImage(chunk.mFrame.GetIntrinsicSize());
@@ -183,7 +185,7 @@ CaptureTask::PostTrackEndEvent()
     }
 
   protected:
-    nsRefPtr<CaptureTask> mTask;
+    RefPtr<CaptureTask> mTask;
   };
 
   IC_LOG("Got MediaStream track removed or finished event.");

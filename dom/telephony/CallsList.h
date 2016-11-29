@@ -15,10 +15,10 @@ namespace mozilla {
 namespace dom {
 
 class CallsList final : public nsISupports,
-                            public nsWrapperCache
+                        public nsWrapperCache
 {
-  nsRefPtr<Telephony> mTelephony;
-  nsRefPtr<TelephonyCallGroup> mGroup;
+  RefPtr<Telephony> mTelephony;
+  RefPtr<TelephonyCallGroup> mGroup;
 
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -31,7 +31,7 @@ public:
 
   // WrapperCache
   virtual JSObject*
-  WrapObject(JSContext* aCx) override;
+  WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   // CallsList WebIDL
   already_AddRefed<TelephonyCall>

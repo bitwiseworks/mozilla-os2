@@ -25,6 +25,22 @@ using mozilla::DebugOnly;
 using JS::GenericNaN;
 
 void
+LIRGenerator::useBoxAtStart(LInstruction* lir, size_t n, MDefinition* mir, LUse::Policy policy)
+{
+    return useBox(lir, n, mir, policy, true);
+}
+
+void
+LIRGenerator::useBoxFixedAtStart(LInstruction* lir, size_t n, MDefinition* mir, ValueOperand op)
+{
+#if defined(JS_NUNBOX32)
+    return useBoxFixed(lir, n, mir, op.typeReg(), op.payloadReg(), true);
+#elif defined(JS_PUNBOX64)
+    return useBoxFixed(lir, n, mir, op.valueReg(), op.scratchReg(), true);
+#endif
+}
+
+void
 LIRGenerator::visitCloneLiteral(MCloneLiteral* ins)
 {
     MOZ_ASSERT(ins->type() == MIRType_Object);
@@ -133,6 +149,14 @@ void
 LIRGenerator::visitDefVar(MDefVar* ins)
 {
     LDefVar* lir = new(alloc()) LDefVar(useRegisterAtStart(ins->scopeChain()));
+    add(lir, ins);
+    assignSafepoint(lir, ins);
+}
+
+void
+LIRGenerator::visitDefLexical(MDefLexical* ins)
+{
+    LDefLexical* lir = new(alloc()) LDefLexical();
     add(lir, ins);
     assignSafepoint(lir, ins);
 }
@@ -304,6 +328,7 @@ LIRGenerator::visitCreateThisWithProto(MCreateThisWithProto* ins)
 {
     LCreateThisWithProto* lir =
         new(alloc()) LCreateThisWithProto(useRegisterOrConstantAtStart(ins->getCallee()),
+                                          useRegisterOrConstantAtStart(ins->getNewTarget()),
                                           useRegisterOrConstantAtStart(ins->getPrototype()));
     defineReturn(lir, ins);
     assignSafepoint(lir, ins);
@@ -312,7 +337,8 @@ LIRGenerator::visitCreateThisWithProto(MCreateThisWithProto* ins)
 void
 LIRGenerator::visitCreateThis(MCreateThis* ins)
 {
-    LCreateThis* lir = new(alloc()) LCreateThis(useRegisterOrConstantAtStart(ins->getCallee()));
+    LCreateThis* lir = new(alloc()) LCreateThis(useRegisterOrConstantAtStart(ins->getCallee()),
+                                                useRegisterOrConstantAtStart(ins->getNewTarget()));
     defineReturn(lir, ins);
     assignSafepoint(lir, ins);
 }
@@ -355,7 +381,7 @@ LIRGenerator::visitReturnFromCtor(MReturnFromCtor* ins)
 void
 LIRGenerator::visitComputeThis(MComputeThis* ins)
 {
-    MOZ_ASSERT(ins->type() == MIRType_Object);
+    MOZ_ASSERT(ins->type() == MIRType_Value);
     MOZ_ASSERT(ins->input()->type() == MIRType_Value);
 
     LComputeThis* lir = new(alloc()) LComputeThis();
@@ -365,17 +391,17 @@ LIRGenerator::visitComputeThis(MComputeThis* ins)
     // they aren't clobbered.
     useBox(lir, LComputeThis::ValueIndex, ins->input());
 
-    define(lir, ins);
+    defineBox(lir, ins);
     assignSafepoint(lir, ins);
 }
 
 void
-LIRGenerator::visitLoadArrowThis(MLoadArrowThis* ins)
+LIRGenerator::visitArrowNewTarget(MArrowNewTarget* ins)
 {
     MOZ_ASSERT(ins->type() == MIRType_Value);
     MOZ_ASSERT(ins->callee()->type() == MIRType_Object);
 
-    LLoadArrowThis* lir = new(alloc()) LLoadArrowThis(useRegister(ins->callee()));
+    LArrowNewTarget* lir = new(alloc()) LArrowNewTarget(useRegister(ins->callee()));
     defineBox(lir, ins);
 }
 
@@ -387,9 +413,8 @@ LIRGenerator::lowerCallArguments(MCall* call)
     // Align the arguments of a call such that the callee would keep the same
     // alignment as the caller.
     uint32_t baseSlot = 0;
-    static const uint32_t alignment = JitStackAlignment / sizeof(Value);
-    if (alignment > 1)
-        baseSlot = AlignBytes(argc, alignment);
+    if (JitStackValueAlignment > 1)
+        baseSlot = AlignBytes(argc, JitStackValueAlignment);
     else
         baseSlot = argc;
 
@@ -501,6 +526,38 @@ LIRGenerator::visitApplyArgs(MApplyArgs* apply)
 }
 
 void
+LIRGenerator::visitApplyArray(MApplyArray* apply)
+{
+    MOZ_ASSERT(apply->getFunction()->type() == MIRType_Object);
+
+    // Assert if we cannot build a rectifier frame.
+    MOZ_ASSERT(CallTempReg0 != ArgumentsRectifierReg);
+    MOZ_ASSERT(CallTempReg1 != ArgumentsRectifierReg);
+
+    // Assert if the return value is already erased.
+    MOZ_ASSERT(CallTempReg2 != JSReturnReg_Type);
+    MOZ_ASSERT(CallTempReg2 != JSReturnReg_Data);
+
+    LApplyArrayGeneric* lir = new(alloc()) LApplyArrayGeneric(
+        useFixedAtStart(apply->getFunction(), CallTempReg3),
+        useFixedAtStart(apply->getElements(), CallTempReg0),
+        tempFixed(CallTempReg1),  // object register
+        tempFixed(CallTempReg2)); // stack counter register
+
+    MDefinition* self = apply->getThis();
+    useBoxFixed(lir, LApplyArrayGeneric::ThisIndex, self, CallTempReg4, CallTempReg5);
+
+    // Bailout is needed in the case of possible non-JSFunction callee,
+    // too many values in the array, or empty space at the end of the
+    // array.  I'm going to use NonJSFunctionCallee for the code even
+    // if that is not an adequate description.
+    assignSnapshot(lir, Bailout_NonJSFunctionCallee);
+
+    defineReturn(lir, apply);
+    assignSafepoint(lir, apply);
+}
+
+void
 LIRGenerator::visitBail(MBail* bail)
 {
     LBail* lir = new(alloc()) LBail();
@@ -516,15 +573,29 @@ LIRGenerator::visitUnreachable(MUnreachable* unreachable)
 }
 
 void
+LIRGenerator::visitEncodeSnapshot(MEncodeSnapshot* mir)
+{
+    LEncodeSnapshot* lir = new(alloc()) LEncodeSnapshot();
+    assignSnapshot(lir, Bailout_Inevitable);
+    add(lir, mir);
+}
+
+void
 LIRGenerator::visitAssertFloat32(MAssertFloat32* assertion)
 {
     MIRType type = assertion->input()->type();
     DebugOnly<bool> checkIsFloat32 = assertion->mustBeFloat32();
 
-    if (type != MIRType_Value && !js_JitOptions.eagerCompilation) {
+    if (type != MIRType_Value && !JitOptions.eagerCompilation) {
         MOZ_ASSERT_IF(checkIsFloat32, type == MIRType_Float32);
         MOZ_ASSERT_IF(!checkIsFloat32, type != MIRType_Float32);
     }
+}
+
+void
+LIRGenerator::visitAssertRecoveredOnBailout(MAssertRecoveredOnBailout* assertion)
+{
+    MOZ_CRASH("AssertRecoveredOnBailout nodes are always recovered on bailouts.");
 }
 
 void
@@ -557,54 +628,19 @@ LIRGenerator::visitGetDynamicName(MGetDynamicName* ins)
 }
 
 void
-LIRGenerator::visitFilterArgumentsOrEval(MFilterArgumentsOrEval* ins)
-{
-    MDefinition* string = ins->getString();
-    MOZ_ASSERT(string->type() == MIRType_String || string->type() == MIRType_Value);
-
-    LInstruction* lir;
-    if (string->type() == MIRType_String) {
-        lir = new(alloc()) LFilterArgumentsOrEvalS(useFixed(string, CallTempReg0),
-                                                   tempFixed(CallTempReg1),
-                                                   tempFixed(CallTempReg2));
-    } else {
-        lir = new(alloc()) LFilterArgumentsOrEvalV(tempFixed(CallTempReg0),
-                                                   tempFixed(CallTempReg1),
-                                                   tempFixed(CallTempReg2));
-        useBoxFixed(lir, LFilterArgumentsOrEvalV::Input, string,
-                    CallTempReg3, CallTempReg4);
-    }
-
-    assignSnapshot(lir, Bailout_StringArgumentsEval);
-    add(lir, ins);
-    assignSafepoint(lir, ins);
-}
-
-void
 LIRGenerator::visitCallDirectEval(MCallDirectEval* ins)
 {
     MDefinition* scopeChain = ins->getScopeChain();
     MOZ_ASSERT(scopeChain->type() == MIRType_Object);
 
     MDefinition* string = ins->getString();
-    MOZ_ASSERT(string->type() == MIRType_String || string->type() == MIRType_Value);
+    MOZ_ASSERT(string->type() == MIRType_String);
 
-    MDefinition* thisValue = ins->getThisValue();
+    MDefinition* newTargetValue = ins->getNewTargetValue();
 
-
-    LInstruction* lir;
-    if (string->type() == MIRType_String) {
-        lir = new(alloc()) LCallDirectEvalS(useRegisterAtStart(scopeChain),
-                                            useRegisterAtStart(string));
-    } else {
-        lir = new(alloc()) LCallDirectEvalV(useRegisterAtStart(scopeChain));
-        useBoxAtStart(lir, LCallDirectEvalV::Argument, string);
-    }
-
-    if (string->type() == MIRType_String)
-        useBoxAtStart(lir, LCallDirectEvalS::ThisValue, thisValue);
-    else
-        useBoxAtStart(lir, LCallDirectEvalV::ThisValue, thisValue);
+    LInstruction* lir = new(alloc()) LCallDirectEval(useRegisterAtStart(scopeChain),
+                                                     useRegisterAtStart(string));
+    useBoxAtStart(lir, LCallDirectEval::NewTarget, newTargetValue);
 
     defineReturn(lir, ins);
     assignSafepoint(lir, ins);
@@ -791,10 +827,11 @@ LIRGenerator::visitTest(MTest* test)
         }
 
         // Compare values.
-        if (comp->compareType() == MCompare::Compare_Value) {
-            LCompareVAndBranch* lir = new(alloc()) LCompareVAndBranch(comp, ifTrue, ifFalse);
-            useBoxAtStart(lir, LCompareVAndBranch::LhsInput, left);
-            useBoxAtStart(lir, LCompareVAndBranch::RhsInput, right);
+        if (comp->compareType() == MCompare::Compare_Bitwise) {
+            LCompareBitwiseAndBranch* lir =
+                new(alloc()) LCompareBitwiseAndBranch(comp, ifTrue, ifFalse);
+            useBoxAtStart(lir, LCompareBitwiseAndBranch::LhsInput, left);
+            useBoxAtStart(lir, LCompareBitwiseAndBranch::RhsInput, right);
             add(lir, test);
             return;
         }
@@ -1015,10 +1052,10 @@ LIRGenerator::visitCompare(MCompare* comp)
     }
 
     // Compare values.
-    if (comp->compareType() == MCompare::Compare_Value) {
-        LCompareV* lir = new(alloc()) LCompareV();
-        useBoxAtStart(lir, LCompareV::LhsInput, left);
-        useBoxAtStart(lir, LCompareV::RhsInput, right);
+    if (comp->compareType() == MCompare::Compare_Bitwise) {
+        LCompareBitwise* lir = new(alloc()) LCompareBitwise();
+        useBoxAtStart(lir, LCompareBitwise::LhsInput, left);
+        useBoxAtStart(lir, LCompareBitwise::RhsInput, right);
         define(lir, comp);
         return;
     }
@@ -1060,8 +1097,7 @@ void
 LIRGenerator::visitToId(MToId* ins)
 {
     LToIdV* lir = new(alloc()) LToIdV(tempDouble());
-    useBox(lir, LToIdV::Object, ins->lhs());
-    useBox(lir, LToIdV::Index, ins->rhs());
+    useBox(lir, LToIdV::Index, ins->input());
     defineBox(lir, ins);
     assignSafepoint(lir, ins);
 }
@@ -1381,17 +1417,17 @@ LIRGenerator::visitPow(MPow* ins)
 }
 
 void
-LIRGenerator::visitRandom(MRandom* ins)
-{
-    LRandom* lir = new(alloc()) LRandom(tempFixed(CallTempReg0), tempFixed(CallTempReg1));
-    defineReturn(lir, ins);
-}
-
-void
 LIRGenerator::visitMathFunction(MMathFunction* ins)
 {
     MOZ_ASSERT(IsFloatingPointType(ins->type()));
-    MOZ_ASSERT(ins->type() == ins->input()->type());
+    MOZ_ASSERT_IF(ins->input()->type() != MIRType_SinCosDouble,
+                  ins->type() == ins->input()->type());
+
+    if (ins->input()->type() == MIRType_SinCosDouble) {
+        MOZ_ASSERT(ins->type() == MIRType_Double);
+        redefine(ins, ins->input(), ins->function());
+        return;
+    }
 
     LInstruction* lir;
     if (ins->type() == MIRType_Double) {
@@ -1747,19 +1783,7 @@ LIRGenerator::visitToDouble(MToDouble* convert)
 
       case MIRType_Float32:
       {
-        LFloat32ToDouble* lir;
-#if defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_MIPS)
-        // Bug 1039993: this used to be useRegisterAtStart, and theoretically, it
-        // should still be, however, there is a bug in LSRA's implementation of
-        // *AtStart, which is quite fundamental. This should be reverted when that
-        // is fixed, or lsra is deprecated.
-        if (gen->optimizationInfo().registerAllocator() == RegisterAllocator_LSRA)
-            lir = new (alloc()) LFloat32ToDouble(useRegister(opd));
-        else
-            lir = new (alloc()) LFloat32ToDouble(useRegisterAtStart(opd));
-#else
-        lir = new (alloc()) LFloat32ToDouble(useRegisterAtStart(opd));
-#endif
+        LFloat32ToDouble* lir = new (alloc()) LFloat32ToDouble(useRegisterAtStart(opd));
         define(lir, convert);
         break;
       }
@@ -1815,16 +1839,7 @@ LIRGenerator::visitToFloat32(MToFloat32* convert)
 
       case MIRType_Double:
       {
-        LDoubleToFloat32* lir;
-#if defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_MIPS)
-        // Bug 1039993: workaround LSRA issues.
-        if (gen->optimizationInfo().registerAllocator() == RegisterAllocator_LSRA)
-            lir = new(alloc()) LDoubleToFloat32(useRegister(opd));
-        else
-            lir = new(alloc()) LDoubleToFloat32(useRegisterAtStart(opd));
-#else
-        lir = new(alloc()) LDoubleToFloat32(useRegisterAtStart(opd));
-#endif
+        LDoubleToFloat32* lir = new(alloc()) LDoubleToFloat32(useRegisterAtStart(opd));
         define(lir, convert);
         break;
       }
@@ -2143,6 +2158,38 @@ LIRGenerator::visitStringReplace(MStringReplace* ins)
 }
 
 void
+LIRGenerator::visitBinarySharedStub(MBinarySharedStub* ins)
+{
+    MDefinition* lhs = ins->getOperand(0);
+    MDefinition* rhs = ins->getOperand(1);
+
+    MOZ_ASSERT(ins->type() == MIRType_Value);
+    MOZ_ASSERT(ins->type() == MIRType_Value);
+
+    LBinarySharedStub* lir = new(alloc()) LBinarySharedStub();
+
+    useBoxFixedAtStart(lir, LBinarySharedStub::LhsInput, lhs, R0);
+    useBoxFixedAtStart(lir, LBinarySharedStub::RhsInput, rhs, R1);
+
+    defineSharedStubReturn(lir, ins);
+    assignSafepoint(lir, ins);
+}
+
+void
+LIRGenerator::visitUnarySharedStub(MUnarySharedStub* ins)
+{
+    MDefinition* input = ins->getOperand(0);
+    MOZ_ASSERT(ins->type() == MIRType_Value);
+
+    LUnarySharedStub* lir = new(alloc()) LUnarySharedStub();
+
+    useBoxFixedAtStart(lir, LUnarySharedStub::Input, input, R0);
+
+    defineSharedStubReturn(lir, ins);
+    assignSafepoint(lir, ins);
+}
+
+void
 LIRGenerator::visitLambda(MLambda* ins)
 {
     if (ins->info().singletonType || ins->info().useSingletonForClone) {
@@ -2165,10 +2212,10 @@ void
 LIRGenerator::visitLambdaArrow(MLambdaArrow* ins)
 {
     MOZ_ASSERT(ins->scopeChain()->type() == MIRType_Object);
-    MOZ_ASSERT(ins->thisDef()->type() == MIRType_Value);
+    MOZ_ASSERT(ins->newTargetDef()->type() == MIRType_Value);
 
-    LLambdaArrow* lir = new(alloc()) LLambdaArrow(useRegister(ins->scopeChain()), temp());
-    useBox(lir, LLambdaArrow::ThisValue, ins->thisDef());
+    LLambdaArrow* lir = new(alloc()) LLambdaArrow(useRegister(ins->scopeChain()));
+    useBox(lir, LLambdaArrow::NewTargetValue, ins->newTargetDef());
     define(lir, ins);
     assignSafepoint(lir, ins);
 }
@@ -2197,7 +2244,9 @@ LIRGenerator::visitElements(MElements* ins)
 void
 LIRGenerator::visitConstantElements(MConstantElements* ins)
 {
-    define(new(alloc()) LPointer(ins->value(), LPointer::NON_GC_THING), ins);
+    define(new(alloc()) LPointer(ins->value().unwrap(/*safe - pointer does not flow back to C++*/),
+                                 LPointer::NON_GC_THING),
+           ins);
 }
 
 void
@@ -2256,11 +2305,18 @@ void
 LIRGenerator::visitInterruptCheck(MInterruptCheck* ins)
 {
     // Implicit interrupt checks require asm.js signal handlers to be installed.
+    // They also require writable JIT code: reprotecting in patchIonBackedges
+    // would be expensive and using AutoWritableJitCode in the signal handler
+    // is complicated because there could be another AutoWritableJitCode on the
+    // stack.
     LInstructionHelper<0, 0, 0>* lir;
-    if (GetJitContext()->runtime->canUseSignalHandlers())
+    if (GetJitContext()->runtime->canUseSignalHandlers() &&
+        !ExecutableAllocator::nonWritableJitCode)
+    {
         lir = new(alloc()) LInterruptCheckImplicit();
-    else
+    } else {
         lir = new(alloc()) LInterruptCheck();
+    }
     add(lir, ins);
     assignSafepoint(lir, ins);
 }
@@ -2326,8 +2382,8 @@ LIRGenerator::visitTypeBarrier(MTypeBarrier* ins)
     if (ins->alwaysBails()) {
         LBail* bail = new(alloc()) LBail();
         assignSnapshot(bail, Bailout_Inevitable);
-        redefine(ins, ins->input());
         add(bail, ins);
+        redefine(ins, ins->input());
         return;
     }
 
@@ -2337,8 +2393,8 @@ LIRGenerator::visitTypeBarrier(MTypeBarrier* ins)
         LTypeBarrierV* barrier = new(alloc()) LTypeBarrierV(tmp);
         useBox(barrier, LTypeBarrierV::Input, ins->input());
         assignSnapshot(barrier, Bailout_TypeBarrierV);
-        redefine(ins, ins->input());
         add(barrier, ins);
+        redefine(ins, ins->input());
         return;
     }
 
@@ -2357,8 +2413,8 @@ LIRGenerator::visitTypeBarrier(MTypeBarrier* ins)
         LDefinition tmp = needTemp ? temp() : LDefinition::BogusTemp();
         LTypeBarrierO* barrier = new(alloc()) LTypeBarrierO(useRegister(ins->getOperand(0)), tmp);
         assignSnapshot(barrier, Bailout_TypeBarrierO);
-        redefine(ins, ins->getOperand(0));
         add(barrier, ins);
+        redefine(ins, ins->getOperand(0));
         return;
     }
 
@@ -2382,15 +2438,36 @@ LIRGenerator::visitMonitorTypes(MMonitorTypes* ins)
     add(lir, ins);
 }
 
+// Returns true iff |def| is a constant that's either not a GC thing or is not
+// allocated in the nursery.
+static bool
+IsNonNurseryConstant(MDefinition* def)
+{
+    if (!def->isConstant())
+        return false;
+    Value v = def->toConstant()->value();
+    return !v.isMarkable() || !IsInsideNursery(v.toGCThing());
+}
+
 void
 LIRGenerator::visitPostWriteBarrier(MPostWriteBarrier* ins)
 {
+    MOZ_ASSERT(ins->object()->type() == MIRType_Object);
+
+    // LPostWriteBarrier assumes that if it has a constant object then that
+    // object is tenured, and does not need to be tested for being in the
+    // nursery. Ensure that assumption holds by lowering constant nursery
+    // objects to a register.
+    bool useConstantObject = IsNonNurseryConstant(ins->object());
+
     switch (ins->value()->type()) {
       case MIRType_Object:
       case MIRType_ObjectOrNull: {
         LDefinition tmp = needTempForPostBarrier() ? temp() : LDefinition::BogusTemp();
         LPostWriteBarrierO* lir =
-            new(alloc()) LPostWriteBarrierO(useRegisterOrConstant(ins->object()),
+            new(alloc()) LPostWriteBarrierO(useConstantObject
+                                            ? useOrConstant(ins->object())
+                                            : useRegister(ins->object()),
                                             useRegister(ins->value()), tmp);
         add(lir, ins);
         assignSafepoint(lir, ins);
@@ -2399,7 +2476,10 @@ LIRGenerator::visitPostWriteBarrier(MPostWriteBarrier* ins)
       case MIRType_Value: {
         LDefinition tmp = needTempForPostBarrier() ? temp() : LDefinition::BogusTemp();
         LPostWriteBarrierV* lir =
-            new(alloc()) LPostWriteBarrierV(useRegisterOrConstant(ins->object()), tmp);
+            new(alloc()) LPostWriteBarrierV(useConstantObject
+                                            ? useOrConstant(ins->object())
+                                            : useRegister(ins->object()),
+                                            tmp);
         useBox(lir, LPostWriteBarrierV::Input, ins->value());
         add(lir, ins);
         assignSafepoint(lir, ins);
@@ -2445,6 +2525,27 @@ LIRGenerator::visitTypedArrayElements(MTypedArrayElements* ins)
 }
 
 void
+LIRGenerator::visitSetDisjointTypedElements(MSetDisjointTypedElements* ins)
+{
+    MOZ_ASSERT(ins->type() == MIRType_None);
+
+    MDefinition* target = ins->target();
+    MOZ_ASSERT(target->type() == MIRType_Object);
+
+    MDefinition* targetOffset = ins->targetOffset();
+    MOZ_ASSERT(targetOffset->type() == MIRType_Int32);
+
+    MDefinition* source = ins->source();
+    MOZ_ASSERT(source->type() == MIRType_Object);
+
+    auto lir = new(alloc()) LSetDisjointTypedElements(useRegister(target),
+                                                      useRegister(targetOffset),
+                                                      useRegister(source),
+                                                      temp());
+    add(lir, ins);
+}
+
+void
 LIRGenerator::visitTypedObjectDescr(MTypedObjectDescr* ins)
 {
     MOZ_ASSERT(ins->type() == MIRType_Object);
@@ -2483,6 +2584,32 @@ LIRGenerator::visitSetInitializedLength(MSetInitializedLength* ins)
     MOZ_ASSERT(ins->index()->isConstant());
     add(new(alloc()) LSetInitializedLength(useRegister(ins->elements()),
                                            useRegisterOrConstant(ins->index())), ins);
+}
+
+void
+LIRGenerator::visitUnboxedArrayLength(MUnboxedArrayLength* ins)
+{
+    define(new(alloc()) LUnboxedArrayLength(useRegisterAtStart(ins->object())), ins);
+}
+
+void
+LIRGenerator::visitUnboxedArrayInitializedLength(MUnboxedArrayInitializedLength* ins)
+{
+    define(new(alloc()) LUnboxedArrayInitializedLength(useRegisterAtStart(ins->object())), ins);
+}
+
+void
+LIRGenerator::visitIncrementUnboxedArrayInitializedLength(MIncrementUnboxedArrayInitializedLength* ins)
+{
+    add(new(alloc()) LIncrementUnboxedArrayInitializedLength(useRegister(ins->object())), ins);
+}
+
+void
+LIRGenerator::visitSetUnboxedArrayInitializedLength(MSetUnboxedArrayInitializedLength* ins)
+{
+    add(new(alloc()) LSetUnboxedArrayInitializedLength(useRegister(ins->object()),
+                                                       useRegisterOrConstant(ins->length()),
+                                                       temp()), ins);
 }
 
 void
@@ -2555,6 +2682,9 @@ LIRGenerator::visitNot(MNot* ins)
 void
 LIRGenerator::visitBoundsCheck(MBoundsCheck* ins)
 {
+     if (!ins->fallible())
+         return;
+
     LInstruction* check;
     if (ins->minimum() || ins->maximum()) {
         check = new(alloc()) LBoundsCheckRange(useRegisterOrConstant(ins->index()),
@@ -2724,17 +2854,22 @@ LIRGenerator::visitStoreElementHole(MStoreElementHole* ins)
     const LUse elements = useRegister(ins->elements());
     const LAllocation index = useRegisterOrConstant(ins->index());
 
+    // Use a temp register when adding new elements to unboxed arrays.
+    LDefinition tempDef = LDefinition::BogusTemp();
+    if (ins->unboxedType() != JSVAL_TYPE_MAGIC)
+        tempDef = temp();
+
     LInstruction* lir;
     switch (ins->value()->type()) {
       case MIRType_Value:
-        lir = new(alloc()) LStoreElementHoleV(object, elements, index);
+        lir = new(alloc()) LStoreElementHoleV(object, elements, index, tempDef);
         useBox(lir, LStoreElementHoleV::Value, ins->value());
         break;
 
       default:
       {
         const LAllocation value = useRegisterOrNonDoubleConstant(ins->value());
-        lir = new(alloc()) LStoreElementHoleT(object, elements, index, value);
+        lir = new(alloc()) LStoreElementHoleT(object, elements, index, value, tempDef);
         break;
       }
     }
@@ -2860,6 +2995,23 @@ LIRGenerator::visitArrayConcat(MArrayConcat* ins)
 }
 
 void
+LIRGenerator::visitArraySlice(MArraySlice* ins)
+{
+    MOZ_ASSERT(ins->type() == MIRType_Object);
+    MOZ_ASSERT(ins->object()->type() == MIRType_Object);
+    MOZ_ASSERT(ins->begin()->type() == MIRType_Int32);
+    MOZ_ASSERT(ins->end()->type() == MIRType_Int32);
+
+    LArraySlice* lir = new(alloc()) LArraySlice(useFixed(ins->object(), CallTempReg0),
+                                                useFixed(ins->begin(), CallTempReg1),
+                                                useFixed(ins->end(), CallTempReg2),
+                                                tempFixed(CallTempReg3),
+                                                tempFixed(CallTempReg4));
+    defineReturn(lir, ins);
+    assignSafepoint(lir, ins);
+}
+
+void
 LIRGenerator::visitArrayJoin(MArrayJoin* ins)
 {
     MOZ_ASSERT(ins->type() == MIRType_String);
@@ -2870,6 +3022,20 @@ LIRGenerator::visitArrayJoin(MArrayJoin* ins)
                                               useRegisterAtStart(ins->sep()));
     defineReturn(lir, ins);
     assignSafepoint(lir, ins);
+}
+
+void
+LIRGenerator::visitSinCos(MSinCos *ins)
+{
+    MOZ_ASSERT(ins->type() == MIRType_SinCosDouble);
+    MOZ_ASSERT(ins->input()->type() == MIRType_Double  ||
+               ins->input()->type() == MIRType_Float32 ||
+               ins->input()->type() == MIRType_Int32);
+
+    LSinCos *lir = new (alloc()) LSinCos(useRegisterAtStart(ins->input()),
+                                         tempFixed(CallTempReg0),
+                                         temp());
+    defineSinCos(lir, ins);
 }
 
 void
@@ -2886,7 +3052,7 @@ LIRGenerator::visitStringSplit(MStringSplit* ins)
 }
 
 void
-LIRGenerator::visitLoadTypedArrayElement(MLoadTypedArrayElement* ins)
+LIRGenerator::visitLoadUnboxedScalar(MLoadUnboxedScalar* ins)
 {
     MOZ_ASSERT(IsValidElementsType(ins->elements(), ins->offsetAdjustment()));
     MOZ_ASSERT(ins->index()->type() == MIRType_Int32);
@@ -2894,18 +3060,19 @@ LIRGenerator::visitLoadTypedArrayElement(MLoadTypedArrayElement* ins)
     const LUse elements = useRegister(ins->elements());
     const LAllocation index = useRegisterOrConstant(ins->index());
 
-    MOZ_ASSERT(IsNumberType(ins->type()) || ins->type() == MIRType_Boolean);
+    MOZ_ASSERT(IsNumberType(ins->type()) || IsSimdType(ins->type()) ||
+               ins->type() == MIRType_Boolean);
 
     // We need a temp register for Uint32Array with known double result.
     LDefinition tempDef = LDefinition::BogusTemp();
-    if (ins->arrayType() == Scalar::Uint32 && IsFloatingPointType(ins->type()))
+    if (ins->readType() == Scalar::Uint32 && IsFloatingPointType(ins->type()))
         tempDef = temp();
 
     if (ins->requiresMemoryBarrier()) {
         LMemoryBarrier* fence = new(alloc()) LMemoryBarrier(MembarBeforeLoad);
         add(fence, ins);
     }
-    LLoadTypedArrayElement* lir = new(alloc()) LLoadTypedArrayElement(elements, index, tempDef);
+    LLoadUnboxedScalar* lir = new(alloc()) LLoadUnboxedScalar(elements, index, tempDef);
     if (ins->fallible())
         assignSnapshot(lir, Bailout_Overflow);
     define(lir, ins);
@@ -2981,14 +3148,17 @@ LIRGenerator::visitLoadTypedArrayElementStatic(MLoadTypedArrayElementStatic* ins
 }
 
 void
-LIRGenerator::visitStoreTypedArrayElement(MStoreTypedArrayElement* ins)
+LIRGenerator::visitStoreUnboxedScalar(MStoreUnboxedScalar* ins)
 {
     MOZ_ASSERT(IsValidElementsType(ins->elements(), ins->offsetAdjustment()));
     MOZ_ASSERT(ins->index()->type() == MIRType_Int32);
 
-    if (ins->isFloatArray()) {
-        MOZ_ASSERT_IF(ins->arrayType() == Scalar::Float32, ins->value()->type() == MIRType_Float32);
-        MOZ_ASSERT_IF(ins->arrayType() == Scalar::Float64, ins->value()->type() == MIRType_Double);
+    if (ins->isSimdWrite()) {
+        MOZ_ASSERT_IF(ins->writeType() == Scalar::Float32x4, ins->value()->type() == MIRType_Float32x4);
+        MOZ_ASSERT_IF(ins->writeType() == Scalar::Int32x4, ins->value()->type() == MIRType_Int32x4);
+    } else if (ins->isFloatWrite()) {
+        MOZ_ASSERT_IF(ins->writeType() == Scalar::Float32, ins->value()->type() == MIRType_Float32);
+        MOZ_ASSERT_IF(ins->writeType() == Scalar::Float64, ins->value()->type() == MIRType_Double);
     } else {
         MOZ_ASSERT(ins->value()->type() == MIRType_Int32);
     }
@@ -2998,7 +3168,7 @@ LIRGenerator::visitStoreTypedArrayElement(MStoreTypedArrayElement* ins)
     LAllocation value;
 
     // For byte arrays, the value has to be in a byte register on x86.
-    if (ins->isByteArray())
+    if (ins->isByteWrite())
         value = useByteOpRegisterOrNonDoubleConstant(ins->value());
     else
         value = useRegisterOrNonDoubleConstant(ins->value());
@@ -3011,7 +3181,7 @@ LIRGenerator::visitStoreTypedArrayElement(MStoreTypedArrayElement* ins)
         LMemoryBarrier* fence = new(alloc()) LMemoryBarrier(MembarBeforeStore);
         add(fence, ins);
     }
-    add(new(alloc()) LStoreTypedArrayElement(elements, index, value), ins);
+    add(new(alloc()) LStoreUnboxedScalar(elements, index, value), ins);
     if (ins->requiresMemoryBarrier()) {
         LMemoryBarrier* fence = new(alloc()) LMemoryBarrier(MembarAfterStore);
         add(fence, ins);
@@ -3025,7 +3195,7 @@ LIRGenerator::visitStoreTypedArrayElementHole(MStoreTypedArrayElementHole* ins)
     MOZ_ASSERT(ins->index()->type() == MIRType_Int32);
     MOZ_ASSERT(ins->length()->type() == MIRType_Int32);
 
-    if (ins->isFloatArray()) {
+    if (ins->isFloatWrite()) {
         MOZ_ASSERT_IF(ins->arrayType() == Scalar::Float32, ins->value()->type() == MIRType_Float32);
         MOZ_ASSERT_IF(ins->arrayType() == Scalar::Float64, ins->value()->type() == MIRType_Double);
     } else {
@@ -3038,7 +3208,7 @@ LIRGenerator::visitStoreTypedArrayElementHole(MStoreTypedArrayElementHole* ins)
     LAllocation value;
 
     // For byte arrays, the value has to be in a byte register on x86.
-    if (ins->isByteArray())
+    if (ins->isByteWrite())
         value = useByteOpRegisterOrNonDoubleConstant(ins->value());
     else
         value = useRegisterOrNonDoubleConstant(ins->value());
@@ -3060,6 +3230,19 @@ LIRGenerator::visitLoadFixedSlot(MLoadFixedSlot* ins)
         LLoadFixedSlotT* lir = new(alloc()) LLoadFixedSlotT(useRegisterForTypedLoad(obj, type));
         define(lir, ins);
     }
+}
+
+void
+LIRGenerator::visitLoadFixedSlotAndUnbox(MLoadFixedSlotAndUnbox* ins)
+{
+    MDefinition* obj = ins->object();
+    MOZ_ASSERT(obj->type() == MIRType_Object);
+
+    LLoadFixedSlotAndUnbox* lir = new(alloc()) LLoadFixedSlotAndUnbox(useRegisterAtStart(obj));
+    if (ins->fallible())
+        assignSnapshot(lir, ins->bailoutKind());
+
+    define(lir, ins);
 }
 
 void
@@ -3106,6 +3289,12 @@ LIRGenerator::visitGetPropertyCache(MGetPropertyCache* ins)
 {
     MOZ_ASSERT(ins->object()->type() == MIRType_Object);
 
+    MDefinition* id = ins->idval();
+    MOZ_ASSERT(id->type() == MIRType_String ||
+               id->type() == MIRType_Symbol ||
+               id->type() == MIRType_Int32 ||
+               id->type() == MIRType_Value);
+
     if (ins->monitoredResult()) {
         // Set the performs-call flag so that we don't omit the overrecursed
         // check. This is necessary because the cache can attach a scripted
@@ -3113,12 +3302,18 @@ LIRGenerator::visitGetPropertyCache(MGetPropertyCache* ins)
         gen->setPerformsCall();
     }
 
+    // If this is a GETPROP, the id is a constant string. Allow passing it as a
+    // constant to reduce register allocation pressure.
+    bool useConstId = id->type() == MIRType_String || id->type() == MIRType_Symbol;
+
     if (ins->type() == MIRType_Value) {
         LGetPropertyCacheV* lir = new(alloc()) LGetPropertyCacheV(useRegister(ins->object()));
+        useBoxOrTypedOrConstant(lir, LGetPropertyCacheV::Id, id, useConstId);
         defineBox(lir, ins);
         assignSafepoint(lir, ins);
     } else {
         LGetPropertyCacheT* lir = new(alloc()) LGetPropertyCacheT(useRegister(ins->object()));
+        useBoxOrTypedOrConstant(lir, LGetPropertyCacheT::Id, id, useConstId);
         define(lir, ins);
         assignSafepoint(lir, ins);
     }
@@ -3161,26 +3356,6 @@ LIRGenerator::visitSetPropertyPolymorphic(MSetPropertyPolymorphic* ins)
                                                   ins->value()->type(), temp());
         assignSnapshot(lir, Bailout_ShapeGuard);
         add(lir, ins);
-    }
-}
-
-void
-LIRGenerator::visitGetElementCache(MGetElementCache* ins)
-{
-    MOZ_ASSERT(ins->object()->type() == MIRType_Object);
-
-    if (ins->type() == MIRType_Value) {
-        MOZ_ASSERT(ins->index()->type() == MIRType_Value);
-        LGetElementCacheV* lir = new(alloc()) LGetElementCacheV(useRegister(ins->object()));
-        useBox(lir, LGetElementCacheV::Index, ins->index());
-        defineBox(lir, ins);
-        assignSafepoint(lir, ins);
-    } else {
-        MOZ_ASSERT(ins->index()->type() == MIRType_Int32);
-        LGetElementCacheT* lir = new(alloc()) LGetElementCacheT(useRegister(ins->object()),
-                                                                useRegister(ins->index()));
-        define(lir, ins);
-        assignSafepoint(lir, ins);
     }
 }
 
@@ -3233,6 +3408,16 @@ LIRGenerator::visitGuardString(MGuardString* ins)
 }
 
 void
+LIRGenerator::visitGuardSharedTypedArray(MGuardSharedTypedArray* ins)
+{
+    MOZ_ASSERT(ins->input()->type() == MIRType_Object);
+    LGuardSharedTypedArray* guard =
+        new(alloc()) LGuardSharedTypedArray(useRegister(ins->obj()), temp());
+    assignSnapshot(guard, Bailout_NonSharedTypedArrayInput);
+    add(guard, ins);
+}
+
+void
 LIRGenerator::visitPolyInlineGuard(MPolyInlineGuard* ins)
 {
     MOZ_ASSERT(ins->input()->type() == MIRType_Object);
@@ -3240,16 +3425,34 @@ LIRGenerator::visitPolyInlineGuard(MPolyInlineGuard* ins)
 }
 
 void
-LIRGenerator::visitGuardShapePolymorphic(MGuardShapePolymorphic* ins)
+LIRGenerator::visitGuardReceiverPolymorphic(MGuardReceiverPolymorphic* ins)
 {
     MOZ_ASSERT(ins->obj()->type() == MIRType_Object);
     MOZ_ASSERT(ins->type() == MIRType_Object);
 
-    LGuardShapePolymorphic* guard =
-        new(alloc()) LGuardShapePolymorphic(useRegister(ins->obj()), temp());
+    LGuardReceiverPolymorphic* guard =
+        new(alloc()) LGuardReceiverPolymorphic(useRegister(ins->obj()), temp());
     assignSnapshot(guard, Bailout_ShapeGuard);
     add(guard, ins);
     redefine(ins, ins->obj());
+}
+
+void
+LIRGenerator::visitGuardUnboxedExpando(MGuardUnboxedExpando* ins)
+{
+    LGuardUnboxedExpando* guard =
+        new(alloc()) LGuardUnboxedExpando(useRegister(ins->obj()));
+    assignSnapshot(guard, ins->bailoutKind());
+    add(guard, ins);
+    redefine(ins, ins->obj());
+}
+
+void
+LIRGenerator::visitLoadUnboxedExpando(MLoadUnboxedExpando* ins)
+{
+    LLoadUnboxedExpando* lir =
+        new(alloc()) LLoadUnboxedExpando(useRegisterAtStart(ins->object()));
+    define(lir, ins);
 }
 
 void
@@ -3340,54 +3543,41 @@ LIRGenerator::visitDeleteElement(MDeleteElement* ins)
 void
 LIRGenerator::visitSetPropertyCache(MSetPropertyCache* ins)
 {
-    LUse obj = useRegisterAtStart(ins->object());
-    LDefinition slots = tempCopy(ins->object(), 0);
+    MOZ_ASSERT(ins->object()->type() == MIRType_Object);
+
+    MDefinition* id = ins->idval();
+    MOZ_ASSERT(id->type() == MIRType_String ||
+               id->type() == MIRType_Symbol ||
+               id->type() == MIRType_Int32 ||
+               id->type() == MIRType_Value);
+
+    // If this is a SETPROP, the id is a constant string. Allow passing it as a
+    // constant to reduce register allocation pressure.
+    bool useConstId = id->type() == MIRType_String || id->type() == MIRType_Symbol;
+    bool useConstValue = IsNonNurseryConstant(ins->value());
 
     // Set the performs-call flag so that we don't omit the overrecursed check.
     // This is necessary because the cache can attach a scripted setter stub
     // that calls this script recursively.
     gen->setPerformsCall();
 
-    LInstruction* lir;
-    if (ins->value()->type() == MIRType_Value) {
-        lir = new(alloc()) LSetPropertyCacheV(obj, slots);
-        useBox(lir, LSetPropertyCacheV::Value, ins->value());
-    } else {
-        LAllocation value = useRegisterOrConstant(ins->value());
-        lir = new(alloc()) LSetPropertyCacheT(obj, slots, value, ins->value()->type());
+    // If the index might be an integer, we need some extra temp registers for
+    // the dense and typed array element stubs.
+    LDefinition tempToUnboxIndex = LDefinition::BogusTemp();
+    LDefinition tempD = LDefinition::BogusTemp();
+    LDefinition tempF32 = LDefinition::BogusTemp();
+
+    if (id->mightBeType(MIRType_Int32)) {
+        if (id->type() != MIRType_Int32)
+            tempToUnboxIndex = tempToUnbox();
+        tempD = tempDouble();
+        tempF32 = hasUnaliasedDouble() ? tempFloat32() : LDefinition::BogusTemp();
     }
 
-    add(lir, ins);
-    assignSafepoint(lir, ins);
-}
-
-void
-LIRGenerator::visitSetElementCache(MSetElementCache* ins)
-{
-    MOZ_ASSERT(ins->object()->type() == MIRType_Object);
-    MOZ_ASSERT(ins->index()->type() == MIRType_Value);
-
-    // Due to lack of registers on x86, we reuse the object register as a
-    // temporary. This register may be used in a 1-byte store, which on x86
-    // again has constraints; thus the use of |useByteOpRegister| over
-    // |useRegister| below.
-    LInstruction* lir;
-    if (ins->value()->type() == MIRType_Value) {
-        LDefinition tempF32 = hasUnaliasedDouble() ? tempFloat32() : LDefinition::BogusTemp();
-        lir = new(alloc()) LSetElementCacheV(useByteOpRegister(ins->object()), tempToUnbox(),
-                                             temp(), tempDouble(), tempF32);
-
-        useBox(lir, LSetElementCacheV::Index, ins->index());
-        useBox(lir, LSetElementCacheV::Value, ins->value());
-    } else {
-        LDefinition tempF32 = hasUnaliasedDouble() ? tempFloat32() : LDefinition::BogusTemp();
-        lir = new(alloc()) LSetElementCacheT(useByteOpRegister(ins->object()),
-                                             useRegisterOrConstant(ins->value()),
-                                             tempToUnbox(), temp(), tempDouble(),
-                                             tempF32);
-
-        useBox(lir, LSetElementCacheT::Index, ins->index());
-    }
+    LInstruction* lir = new(alloc()) LSetPropertyCache(useRegister(ins->object()), temp(),
+                                                       tempToUnboxIndex, tempD, tempF32);
+    useBoxOrTypedOrConstant(lir, LSetPropertyCache::Id, id, useConstId);
+    useBoxOrTypedOrConstant(lir, LSetPropertyCache::Value, ins->value(), useConstValue);
 
     add(lir, ins);
     assignSafepoint(lir, ins);
@@ -3473,6 +3663,13 @@ void
 LIRGenerator::visitGetFrameArgument(MGetFrameArgument* ins)
 {
     LGetFrameArgument* lir = new(alloc()) LGetFrameArgument(useRegisterOrConstant(ins->index()));
+    defineBox(lir, ins);
+}
+
+void
+LIRGenerator::visitNewTarget(MNewTarget* ins)
+{
+    LNewTarget* lir = new(alloc()) LNewTarget();
     defineBox(lir, ins);
 }
 
@@ -3669,7 +3866,7 @@ LIRGenerator::visitAsmJSReturn(MAsmJSReturn* ins)
     else if (rval->type() == MIRType_Double)
         lir->setOperand(0, useFixed(rval, ReturnDoubleReg));
     else if (IsSimdType(rval->type()))
-        lir->setOperand(0, useFixed(rval, ReturnSimdReg));
+        lir->setOperand(0, useFixed(rval, ReturnSimd128Reg));
     else if (rval->type() == MIRType_Int32)
         lir->setOperand(0, useFixed(rval, ReturnReg));
     else
@@ -3807,9 +4004,8 @@ LIRGenerator::visitSimdBox(MSimdBox* ins)
     MOZ_ASSERT(IsSimdType(ins->input()->type()));
     LUse in = useRegister(ins->input());
     LSimdBox* lir = new(alloc()) LSimdBox(in, temp());
-    // :TODO: Cannot spill SIMD registers (Bug 1112164)
-    assignSnapshot(lir, Bailout_Inevitable);
     define(lir, ins);
+    assignSafepoint(lir, ins);
 }
 
 void
@@ -3854,11 +4050,13 @@ LIRGenerator::visitSimdConvert(MSimdConvert* ins)
 {
     MOZ_ASSERT(IsSimdType(ins->type()));
     MDefinition* input = ins->input();
-    LUse use = useRegisterAtStart(input);
-
+    LUse use = useRegister(input);
     if (ins->type() == MIRType_Int32x4) {
         MOZ_ASSERT(input->type() == MIRType_Float32x4);
-        define(new(alloc()) LFloat32x4ToInt32x4(use), ins);
+        LFloat32x4ToInt32x4* lir = new(alloc()) LFloat32x4ToInt32x4(use, temp());
+        if (!gen->compilingAsmJS())
+            assignSnapshot(lir, Bailout_BoundsCheck);
+        define(lir, ins);
     } else if (ins->type() == MIRType_Float32x4) {
         MOZ_ASSERT(input->type() == MIRType_Int32x4);
         define(new(alloc()) LInt32x4ToFloat32x4(use), ins);
@@ -3871,7 +4069,12 @@ void
 LIRGenerator::visitSimdReinterpretCast(MSimdReinterpretCast* ins)
 {
     MOZ_ASSERT(IsSimdType(ins->type()) && IsSimdType(ins->input()->type()));
-    redefine(ins, ins->input());
+    MDefinition* input = ins->input();
+    LUse use = useRegisterAtStart(input);
+    // :TODO: (Bug 1132894) We have to allocate a different register as redefine
+    // and/or defineReuseInput are not yet capable of reusing the same register
+    // with a different register type.
+    define(new(alloc()) LSimdReinterpretCast(use), ins);
 }
 
 void
@@ -3947,6 +4150,36 @@ LIRGenerator::visitSimdSwizzle(MSimdSwizzle* ins)
 }
 
 void
+LIRGenerator::visitSimdGeneralShuffle(MSimdGeneralShuffle*ins)
+{
+    MOZ_ASSERT(IsSimdType(ins->type()));
+
+    LSimdGeneralShuffleBase* lir;
+    if (ins->type() == MIRType_Int32x4)
+        lir = new (alloc()) LSimdGeneralShuffleI(temp());
+    else if (ins->type() == MIRType_Float32x4)
+        lir = new (alloc()) LSimdGeneralShuffleF(temp());
+    else
+        MOZ_CRASH("Unknown SIMD kind when doing a shuffle");
+
+    if (!lir->init(alloc(), ins->numVectors() + ins->numLanes()))
+        return;
+
+    for (unsigned i = 0; i < ins->numVectors(); i++) {
+        MOZ_ASSERT(IsSimdType(ins->vector(i)->type()));
+        lir->setOperand(i, useRegister(ins->vector(i)));
+    }
+
+    for (unsigned i = 0; i < ins->numLanes(); i++) {
+        MOZ_ASSERT(ins->lane(i)->type() == MIRType_Int32);
+        lir->setOperand(i + ins->numVectors(), useRegister(ins->lane(i)));
+    }
+
+    assignSnapshot(lir, Bailout_BoundsCheck);
+    define(lir, ins);
+}
+
+void
 LIRGenerator::visitSimdShuffle(MSimdShuffle* ins)
 {
     MOZ_ASSERT(IsSimdType(ins->lhs()->type()));
@@ -3969,6 +4202,7 @@ LIRGenerator::visitSimdShuffle(MSimdShuffle* ins)
 void
 LIRGenerator::visitSimdUnaryArith(MSimdUnaryArith* ins)
 {
+    MOZ_ASSERT(IsSimdType(ins->input()->type()));
     MOZ_ASSERT(IsSimdType(ins->type()));
 
     // Cannot be at start, as the ouput is used as a temporary to store values.
@@ -3988,15 +4222,17 @@ LIRGenerator::visitSimdUnaryArith(MSimdUnaryArith* ins)
 void
 LIRGenerator::visitSimdBinaryComp(MSimdBinaryComp* ins)
 {
+    MOZ_ASSERT(IsSimdType(ins->lhs()->type()));
+    MOZ_ASSERT(IsSimdType(ins->rhs()->type()));
     MOZ_ASSERT(ins->type() == MIRType_Int32x4);
 
     if (ShouldReorderCommutative(ins->lhs(), ins->rhs(), ins))
         ins->reverse();
 
-    if (ins->compareType() == MSimdBinaryComp::CompareInt32x4) {
+    if (ins->specialization() == MIRType_Int32x4) {
         LSimdBinaryCompIx4* add = new(alloc()) LSimdBinaryCompIx4();
         lowerForCompIx4(add, ins, ins->lhs(), ins->rhs());
-    } else if (ins->compareType() == MSimdBinaryComp::CompareFloat32x4) {
+    } else if (ins->specialization() == MIRType_Float32x4) {
         LSimdBinaryCompFx4* add = new(alloc()) LSimdBinaryCompFx4();
         lowerForCompFx4(add, ins, ins->lhs(), ins->rhs());
     } else {
@@ -4007,6 +4243,8 @@ LIRGenerator::visitSimdBinaryComp(MSimdBinaryComp* ins)
 void
 LIRGenerator::visitSimdBinaryBitwise(MSimdBinaryBitwise* ins)
 {
+    MOZ_ASSERT(IsSimdType(ins->lhs()->type()));
+    MOZ_ASSERT(IsSimdType(ins->rhs()->type()));
     MOZ_ASSERT(IsSimdType(ins->type()));
 
     MDefinition* lhs = ins->lhs();
@@ -4025,6 +4263,8 @@ void
 LIRGenerator::visitSimdShift(MSimdShift* ins)
 {
     MOZ_ASSERT(ins->type() == MIRType_Int32x4);
+    MOZ_ASSERT(ins->lhs()->type() == MIRType_Int32x4);
+    MOZ_ASSERT(ins->rhs()->type() == MIRType_Int32);
 
     LUse vector = useRegisterAtStart(ins->lhs());
     LAllocation value = useRegisterOrConstant(ins->rhs());
@@ -4038,16 +4278,24 @@ LIRGenerator::visitLexicalCheck(MLexicalCheck* ins)
     MDefinition* input = ins->input();
     MOZ_ASSERT(input->type() == MIRType_Value);
     LLexicalCheck* lir = new(alloc()) LLexicalCheck();
-    redefine(ins, input);
     useBox(lir, LLexicalCheck::Input, input);
+    assignSnapshot(lir, ins->bailoutKind());
+    add(lir, ins);
+    redefine(ins, input);
+}
+
+void
+LIRGenerator::visitThrowRuntimeLexicalError(MThrowRuntimeLexicalError* ins)
+{
+    LThrowRuntimeLexicalError* lir = new(alloc()) LThrowRuntimeLexicalError();
     add(lir, ins);
     assignSafepoint(lir, ins);
 }
 
 void
-LIRGenerator::visitThrowUninitializedLexical(MThrowUninitializedLexical* ins)
+LIRGenerator::visitGlobalNameConflictsCheck(MGlobalNameConflictsCheck* ins)
 {
-    LThrowUninitializedLexical* lir = new(alloc()) LThrowUninitializedLexical();
+    LGlobalNameConflictsCheck* lir = new(alloc()) LGlobalNameConflictsCheck();
     add(lir, ins);
     assignSafepoint(lir, ins);
 }
@@ -4061,35 +4309,65 @@ LIRGenerator::visitDebugger(MDebugger* ins)
 }
 
 void
-LIRGenerator::visitNurseryObject(MNurseryObject* ins)
+LIRGenerator::visitAtomicIsLockFree(MAtomicIsLockFree* ins)
 {
-    define(new(alloc()) LNurseryObject(), ins);
+    define(new(alloc()) LAtomicIsLockFree(useRegister(ins->input())), ins);
+}
+
+void
+LIRGenerator::visitCheckReturn(MCheckReturn* ins)
+{
+    MDefinition* retVal = ins->returnValue();
+    MDefinition* thisVal = ins->thisValue();
+    MOZ_ASSERT(retVal->type() == MIRType_Value);
+    MOZ_ASSERT(thisVal->type() == MIRType_Value);
+
+    LCheckReturn* lir = new(alloc()) LCheckReturn();
+    useBoxAtStart(lir, LCheckReturn::ReturnValue, retVal);
+    useBoxAtStart(lir, LCheckReturn::ThisValue, thisVal);
+    assignSnapshot(lir, Bailout_BadDerivedConstructorReturn);
+    add(lir, ins);
+    redefine(ins, retVal);
+}
+
+void
+LIRGenerator::visitCheckObjCoercible(MCheckObjCoercible* ins)
+{
+    MDefinition* checkVal = ins->checkValue();
+    MOZ_ASSERT(checkVal->type() == MIRType_Value);
+
+    LCheckObjCoercible* lir = new(alloc()) LCheckObjCoercible();
+    useBoxAtStart(lir, LCheckObjCoercible::CheckValue, checkVal);
+    redefine(ins, checkVal);
+    add(lir, ins);
+    assignSafepoint(lir, ins);
 }
 
 static void
 SpewResumePoint(MBasicBlock* block, MInstruction* ins, MResumePoint* resumePoint)
 {
-    fprintf(JitSpewFile, "Current resume point %p details:\n", (void*)resumePoint);
-    fprintf(JitSpewFile, "    frame count: %u\n", resumePoint->frameCount());
+    Fprinter& out = JitSpewPrinter();
+    out.printf("Current resume point %p details:\n", (void*)resumePoint);
+    out.printf("    frame count: %u\n", resumePoint->frameCount());
 
     if (ins) {
-        fprintf(JitSpewFile, "    taken after: ");
-        ins->printName(JitSpewFile);
+        out.printf("    taken after: ");
+        ins->printName(out);
     } else {
-        fprintf(JitSpewFile, "    taken at block %d entry", block->id());
+        out.printf("    taken at block %d entry", block->id());
     }
-    fprintf(JitSpewFile, "\n");
+    out.printf("\n");
 
-    fprintf(JitSpewFile, "    pc: %p (script: %p, offset: %d)\n",
+    out.printf("    pc: %p (script: %p, offset: %d)\n",
             (void*)resumePoint->pc(),
             (void*)resumePoint->block()->info().script(),
             int(resumePoint->block()->info().script()->pcToOffset(resumePoint->pc())));
 
     for (size_t i = 0, e = resumePoint->numOperands(); i < e; i++) {
         MDefinition* in = resumePoint->getOperand(i);
-        fprintf(JitSpewFile, "    slot%u: ", (unsigned)i);
-        in->printName(JitSpewFile);
-        fprintf(JitSpewFile, "\n");
+        out.printf("    slot%u: ", (unsigned)i);
+        in->printName(out);
+        out.printf("\n");
     }
 }
 
@@ -4113,19 +4391,9 @@ LIRGenerator::visitInstruction(MInstruction* ins)
     ins->setInWorklistUnchecked();
 #endif
 
-    // If we added a Nop for this instruction, we'll also add a Mop, so that
-    // that live-ranges for fixed register defs, which with LSRA extend through
-    // the Nop so that they can extend through the OsiPoint don't, with their
-    // one-extra extension, extend into a position where they use the input
-    // move group for the following instruction.
-    bool needsMop = !current->instructions().empty() && current->rbegin()->isNop();
-
     // If no safepoint was created, there's no need for an OSI point.
     if (LOsiPoint* osiPoint = popOsiPoint())
         add(osiPoint);
-
-    if (needsMop)
-        add(new(alloc()) LMop);
 
     return !gen->errored();
 }
@@ -4169,9 +4437,6 @@ LIRGenerator::visitBlock(MBasicBlock* block)
     updateResumeState(block);
 
     definePhis();
-
-    if (gen->optimizationInfo().registerAllocator() == RegisterAllocator_LSRA)
-        add(new(alloc()) LLabel());
 
     for (MInstructionIterator iter = block->begin(); *iter != block->lastIns(); iter++) {
         if (!visitInstruction(*iter))

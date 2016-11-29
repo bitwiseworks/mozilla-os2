@@ -1,9 +1,13 @@
+import os
+
 HG_SHARE_BASE_DIR = "/builds/hg-shared"
 
 PYTHON_DIR = "/tools/python27"
 SRCDIR = "source"
 
 config = {
+    "platform": "linux64",
+    "build_type": "br-haz",
     "log_name": "hazards",
     "shell-objdir": "obj-opt-js",
     "analysis-dir": "analysis",
@@ -21,6 +25,7 @@ config = {
         'hgtool.py': '%(abs_tools_dir)s/buildfarm/utils/hgtool.py',
         'gittool.py': '%(abs_tools_dir)s/buildfarm/utils/gittool.py',
         'tooltool.py': '/tools/tooltool.py',
+        "virtualenv": [PYTHON_DIR + "/bin/python", "/tools/misc-python/virtualenv.py"],
     },
 
     "purge_minsize": 18,
@@ -34,13 +39,16 @@ config = {
     }],
 
     "upload_remote_baseuri": 'https://ftp-ssl.mozilla.org/',
+    "default_blob_upload_servers": [
+        "https://blobupload.elasticbeanstalk.com",
+    ],
+    "blob_uploader_auth_file": os.path.join(os.getcwd(), "oauth.txt"),
 
+    "virtualenv_path": '%s/venv' % os.getcwd(),
     'tools_dir': "/tools",
     'compiler_manifest': "build/gcc.manifest",
     'b2g_compiler_manifest': "build/gcc-b2g.manifest",
-    'compiler_setup': "setup.sh.gcc",
     'sixgill_manifest': "build/sixgill.manifest",
-    'sixgill_setup': "setup.sh.sixgill",
 
     # Mock.
     "mock_packages": [
@@ -76,6 +84,7 @@ config = {
     "mock_files": [
         ("/home/cltbld/.ssh", "/home/mock_mozilla/.ssh"),
         ("/tools/tooltool.py", "/tools/tooltool.py"),
+        ('/usr/local/lib/hgext', '/usr/local/lib/hgext'),
     ],
     "env_replacements": {
         "pythondir": PYTHON_DIR,
@@ -85,5 +94,11 @@ config = {
     "partial_env": {
         "PATH": "%(pythondir)s/bin:%(gccdir)s/bin:%(PATH)s",
         "LD_LIBRARY_PATH": "%(sixgilldir)s/usr/lib64",
+
+        # Suppress the mercurial-setup check. When running in automation, this
+        # is redundant with MOZ_AUTOMATION, but a local developer-mode build
+        # will have the mach state directory set to a nonstandard location and
+        # therefore will always claim that mercurial-setup has not been run.
+        "I_PREFER_A_SUBOPTIMAL_MERCURIAL_EXPERIENCE": "1",
     },
 }

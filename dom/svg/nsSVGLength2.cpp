@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -16,6 +17,7 @@
 #include "nsSVGIntegrationUtils.h"
 #include "nsTextFormatter.h"
 #include "DOMSVGLength.h"
+#include "LayoutLogging.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -120,7 +122,7 @@ static float
 FixAxisLength(float aLength)
 {
   if (aLength == 0.0f) {
-    NS_WARNING("zero axis length");
+    LAYOUT_WARNING("zero axis length");
     return 1e-20f;
   }
   return aLength;
@@ -227,7 +229,7 @@ float
 nsSVGLength2::GetUnitScaleFactor(nsIFrame *aFrame, uint8_t aUnitType) const
 {
   nsIContent* content = aFrame->GetContent();
-  if (content->IsSVG()) {
+  if (content->IsSVGElement()) {
     return GetUnitScaleFactor(SVGElementMetrics(static_cast<nsSVGElement*>(content)), aUnitType);
   }
   return GetUnitScaleFactor(NonSVGFrameUserSpaceMetrics(aFrame), aUnitType);
@@ -348,7 +350,7 @@ nsSVGLength2::NewValueSpecifiedUnits(uint16_t unitType,
 nsresult
 nsSVGLength2::ToDOMBaseVal(DOMSVGLength **aResult, nsSVGElement *aSVGElement)
 {
-  nsRefPtr<DOMSVGLength> domBaseVal =
+  RefPtr<DOMSVGLength> domBaseVal =
     DOMSVGLength::GetTearOff(this, aSVGElement, false);
 
   domBaseVal.forget(aResult);
@@ -358,7 +360,7 @@ nsSVGLength2::ToDOMBaseVal(DOMSVGLength **aResult, nsSVGElement *aSVGElement)
 nsresult
 nsSVGLength2::ToDOMAnimVal(DOMSVGLength **aResult, nsSVGElement *aSVGElement)
 {
-  nsRefPtr<DOMSVGLength> domAnimVal =
+  RefPtr<DOMSVGLength> domAnimVal =
     DOMSVGLength::GetTearOff(this, aSVGElement, true);
 
   domAnimVal.forget(aResult);
@@ -448,7 +450,7 @@ nsSVGLength2::SetAnimValue(float aValue, nsSVGElement *aSVGElement)
 already_AddRefed<SVGAnimatedLength>
 nsSVGLength2::ToDOMAnimatedLength(nsSVGElement* aSVGElement)
 {
-  nsRefPtr<SVGAnimatedLength> svgAnimatedLength =
+  RefPtr<SVGAnimatedLength> svgAnimatedLength =
     sSVGAnimatedLengthTearoffTable.GetTearoff(this);
   if (!svgAnimatedLength) {
     svgAnimatedLength = new SVGAnimatedLength(this, aSVGElement);

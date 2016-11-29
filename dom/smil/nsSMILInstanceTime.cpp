@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -57,7 +58,7 @@ nsSMILInstanceTime::~nsSMILInstanceTime()
 void
 nsSMILInstanceTime::Unlink()
 {
-  nsRefPtr<nsSMILInstanceTime> deathGrip(this);
+  RefPtr<nsSMILInstanceTime> deathGrip(this);
   if (mBaseInterval) {
     mBaseInterval->RemoveDependentTime(*this);
     mBaseInterval = nullptr;
@@ -92,7 +93,7 @@ nsSMILInstanceTime::HandleChangedInterval(
   mozilla::AutoRestore<bool> setVisited(mVisited);
   mVisited = true;
 
-  nsRefPtr<nsSMILInstanceTime> deathGrip(this);
+  RefPtr<nsSMILInstanceTime> deathGrip(this);
   mCreator->HandleChangedInstanceTime(*GetBaseTime(), aSrcContainer, *this,
                                       objectChanged);
 }
@@ -108,7 +109,7 @@ nsSMILInstanceTime::HandleDeletedInterval()
   mBaseInterval = nullptr;
   mFlags &= ~kMayUpdate; // Can't update without a base interval
 
-  nsRefPtr<nsSMILInstanceTime> deathGrip(this);
+  RefPtr<nsSMILInstanceTime> deathGrip(this);
   mCreator->HandleDeletedInstanceTime(*this);
   mCreator = nullptr;
 }

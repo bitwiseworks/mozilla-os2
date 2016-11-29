@@ -11,10 +11,16 @@
 # include <io.h>
   typedef WCHAR NS_tchar;
 # define NS_main wmain
-# define F_OK 00
-# define W_OK 02
-# define R_OK 04
-# if _MSC_VER < 1900
+# ifndef F_OK
+#   define F_OK 00
+# endif
+# ifndef W_OK
+#   define W_OK 02
+# endif
+# ifndef R_OK
+#   define R_OK 04
+# endif
+# if defined(_MSC_VER) && _MSC_VER < 1900
 #  define stat _stat
 # endif
 # define NS_T(str) L ## str
@@ -77,8 +83,9 @@ static void
 WriteMsg(const NS_tchar *path, const char *status)
 {
   FILE* outFP = NS_tfopen(path, NS_T("wb"));
-  if (!outFP)
+  if (!outFP) {
     return;
+  }
 
   fprintf(outFP, "%s\n", status);
   fclose(outFP);
@@ -99,11 +106,15 @@ CheckMsg(const NS_tchar *path, const char *expected)
 
   struct stat ms;
   if (fstat(fileno(inFP), &ms)) {
+    fclose(inFP);
+    inFP = nullptr;
     return false;
   }
 
   char *mbuf = (char *) malloc(ms.st_size + 1);
   if (!mbuf) {
+    fclose(inFP);
+    inFP = nullptr;
     return false;
   }
 
@@ -113,14 +124,19 @@ CheckMsg(const NS_tchar *path, const char *expected)
   r -= c;
   rb += c;
   if (c == 0 && r) {
+    free(mbuf);
+    fclose(inFP);
+    inFP = nullptr;
     return false;
   }
   mbuf[ms.st_size] = '\0';
   rb = mbuf;
 
+  bool isMatch = strcmp(rb, expected) == 0;
+  free(mbuf);
   fclose(inFP);
   inFP = nullptr;
-  return strcmp(rb, expected) == 0;
+  return isMatch;
 }
 
 int NS_main(int argc, NS_tchar **argv)
@@ -201,13 +217,13 @@ int NS_main(int argc, NS_tchar **argv)
   }
 
   if (!NS_tstrcmp(argv[1], NS_T("check-signature"))) {
-#ifdef XP_WIN
+#if defined(XP_WIN) && defined(MOZ_MAINTENANCE_SERVICE)
     if (ERROR_SUCCESS == VerifyCertificateTrustForFile(argv[2])) {
       return 0;
     } else {
       return 1;
     }
-#else 
+#else
     // Not implemented on non-Windows platforms
     return 1;
 #endif
@@ -229,7 +245,9 @@ int NS_main(int argc, NS_tchar **argv)
       NS_tfputs(NS_T("test"), file);
       fclose(file);
     }
-    symlink(path, argv[5]);
+    if (symlink(path, argv[5]) != 0) {
+      return 1;
+    }
     NS_tsnprintf(path, sizeof(path)/sizeof(path[0]),
                  NS_T("%s/%s"), NS_T("/tmp"), argv[2]);
     if (argc > 6 && !NS_tstrcmp(argv[6], NS_T("change-perm"))) {
@@ -285,7 +303,7 @@ int NS_main(int argc, NS_tchar **argv)
     } else {
       return serviceState;
     }
-#else 
+#else
     // Not implemented on non-Windows platforms
     return 1;
 #endif
@@ -303,7 +321,17 @@ int NS_main(int argc, NS_tchar **argv)
     } else {
       return 2;
     }
-#else 
+#else
+    // Not implemented on non-Windows platforms
+    return 1;
+#endif
+  }
+
+  if (!NS_tstrcmp(argv[1], NS_T("is-process-running"))) {
+#ifdef XP_WIN
+    LPCWSTR application = argv[2];
+    return (ERROR_NOT_FOUND == IsProcessRunning(application)) ? 0 : 1;
+#else
     // Not implemented on non-Windows platforms
     return 1;
 #endif
@@ -372,4 +400,4 @@ int NS_main(int argc, NS_tchar **argv)
   }
 
   return 0;
-} 
+}

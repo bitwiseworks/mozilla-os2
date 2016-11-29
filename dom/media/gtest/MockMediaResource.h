@@ -25,24 +25,15 @@ public:
     return nullptr;
   }
   virtual bool CanClone() override { return false; }
-  virtual already_AddRefed<MediaResource> CloneData(MediaDecoder* aDecoder)
+  virtual already_AddRefed<MediaResource> CloneData(MediaResourceCallback*)
     override
   {
     return nullptr;
   }
   virtual void SetReadMode(MediaCacheStream::ReadMode aMode) override {}
   virtual void SetPlaybackRate(uint32_t aBytesPerSecond) override {}
-  virtual nsresult Read(char* aBuffer, uint32_t aCount, uint32_t* aBytes)
-    override
-  {
-    return NS_OK;
-  }
   virtual nsresult ReadAt(int64_t aOffset, char* aBuffer, uint32_t aCount,
                           uint32_t* aBytes) override;
-  virtual nsresult Seek(int32_t aWhence, int64_t aOffset) override
-  {
-    return NS_OK;
-  }
   virtual int64_t Tell() override { return 0; }
   virtual void Pin() override {}
   virtual void Unpin() override {}
@@ -67,7 +58,7 @@ public:
 
   virtual bool IsTransportSeekable() override { return true; }
   virtual nsresult Open(nsIStreamListener** aStreamListener) override;
-  virtual nsresult GetCachedRanges(nsTArray<MediaByteRange>& aRanges)
+  virtual nsresult GetCachedRanges(MediaByteRangeSet& aRanges)
     override;
   virtual const nsCString& GetContentType() const override
   {
@@ -77,14 +68,17 @@ public:
   void MockClearBufferedRanges();
   void MockAddBufferedRange(int64_t aStart, int64_t aEnd);
 
-private:
+protected:
   virtual ~MockMediaResource();
+
+private:
   FILE* mFileHandle;
   const char* mFileName;
-  nsTArray<MediaByteRange> mRanges;
+  MediaByteRangeSet mRanges;
   Atomic<int> mEntry;
   nsCString mContentType;
 };
-}
+
+} // namespace mozilla
 
 #endif

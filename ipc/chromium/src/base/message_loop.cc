@@ -32,6 +32,7 @@
 #endif
 #ifdef MOZ_TASK_TRACER
 #include "GeckoTaskTracer.h"
+#include "TracedTaskCommon.h"
 #endif
 
 #include "MessagePump.h"
@@ -287,6 +288,7 @@ void MessageLoop::PostIdleTask(
 
 #ifdef MOZ_TASK_TRACER
   task = mozilla::tasktracer::CreateTracedTask(task);
+  (static_cast<mozilla::tasktracer::TracedTask*>(task))->DispatchTask();
 #endif
 
   task->SetBirthPlace(from_here);
@@ -301,6 +303,7 @@ void MessageLoop::PostTask_Helper(
 
 #ifdef MOZ_TASK_TRACER
   task = mozilla::tasktracer::CreateTracedTask(task);
+  (static_cast<mozilla::tasktracer::TracedTask*>(task))->DispatchTask(delay_ms);
 #endif
 
   task->SetBirthPlace(from_here);
@@ -318,7 +321,7 @@ void MessageLoop::PostTask_Helper(
   // directly, as it could starve handling of foreign threads.  Put every task
   // into this queue.
 
-  nsRefPtr<base::MessagePump> pump;
+  RefPtr<base::MessagePump> pump;
   {
     AutoLock locked(incoming_queue_lock_);
     incoming_queue_.push(pending_task);
@@ -407,6 +410,15 @@ void MessageLoop::ReloadWorkQueue() {
 }
 
 bool MessageLoop::DeletePendingTasks() {
+#ifdef DEBUG
+  if (!work_queue_.empty()) {
+    Task* task = work_queue_.front().task;
+    tracked_objects::Location loc = task->GetBirthPlace();
+    printf("Unexpected task! %s:%s:%d\n",
+	   loc.function_name(), loc.file_name(), loc.line_number());
+  }
+#endif
+
   MOZ_ASSERT(work_queue_.empty());
   bool did_work = !deferred_non_nestable_work_queue_.empty();
   while (!deferred_non_nestable_work_queue_.empty()) {

@@ -103,7 +103,7 @@ nsSVGUseFrame::Init(nsIContent*       aContent,
                     nsContainerFrame* aParent,
                     nsIFrame*         aPrevInFlow)
 {
-  NS_ASSERTION(aContent->IsSVG(nsGkAtoms::use),
+  NS_ASSERTION(aContent->IsSVGElement(nsGkAtoms::use),
                "Content is not an SVG use!");
 
   mHasValidDimensions =
@@ -166,7 +166,7 @@ nsSVGUseFrame::AttributeChanged(int32_t         aNameSpaceID,
 void
 nsSVGUseFrame::DestroyFrom(nsIFrame* aDestructRoot)
 {
-  nsRefPtr<SVGUseElement> use = static_cast<SVGUseElement*>(mContent);
+  RefPtr<SVGUseElement> use = static_cast<SVGUseElement*>(mContent);
   nsSVGUseFrameBase::DestroyFrom(aDestructRoot);
   use->DestroyAnonymousContent();
 }

@@ -11,12 +11,11 @@ XPIDL_SOURCES += [
     'nsIContentPolicy.idl',
     'nsIContentPolicyBase.idl',
     'nsIDocumentEncoder.idl',
+    'nsIDOMBlob.idl',
     'nsIDOMDataChannel.idl',
     'nsIDOMDOMCursor.idl',
     'nsIDOMDOMRequest.idl',
-    'nsIDOMFile.idl',
     'nsIDOMFileList.idl',
-    'nsIDOMFileReader.idl',
     'nsIDOMFormData.idl',
     'nsIDOMParser.idl',
     'nsIDOMSerializer.idl',
@@ -26,6 +25,7 @@ XPIDL_SOURCES += [
     'nsIImageLoadingContent.idl',
     'nsIMessageManager.idl',
     'nsIObjectLoadingContent.idl',
+    'nsIRemoteWindowContext.idl',
     'nsIScriptChannel.idl',
     'nsIScriptLoaderObserver.idl',
     'nsISelection.idl',
@@ -53,6 +53,7 @@ EXPORTS += [
     'nsAttrValue.h',
     'nsAttrValueInlines.h',
     'nsCaseTreatment.h',
+    'nsChildContentList.h',
     'nsContentCID.h',
     'nsContentCreatorFunctions.h',
     'nsContentList.h',
@@ -74,12 +75,16 @@ EXPORTS += [
     'nsDOMNavigationTiming.h',
     'nsDOMString.h',
     'nsFocusManager.h',
+    'nsFormData.h',
     'nsFrameMessageManager.h',
     'nsGenericDOMDataNode.h',
     'nsGkAtomList.h',
     'nsGkAtoms.h',
     'nsHostObjectProtocolHandler.h',
+    'nsHostObjectURI.h',
+    'nsIAnimationObserver.h',
     'nsIAttribute.h',
+    'nsIConsoleReportCollector.h',
     'nsIContent.h',
     'nsIContentInlines.h',
     'nsIContentIterator.h',
@@ -117,6 +122,7 @@ EXPORTS += [
     'nsSandboxFlags.h',
     'nsScriptLoader.h',
     'nsStructuredCloneContainer.h',
+    'nsStubAnimationObserver.h',
     'nsStubDocumentObserver.h',
     'nsStubMutationObserver.h',
     'nsStyledElement.h',
@@ -137,9 +143,11 @@ if CONFIG['MOZ_WEBRTC']:
     ]
 
 EXPORTS.mozilla += [
+    'ConsoleReportCollector.h',
     'CORSMode.h',
     'FeedWriterEnabled.h',
     'TextInputProcessor.h',
+    'UseCounter.h',
 ]
 
 EXPORTS.mozilla.dom += [
@@ -148,6 +156,8 @@ EXPORTS.mozilla.dom += [
     'BarProps.h',
     'BlobSet.h',
     'ChildIterator.h',
+    'ChromeNodeList.h',
+    'ChromeUtils.h',
     'Comment.h',
     'Console.h',
     'DirectionalityUtils.h',
@@ -168,28 +178,33 @@ EXPORTS.mozilla.dom += [
     'ElementInlines.h',
     'EventSource.h',
     'File.h',
+    'FileList.h',
+    'FileReader.h',
     'FragmentOrElement.h',
     'FromParser.h',
     'ImageEncoder.h',
     'ImportManager.h',
     'Link.h',
-    'MessageChannel.h',
-    'MessagePort.h',
-    'MessagePortList.h',
     'NameSpaceConstants.h',
     'Navigator.h',
     'NodeInfo.h',
     'NodeInfoInlines.h',
     'NodeIterator.h',
+    'PerformanceCompositeTiming.h',
     'PerformanceEntry.h',
     'PerformanceMark.h',
     'PerformanceMeasure.h',
+    'PerformanceObserver.h',
+    'PerformanceObserverEntryList.h',
+    'PerformanceRenderTiming.h',
     'PerformanceResourceTiming.h',
     'ProcessGlobal.h',
     'ResponsiveImageSelector.h',
+    'SameProcessMessageQueue.h',
     'ScreenOrientation.h',
     'ScriptSettings.h',
     'ShadowRoot.h',
+    'StructuredCloneHolder.h',
     'StructuredCloneTags.h',
     'StyleSheetList.h',
     'SubtleCrypto.h',
@@ -198,6 +213,7 @@ EXPORTS.mozilla.dom += [
     'URL.h',
     'URLSearchParams.h',
     'WebSocket.h',
+    'WindowOrientationObserver.h',
 ]
 
 UNIFIED_SOURCES += [
@@ -205,8 +221,11 @@ UNIFIED_SOURCES += [
     'Attr.cpp',
     'BarProps.cpp',
     'ChildIterator.cpp',
+    'ChromeNodeList.cpp',
+    'ChromeUtils.cpp',
     'Comment.cpp',
     'Console.cpp',
+    'ConsoleReportCollector.cpp',
     'Crypto.cpp',
     'DirectionalityUtils.cpp',
     'DocumentFragment.cpp',
@@ -225,14 +244,13 @@ UNIFIED_SOURCES += [
     'Element.cpp',
     'EventSource.cpp',
     'File.cpp',
-    'FileIOObject.cpp',
+    'FileList.cpp',
+    'FileReader.cpp',
     'FragmentOrElement.cpp',
     'ImageEncoder.cpp',
     'ImportManager.cpp',
     'Link.cpp',
-    'MessageChannel.cpp',
-    'MessagePortList.cpp',
-    'MultipartFileImpl.cpp',
+    'MultipartBlobImpl.cpp',
     'Navigator.cpp',
     'NodeInfo.cpp',
     'NodeIterator.cpp',
@@ -254,7 +272,6 @@ UNIFIED_SOURCES += [
     'nsDOMAttributeMap.cpp',
     'nsDOMCaretPosition.cpp',
     'nsDOMClassInfo.cpp',
-    'nsDOMFileReader.cpp',
     'nsDOMMutationObserver.cpp',
     'nsDOMNavigationTiming.cpp',
     'nsDOMScriptObjectFactory.cpp',
@@ -300,6 +317,7 @@ UNIFIED_SOURCES += [
     'nsScriptLoader.cpp',
     'nsScriptNameSpaceManager.cpp',
     'nsStructuredCloneContainer.cpp',
+    'nsStubAnimationObserver.cpp',
     'nsStubDocumentObserver.cpp',
     'nsStubMutationObserver.cpp',
     'nsStyledElement.cpp',
@@ -317,14 +335,22 @@ UNIFIED_SOURCES += [
     'nsXMLContentSerializer.cpp',
     'nsXMLHttpRequest.cpp',
     'nsXMLNameSpaceMap.cpp',
+    'PerformanceCompositeTiming.cpp',
     'PerformanceEntry.cpp',
     'PerformanceMark.cpp',
     'PerformanceMeasure.cpp',
+    'PerformanceObserver.cpp',
+    'PerformanceObserverEntryList.cpp',
+    'PerformanceRenderTiming.cpp',
     'PerformanceResourceTiming.cpp',
+    'PostMessageEvent.cpp',
     'ProcessGlobal.cpp',
     'ResponsiveImageSelector.cpp',
+    'SameProcessMessageQueue.cpp',
+    'ScreenOrientation.cpp',
     'ScriptSettings.cpp',
     'ShadowRoot.cpp',
+    'StructuredCloneHolder.cpp',
     'StyleSheetList.cpp',
     'SubtleCrypto.cpp',
     'Text.cpp',
@@ -335,6 +361,7 @@ UNIFIED_SOURCES += [
     'URLSearchParams.cpp',
     'WebSocket.cpp',
     'WindowNamedPropertiesHandler.cpp',
+    'WindowOrientationObserver.cpp',
 ]
 
 if CONFIG['MOZ_WEBRTC']:
@@ -344,8 +371,6 @@ if CONFIG['MOZ_WEBRTC']:
 
 # these files couldn't be in UNIFIED_SOURCES for now for reasons given below:
 SOURCES += [
-    # this file doesn't like windows.h
-    'MessagePort.cpp',
     # Because of OS X headers.
     'nsContentUtils.cpp',
     # this file doesn't like windows.h
@@ -375,8 +400,6 @@ EXTRA_COMPONENTS += [
     'contentAreaDropListener.manifest',
     'messageWakeupService.js',
     'messageWakeupService.manifest',
-    'SiteSpecificUserAgent.js',
-    'SiteSpecificUserAgent.manifest',
     'SlowScriptDebug.js',
     'SlowScriptDebug.manifest',
 ]
@@ -393,13 +416,10 @@ EXTRA_JS_MODULES += [
     'IndexedDBHelper.jsm',
 ]
 
-FAIL_ON_WARNINGS = True
-
-MSVC_ENABLE_PGO = True
-
 LOCAL_INCLUDES += [
     '../battery',
-    '../bluetooth',
+    '../bluetooth/common',
+    '../bluetooth/common/webapi',
     '../events',
     '../media',
     '../network',
@@ -417,7 +437,8 @@ LOCAL_INCLUDES += [
     '/dom/xml',
     '/dom/xslt/xpath',
     '/dom/xul',
-    '/image/src',
+    '/gfx/2d',
+    '/image',
     '/js/xpconnect/src',
     '/js/xpconnect/wrappers',
     '/layout/base',
@@ -426,6 +447,7 @@ LOCAL_INCLUDES += [
     '/layout/svg',
     '/layout/xul',
     '/netwerk/base',
+    '/security/manager/ssl',
     '/widget',
     '/xpcom/ds',
 ]
@@ -454,3 +476,16 @@ if CONFIG['MOZ_BUILD_APP'] in ['browser', 'mobile/android', 'xulrunner']:
 
 if CONFIG['MOZ_X11']:
     CXXFLAGS += CONFIG['TK_CFLAGS']
+
+GENERATED_FILES += [
+    'PropertyUseCounterMap.inc',
+    'UseCounterList.h',
+]
+
+countermap = GENERATED_FILES['PropertyUseCounterMap.inc']
+countermap.script = 'gen-usecounters.py:property_map'
+countermap.inputs = ['UseCounters.conf']
+
+counterlist = GENERATED_FILES['UseCounterList.h']
+counterlist.script = 'gen-usecounters.py:use_counter_list'
+counterlist.inputs = ['UseCounters.conf']

@@ -8,18 +8,19 @@
 #include "nsStreamUtils.h"
 #include "nsThreadUtils.h"
 #include "nsNetUtil.h"
-#include "prlog.h"
+#include "nsNetCID.h"
+#include "nsIBufferedStreams.h"
+#include "nsIRequestObserver.h"
+#include "mozilla/Logging.h"
 
 using namespace mozilla;
 
 #undef LOG
-#if defined(PR_LOGGING)
 //
 // NSPR_LOG_MODULES=nsStreamCopier:5
 //
-static PRLogModuleInfo *gStreamCopierLog = nullptr;
-#endif
-#define LOG(args) PR_LOG(gStreamCopierLog, PR_LOG_DEBUG, args)
+static LazyLogModule gStreamCopierLog("nsStreamCopier");
+#define LOG(args) MOZ_LOG(gStreamCopierLog, mozilla::LogLevel::Debug, args)
 
 /**
  * An event used to perform initialization off the main thread.
@@ -53,7 +54,7 @@ public:
       return NS_OK;
     }
 private:
-      nsRefPtr<nsAsyncStreamCopier> mCopier;
+      RefPtr<nsAsyncStreamCopier> mCopier;
       nsCOMPtr<nsIEventTarget> mTarget;
 };
 
@@ -69,10 +70,6 @@ nsAsyncStreamCopier::nsAsyncStreamCopier()
     , mIsPending(false)
     , mShouldSniffBuffering(false)
 {
-#if defined(PR_LOGGING)
-    if (!gStreamCopierLog)
-        gStreamCopierLog = PR_NewLogModule("nsStreamCopier");
-#endif
     LOG(("Creating nsAsyncStreamCopier @%x\n", this));
 }
 

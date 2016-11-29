@@ -19,6 +19,8 @@
 #include <algorithm>
 #include "prenv.h"
 
+#include "mozilla/WindowsVersion.h"
+
 namespace {
 
 // System pagesize. This value remains constant on x86/64 architectures.
@@ -74,8 +76,9 @@ bool OpenProcessHandle(ProcessId pid, ProcessHandle* handle) {
                                          SYNCHRONIZE,
                                      FALSE, pid);
 
-  if (result == INVALID_HANDLE_VALUE)
+  if (result == NULL) {
     return false;
+  }
 
   *handle = result;
   return true;
@@ -89,8 +92,9 @@ bool OpenPrivilegedProcessHandle(ProcessId pid, ProcessHandle* handle) {
                                          SYNCHRONIZE,
                                      FALSE, pid);
 
-  if (result == INVALID_HANDLE_VALUE)
+  if (result == NULL) {
     return false;
+  }
 
   *handle = result;
   return true;
@@ -292,7 +296,7 @@ bool LaunchApp(const std::wstring& cmdline,
 
   LPPROC_THREAD_ATTRIBUTE_LIST lpAttributeList = NULL;
   // Don't even bother trying pre-Vista...
-  if (win_util::GetWinVersion() >= win_util::WINVERSION_VISTA) {
+  if (mozilla::IsVistaOrLater()) {
     // setup our handle array first - if we end up with no handles that can
     // be inherited we can avoid trying to do the ThreadAttributeList dance...
     HANDLE handlesToInherit[2];

@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -26,7 +27,10 @@ PerformanceResourceTiming::PerformanceResourceTiming(nsPerformanceTiming* aPerfo
                                                      nsPerformance* aPerformance,
                                                      const nsAString& aName)
 : PerformanceEntry(aPerformance, aName, NS_LITERAL_STRING("resource")),
-  mTiming(aPerformanceTiming)
+  mTiming(aPerformanceTiming),
+  mEncodedBodySize(0),
+  mTransferSize(0),
+  mDecodedBodySize(0)
 {
   MOZ_ASSERT(aPerformance, "Parent performance object should be provided");
 }
@@ -43,7 +47,7 @@ PerformanceResourceTiming::StartTime() const
 }
 
 JSObject*
-PerformanceResourceTiming::WrapObject(JSContext* aCx)
+PerformanceResourceTiming::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return PerformanceResourceTimingBinding::Wrap(aCx, this);
+  return PerformanceResourceTimingBinding::Wrap(aCx, this, aGivenProto);
 }

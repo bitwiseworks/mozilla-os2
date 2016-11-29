@@ -10,6 +10,7 @@
 #include "jsfun.h"
 
 #include "jit/JitAllocPolicy.h"
+#include "jit/JitFrames.h"
 #include "jit/Registers.h"
 #include "vm/ScopeObject.h"
 
@@ -221,7 +222,7 @@ class CompileInfo
         nbodyfixed_ = script->nbodyfixed();
         nlocals_ = script->nfixed();
         fixedLexicalBegin_ = script->fixedLexicalBegin();
-        nstack_ = script->nslots() - script->nfixed();
+        nstack_ = Max<unsigned>(script->nslots() - script->nfixed(), MinJITStackSize);
         nslots_ = nimplicit_ + nargs_ + nlocals_ + nstack_;
     }
 
@@ -248,10 +249,13 @@ class CompileInfo
     JSFunction* funMaybeLazy() const {
         return fun_;
     }
+    ModuleObject* module() const {
+        return script_->module();
+    }
     bool constructing() const {
         return constructing_;
     }
-    jsbytecode* osrPc() {
+    jsbytecode* osrPc() const {
         return osrPc_;
     }
     NestedScopeObject* osrStaticScope() const {
@@ -261,7 +265,7 @@ class CompileInfo
         return inlineScriptTree_;
     }
 
-    bool hasOsrAt(jsbytecode* pc) {
+    bool hasOsrAt(jsbytecode* pc) const {
         MOZ_ASSERT(JSOp(*pc) == JSOP_LOOPENTRY);
         return pc == osrPc();
     }
@@ -461,7 +465,7 @@ class CompileInfo
         return scriptNeedsArgsObj_;
     }
     bool argsObjAliasesFormals() const {
-        return scriptNeedsArgsObj_ && !script()->strict();
+        return scriptNeedsArgsObj_ && script()->hasMappedArgsObj();
     }
 
     AnalysisMode analysisMode() const {
@@ -494,7 +498,7 @@ class CompileInfo
         if (slot == thisSlot())
             return true;
 
-        if (funMaybeLazy()->isHeavyweight() && slot == scopeChainSlot())
+        if (funMaybeLazy()->needsCallObject() && slot == scopeChainSlot())
             return true;
 
         // If the function may need an arguments object, then make sure to
@@ -527,7 +531,7 @@ class CompileInfo
     // definition can be optimized away as long as we can compute its values.
     bool isRecoverableOperand(uint32_t slot) const {
         // If this script is not a function, then none of the slots are
-        // obserbavle.  If it this |slot| is not observable, thus we can always
+        // observable.  If it this |slot| is not observable, thus we can always
         // recover it.
         if (!funMaybeLazy())
             return true;

@@ -21,8 +21,8 @@ nsIFrame* NS_NewListBoxBodyFrame(nsIPresShell* aPresShell,
                                  nsStyleContext* aContext);
 
 class nsListBoxBodyFrame final : public nsBoxFrame,
-                                     public nsIScrollbarMediator,
-                                     public nsIReflowCallback
+                                 public nsIScrollbarMediator,
+                                 public nsIReflowCallback
 {
   nsListBoxBodyFrame(nsStyleContext* aContext,
                      nsBoxLayout* aLayoutManager);
@@ -54,17 +54,27 @@ public:
   virtual nsresult AttributeChanged(int32_t aNameSpaceID, nsIAtom* aAttribute, int32_t aModType) override;
 
   // nsIScrollbarMediator
-  virtual void ScrollByPage(nsScrollbarFrame* aScrollbar, int32_t aDirection) override;
-  virtual void ScrollByWhole(nsScrollbarFrame* aScrollbar, int32_t aDirection) override;
-  virtual void ScrollByLine(nsScrollbarFrame* aScrollbar, int32_t aDirection) override;
+  virtual void ScrollByPage(nsScrollbarFrame* aScrollbar, int32_t aDirection,
+                            nsIScrollbarMediator::ScrollSnapMode snapMode
+                              = nsIScrollbarMediator::DISABLE_SNAP) override;
+  virtual void ScrollByWhole(nsScrollbarFrame* aScrollbar, int32_t aDirection,
+                             nsIScrollbarMediator::ScrollSnapMode snapMode
+                               = nsIScrollbarMediator::DISABLE_SNAP) override;
+  virtual void ScrollByLine(nsScrollbarFrame* aScrollbar, int32_t aDirection,
+                            nsIScrollbarMediator::ScrollSnapMode snapMode
+                              = nsIScrollbarMediator::DISABLE_SNAP) override;
   virtual void RepeatButtonScroll(nsScrollbarFrame* aScrollbar) override;
   virtual void ThumbMoved(nsScrollbarFrame* aScrollbar,
                           int32_t aOldPos,
                           int32_t aNewPos) override;
+  virtual void ScrollbarReleased(nsScrollbarFrame* aScrollbar) override {}
   virtual void VisibilityChanged(bool aVisible) override;
   virtual nsIFrame* GetScrollbarBox(bool aVertical) override;
   virtual void ScrollbarActivityStarted() const override {}
   virtual void ScrollbarActivityStopped() const override {}
+  virtual bool IsScrollbarOnRight() const override {
+    return (StyleVisibility()->mDirection == NS_STYLE_DIRECTION_LTR);
+  }
 
 
   // nsIReflowCallback
@@ -112,7 +122,7 @@ public:
   bool ContinueReflow(nscoord height);
   NS_IMETHOD ListBoxAppendFrames(nsFrameList& aFrameList);
   NS_IMETHOD ListBoxInsertFrames(nsIFrame* aPrevFrame, nsFrameList& aFrameList);
-  void OnContentInserted(nsPresContext* aPresContext, nsIContent* aContent);
+  void OnContentInserted(nsIContent* aContent);
   void OnContentRemoved(nsPresContext* aPresContext,  nsIContent* aContainer,
                         nsIFrame* aChildFrame, nsIContent* aOldNextSibling);
 
@@ -168,7 +178,7 @@ protected:
   int32_t ToRowIndex(nscoord aPos) const;
   void RemoveChildFrame(nsBoxLayoutState &aState, nsIFrame *aChild);
 
-  nsTArray< nsRefPtr<nsPositionChangedEvent> > mPendingPositionChangeEvents;
+  nsTArray< RefPtr<nsPositionChangedEvent> > mPendingPositionChangeEvents;
   nsCOMPtr<nsPIBoxObject> mBoxObject;
 
   // frame markers

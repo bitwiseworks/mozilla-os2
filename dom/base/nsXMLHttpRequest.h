@@ -41,7 +41,6 @@
 #undef Status
 #endif
 
-class AsyncVerifyRedirectCallbackForwarder;
 class nsFormData;
 class nsIJARChannel;
 class nsILoadGroup;
@@ -51,9 +50,9 @@ class nsIJSID;
 namespace mozilla {
 
 namespace dom {
+class Blob;
 class BlobSet;
-class File;
-}
+} // namespace dom
 
 // A helper for building up an ArrayBuffer object's data
 // before creating the ArrayBuffer itself.  Will do doubling
@@ -147,7 +146,7 @@ public:
 };
 
 class nsXMLHttpRequestUpload final : public nsXHREventTarget,
-                                         public nsIXMLHttpRequestUpload
+                                     public nsIXMLHttpRequestUpload
 {
 public:
   explicit nsXMLHttpRequestUpload(mozilla::DOMEventTargetHelper* aOwner)
@@ -160,7 +159,7 @@ public:
   NS_REALLY_FORWARD_NSIDOMEVENTTARGET(nsXHREventTarget)
   NS_DECL_NSIXMLHTTPREQUESTUPLOAD
 
-  virtual JSObject* WrapObject(JSContext *cx) override;
+  virtual JSObject* WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto) override;
   nsISupports* GetParentObject()
   {
     return GetOwner();
@@ -180,15 +179,15 @@ class nsXMLHttpRequestXPCOMifier;
 // Make sure that any non-DOM interfaces added here are also added to
 // nsXMLHttpRequestXPCOMifier.
 class nsXMLHttpRequest final : public nsXHREventTarget,
-                                   public nsIXMLHttpRequest,
-                                   public nsIJSXMLHttpRequest,
-                                   public nsIStreamListener,
-                                   public nsIChannelEventSink,
-                                   public nsIProgressEventSink,
-                                   public nsIInterfaceRequestor,
-                                   public nsSupportsWeakReference,
-                                   public nsITimerCallback,
-                                   public nsISizeOfEventTarget
+                               public nsIXMLHttpRequest,
+                               public nsIJSXMLHttpRequest,
+                               public nsIStreamListener,
+                               public nsIChannelEventSink,
+                               public nsIProgressEventSink,
+                               public nsIInterfaceRequestor,
+                               public nsSupportsWeakReference,
+                               public nsITimerCallback,
+                               public nsISizeOfEventTarget
 {
   friend class nsXHRParseEndListener;
   friend class nsXMLHttpRequestXPCOMifier;
@@ -196,9 +195,9 @@ class nsXMLHttpRequest final : public nsXHREventTarget,
 public:
   nsXMLHttpRequest();
 
-  virtual JSObject* WrapObject(JSContext *cx) override
+  virtual JSObject* WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto) override
   {
-    return mozilla::dom::XMLHttpRequestBinding::Wrap(cx, this);
+    return mozilla::dom::XMLHttpRequestBinding::Wrap(cx, this, aGivenProto);
   }
   nsISupports* GetParentObject()
   {
@@ -220,7 +219,7 @@ public:
       return nullptr;
     }
 
-    nsRefPtr<nsXMLHttpRequest> req = new nsXMLHttpRequest();
+    RefPtr<nsXMLHttpRequest> req = new nsXMLHttpRequest();
     req->Construct(principal->GetPrincipal(), global);
     req->InitParameters(aParams.mMozAnon, aParams.mMozSystem);
     return req.forget();
@@ -352,7 +351,7 @@ private:
     {
       mValue.mArrayBufferView = aArrayBufferView;
     }
-    explicit RequestBody(mozilla::dom::File& aBlob) : mType(Blob)
+    explicit RequestBody(mozilla::dom::Blob& aBlob) : mType(Blob)
     {
       mValue.mBlob = &aBlob;
     }
@@ -386,7 +385,7 @@ private:
     union Value {
       const mozilla::dom::ArrayBuffer* mArrayBuffer;
       const mozilla::dom::ArrayBufferView* mArrayBufferView;
-      mozilla::dom::File* mBlob;
+      mozilla::dom::Blob* mBlob;
       nsIDocument* mDocument;
       const nsAString* mString;
       nsFormData* mFormData;
@@ -426,7 +425,13 @@ private:
     return Send(Nullable<RequestBody>(aBody));
   }
 
-  bool IsDeniedCrossSiteRequest();
+  bool IsCrossSiteCORSRequest();
+  bool IsDeniedCrossSiteCORSRequest();
+
+  // Tell our channel what network interface ID we were told to use.
+  // If it's an HTTP channel and we were told to use a non-default
+  // interface ID.
+  void PopulateNetworkInterfaceId();
 
 public:
   void Send(JSContext* /*aCx*/, ErrorResult& aRv)
@@ -445,7 +450,7 @@ public:
   {
     aRv = Send(RequestBody(&aArrayBufferView));
   }
-  void Send(JSContext* /*aCx*/, mozilla::dom::File& aBlob, ErrorResult& aRv)
+  void Send(JSContext* /*aCx*/, mozilla::dom::Blob& aBlob, ErrorResult& aRv)
   {
     aRv = Send(RequestBody(aBlob));
   }
@@ -488,7 +493,6 @@ public:
     }
     aRv = Send(RequestBody(aStream));
   }
-  void SendAsBinary(const nsAString& aBody, ErrorResult& aRv);
 
   void Abort();
 
@@ -537,6 +541,16 @@ public:
   nsIChannel* GetChannel()
   {
     return mChannel;
+  }
+
+  void GetNetworkInterfaceId(nsACString& aId) const
+  {
+    aId = mNetworkInterfaceId;
+  }
+
+  void SetNetworkInterfaceId(const nsACString& aId)
+  {
+    mNetworkInterfaceId = aId;
   }
 
   // We need a GetInterface callable from JS for chrome JS
@@ -591,8 +605,8 @@ protected:
                 uint32_t count,
                 uint32_t *writeCount);
   nsresult CreateResponseParsedJSON(JSContext* aCx);
-  void CreatePartialBlob();
-  bool CreateDOMFile(nsIRequest *request);
+  void CreatePartialBlob(ErrorResult& aRv);
+  bool CreateDOMBlob(nsIRequest *request);
   // Change the state of the object with this. The broadcast argument
   // determines if the onreadystatechange listener should be called.
   nsresult ChangeState(uint32_t aState, bool aBroadcast = true);
@@ -606,18 +620,9 @@ protected:
 
   void ChangeStateToDone();
 
-  /**
-   * Check if aChannel is ok for a cross-site request by making sure no
-   * inappropriate headers are set, and no username/password is set.
-   *
-   * Also updates the XML_HTTP_REQUEST_USE_XSITE_AC bit.
-   */
-  nsresult CheckChannelForCrossSiteRequest(nsIChannel* aChannel);
-
   void StartProgressEventTimer();
 
-  friend class AsyncVerifyRedirectCallbackForwarder;
-  void OnRedirectVerifyCallback(nsresult result);
+  nsresult OnRedirectVerifyCallback(nsresult result);
 
   nsresult Open(const nsACString& method, const nsACString& url, bool async,
                 const mozilla::dom::Optional<nsAString>& user,
@@ -629,13 +634,13 @@ protected:
   nsCOMPtr<nsIPrincipal> mPrincipal;
   nsCOMPtr<nsIChannel> mChannel;
   nsCOMPtr<nsIDocument> mResponseXML;
-  nsCOMPtr<nsIChannel> mCORSPreflightChannel;
   nsTArray<nsCString> mCORSUnsafeHeaders;
 
   nsCOMPtr<nsIStreamListener> mXMLParserStreamListener;
 
   // used to implement getAllResponseHeaders()
-  class nsHeaderVisitor : public nsIHttpHeaderVisitor {
+  class nsHeaderVisitor : public nsIHttpHeaderVisitor
+  {
   public:
     NS_DECL_ISUPPORTS
     NS_DECL_NSIHTTPHEADERVISITOR
@@ -693,12 +698,12 @@ protected:
 
   // It is either a cached blob-response from the last call to GetResponse,
   // but is also explicitly set in OnStopRequest.
-  nsRefPtr<mozilla::dom::File> mResponseBlob;
+  RefPtr<mozilla::dom::Blob> mResponseBlob;
   // Non-null only when we are able to get a os-file representation of the
   // response, i.e. when loading from a file.
-  nsRefPtr<mozilla::dom::File> mDOMFile;
+  RefPtr<mozilla::dom::Blob> mDOMBlob;
   // We stream data to mBlobSet when response type is "blob" or "moz-blob"
-  // and mDOMFile is null.
+  // and mDOMBlob is null.
   nsAutoPtr<mozilla::dom::BlobSet> mBlobSet;
 
   nsString mOverrideMimeType;
@@ -723,7 +728,7 @@ protected:
 
   uint32_t mState;
 
-  nsRefPtr<nsXMLHttpRequestUpload> mUpload;
+  RefPtr<nsXMLHttpRequestUpload> mUpload;
   int64_t mUploadTransferred;
   int64_t mUploadTotal;
   bool mUploadLengthComputable;
@@ -761,6 +766,10 @@ protected:
 
   bool mIsSystem;
   bool mIsAnon;
+
+  // A platform-specific identifer to represent the network interface
+  // that this request is associated with.
+  nsCString mNetworkInterfaceId;
 
   /**
    * Close the XMLHttpRequest's channels and dispatch appropriate progress
@@ -821,10 +830,11 @@ private:
 // A shim class designed to expose the non-DOM interfaces of
 // XMLHttpRequest via XPCOM stuff.
 class nsXMLHttpRequestXPCOMifier final : public nsIStreamListener,
-                                             public nsIChannelEventSink,
-                                             public nsIProgressEventSink,
-                                             public nsIInterfaceRequestor,
-                                             public nsITimerCallback
+                                         public nsIChannelEventSink,
+                                         public nsIAsyncVerifyRedirectCallback,
+                                         public nsIProgressEventSink,
+                                         public nsIInterfaceRequestor,
+                                         public nsITimerCallback
 {
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(nsXMLHttpRequestXPCOMifier,
@@ -846,13 +856,14 @@ public:
   NS_FORWARD_NSISTREAMLISTENER(mXHR->)
   NS_FORWARD_NSIREQUESTOBSERVER(mXHR->)
   NS_FORWARD_NSICHANNELEVENTSINK(mXHR->)
+  NS_FORWARD_NSIASYNCVERIFYREDIRECTCALLBACK(mXHR->)
   NS_FORWARD_NSIPROGRESSEVENTSINK(mXHR->)
   NS_FORWARD_NSITIMERCALLBACK(mXHR->)
 
   NS_DECL_NSIINTERFACEREQUESTOR
 
 private:
-  nsRefPtr<nsXMLHttpRequest> mXHR;
+  RefPtr<nsXMLHttpRequest> mXHR;
 };
 
 class nsXHRParseEndListener : public nsIDOMEventListener

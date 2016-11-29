@@ -3,13 +3,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-// Explicitly set the default version.
-// See https://bugzilla.mozilla.org/show_bug.cgi?id=522760#c11
-if (typeof version != 'undefined')
-{
-  version(0);
-}
-
 var STATUS = "STATUS: ";
 var VERBOSE = false;
 var SECT_PREFIX = 'Section ';
@@ -535,8 +528,6 @@ function BigO(data)
     }
     return deriv;
   }
-
-  return 0;
 }
 
 function compareSource(expect, actual, summary)

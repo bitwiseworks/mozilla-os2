@@ -51,12 +51,12 @@ public:
   virtual int32_t Release() override;
 
   virtual int32_t SetChannelParameters(uint32_t aPacketLossRate,
-                                       int aRoundTripTimeMs) override;
+                                       int64_t aRoundTripTimeMs) override;
 
   virtual int32_t SetRates(uint32_t aBitRate, uint32_t aFrameRate) override;
 
 private:
-  RefPtr<android::OMXVideoEncoder> mOMX;
+  nsAutoPtr<android::OMXVideoEncoder> mOMX;
   android::sp<android::OMXCodecReservation> mReservation;
 
   webrtc::EncodedImageCallback* mCallback;

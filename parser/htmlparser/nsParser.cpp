@@ -28,7 +28,6 @@
 #include "nsIFragmentContentSink.h"
 #include "nsStreamUtils.h"
 #include "nsHTMLTokenizer.h"
-#include "nsNetUtil.h"
 #include "nsScriptLoader.h"
 #include "nsDataHashtable.h"
 #include "nsXPCOMCIDInternal.h"
@@ -112,7 +111,7 @@ For more details @see bugzilla bug 76722
 class nsParserContinueEvent : public nsRunnable
 {
 public:
-  nsRefPtr<nsParser> mParser;
+  RefPtr<nsParser> mParser;
 
   explicit nsParserContinueEvent(nsParser* aParser)
     : mParser(aParser)
@@ -1051,8 +1050,8 @@ nsParser::ContinueInterruptedParsing()
                         mParserContext->mStreamListenerState == eOnStop;
 
   mProcessingNetworkData = true;
-  if (mSink) {
-    mSink->WillParse();
+  if (sinkDeathGrip) {
+    sinkDeathGrip->WillParse();
   }
   result = ResumeParse(true, isFinalChunk); // Ref. bug 57999
   mProcessingNetworkData = false;
@@ -1837,8 +1836,8 @@ nsParser::OnDataAvailable(nsIRequest *request, nsISupports* aContext,
       nsCOMPtr<nsIParser> kungFuDeathGrip(this);
       nsCOMPtr<nsIContentSink> sinkDeathGrip(mSink);
       mProcessingNetworkData = true;
-      if (mSink) {
-        mSink->WillParse();
+      if (sinkDeathGrip) {
+        sinkDeathGrip->WillParse();
       }
       rv = ResumeParse();
       mProcessingNetworkData = false;

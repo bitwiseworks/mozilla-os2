@@ -115,9 +115,7 @@ nsMathMLmoFrame::ProcessTextData()
   mFlags = 0;
 
   nsAutoString data;
-  if (!nsContentUtils::GetNodeTextContent(mContent, false, data)) {
-    NS_RUNTIMEABORT("OOM");
-  }
+  nsContentUtils::GetNodeTextContent(mContent, false, data);
 
   data.CompressWhitespace();
   int32_t length = data.Length();
@@ -135,7 +133,7 @@ nsMathMLmoFrame::ProcessTextData()
   nsPresContext* presContext = PresContext();
   if (mFrames.GetLength() != 1) {
     data.Truncate(); // empty data to reset the char
-    mMathMLChar.SetData(presContext, data);
+    mMathMLChar.SetData(data);
     ResolveMathMLCharStyle(presContext, mContent, mStyleContext, &mMathMLChar);
     return;
   }
@@ -179,7 +177,7 @@ nsMathMLmoFrame::ProcessTextData()
   }
 
   // cache the operator
-  mMathMLChar.SetData(presContext, data);
+  mMathMLChar.SetData(data);
 
   // cache the native direction -- beware of bug 133429...
   // mEmbellishData.direction must always retain our native direction, whereas
@@ -364,7 +362,7 @@ nsMathMLmoFrame::ProcessOperatorData()
       // Cache the default values of lspace and rspace.
       // since these values are relative to the 'em' unit, convert to twips now
       nscoord em;
-      nsRefPtr<nsFontMetrics> fm;
+      RefPtr<nsFontMetrics> fm;
       nsLayoutUtils::GetFontMetricsForFrame(this, getter_AddRefs(fm),
                                             fontSizeInflation);
       GetEmHeight(fm, em);
@@ -455,8 +453,9 @@ nsMathMLmoFrame::ProcessOperatorData()
   mEmbellishData.trailingSpace = trailingSpace;
 
   // Now see if there are user-defined attributes that override the dictionary.
-  // XXX If an attribute can be forced to be true when it is false in the
-  // dictionary, then the following code has to change...
+  // XXX Bug 1197771 - forcing an attribute to true when it is false in the
+  // dictionary can cause conflicts in the rest of the stretching algorithms
+  // (e.g. all largeops are assumed to have a vertical direction)
 
   // For each attribute overriden by the user, turn off its bit flag.
   // symmetric|movablelimits|separator|largeop|accent|fence|stretchy|form
@@ -473,6 +472,8 @@ nsMathMLmoFrame::ProcessOperatorData()
     mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::fence_, value);
     if (value.EqualsLiteral("false"))
       mFlags &= ~NS_MATHML_OPERATOR_FENCE;
+    else
+      mEmbellishData.flags |= NS_MATHML_EMBELLISH_FENCE;
   }
   mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::largeop_, value);
   if (value.EqualsLiteral("false")) {
@@ -484,6 +485,8 @@ nsMathMLmoFrame::ProcessOperatorData()
     mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::separator_, value);
     if (value.EqualsLiteral("false"))
       mFlags &= ~NS_MATHML_OPERATOR_SEPARATOR;
+    else
+      mEmbellishData.flags |= NS_MATHML_EMBELLISH_SEPARATOR;
   }
   mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::symmetric_, value);
   if (value.EqualsLiteral("false"))
@@ -616,7 +619,7 @@ nsMathMLmoFrame::Stretch(nsRenderingContext& aRenderingContext,
 
   // get the axis height;
   float fontSizeInflation = nsLayoutUtils::FontSizeInflationFor(this);
-  nsRefPtr<nsFontMetrics> fm;
+  RefPtr<nsFontMetrics> fm;
   nsLayoutUtils::GetFontMetricsForFrame(this, getter_AddRefs(fm),
                                         fontSizeInflation);
   nscoord axisHeight, height;
@@ -1035,7 +1038,8 @@ nsMathMLmoFrame::MarkIntrinsicISizesDirty()
 }
 
 /* virtual */ void
-nsMathMLmoFrame::GetIntrinsicISizeMetrics(nsRenderingContext *aRenderingContext, nsHTMLReflowMetrics& aDesiredSize)
+nsMathMLmoFrame::GetIntrinsicISizeMetrics(nsRenderingContext* aRenderingContext,
+                                          nsHTMLReflowMetrics& aDesiredSize)
 {
   ProcessOperatorData();
   if (UseMathMLChar()) {
@@ -1044,8 +1048,7 @@ nsMathMLmoFrame::GetIntrinsicISizeMetrics(nsRenderingContext *aRenderingContext,
     aDesiredSize.Width() = mMathMLChar.
       GetMaxWidth(PresContext(), *aRenderingContext,
                   nsLayoutUtils::FontSizeInflationFor(this),
-                  stretchHint, mMaxSize,
-                  NS_MATHML_OPERATOR_MAXSIZE_IS_ABSOLUTE(mFlags));
+                  stretchHint);
   }
   else {
     nsMathMLTokenFrame::GetIntrinsicISizeMetrics(aRenderingContext,

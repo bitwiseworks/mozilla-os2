@@ -30,16 +30,10 @@ config = {
                 os.getcwd(), 'build', 'tools', 'buildfarm', 'utils', 'hgtool.py'
             )
         ],
-        "buildbot": {
-            'gpo_location': [
-                sys.executable,
-                'c:\\mozilla-build\\buildbotve\\scripts\\buildbot'
-            ],
-            'puppet_location': [
-                sys.executable,
-                'c:\\mozilla-build\\buildbot-0.8.4-pre-moz6\\scripts\\buildbot'
-            ]
-        },
+        "buildbot": [
+            sys.executable,
+            'c:\\mozilla-build\\buildbotve\\scripts\\buildbot'
+        ],
         "make": [
             sys.executable,
             os.path.join(
@@ -54,7 +48,7 @@ config = {
     'app_ini_path': '%(obj_dir)s/dist/bin/application.ini',
     # decides whether we want to use moz_sign_cmd in env
     'enable_signing': True,
-    'purge_skip': ['info', 'rel-*:45d', 'tb-rel-*:45d'],
+    'purge_skip': ['info', 'rel-*:10d', 'tb-rel-*:10d'],
     'purge_basedirs':  [],
     'enable_ccache': False,
     'vcs_share_base': 'C:/builds/hg-shared',
@@ -74,6 +68,7 @@ config = {
     'base_name': 'WINNT_5.2_%(branch)s',
     'platform': 'win32',
     'stage_platform': 'win32',
+    'publish_nightly_en_US_routes': True,
     'env': {
         'MOZBUILD_STATE_PATH': os.path.join(os.getcwd(), '.mozbuild'),
         'MOZ_AUTOMATION': '1',
@@ -81,7 +76,7 @@ config = {
         'HG_SHARE_BASE_DIR': 'C:/builds/hg-shared',
         'MOZ_CRASHREPORTER_NO_REPORT': '1',
         'MOZ_OBJDIR': 'obj-firefox',
-        'PATH': 'C:/mozilla-build/nsis-3.0b1;C:/mozilla-build/nsis-2.46u;C:/mozilla-build/python27;'
+        'PATH': 'C:/mozilla-build/nsis-3.0b1;C:/mozilla-build/python27;'
                 'C:/mozilla-build/buildbotve/scripts;'
                 '%s' % (os.environ.get('path')),
         'PDBSTR_PATH': '/c/Program Files (x86)/Windows Kits/8.0/Debuggers/x64/srcsrv/pdbstr.exe',

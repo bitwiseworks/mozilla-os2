@@ -16,7 +16,7 @@ using namespace js::jit;
 namespace js {
 namespace jit {
 
-OptimizationInfos js_IonOptimizations;
+OptimizationInfos IonOptimizations;
 
 void
 OptimizationInfo::initNormalOptimizationInfo()
@@ -28,16 +28,22 @@ OptimizationInfo::initNormalOptimizationInfo()
     eliminateRedundantChecks_ = true;
     inlineInterpreted_ = true;
     inlineNative_ = true;
+    eagerSimdUnbox_ = true;
     gvn_ = true;
     licm_ = true;
     rangeAnalysis_ = true;
     loopUnrolling_ = true;
+    reordering_ = true;
     autoTruncate_ = true;
+    sincos_ = true;
     sink_ = true;
-    registerAllocator_ = RegisterAllocator_LSRA;
+    registerAllocator_ = RegisterAllocator_Backtracking;
 
-    inlineMaxTotalBytecodeLength_ = 1000;
-    inliningMaxCallerBytecodeLength_ = 10000;
+    inlineMaxBytecodePerCallSiteMainThread_ = 500;
+    inlineMaxBytecodePerCallSiteOffThread_ = 1000;
+    inlineMaxCalleeInlinedBytecodeLength_ = 3350;
+    inlineMaxTotalBytecodeLength_ = 80000;
+    inliningMaxCallerBytecodeLength_ = 1500;
     maxInlineDepth_ = 3;
     scalarReplacement_ = true;
     smallFunctionMaxInlineDepth_ = 10;
@@ -55,10 +61,13 @@ OptimizationInfo::initAsmjsOptimizationInfo()
     // Take normal option values for not specified values.
     initNormalOptimizationInfo();
 
+    ama_ = true;
     level_ = Optimization_AsmJS;
+    eagerSimdUnbox_ = false;           // AsmJS has no boxing / unboxing.
     edgeCaseAnalysis_ = false;
     eliminateRedundantChecks_ = false;
     autoTruncate_ = false;
+    sincos_ = false;
     sink_ = false;
     registerAllocator_ = RegisterAllocator_Backtracking;
     scalarReplacement_ = false;        // AsmJS has no objects.
@@ -73,8 +82,8 @@ OptimizationInfo::compilerWarmUpThreshold(JSScript* script, jsbytecode* pc) cons
         pc = nullptr;
 
     uint32_t warmUpThreshold = compilerWarmUpThreshold_;
-    if (js_JitOptions.forcedDefaultIonWarmUpThreshold.isSome())
-        warmUpThreshold = js_JitOptions.forcedDefaultIonWarmUpThreshold.ref();
+    if (JitOptions.forcedDefaultIonWarmUpThreshold.isSome())
+        warmUpThreshold = JitOptions.forcedDefaultIonWarmUpThreshold.ref();
 
     // If the script is too large to compile on the main thread, we can still
     // compile it off thread. In these cases, increase the warm-up counter
@@ -88,7 +97,7 @@ OptimizationInfo::compilerWarmUpThreshold(JSScript* script, jsbytecode* pc) cons
     if (numLocalsAndArgs > MAX_MAIN_THREAD_LOCALS_AND_ARGS)
         warmUpThreshold *= (numLocalsAndArgs / (double) MAX_MAIN_THREAD_LOCALS_AND_ARGS);
 
-    if (!pc || js_JitOptions.eagerCompilation)
+    if (!pc || JitOptions.eagerCompilation)
         return warmUpThreshold;
 
     // It's more efficient to enter outer loops, rather than inner loops, via OSR.

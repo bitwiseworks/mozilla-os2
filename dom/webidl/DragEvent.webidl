@@ -4,11 +4,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
+[Constructor(DOMString type, optional DragEventInit eventInitDict)]
 interface DragEvent : MouseEvent
 {
   readonly attribute DataTransfer? dataTransfer;
 
-  [Throws]
   void initDragEvent(DOMString type,
                      boolean canBubble,
                      boolean cancelable,
@@ -25,4 +25,9 @@ interface DragEvent : MouseEvent
                      unsigned short aButton,
                      EventTarget? aRelatedTarget,
                      DataTransfer? aDataTransfer);
+};
+
+dictionary DragEventInit : MouseEventInit
+{
+  DataTransfer? dataTransfer = null;
 };

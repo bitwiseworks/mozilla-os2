@@ -11,6 +11,7 @@
 
 #include "nsIMutableArray.h"
 #include "nsComponentManagerUtils.h"
+#include "nsQueryObject.h"
 
 using namespace mozilla;
 using namespace mozilla::a11y;
@@ -98,7 +99,7 @@ xpcAccessibleTextRange::Compare(nsIAccessibleTextRange* aOtherRange,
                                 bool* aResult)
 {
 
-  nsRefPtr<xpcAccessibleTextRange> xpcRange(do_QueryObject(aOtherRange));
+  RefPtr<xpcAccessibleTextRange> xpcRange(do_QueryObject(aOtherRange));
   if (!xpcRange || !aResult)
     return NS_ERROR_INVALID_ARG;
 
@@ -112,7 +113,7 @@ xpcAccessibleTextRange::CompareEndPoints(uint32_t aEndPoint,
                                          uint32_t aOtherRangeEndPoint,
                                          int32_t* aResult)
 {
-  nsRefPtr<xpcAccessibleTextRange> xpcRange(do_QueryObject(aOtherRange));
+  RefPtr<xpcAccessibleTextRange> xpcRange(do_QueryObject(aOtherRange));
   if (!xpcRange || !aResult)
     return NS_ERROR_INVALID_ARG;
 

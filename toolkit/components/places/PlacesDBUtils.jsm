@@ -67,7 +67,6 @@ this.PlacesDBUtils = {
       }
 
       // Notify observers that maintenance finished.
-      Services.prefs.setIntPref("places.database.lastMaintenance", parseInt(Date.now() / 1000));
       Services.obs.notifyObservers(null, FINISHED_MAINTENANCE_TOPIC, null);
     }
   },
@@ -94,7 +93,12 @@ this.PlacesDBUtils = {
     , this._refreshUI
     ]);
     tasks._telemetryStart = Date.now();
-    tasks.callback = aCallback;
+    tasks.callback = function() {
+      Services.prefs.setIntPref("places.database.lastMaintenance",
+                                parseInt(Date.now() / 1000));
+      if (aCallback)
+        aCallback();
+    }
     tasks.scope = aScope;
     this._executeTasks(tasks);
   },
@@ -184,8 +188,9 @@ this.PlacesDBUtils = {
    * @param [optional] aTasks
    *        Tasks object to execute.
    */
-  _checkIntegritySkipReindex: function PDBU__checkIntegritySkipReindex(aTasks)
-    this.checkIntegrity(aTasks, true),
+  _checkIntegritySkipReindex: function PDBU__checkIntegritySkipReindex(aTasks) {
+    return this.checkIntegrity(aTasks, true);
+  },
 
   /**
    * Checks integrity and tries to fix the database through a reindex.
@@ -273,7 +278,7 @@ this.PlacesDBUtils = {
         PlacesDBUtils._executeTasks(tasks);
       }
     });
-    stmts.forEach(function (aStmt) aStmt.finalize());
+    stmts.forEach(aStmt => aStmt.finalize());
   },
 
   _getBoundCoherenceStatements: function PDBU__getBoundCoherenceStatements()
@@ -474,23 +479,6 @@ this.PlacesDBUtils = {
     fixOrphanItems.params["tagsGuid"] = PlacesUtils.bookmarks.tagsGuid;
     cleanupStatements.push(fixOrphanItems);
 
-    // D.5 fix wrong keywords
-    let fixInvalidKeywords = DBConn.createAsyncStatement(
-      `UPDATE moz_bookmarks SET keyword_id = NULL WHERE guid NOT IN (
-         :rootGuid, :menuGuid, :toolbarGuid, :unfiledGuid, :tagsGuid  /* skip roots */
-       ) AND id IN (
-         SELECT id FROM moz_bookmarks b
-         WHERE keyword_id NOT NULL
-           AND NOT EXISTS
-             (SELECT id FROM moz_keywords WHERE id = b.keyword_id LIMIT 1)
-       )`);
-    fixInvalidKeywords.params["rootGuid"] = PlacesUtils.bookmarks.rootGuid;
-    fixInvalidKeywords.params["menuGuid"] = PlacesUtils.bookmarks.menuGuid;
-    fixInvalidKeywords.params["toolbarGuid"] = PlacesUtils.bookmarks.toolbarGuid;
-    fixInvalidKeywords.params["unfiledGuid"] = PlacesUtils.bookmarks.unfiledGuid;
-    fixInvalidKeywords.params["tagsGuid"] = PlacesUtils.bookmarks.tagsGuid;
-    cleanupStatements.push(fixInvalidKeywords);
-
     // D.6 fix wrong item types
     //     Folders and separators should not have an fk.
     //     If they have a valid fk convert them to bookmarks. Later in D.9 we
@@ -681,7 +669,7 @@ this.PlacesDBUtils = {
       `DELETE FROM moz_keywords WHERE id IN (
          SELECT id FROM moz_keywords k
          WHERE NOT EXISTS
-           (SELECT id FROM moz_bookmarks WHERE keyword_id = k.id LIMIT 1)
+           (SELECT 1 FROM moz_places h WHERE k.place_id = h.id)
        )`);
     cleanupStatements.push(deleteUnusedKeywords);
 
@@ -1133,7 +1121,10 @@ Tasks.prototype = {
    *
    * @return next task or undefined if no task is left.
    */
-  pop: function T_pop() this._list.shift(),
+  pop: function T_pop()
+  {
+    return this._list.shift();
+  },
 
   /**
    * Removes all tasks.
@@ -1146,7 +1137,10 @@ Tasks.prototype = {
   /**
    * Returns array of tasks ordered from the next to be run to the latest.
    */
-  get list() this._list.slice(0, this._list.length),
+  get list()
+  {
+    return this._list.slice(0, this._list.length);
+  },
 
   /**
    * Adds a message to the log.
@@ -1162,5 +1156,8 @@ Tasks.prototype = {
   /**
    * Returns array of log messages ordered from oldest to newest.
    */
-  get messages() this._log.slice(0, this._log.length),
+  get messages()
+  {
+    return this._log.slice(0, this._log.length);
+  },
 }

@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -34,10 +35,10 @@ class HTMLFormControlsCollection;
 class HTMLImageElement;
 
 class HTMLFormElement final : public nsGenericHTMLElement,
-                                  public nsIDOMHTMLFormElement,
-                                  public nsIWebProgressListener,
-                                  public nsIForm,
-                                  public nsIRadioGroupContainer
+                              public nsIDOMHTMLFormElement,
+                              public nsIWebProgressListener,
+                              public nsIForm,
+                              public nsIRadioGroupContainer
 {
   friend class HTMLFormControlsCollection;
 
@@ -410,7 +411,7 @@ public:
   void RequestAutocomplete();
 
 protected:
-  virtual JSObject* WrapNode(JSContext* aCx) override;
+  virtual JSObject* WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   void PostPasswordEvent();
   void EventHandled() { mFormPasswordEventDispatcher = nullptr; }
@@ -430,7 +431,7 @@ protected:
     }
   };
 
-  nsRefPtr<FormPasswordEventDispatcher> mFormPasswordEventDispatcher;
+  RefPtr<FormPasswordEventDispatcher> mFormPasswordEventDispatcher;
 
   class RemoveElementRunnable;
   friend class RemoveElementRunnable;
@@ -447,11 +448,11 @@ protected:
     }
 
   private:
-    nsRefPtr<HTMLFormElement> mForm;
+    RefPtr<HTMLFormElement> mForm;
   };
 
   nsresult DoSubmitOrReset(WidgetEvent* aEvent,
-                           int32_t aMessage);
+                           EventMessage aMessage);
   nsresult DoReset();
 
   // Async callback to handle removal of our default submit
@@ -560,7 +561,7 @@ protected:
   // Data members
   //
   /** The list of controls (form.elements as well as stuff not in elements) */
-  nsRefPtr<HTMLFormControlsCollection> mControls;
+  RefPtr<HTMLFormControlsCollection> mControls;
   /** The currently selected radio button of each group */
   nsRefPtrHashtable<nsStringCaseInsensitiveHashKey, HTMLInputElement> mSelectedRadioButtons;
   /** The number of required radio button of each group */

@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -46,9 +48,9 @@ Crypto::Init(nsIGlobalObject* aParent)
 }
 
 /* virtual */ JSObject*
-Crypto::WrapObject(JSContext* aCx)
+Crypto::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return CryptoBinding::Wrap(aCx, this);
+  return CryptoBinding::Wrap(aCx, this, aGivenProto);
 }
 
 void
@@ -59,6 +61,12 @@ Crypto::GetRandomValues(JSContext* aCx, const ArrayBufferView& aArray,
   MOZ_ASSERT(NS_IsMainThread(), "Called on the wrong thread");
 
   JS::Rooted<JSObject*> view(aCx, aArray.Obj());
+
+  if (JS_IsTypedArrayObject(view) && JS_GetTypedArraySharedness(view)) {
+    // Throw if the object is mapping shared memory (must opt in).
+    aRv.ThrowTypeError<MSG_TYPEDARRAY_IS_SHARED>(NS_LITERAL_STRING("Argument of Crypto.getRandomValues"));
+    return;
+  }
 
   // Throw if the wrong type of ArrayBufferView is passed in
   // (Part of the Web Crypto API spec)
@@ -89,7 +97,7 @@ Crypto::GetRandomValues(JSContext* aCx, const ArrayBufferView& aArray,
 
   uint8_t* data = aArray.Data();
 
-  if (XRE_GetProcessType() != GeckoProcessType_Default) {
+  if (!XRE_IsParentProcess()) {
     InfallibleTArray<uint8_t> randomValues;
     // Tell the parent process to generate random values via PContent
     ContentChild* cc = ContentChild::GetSingleton();
@@ -110,7 +118,7 @@ Crypto::GetRandomValues(JSContext* aCx, const ArrayBufferView& aArray,
     }
 
     memcpy(data, buf, dataLen);
-    NS_Free(buf);
+    free(buf);
   }
 
   aRetval.set(view);

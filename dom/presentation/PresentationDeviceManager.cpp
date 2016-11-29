@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -20,8 +21,8 @@ namespace dom {
 NS_IMPL_ISUPPORTS(PresentationDeviceManager,
                   nsIPresentationDeviceManager,
                   nsIPresentationDeviceListener,
-                  nsIPresentationDeviceEventListener,
-                  nsIObserver)
+                  nsIObserver,
+                  nsISupportsWeakReference)
 
 PresentationDeviceManager::PresentationDeviceManager()
 {
@@ -31,6 +32,28 @@ PresentationDeviceManager::~PresentationDeviceManager()
 {
   UnloadDeviceProviders();
   mDevices.Clear();
+}
+
+void
+PresentationDeviceManager::Init()
+{
+  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
+  if (obs) {
+    obs->AddObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID, false);
+  }
+
+  LoadDeviceProviders();
+}
+
+void
+PresentationDeviceManager::Shutdown()
+{
+  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
+  if (obs) {
+    obs->RemoveObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID);
+  }
+
+  UnloadDeviceProviders();
 }
 
 void
@@ -129,6 +152,11 @@ PresentationDeviceManager::GetAvailableDevices(nsIArray** aRetVal)
   NS_ENSURE_ARG_POINTER(aRetVal);
   MOZ_ASSERT(NS_IsMainThread());
 
+  // Bug 1194049: some providers may discontinue discovery after timeout.
+  // Call |ForceDiscovery()| here to make sure device lists are updated.
+  NS_DispatchToMainThread(
+      NS_NewRunnableMethod(this, &PresentationDeviceManager::ForceDiscovery));
+
   nsCOMPtr<nsIMutableArray> devices = do_CreateInstance(NS_ARRAY_CONTRACTID);
   for (uint32_t i = 0; i < mDevices.Length(); ++i) {
     devices->AppendElement(mDevices[i], false);
@@ -151,7 +179,6 @@ PresentationDeviceManager::AddDevice(nsIPresentationDevice* aDevice)
   }
 
   mDevices.AppendElement(aDevice);
-  aDevice->SetListener(this);
 
   NotifyDeviceChange(aDevice, MOZ_UTF16("add"));
 
@@ -169,7 +196,6 @@ PresentationDeviceManager::RemoveDevice(nsIPresentationDevice* aDevice)
     return NS_ERROR_FAILURE;
   }
 
-  mDevices[index]->SetListener(nullptr);
   mDevices.RemoveElementAt(index);
 
   NotifyDeviceChange(aDevice, MOZ_UTF16("remove"));
@@ -192,7 +218,6 @@ PresentationDeviceManager::UpdateDevice(nsIPresentationDevice* aDevice)
   return NS_OK;
 }
 
-// nsIPresentationDeviceListener
 NS_IMETHODIMP
 PresentationDeviceManager::OnSessionRequest(nsIPresentationDevice* aDevice,
                                             const nsAString& aUrl,
@@ -205,7 +230,7 @@ PresentationDeviceManager::OnSessionRequest(nsIPresentationDevice* aDevice,
   nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
   NS_ENSURE_TRUE(obs, NS_ERROR_FAILURE);
 
-  nsRefPtr<PresentationSessionRequest> request =
+  RefPtr<PresentationSessionRequest> request =
     new PresentationSessionRequest(aDevice, aUrl, aPresentationId, aControlChannel);
   obs->NotifyObservers(request,
                        PRESENTATION_SESSION_REQUEST_TOPIC,
@@ -221,7 +246,9 @@ PresentationDeviceManager::Observe(nsISupports *aSubject,
                                    const char16_t *aData)
 {
   if (!strcmp(aTopic, "profile-after-change")) {
-    LoadDeviceProviders();
+    Init();
+  } else if (!strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID)) {
+    Shutdown();
   }
 
   return NS_OK;

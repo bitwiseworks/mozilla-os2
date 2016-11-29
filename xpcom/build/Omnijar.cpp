@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -59,9 +60,9 @@ Omnijar::InitOne(nsIFile* aPath, Type aType)
     if ((aType == APP) && (!sPath[GRE])) {
       nsCOMPtr<nsIFile> greDir, appDir;
       bool equals;
-      nsDirectoryService::gService->Get(SPROP(GRE), NS_GET_IID(nsIFile),
+      nsDirectoryService::gService->Get(sProp[GRE], NS_GET_IID(nsIFile),
                                         getter_AddRefs(greDir));
-      nsDirectoryService::gService->Get(SPROP(APP), NS_GET_IID(nsIFile),
+      nsDirectoryService::gService->Get(sProp[APP], NS_GET_IID(nsIFile),
                                         getter_AddRefs(appDir));
       if (NS_SUCCEEDED(greDir->Equals(appDir, &equals)) && equals) {
         sIsUnified = true;
@@ -79,12 +80,12 @@ Omnijar::InitOne(nsIFile* aPath, Type aType)
     return;
   }
 
-  nsRefPtr<nsZipArchive> zipReader = new nsZipArchive();
+  RefPtr<nsZipArchive> zipReader = new nsZipArchive();
   if (NS_FAILED(zipReader->OpenArchive(file))) {
     return;
   }
 
-  nsRefPtr<nsZipHandle> handle;
+  RefPtr<nsZipHandle> handle;
   if (NS_SUCCEEDED(nsZipHandle::Init(zipReader, NS_STRINGIFY(OMNIJAR_NAME),
                                      getter_AddRefs(handle)))) {
     zipReader = new nsZipArchive();

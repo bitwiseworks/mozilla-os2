@@ -11,7 +11,8 @@
 using namespace mozilla;
 
 void
-VibrancyManager::UpdateVibrantRegion(VibrancyType aType, const nsIntRegion& aRegion)
+VibrancyManager::UpdateVibrantRegion(VibrancyType aType,
+                                     const LayoutDeviceIntRegion& aRegion)
 {
   auto& vr = *mVibrantRegions.LookupOrAdd(uint32_t(aType));
   if (vr.region == aRegion) {
@@ -27,8 +28,8 @@ VibrancyManager::UpdateVibrantRegion(VibrancyType aType, const nsIntRegion& aReg
   vr.effectViews.SwapElements(viewsToRecycle);
   // vr.effectViews is now empty.
 
-  nsIntRegionRectIterator iter(aRegion);
-  const nsIntRect* iterRect = nullptr;
+  LayoutDeviceIntRegion::RectIterator iter(aRegion);
+  const LayoutDeviceIntRect* iterRect = nullptr;
   for (size_t i = 0; (iterRect = iter.Next()) || i < viewsToRecycle.Length(); ++i) {
     if (iterRect) {
       NSView* view = nil;
@@ -36,6 +37,7 @@ VibrancyManager::UpdateVibrantRegion(VibrancyType aType, const nsIntRegion& aReg
       if (i < viewsToRecycle.Length()) {
         view = viewsToRecycle[i];
         [view setFrame:rect];
+        [view setNeedsDisplay:YES];
       } else {
         view = CreateEffectView(aType, rect);
         [mContainerView addSubview:view];
@@ -56,20 +58,12 @@ VibrancyManager::UpdateVibrantRegion(VibrancyType aType, const nsIntRegion& aReg
   vr.region = aRegion;
 }
 
-static PLDHashOperator
-ClearVibrantRegionFunc(const uint32_t& aVibrancyType,
-                       VibrancyManager::VibrantRegion* aVibrantRegion,
-                       void* aVM)
-{
-  static_cast<VibrancyManager*>(aVM)->ClearVibrantRegion(*aVibrantRegion);
-  return PL_DHASH_NEXT;
-}
-
 void
 VibrancyManager::ClearVibrantAreas() const
 {
-  mVibrantRegions.EnumerateRead(ClearVibrantRegionFunc,
-                                const_cast<VibrancyManager*>(this));
+  for (auto iter = mVibrantRegions.ConstIter(); !iter.Done(); iter.Next()) {
+    ClearVibrantRegion(*iter.UserData());
+  }
 }
 
 void
@@ -77,8 +71,8 @@ VibrancyManager::ClearVibrantRegion(const VibrantRegion& aVibrantRegion) const
 {
   [[NSColor clearColor] set];
 
-  nsIntRegionRectIterator iter(aVibrantRegion.region);
-  while (const nsIntRect* rect = iter.Next()) {
+  LayoutDeviceIntRegion::RectIterator iter(aVibrantRegion.region);
+  while (const LayoutDeviceIntRect* rect = iter.Next()) {
     NSRectFill(mCoordinateConverter.DevPixelsToCocoaPoints(*rect));
   }
 }
@@ -86,6 +80,19 @@ VibrancyManager::ClearVibrantRegion(const VibrantRegion& aVibrantRegion) const
 @interface NSView(CurrentFillColor)
 - (NSColor*)_currentFillColor;
 @end
+
+static NSColor*
+AdjustedColor(NSColor* aFillColor, VibrancyType aType)
+{
+  if (aType == VibrancyType::MENU && [aFillColor alphaComponent] == 1.0) {
+    // The opaque fill color that's used for the menu background when "Reduce
+    // vibrancy" is checked in the system accessibility prefs is too dark.
+    // This is probably because we're not using the right material for menus,
+    // see VibrancyManager::CreateEffectView.
+    return [NSColor colorWithDeviceWhite:0.96 alpha:1.0];
+  }
+  return aFillColor;
+}
 
 NSColor*
 VibrancyManager::VibrancyFillColorForType(VibrancyType aType)
@@ -98,7 +105,7 @@ VibrancyManager::VibrancyFillColorForType(VibrancyType aType)
     // -[NSVisualEffectView _currentFillColor] is the color that our view
     // would draw during its drawRect implementation, if we hadn't
     // disabled that.
-    return [views[0] _currentFillColor];
+    return AdjustedColor([views[0] _currentFillColor], aType);
   }
   return [NSColor whiteColor];
 }
@@ -177,6 +184,7 @@ AppearanceForVibrancyType(VibrancyType aType)
     case VibrancyType::TOOLTIP:
     case VibrancyType::MENU:
     case VibrancyType::HIGHLIGHTED_MENUITEM:
+    case VibrancyType::SHEET:
       return [NSAppearanceClass performSelector:@selector(appearanceNamed:)
                                      withObject:@"NSAppearanceNameVibrantLight"];
     case VibrancyType::DARK:
@@ -197,6 +205,12 @@ enum {
 };
 #endif
 
+#if !defined(MAC_OS_X_VERSION_10_11) || MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_11
+enum {
+  NSVisualEffectMaterialMenu = 5
+};
+#endif
+
 static NSUInteger
 VisualEffectStateForVibrancyType(VibrancyType aType)
 {
@@ -204,8 +218,10 @@ VisualEffectStateForVibrancyType(VibrancyType aType)
     case VibrancyType::TOOLTIP:
     case VibrancyType::MENU:
     case VibrancyType::HIGHLIGHTED_MENUITEM:
-      // Tooltip and menu windows are never "key", so we need to tell the
-      // vibrancy effect to look active regardless of window state.
+    case VibrancyType::SHEET:
+      // Tooltip and menu windows are never "key" and sheets always looks
+      // active, so we need to tell the vibrancy effect to look active
+      // regardless of window state.
       return NSVisualEffectStateActive;
     default:
       return NSVisualEffectStateFollowsWindowActiveState;
@@ -247,13 +263,14 @@ VibrancyManager::CreateEffectView(VibrancyType aType, NSRect aRect)
   [effectView setState:VisualEffectStateForVibrancyType(aType)];
 
   if (aType == VibrancyType::MENU) {
-    // NSVisualEffectMaterialTitlebar doesn't match the native menu look
-    // perfectly but comes pretty close. Ideally we'd use a material with
-    // materialTypeName "MacLight", since that's what menus use, but there's
-    // no entry with that material in the internalMaterialType-to-
-    // CGSWindowBackdropViewSpec table which NSVisualEffectView consults when
-    // setting up the effect.
-    [effectView setMaterial:NSVisualEffectMaterialTitlebar];
+    if (nsCocoaFeatures::OnElCapitanOrLater()) {
+      [effectView setMaterial:NSVisualEffectMaterialMenu];
+    } else {
+      // Before 10.11 there is no material that perfectly matches the menu
+      // look. Of all available material types, NSVisualEffectMaterialTitlebar
+      // is the one that comes closest.
+      [effectView setMaterial:NSVisualEffectMaterialTitlebar];
+    }
   } else if (aType == VibrancyType::HIGHLIGHTED_MENUITEM) {
     [effectView setMaterial:NSVisualEffectMaterialMenuItem];
     if ([effectView respondsToSelector:@selector(setEmphasized:)]) {

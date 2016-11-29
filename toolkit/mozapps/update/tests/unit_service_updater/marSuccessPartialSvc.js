@@ -6,11 +6,9 @@
 /* General Partial MAR File Patch Apply Test */
 
 function run_test() {
-  if (!shouldRunServiceTest()) {
+  if (!setupTestCommon()) {
     return;
   }
-
-  setupTestCommon();
   gTestFiles = gTestFilesPartialSuccess;
   gTestFiles[gTestFiles.length - 1].originalContents = null;
   gTestFiles[gTestFiles.length - 1].compareContents = "FromPartial\n";
@@ -19,58 +17,68 @@ function run_test() {
   gTestFiles[gTestFiles.length - 2].compareContents = "FromPartial\n";
   gTestFiles[gTestFiles.length - 2].comparePerms = 0o644;
   gTestDirs = gTestDirsPartialSuccess;
-  setupUpdaterTest(FILE_PARTIAL_MAR);
-
-// This is commented out on mozilla-esr38 since it doesn't have the test updater
-//  createUpdaterINI(true);
-
-  // For Mac OS X set the last modified time for the root directory to a date in
-  // the past to test that the last modified time is updated on all updates since
-  // the precomplete file in the root of the bundle is renamed, etc. (bug 600098).
-  if (IS_MACOSX) {
-    let now = Date.now();
-    let yesterday = now - (1000 * 60 * 60 * 24);
-    let applyToDir = getApplyDirFile();
-    applyToDir.lastModifiedTime = yesterday;
-  }
-
-  setupAppFilesAsync();
-}
-
-function setupAppFilesFinished() {
-  runUpdateUsingService(STATE_PENDING_SVC, STATE_SUCCEEDED);
+  setupDistributionDir();
+  setupUpdaterTest(FILE_PARTIAL_MAR, false);
 }
 
 /**
- * Checks if the post update binary was properly launched for the platforms that
- * support launching post update process.
+ * Called after the call to setupUpdaterTest finishes.
  */
-function checkUpdateFinished() {
-// This is commented out on mozilla-esr38 since it doesn't have the test updater
-//  if (IS_WIN || IS_MACOSX) {
-//    gCheckFunc = finishCheckUpdateFinished;
-//    checkPostUpdateAppLog();
-//  } else {
-//    finishCheckUpdateFinished();
-//  }
-  do_timeout(TEST_HELPER_TIMEOUT, finishCheckUpdateFinished);
+function setupUpdaterTestFinished() {
+  runUpdate(STATE_SUCCEEDED, false, 0, true);
 }
 
 /**
- * Checks if the update has finished and if it has finished performs checks for
- * the test.
+ * Called after the call to runUpdate finishes.
  */
-function finishCheckUpdateFinished() {
-  if (IS_MACOSX) {
-    logTestInfo("testing last modified time on the apply to directory has " +
-                "changed after a successful update (bug 600098)");
-    let now = Date.now();
-    let applyToDir = getApplyDirFile();
-    let timeDiff = Math.abs(applyToDir.lastModifiedTime - now);
-    do_check_true(timeDiff < MAC_MAX_TIME_DIFFERENCE);
-  }
+function runUpdateFinished() {
+  checkPostUpdateAppLog();
+}
 
-  checkFilesAfterUpdateSuccess(getApplyDirFile, false, false);
+/**
+ * Called after the call to checkPostUpdateAppLog finishes.
+ */
+function checkPostUpdateAppLogFinished() {
+  checkAppBundleModTime();
+  standardInit();
+  Assert.equal(readStatusState(), STATE_NONE,
+               "the status file state" + MSG_SHOULD_EQUAL);
+  Assert.ok(!gUpdateManager.activeUpdate,
+            "the active update should not be defined");
+  Assert.equal(gUpdateManager.updateCount, 1,
+               "the update manager updateCount attribute" + MSG_SHOULD_EQUAL);
+  Assert.equal(gUpdateManager.getUpdateAt(0).state, STATE_SUCCEEDED,
+               "the update state" + MSG_SHOULD_EQUAL);
+  checkPostUpdateRunningFile(true);
+  checkFilesAfterUpdateSuccess(getApplyDirFile);
   checkUpdateLogContents(LOG_PARTIAL_SUCCESS);
-  checkCallbackServiceLog();
+  checkDistributionDir();
+  checkCallbackLog();
+}
+
+/**
+ * Setup the state of the distribution directory for the test.
+ */
+function setupDistributionDir() {
+  if (IS_MACOSX) {
+    // Create files in the old distribution directory location to verify that
+    // the directory and its contents are removed when there is a distribution
+    // directory in the new location.
+    let testFile = getApplyDirFile(DIR_MACOS + "distribution/testFile", true);
+    writeFile(testFile, "test\n");
+    testFile = getApplyDirFile(DIR_MACOS + "distribution/test/testFile", true);
+    writeFile(testFile, "test\n");
+  }
+}
+
+/**
+ * Checks the state of the distribution directory.
+ */
+function checkDistributionDir() {
+  if (IS_MACOSX) {
+    let distributionDir = getApplyDirFile(DIR_MACOS + "distribution", true);
+    Assert.ok(!distributionDir.exists(),
+              MSG_SHOULD_NOT_EXIST + getMsgPath(distributionDir.path));
+    checkUpdateLogContains(REMOVE_OLD_DIST_DIR);
+  }
 }

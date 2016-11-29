@@ -21,7 +21,7 @@ class AccessibleWrap;
  * IRawElementProviderSimple implementation (maintains IAccessibleEx approach).
  */
 class uiaRawElmProvider final : public IAccessibleEx,
-                                    public IRawElementProviderSimple
+                                public IRawElementProviderSimple
 {
 public:
   uiaRawElmProvider(AccessibleWrap* aAcc) : mAcc(aAcc) { }
@@ -66,7 +66,7 @@ private:
   uiaRawElmProvider(const uiaRawElmProvider&) = delete;
 
 protected:
-  nsRefPtr<AccessibleWrap> mAcc;
+  RefPtr<AccessibleWrap> mAcc;
 };
 
 } // a11y namespace

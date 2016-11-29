@@ -21,6 +21,7 @@
 #include "nsIXULDocument.h"
 #include "nsScriptLoader.h"
 #include "nsIStreamListener.h"
+#include "nsIStreamLoader.h"
 #include "nsICSSLoaderObserver.h"
 #include "nsIXULStore.h"
 
@@ -35,7 +36,6 @@ class nsPIWindowRoot;
 #if 0 // XXXbe save me, scc (need NSCAP_FORWARD_DECL(nsXULPrototypeScript))
 class nsIObjectInputStream;
 class nsIObjectOutputStream;
-class nsIXULPrototypeScript;
 #else
 #include "nsIObjectInputStream.h"
 #include "nsIObjectOutputStream.h"
@@ -43,8 +43,6 @@ class nsIXULPrototypeScript;
 #endif
 #include "nsURIHashKey.h"
 #include "nsInterfaceHashtable.h"
-
-struct PRLogModuleInfo;
 
 class nsRefMapEntry : public nsStringHashKey
 {
@@ -76,7 +74,7 @@ public:
   bool RemoveElement(mozilla::dom::Element* aElement);
 
 private:
-  nsSmallVoidArray mRefContentList;
+  nsTArray<mozilla::dom::Element*> mRefContentList;
 };
 
 /**
@@ -87,11 +85,11 @@ namespace mozilla {
 namespace dom {
 
 class XULDocument final : public XMLDocument,
-                              public nsIXULDocument,
-                              public nsIDOMXULDocument,
-                              public nsIStreamLoaderObserver,
-                              public nsICSSLoaderObserver,
-                              public nsIOffThreadScriptReceiver
+                          public nsIXULDocument,
+                          public nsIDOMXULDocument,
+                          public nsIStreamLoaderObserver,
+                          public nsICSSLoaderObserver,
+                          public nsIOffThreadScriptReceiver
 {
 public:
     XULDocument();
@@ -295,12 +293,18 @@ protected:
     static nsIRDFResource* kNC_attribute;
     static nsIRDFResource* kNC_value;
 
-    static PRLogModuleInfo* gXULLog;
+    static LazyLogModule gXULLog;
 
     nsresult
     Persist(nsIContent* aElement, int32_t aNameSpaceID, nsIAtom* aAttribute);
+    // Just like Persist but ignores the return value so we can use it
+    // as a runnable method.
+    void DoPersist(nsIContent* aElement, int32_t aNameSpaceID, nsIAtom* aAttribute)
+    {
+        Persist(aElement, aNameSpaceID, aAttribute);
+    }
 
-    virtual JSObject* WrapNode(JSContext *aCx) override;
+    virtual JSObject* WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto) override;
 
     // IMPORTANT: The ownership implicit in the following member
     // variables has been explicitly checked and set using nsCOMPtr
@@ -338,7 +342,7 @@ protected:
      * An array of style sheets, that will be added (preserving order) to the
      * document after all of them are loaded (in DoneWalking).
      */
-    nsTArray<nsRefPtr<CSSStyleSheet>> mOverlaySheets;
+    nsTArray<RefPtr<CSSStyleSheet>> mOverlaySheets;
 
     nsCOMPtr<nsIDOMXULCommandDispatcher>     mCommandDispatcher; // [OWNER] of the focus tracker
 
@@ -512,7 +516,7 @@ protected:
     {
     protected:
         XULDocument* mDocument;              // [WEAK]
-        nsRefPtr<Element> mObservesElement; // [OWNER]
+        RefPtr<Element> mObservesElement; // [OWNER]
         bool mResolved;
 
     public:
@@ -605,19 +609,19 @@ protected:
      * The current prototype that we are walking to construct the
      * content model.
      */
-    nsRefPtr<nsXULPrototypeDocument> mCurrentPrototype;
+    RefPtr<nsXULPrototypeDocument> mCurrentPrototype;
 
     /**
      * The master document (outermost, .xul) prototype, from which
      * all subdocuments get their security principals.
      */
-    nsRefPtr<nsXULPrototypeDocument> mMasterPrototype;
+    RefPtr<nsXULPrototypeDocument> mMasterPrototype;
 
     /**
      * Owning references to all of the prototype documents that were
      * used to construct this document.
      */
-    nsTArray< nsRefPtr<nsXULPrototypeDocument> > mPrototypes;
+    nsTArray< RefPtr<nsXULPrototypeDocument> > mPrototypes;
 
     /**
      * Prepare to walk the current prototype.
@@ -684,8 +688,8 @@ protected:
 
     class CachedChromeStreamListener : public nsIStreamListener {
     protected:
-        XULDocument* mDocument;
-        bool         mProtoLoaded;
+        RefPtr<XULDocument> mDocument;
+        bool mProtoLoaded;
 
         virtual ~CachedChromeStreamListener();
 
@@ -703,8 +707,8 @@ protected:
 
     class ParserObserver : public nsIRequestObserver {
     protected:
-        nsRefPtr<XULDocument> mDocument;
-        nsRefPtr<nsXULPrototypeDocument> mPrototype;
+        RefPtr<XULDocument> mDocument;
+        RefPtr<nsXULPrototypeDocument> mPrototype;
         virtual ~ParserObserver();
 
     public:

@@ -17,8 +17,8 @@ class nsIOutputStream;
 namespace mozilla { namespace net {
 
 class nsHttpPipeline final : public nsAHttpConnection
-                               , public nsAHttpTransaction
-                               , public nsAHttpSegmentReader
+                           , public nsAHttpTransaction
+                           , public nsAHttpSegmentReader
 {
 public:
     NS_DECL_THREADSAFE_ISUPPORTS
@@ -59,7 +59,7 @@ private:
     // overload of nsAHttpTransaction::QueryPipeline()
     nsHttpPipeline *QueryPipeline() override;
 
-    nsRefPtr<nsAHttpConnection>   mConnection;
+    RefPtr<nsAHttpConnection>   mConnection;
     nsTArray<nsAHttpTransaction*> mRequestQ;  // array of transactions
     nsTArray<nsAHttpTransaction*> mResponseQ; // array of transactions
     nsresult                      mStatus;
@@ -99,6 +99,7 @@ private:
     bool     mSuppressSendEvents;
 };
 
-}} // namespace mozilla::net
+} // namespace net
+} // namespace mozilla
 
 #endif // nsHttpPipeline_h__

@@ -47,15 +47,30 @@ enum class gfxBreakPriority {
 /**
   * The format for an image surface. For all formats with alpha data, 0
   * means transparent, 1 or 255 means fully opaque.
+  *
+  * XXX: it's vital that the values here match the values in cairo_format_t,
+  * otherwise gfxCairoFormatToImageFormat() and gfxImageFormatToCairoFormat()
+  * won't work.
   */
 enum class gfxImageFormat {
-  ARGB32, ///< ARGB data in native endianness, using premultiplied alpha
-  RGB24,  ///< xRGB data in native endianness
-  A8,     ///< Only an alpha channel
-  A1,     ///< Packed transparency information (one byte refers to 8 pixels)
-  RGB16_565,  ///< RGB_565 data in native endianness
+  ARGB32    = 0, ///< ARGB data in native endianness, using premultiplied alpha
+  RGB24     = 1, ///< xRGB data in native endianness
+  A8        = 2, ///< Only an alpha channel
+  RGB16_565 = 4, ///< RGB_565 data in native endianness
   Unknown
 };
+
+// XXX: temporary
+// This works because the gfxImageFormat enum is defined so as to match the
+// cairo_format_t enum.
+#define gfxCairoFormatToImageFormat(aFormat) \
+    ((gfxImageFormat)aFormat)
+
+// XXX: temporary
+// This works because the gfxImageFormat enum is defined so as to match the
+// cairo_format_t enum.
+#define gfxImageFormatToCairoFormat(aFormat) \
+    ((cairo_format_t)aFormat)
 
 enum class gfxSurfaceType {
   Image,
@@ -82,7 +97,6 @@ enum class gfxSurfaceType {
   XML,
   Skia,
   Subsurface,
-  D2D,
   Max
 };
 
@@ -91,17 +105,6 @@ enum class gfxContentType {
   ALPHA       = 0x2000,
   COLOR_ALPHA = 0x3000,
   SENTINEL    = 0xffff
-};
-
-/**
-  * The memory used by a gfxASurface (as reported by KnownMemoryUsed()) can
-  * either live in this process's heap, in this process but outside the
-  * heap, or in another process altogether.
-  */
-enum class gfxMemoryLocation {
-  IN_PROCESS_HEAP,
-  IN_PROCESS_NONHEAP,
-  OUT_OF_PROCESS
 };
 
 #endif /* GFX_TYPES_H */

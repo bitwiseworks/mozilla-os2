@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+Components.utils.import("resource://gre/modules/AppConstants.jsm");
+
 var gPrivacyPane = {
 
   /**
@@ -31,6 +33,16 @@ var gPrivacyPane = {
     document.getElementById("trackingprotectionbox").hidden = false;
   },
 #endif
+
+  /**
+   * Linkify the Learn More link of the Private Browsing Mode Tracking
+   * Protection UI.
+   */
+  _initTrackingProtectionPBM: function () {
+    let link = document.getElementById("trackingProtectionPBMLearnMore");
+    let url = Services.urlFormatter.formatURLPref("app.support.baseURL") + "tracking-protection-pbm";
+    link.setAttribute("href", url);
+  },
 
   /**
    * Initialize autocomplete to ensure prefs are in sync.
@@ -71,6 +83,7 @@ var gPrivacyPane = {
 #ifdef NIGHTLY_BUILD
     this._initTrackingProtection();
 #endif
+    this._initTrackingProtectionPBM();
     this._initAutocomplete();
 
     setEventListener("privacy.sanitize.sanitizeOnShutdown", "change",
@@ -103,6 +116,8 @@ var gPrivacyPane = {
                      gPrivacyPane.showCookies);
     setEventListener("clearDataSettings", "command",
                      gPrivacyPane.showClearPrivateDataSettings);
+    setEventListener("changeBlockList", "command",
+                     gPrivacyPane.showBlockLists);
   },
 
   // HISTORY MODE
@@ -111,20 +126,21 @@ var gPrivacyPane = {
    * The list of preferences which affect the initial history mode settings.
    * If the auto start private browsing mode pref is active, the initial
    * history mode would be set to "Don't remember anything".
-   * If all of these preferences have their default values, and the auto-start
+   * If ALL of these preferences are set to the values that correspond
+   * to keeping some part of history, and the auto-start
    * private browsing mode is not active, the initial history mode would be
    * set to "Remember everything".
    * Otherwise, the initial history mode would be set to "Custom".
    *
-   * Extensions adding their own preferences can append their IDs to this array if needed.
+   * Extensions adding their own preferences can set values here if needed.
    */
-  prefsForDefault: [
-    "places.history.enabled",
-    "browser.formfill.enable",
-    "network.cookie.cookieBehavior",
-    "network.cookie.lifetimePolicy",
-    "privacy.sanitize.sanitizeOnShutdown"
-  ],
+  prefsForKeepingHistory: {
+    "places.history.enabled": true, // History is enabled
+    "browser.formfill.enable": true, // Form information is saved
+    "network.cookie.cookieBehavior": 0, // All cookies are enabled
+    "network.cookie.lifetimePolicy": 0, // Cookies use supplied lifetime
+    "privacy.sanitize.sanitizeOnShutdown": false, // Private date is NOT cleared on shutdown
+  },
 
   /**
    * The list of control IDs which are dependent on the auto-start private
@@ -143,16 +159,15 @@ var gPrivacyPane = {
   ],
 
   /**
-   * Check whether all the preferences values are set to their default values
+   * Check whether preferences values are set to keep history
    *
    * @param aPrefs an array of pref names to check for
-   * @returns boolean true if all of the prefs are set to their default values,
+   * @returns boolean true if all of the prefs are set to keep history,
    *                  false otherwise
    */
-  _checkDefaultValues: function(aPrefs) {
-    for (let i = 0; i < aPrefs.length; ++i) {
-      let pref = document.getElementById(aPrefs[i]);
-      if (pref.value != pref.defaultValue)
+  _checkHistoryValues: function(aPrefs) {
+    for (let pref of Object.keys(aPrefs)) {
+      if (document.getElementById(pref).value != aPrefs[pref])
         return false;
     }
     return true;
@@ -164,10 +179,9 @@ var gPrivacyPane = {
   initializeHistoryMode: function PPP_initializeHistoryMode()
   {
     let mode;
-    let getVal = function (aPref)
-      document.getElementById(aPref).value;
+    let getVal = aPref => document.getElementById(aPref).value;
 
-    if (this._checkDefaultValues(this.prefsForDefault)) {
+    if (this._checkHistoryValues(this.prefsForKeepingHistory)) {
       if (getVal("browser.privatebrowsing.autostart"))
         mode = "dontremember";
       else
@@ -260,8 +274,13 @@ var gPrivacyPane = {
 
       // adjust the cookie controls status
       this.readAcceptCookies();
-      document.getElementById("keepCookiesUntil").value = disabled ? 2 :
-        document.getElementById("network.cookie.lifetimePolicy").value;
+      let lifetimePolicy = document.getElementById("network.cookie.lifetimePolicy").value;
+      if (lifetimePolicy != Ci.nsICookieService.ACCEPT_NORMALLY &&
+          lifetimePolicy != Ci.nsICookieService.ACCEPT_SESSION &&
+          lifetimePolicy != Ci.nsICookieService.ACCEPT_FOR_N_DAYS) {
+        lifetimePolicy = Ci.nsICookieService.ACCEPT_NORMALLY;
+      }
+      document.getElementById("keepCookiesUntil").value = disabled ? 2 : lifetimePolicy;
 
       // adjust the checked state of the sanitizeOnShutdown checkbox
       document.getElementById("alwaysClear").checked = disabled ? false :
@@ -352,20 +371,22 @@ var gPrivacyPane = {
       this._shouldPromptForRestart = true;
   },
 
-  // HISTORY
-
   /**
-   * Update browser.urlbar.autocomplete.enabled when a
-   * browser.urlbar.suggest.* pref is changed from the ui.
+   * Displays the available block lists for tracking protection.
    */
-  writeSuggestionPref: function () {
-    let getVal = (aPref) => {
-      return document.getElementById("browser.urlbar.suggest." + aPref).value;
-    }
-    // autocomplete.enabled is true if any of the suggestions is true
-    let enabled = ["history", "bookmark", "openpage"].map(getVal).some(v => v);
-    Services.prefs.setBoolPref("browser.urlbar.autocomplete.enabled", enabled);
+  showBlockLists: function ()
+  {
+    var bundlePreferences = document.getElementById("bundlePreferences");
+    let brandName = document.getElementById("bundleBrand")
+                            .getString("brandShortName");
+    var params = { brandShortName: brandName,
+                   windowTitle: bundlePreferences.getString("blockliststitle"),
+                   introText: bundlePreferences.getString("blockliststext") };
+    gSubDialog.open("chrome://browser/content/preferences/blocklists.xul",
+                    null, params);
   },
+
+  // HISTORY
 
   /*
    * Preferences:
@@ -392,7 +413,6 @@ var gPrivacyPane = {
    * network.cookie.lifetimePolicy
    * - determines how long cookies are stored:
    *     0   means keep cookies until they expire
-   *     1   means ask how long to keep each cookie
    *     2   means keep cookies until the browser is closed
    */
 

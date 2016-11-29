@@ -28,6 +28,8 @@ public:
 
   bool RecvSetDefaultVoice(const nsString& aUri, const bool& aIsDefault) override;
 
+  bool RecvIsSpeakingChanged(const bool& aIsSpeaking) override;
+
 protected:
   SpeechSynthesisChild();
   virtual ~SpeechSynthesisChild();
@@ -48,11 +50,11 @@ public:
   virtual ~SpeechSynthesisRequestChild();
 
 protected:
-  virtual bool RecvOnStart() override;
+  virtual bool RecvOnStart(const nsString& aUri) override;
 
-  virtual bool Recv__delete__(const bool& aIsError,
-                              const float& aElapsedTime,
-                              const uint32_t& aCharIndex) override;
+  virtual bool RecvOnEnd(const bool& aIsError,
+                         const float& aElapsedTime,
+                         const uint32_t& aCharIndex) override;
 
   virtual bool RecvOnPause(const float& aElapsedTime, const uint32_t& aCharIndex) override;
 
@@ -64,7 +66,7 @@ protected:
   virtual bool RecvOnMark(const nsString& aName, const float& aElapsedTime,
                           const uint32_t& aCharIndex) override;
 
-  nsRefPtr<SpeechTaskChild> mTask;
+  RefPtr<SpeechTaskChild> mTask;
 };
 
 class SpeechTaskChild : public nsSpeechTask
@@ -87,6 +89,10 @@ public:
   virtual void Resume() override;
 
   virtual void Cancel() override;
+
+  virtual void ForceEnd() override;
+
+  virtual void SetAudioOutputVolume(float aVolume) override;
 
 private:
   SpeechSynthesisRequestChild* mActor;

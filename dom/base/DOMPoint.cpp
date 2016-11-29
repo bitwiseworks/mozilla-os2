@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -21,7 +22,7 @@ already_AddRefed<DOMPoint>
 DOMPoint::Constructor(const GlobalObject& aGlobal, const DOMPointInit& aParams,
                       ErrorResult& aRV)
 {
-  nsRefPtr<DOMPoint> obj =
+  RefPtr<DOMPoint> obj =
     new DOMPoint(aGlobal.GetAsSupports(), aParams.mX, aParams.mY,
                  aParams.mZ, aParams.mW);
   return obj.forget();
@@ -31,13 +32,13 @@ already_AddRefed<DOMPoint>
 DOMPoint::Constructor(const GlobalObject& aGlobal, double aX, double aY,
                       double aZ, double aW, ErrorResult& aRV)
 {
-  nsRefPtr<DOMPoint> obj =
+  RefPtr<DOMPoint> obj =
     new DOMPoint(aGlobal.GetAsSupports(), aX, aY, aZ, aW);
   return obj.forget();
 }
 
 JSObject*
-DOMPoint::WrapObject(JSContext* aCx)
+DOMPoint::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return DOMPointBinding::Wrap(aCx, this);
+  return DOMPointBinding::Wrap(aCx, this, aGivenProto);
 }

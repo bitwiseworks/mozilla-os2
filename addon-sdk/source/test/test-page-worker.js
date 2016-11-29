@@ -8,6 +8,8 @@ const { Page } = require("sdk/page-worker");
 const { URL } = require("sdk/url");
 const fixtures = require("./fixtures");
 const testURI = fixtures.url("test.html");
+const { getActiveView } = require("sdk/view/core");
+const { getDocShell } = require('sdk/frame/utils');
 
 const ERR_DESTROYED =
   "Couldn't find the worker to receive this message. " +
@@ -66,9 +68,9 @@ exports.testUnwrappedDOM = function(assert, done) {
   let page = Page({
     allow: { script: true },
     contentURL: "data:text/html;charset=utf-8,<script>document.getElementById=3;window.scrollTo=3;</script>",
-    contentScript: "window.addEventListener('load', function () " +
-                   "self.postMessage([typeof(unsafeWindow.document.getElementById), " +
-                   "typeof(unsafeWindow.scrollTo)]), true)",
+    contentScript: "window.addEventListener('load', function () {" +
+                   "return self.postMessage([typeof(unsafeWindow.document.getElementById), " +
+                   "typeof(unsafeWindow.scrollTo)]); }, true)",
     onMessage: function (message) {
       assert.equal(message[0],
                        "number",
@@ -93,7 +95,7 @@ exports.testPageProperties = function(assert) {
     assert.ok(prop in page, prop + " property is defined on page.");
   }
 
-  assert.ok(function () page.postMessage("foo") || true,
+  assert.ok(() => page.postMessage("foo") || true,
               "postMessage doesn't throw exception on page.");
 }
 
@@ -149,13 +151,13 @@ exports.testAutoDestructor = function(assert, done) {
 
 exports.testValidateOptions = function(assert) {
   assert.throws(
-    function () Page({ contentURL: 'home' }),
+    () => Page({ contentURL: 'home' }),
     /The `contentURL` option must be a valid URL\./,
     "Validation correctly denied a non-URL contentURL"
   );
 
   assert.throws(
-    function () Page({ onMessage: "This is not a function."}),
+    () => Page({ onMessage: "This is not a function."}),
     /The option "onMessage" must be one of the following types: function/,
     "Validation correctly denied a non-function onMessage."
   );
@@ -281,7 +283,7 @@ exports.testLoadContentPageRelativePath = function(assert, done) {
   const { merge } = require("sdk/util/object");
 
   const options = merge({}, require('@loader/options'),
-      { prefixURI: require('./fixtures').url() });
+      { id: "testloader", prefixURI: require('./fixtures').url() });
 
   let loader = Loader(module, null, options);
 
@@ -316,6 +318,7 @@ exports.testAllowScript = function(assert, done) {
   let page = Page({
     onMessage: function(message) {
       assert.ok(message, "Script runs when allowed to do so.");
+      page.destroy();
       done();
     },
     allow: { script: true },
@@ -329,7 +332,7 @@ exports.testAllowScript = function(assert, done) {
 exports.testPingPong = function(assert, done) {
   let page = Page({
     contentURL: 'data:text/html;charset=utf-8,ping-pong',
-    contentScript: 'self.on("message", function(message) self.postMessage("pong"));'
+    contentScript: 'self.on("message", message => self.postMessage("pong"));'
       + 'self.postMessage("ready");',
     onMessage: function(message) {
       if ('ready' == message) {
@@ -488,7 +491,7 @@ exports.testWindowStopDontBreak = function (assert, done) {
                             getService(Ci.nsIConsoleService);
   const listener = {
     observe: ({message}) => {
-      if (message.contains('contentWorker is null'))
+      if (message.includes('contentWorker is null'))
         assert.fail('contentWorker is null');
     }
   };
@@ -513,6 +516,29 @@ exports.testWindowStopDontBreak = function (assert, done) {
   page.port.emit("ping");
 };
 
+/**
+ * bug 1138545 - the docs claim you can pass in a bare regexp.
+ */
+exports.testRegexArgument = function (assert, done) {
+  let url = 'data:text/html;charset=utf-8,testWindowStopDontBreak';
+
+  let page = new Page({
+    contentURL: url,
+    contentScriptWhen: 'ready',
+    contentScript: Isolate(() => {
+     self.port.emit("pong", document.location.href);
+    }),
+    include: /^data\:text\/html;.*/
+  });
+
+  assert.pass("We can pass in a RegExp into page-worker's include option.");
+
+  page.port.on("pong", (href) => {
+    assert.equal(href, url, "we get back the same url from the content script.");
+    page.destroy();
+    done();
+  });
+};
 
 function isDestroyed(page) {
   try {

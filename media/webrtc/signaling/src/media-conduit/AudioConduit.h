@@ -99,9 +99,9 @@ public:
    * Register External Transport to this Conduit. RTP and RTCP frames from the VoiceEngine
    * shall be passed to the registered transport for transporting externally.
    */
-  virtual MediaConduitErrorCode SetTransmitterTransport(mozilla::RefPtr<TransportInterface> aTransport) override;
+  virtual MediaConduitErrorCode SetTransmitterTransport(RefPtr<TransportInterface> aTransport) override;
 
-  virtual MediaConduitErrorCode SetReceiverTransport(mozilla::RefPtr<TransportInterface> aTransport) override;
+  virtual MediaConduitErrorCode SetReceiverTransport(RefPtr<TransportInterface> aTransport) override;
 
   /**
    * Function to deliver externally captured audio sample for encoding and transport
@@ -150,13 +150,13 @@ public:
    * Webrtc transport implementation to send and receive RTP packet.
    * AudioConduit registers itself as ExternalTransport to the VoiceEngine
    */
-  virtual int SendPacket(int channel, const void *data, int len) override;
+  virtual int SendPacket(int channel, const void *data, size_t len) override;
 
   /**
    * Webrtc transport implementation to send and receive RTCP packet.
    * AudioConduit registers itself as ExternalTransport to the VoiceEngine
    */
-  virtual int SendRTCPPacket(int channel, const void *data, int len) override;
+  virtual int SendRTCPPacket(int channel, const void *data, size_t len) override;
 
 
   virtual uint64_t CodecPluginID() override { return 0; }
@@ -171,7 +171,7 @@ public:
                       mChannel(-1),
                       mCodecMutex("AudioConduit codec db"),
                       mCaptureDelay(150),
-#ifdef MOZILLA_INTERNAL_API
+#if !defined(MOZILLA_EXTERNAL_LINKAGE)
                       mLastTimestamp(0),
 #endif // MOZILLA_INTERNAL_API
                       mSamples(0),
@@ -252,8 +252,8 @@ private:
 
   webrtc::VoiceEngine* mVoiceEngine;
   mozilla::ReentrantMonitor mTransportMonitor;
-  mozilla::RefPtr<TransportInterface> mTransmitterTransport;
-  mozilla::RefPtr<TransportInterface> mReceiverTransport;
+  RefPtr<TransportInterface> mTransmitterTransport;
+  RefPtr<TransportInterface> mReceiverTransport;
   ScopedCustomReleasePtr<webrtc::VoENetwork>   mPtrVoENetwork;
   ScopedCustomReleasePtr<webrtc::VoEBase>      mPtrVoEBase;
   ScopedCustomReleasePtr<webrtc::VoECodec>     mPtrVoECodec;
@@ -284,7 +284,7 @@ private:
   // Current "capture" delay (really output plus input delay)
   int32_t mCaptureDelay;
 
-#ifdef MOZILLA_INTERNAL_API
+#if !defined(MOZILLA_EXTERNAL_LINKAGE)
   uint32_t mLastTimestamp;
 #endif // MOZILLA_INTERNAL_API
 

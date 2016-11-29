@@ -8,9 +8,11 @@
 #include "imgILoader.h"
 #include "imgIRequest.h"
 #include "nsNetUtil.h"
+#include "nsServiceManagerUtils.h"
 #include "nsIImageToPixbuf.h"
 #include "nsIStringBundle.h"
 #include "nsIObserverService.h"
+#include "nsIURI.h"
 #include "nsCRT.h"
 
 #include <dlfcn.h>

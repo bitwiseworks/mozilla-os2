@@ -7,12 +7,13 @@
 #ifndef MP4_STREAM_H_
 #define MP4_STREAM_H_
 
-#include "mp4_demuxer/mp4_demuxer.h"
+#include "mp4_demuxer/Stream.h"
 
 #include "MediaResource.h"
 
 #include "mozilla/Maybe.h"
 #include "mozilla/Monitor.h"
+#include "mozilla/UniquePtrExtensions.h"
 
 namespace mozilla {
 
@@ -49,13 +50,13 @@ public:
 
   void Pin()
   {
-    mResource->Pin();
+    mResource.GetResource()->Pin();
     ++mPinCount;
   }
 
   void Unpin()
   {
-    mResource->Unpin();
+    mResource.GetResource()->Unpin();
     MOZ_ASSERT(mPinCount);
     --mPinCount;
     if (mPinCount == 0) {
@@ -64,7 +65,7 @@ public:
   }
 
 private:
-  nsRefPtr<MediaResource> mResource;
+  MediaResourceIndex mResource;
   Maybe<ReadRecord> mFailedRead;
   uint32_t mPinCount;
 
@@ -74,9 +75,15 @@ private:
     int64_t mOffset;
     size_t mCount;
 
+    CacheBlock(CacheBlock&& aOther)
+      : mOffset(aOther.mOffset)
+      , mCount(aOther.mCount)
+      , mBuffer(Move(aOther.mBuffer))
+    {}
+
     bool Init()
     {
-      mBuffer = new (fallible) char[mCount];
+      mBuffer = MakeUniqueFallible<char[]>(mCount);
       return !!mBuffer;
     }
 
@@ -87,11 +94,14 @@ private:
     }
 
   private:
-    nsAutoArrayPtr<char> mBuffer;
+    CacheBlock(const CacheBlock&) = delete;
+    CacheBlock& operator=(const CacheBlock&) = delete;
+
+    UniquePtr<char[]> mBuffer;
   };
   nsTArray<CacheBlock> mCache;
 };
 
-}
+} // namespace mozilla
 
 #endif

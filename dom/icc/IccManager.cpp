@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -10,6 +12,12 @@
 #include "mozilla/dom/IccChangeEvent.h"
 #include "mozilla/Preferences.h"
 #include "nsIIccInfo.h"
+// Service instantiation
+#include "ipc/IccIPCService.h"
+#if defined(MOZ_WIDGET_GONK) && defined(MOZ_B2G_RIL)
+#include "nsIGonkIccService.h"
+#endif
+#include "nsXULAppAPI.h" // For XRE_GetProcessType()
 
 using namespace mozilla::dom;
 
@@ -37,7 +45,7 @@ IccManager::IccManager(nsPIDOMWindow* aWindow)
     mozilla::Preferences::GetUint("ril.numRadioInterfaces", 1);
 
   for (uint32_t i = 0; i < numberOfServices; i++) {
-    nsRefPtr<IccListener> iccListener = new IccListener(this, i);
+    RefPtr<IccListener> iccListener = new IccListener(this, i);
     mIccListeners.AppendElement(iccListener);
   }
 }
@@ -48,9 +56,9 @@ IccManager::~IccManager()
 }
 
 JSObject*
-IccManager::WrapObject(JSContext* aCx)
+IccManager::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return MozIccManagerBinding::Wrap(aCx, this);
+  return MozIccManagerBinding::Wrap(aCx, this, aGivenProto);
 }
 
 void
@@ -73,11 +81,11 @@ IccManager::NotifyIccAdd(const nsAString& aIccId)
   init.mCancelable = false;
   init.mIccId = aIccId;
 
-  nsRefPtr<IccChangeEvent> event =
+  RefPtr<IccChangeEvent> event =
     IccChangeEvent::Constructor(this, NS_LITERAL_STRING("iccdetected"), init);
   event->SetTrusted(true);
 
-  nsRefPtr<AsyncEventDispatcher> asyncDispatcher =
+  RefPtr<AsyncEventDispatcher> asyncDispatcher =
     new AsyncEventDispatcher(this, event);
 
   return asyncDispatcher->PostDOMEvent();
@@ -93,11 +101,11 @@ IccManager::NotifyIccRemove(const nsAString& aIccId)
   init.mCancelable = false;
   init.mIccId = aIccId;
 
-  nsRefPtr<IccChangeEvent> event =
+  RefPtr<IccChangeEvent> event =
     IccChangeEvent::Constructor(this, NS_LITERAL_STRING("iccundetected"), init);
   event->SetTrusted(true);
 
-  nsRefPtr<AsyncEventDispatcher> asyncDispatcher =
+  RefPtr<AsyncEventDispatcher> asyncDispatcher =
     new AsyncEventDispatcher(this, event);
 
   return asyncDispatcher->PostDOMEvent();
@@ -108,7 +116,7 @@ IccManager::NotifyIccRemove(const nsAString& aIccId)
 void
 IccManager::GetIccIds(nsTArray<nsString>& aIccIds)
 {
-  nsTArray<nsRefPtr<IccListener>>::size_type i;
+  nsTArray<RefPtr<IccListener>>::size_type i;
   for (i = 0; i < mIccListeners.Length(); ++i) {
     Icc* icc = mIccListeners[i]->GetIcc();
     if (icc) {
@@ -120,7 +128,7 @@ IccManager::GetIccIds(nsTArray<nsString>& aIccIds)
 Icc*
 IccManager::GetIccById(const nsAString& aIccId) const
 {
-  nsTArray<nsRefPtr<IccListener>>::size_type i;
+  nsTArray<RefPtr<IccListener>>::size_type i;
   for (i = 0; i < mIccListeners.Length(); ++i) {
     Icc* icc = mIccListeners[i]->GetIcc();
     if (icc && aIccId == icc->GetIccId()) {
@@ -128,4 +136,20 @@ IccManager::GetIccById(const nsAString& aIccId) const
     }
   }
   return nullptr;
+}
+
+already_AddRefed<nsIIccService>
+NS_CreateIccService()
+{
+  nsCOMPtr<nsIIccService> service;
+
+  if (XRE_IsContentProcess()) {
+    service = new mozilla::dom::icc::IccIPCService();
+#if defined(MOZ_WIDGET_GONK) && defined(MOZ_B2G_RIL)
+  } else {
+    service = do_GetService(GONK_ICC_SERVICE_CONTRACTID);
+#endif
+  }
+
+  return service.forget();
 }

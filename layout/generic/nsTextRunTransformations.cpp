@@ -16,7 +16,6 @@
 #include "mozilla/gfx/2D.h"
 #include "nsTextFrameUtils.h"
 #include "nsIPersistentProperties2.h"
-#include "nsNetUtil.h"
 #include "GreekCasing.h"
 #include "IrishCasing.h"
 
@@ -39,7 +38,7 @@ nsTransformedTextRun::Create(const gfxTextRunFactory::Parameters* aParams,
                              gfxFontGroup* aFontGroup,
                              const char16_t* aString, uint32_t aLength,
                              const uint32_t aFlags,
-                             nsTArray<nsRefPtr<nsTransformedCharStyle>>&& aStyles,
+                             nsTArray<RefPtr<nsTransformedCharStyle>>&& aStyles,
                              bool aOwnsFactory)
 {
   NS_ASSERTION(!(aFlags & gfxTextRunFactory::TEXT_IS_8BIT),
@@ -87,8 +86,8 @@ size_t
 nsTransformedTextRun::SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf)
 {
   size_t total = gfxTextRun::SizeOfExcludingThis(aMallocSizeOf);
-  total += mStyles.SizeOfExcludingThis(aMallocSizeOf);
-  total += mCapitalize.SizeOfExcludingThis(aMallocSizeOf);
+  total += mStyles.ShallowSizeOfExcludingThis(aMallocSizeOf);
+  total += mCapitalize.ShallowSizeOfExcludingThis(aMallocSizeOf);
   if (mOwnsFactory) {
     total += aMallocSizeOf(mFactory);
   }
@@ -105,7 +104,7 @@ nsTransformedTextRun*
 nsTransformingTextRunFactory::MakeTextRun(const char16_t* aString, uint32_t aLength,
                                           const gfxTextRunFactory::Parameters* aParams,
                                           gfxFontGroup* aFontGroup, uint32_t aFlags,
-                                          nsTArray<nsRefPtr<nsTransformedCharStyle>>&& aStyles,
+                                          nsTArray<RefPtr<nsTransformedCharStyle>>&& aStyles,
                                           bool aOwnsFactory)
 {
   return nsTransformedTextRun::Create(aParams, this, aFontGroup,
@@ -117,7 +116,7 @@ nsTransformedTextRun*
 nsTransformingTextRunFactory::MakeTextRun(const uint8_t* aString, uint32_t aLength,
                                           const gfxTextRunFactory::Parameters* aParams,
                                           gfxFontGroup* aFontGroup, uint32_t aFlags,
-                                          nsTArray<nsRefPtr<nsTransformedCharStyle>>&& aStyles,
+                                          nsTArray<RefPtr<nsTransformedCharStyle>>&& aStyles,
                                           bool aOwnsFactory)
 {
   // We'll only have a Unicode code path to minimize the amount of code needed
@@ -284,7 +283,7 @@ nsCaseTransformTextRunFactory::TransformString(
     nsTArray<bool>& aDeletedCharsArray,
     nsTransformedTextRun* aTextRun,
     nsTArray<uint8_t>* aCanBreakBeforeArray,
-    nsTArray<nsRefPtr<nsTransformedCharStyle>>* aStyleArray)
+    nsTArray<RefPtr<nsTransformedCharStyle>>* aStyleArray)
 {
   NS_PRECONDITION(!aTextRun || (aCanBreakBeforeArray && aStyleArray),
                   "either none or all three optional parameters required");
@@ -308,11 +307,14 @@ nsCaseTransformTextRunFactory::TransformString(
   mozilla::GreekCasing::State greekState;
   mozilla::IrishCasing::State irishState;
   uint32_t irishMark = uint32_t(-1); // location of possible prefix letter(s)
+                                     // in the output string
+  uint32_t irishMarkSrc; // corresponding location in source string (may differ
+                         // from output due to expansions like eszet -> 'SS')
 
   for (uint32_t i = 0; i < length; ++i) {
     uint32_t ch = str[i];
 
-    nsRefPtr<nsTransformedCharStyle> charStyle;
+    RefPtr<nsTransformedCharStyle> charStyle;
     if (aTextRun) {
       charStyle = aTextRun->mStyles[i];
       style = aAllUppercase ? NS_STYLE_TEXT_TRANSFORM_UPPERCASE :
@@ -457,6 +459,7 @@ nsCaseTransformTextRunFactory::TransformString(
         ch = mozilla::IrishCasing::UpperCase(ch, irishState, mark, action);
         if (mark) {
           irishMark = aConvertedString.Length();
+          irishMarkSrc = i;
           break;
         } else if (action) {
           nsString& str = aConvertedString; // shorthand
@@ -482,7 +485,7 @@ nsCaseTransformTextRunFactory::TransformString(
             NS_ASSERTION(str.Length() >= 2 && irishMark == str.Length() - 2,
                          "bad irishMark!");
             str.Replace(irishMark, 2, ToLowerCase(str[irishMark]));
-            aDeletedCharsArray[irishMark + 1] = true;
+            aDeletedCharsArray[irishMarkSrc + 1] = true;
             // Remove the trailing entries (corresponding to the deleted hyphen)
             // from the auxiliary arrays.
             aCharsToMergeArray.SetLength(aCharsToMergeArray.Length() - 1);
@@ -610,7 +613,7 @@ nsCaseTransformTextRunFactory::RebuildTextRun(nsTransformedTextRun* aTextRun,
   nsAutoTArray<bool,50> charsToMergeArray;
   nsAutoTArray<bool,50> deletedCharsArray;
   nsAutoTArray<uint8_t,50> canBreakBeforeArray;
-  nsAutoTArray<nsRefPtr<nsTransformedCharStyle>,50> styleArray;
+  nsAutoTArray<RefPtr<nsTransformedCharStyle>,50> styleArray;
 
   bool mergeNeeded = TransformString(aTextRun->mString,
                                      convertedString,

@@ -36,17 +36,18 @@ EXTRA_JS_MODULES.sessionstore = [
     'SessionFile.jsm',
     'SessionHistory.jsm',
     'SessionMigration.jsm',
+    'SessionSaver.jsm',
     'SessionStorage.jsm',
+    'SessionStore.jsm',
     'SessionWorker.js',
     'SessionWorker.jsm',
+    'StartupPerformance.jsm',
     'TabAttributes.jsm',
     'TabState.jsm',
     'TabStateCache.jsm',
+    'TabStateFlusher.jsm',
     'Utils.jsm',
 ]
 
-EXTRA_PP_JS_MODULES.sessionstore += [
-    'SessionSaver.jsm',
-    'SessionStore.jsm',
-]
-
+with Files('**'):
+    BUG_COMPONENT = ('Firefox', 'Session Restore')

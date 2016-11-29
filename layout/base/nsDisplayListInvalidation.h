@@ -13,11 +13,13 @@
 #include "nsColor.h"
 #include "gfxRect.h"
 
+class nsDisplayBackgroundImage;
+class nsCharClipDisplayItem;
 class nsDisplayItem;
 class nsDisplayListBuilder;
-class nsDisplayBackgroundImage;
-class nsDisplayThemedBackground;
 class nsDisplaySVGEffects;
+class nsDisplayTableItem;
+class nsDisplayThemedBackground;
 
 /**
  * This stores the geometry of an nsDisplayItem, and the area
@@ -131,7 +133,8 @@ public:
       return false;
     }
 
-    if (mLastDrawResult == mozilla::image::DrawResult::SUCCESS) {
+    if (mLastDrawResult == mozilla::image::DrawResult::SUCCESS ||
+        mLastDrawResult == mozilla::image::DrawResult::BAD_IMAGE) {
       return false;
     }
 
@@ -169,7 +172,9 @@ public:
   bool mHasRoundedCorners;
 };
 
-class nsDisplayBorderGeometry : public nsDisplayItemGeometry
+class nsDisplayBorderGeometry
+  : public nsDisplayItemGeometry
+  , public nsImageGeometryMixin<nsDisplayBorderGeometry>
 {
 public:
   nsDisplayBorderGeometry(nsDisplayItem* aItem, nsDisplayListBuilder* aBuilder);
@@ -245,6 +250,27 @@ public:
   gfxRect mBBox;
   gfxPoint mUserSpaceOffset;
   nsPoint mFrameOffsetToReferenceFrame;
+};
+
+class nsCharClipGeometry : public nsDisplayItemGenericGeometry
+{
+public:
+  nsCharClipGeometry(nsCharClipDisplayItem* aItem, nsDisplayListBuilder* aBuilder);
+
+  nscoord mVisIStartEdge;
+  nscoord mVisIEndEdge;
+};
+
+class nsDisplayTableItemGeometry
+  : public nsDisplayItemGenericGeometry
+  , public nsImageGeometryMixin<nsDisplayTableItemGeometry>
+{
+public:
+  nsDisplayTableItemGeometry(nsDisplayTableItem* aItem,
+                             nsDisplayListBuilder* aBuilder,
+                             const nsPoint& aFrameOffsetToViewport);
+
+  nsPoint mFrameOffsetToViewport;
 };
 
 #endif /*NSDISPLAYLISTINVALIDATION_H_*/

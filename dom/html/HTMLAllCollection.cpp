@@ -68,23 +68,21 @@ HTMLAllCollection::Collection()
 static bool
 IsAllNamedElement(nsIContent* aContent)
 {
-  nsIAtom* tag = aContent->Tag();
-  return
-    tag == nsGkAtoms::a ||
-    tag == nsGkAtoms::applet ||
-    tag == nsGkAtoms::button ||
-    tag == nsGkAtoms::embed ||
-    tag == nsGkAtoms::form ||
-    tag == nsGkAtoms::iframe ||
-    tag == nsGkAtoms::img ||
-    tag == nsGkAtoms::input ||
-    tag == nsGkAtoms::map ||
-    tag == nsGkAtoms::meta ||
-    tag == nsGkAtoms::object ||
-    tag == nsGkAtoms::select ||
-    tag == nsGkAtoms::textarea ||
-    tag == nsGkAtoms::frame ||
-    tag == nsGkAtoms::frameset;
+  return aContent->IsAnyOfHTMLElements(nsGkAtoms::a,
+                                       nsGkAtoms::applet,
+                                       nsGkAtoms::button,
+                                       nsGkAtoms::embed,
+                                       nsGkAtoms::form,
+                                       nsGkAtoms::iframe,
+                                       nsGkAtoms::img,
+                                       nsGkAtoms::input,
+                                       nsGkAtoms::map,
+                                       nsGkAtoms::meta,
+                                       nsGkAtoms::object,
+                                       nsGkAtoms::select,
+                                       nsGkAtoms::textarea,
+                                       nsGkAtoms::frame,
+                                       nsGkAtoms::frameset);
 }
 
 static bool
@@ -122,7 +120,7 @@ HTMLAllCollection::GetDocumentAllList(const nsAString& aID)
   }
 
   nsCOMPtr<nsIAtom> id = do_GetAtom(aID);
-  nsRefPtr<nsContentList> docAllList =
+  RefPtr<nsContentList> docAllList =
     new nsContentList(root, DocAllResultMatch, nullptr, nullptr, true, id);
   mNamedMap.Put(aID, docAllList);
   return docAllList;
@@ -204,17 +202,18 @@ HTMLAllCollection::GetSupportedNames(unsigned aFlags, nsTArray<nsString>& aNames
     }
   }
 
-  aNames.SetCapacity(atoms.Length());
-  for (uint32_t i = 0; i < atoms.Length(); ++i) {
-    aNames.AppendElement(nsDependentAtomString(atoms[i]));
+  uint32_t atomsLen = atoms.Length();
+  nsString* names = aNames.AppendElements(atomsLen);
+  for (uint32_t i = 0; i < atomsLen; ++i) {
+    atoms[i]->ToString(names[i]);
   }
 }
 
 
 JSObject*
-HTMLAllCollection::WrapObject(JSContext* aCx)
+HTMLAllCollection::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLAllCollectionBinding::Wrap(aCx, this);
+  return HTMLAllCollectionBinding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

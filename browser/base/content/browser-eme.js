@@ -1,9 +1,9 @@
-# -*- indent-tabs-mode: nil; js-indent-level: 2 -*-
-# This Source Code Form is subject to the terms of the Mozilla Public
-# License, v. 2.0. If a copy of the MPL was not distributed with this
-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*-
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-let gEMEHandler = {
+var gEMEHandler = {
   get uiEnabled() {
     let emeUIEnabled = Services.prefs.getBoolPref("browser.eme.ui.enabled");
     // Force-disable on WinXP:
@@ -32,16 +32,6 @@ let gEMEHandler = {
     let baseURL = Services.urlFormatter.formatURLPref("app.support.baseURL");
     return "<label class='text-link' href='" + baseURL + "drm-content'>" +
            text + "</label>";
-  },
-  onDontAskAgain: function(menuPopupItem) {
-    let button = menuPopupItem.parentNode.anchorNode;
-    let bar = button.parentNode;
-    Services.prefs.setBoolPref("browser.eme.ui." + bar.value + ".disabled", true);
-    bar.close();
-  },
-  onNotNow: function(menuPopupItem) {
-    let button = menuPopupItem.parentNode.anchorNode;
-    button.parentNode.close();
   },
   receiveMessage: function({target: browser, data: data}) {
     let parsedData;
@@ -105,13 +95,6 @@ let gEMEHandler = {
       return;
     }
 
-    // If the user turned these off, bail out:
-    try {
-      if (Services.prefs.getBoolPref("browser.eme.ui." + notificationId + ".disabled")) {
-        return;
-      }
-    } catch (ex) { /* Don't care if the pref doesn't exist */ }
-
     let msgPrefix = "emeNotifications." + notificationId + ".";
     let msgId = msgPrefix + "message";
 
@@ -139,13 +122,6 @@ let gEMEHandler = {
         label: gNavigatorBundle.getString(btnLabelId),
         accessKey: gNavigatorBundle.getString(btnAccessKeyId),
         callback: callback
-      });
-
-      let optionsId = "emeNotifications.optionsButton";
-      buttons.push({
-        label: gNavigatorBundle.getString(optionsId + ".label"),
-        accessKey: gNavigatorBundle.getString(optionsId + ".accesskey"),
-        popup: "emeNotificationsPopup"
       });
     }
 
@@ -206,6 +182,7 @@ let gEMEHandler = {
     let options = {
       dismissed: true,
       eventCallback: aTopic => aTopic == "swapping",
+      learnMoreURL: Services.urlFormatter.formatURLPref("app.support.baseURL") + "drm-content",
     };
     PopupNotifications.show(browser, "drmContentPlaying", message, anchorId, mainAction, null, options);
   },

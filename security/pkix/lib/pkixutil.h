@@ -53,16 +53,18 @@ public:
   Result Init();
 
   const Input GetDER() const { return der; }
-  der::Version GetVersion() const { return version; }
   const der::SignedDataWithSignature& GetSignedData() const {
     return signedData;
   }
+
+  der::Version GetVersion() const { return version; }
+  const Input GetSerialNumber() const { return serialNumber; }
+  const Input GetSignature() const { return signature; }
   const Input GetIssuer() const { return issuer; }
   // XXX: "validity" is a horrible name for the structure that holds
   // notBefore & notAfter, but that is the name used in RFC 5280 and we use the
   // RFC 5280 names for everything.
   const Input GetValidity() const { return validity; }
-  const Input GetSerialNumber() const { return serialNumber; }
   const Input GetSubject() const { return subject; }
   const Input GetSubjectPublicKeyInfo() const
   {
@@ -99,6 +101,10 @@ public:
   const Input* GetSubjectAltName() const
   {
     return MaybeInput(subjectAltName);
+  }
+  const Input* GetRequiredTLSFeatures() const
+  {
+    return MaybeInput(requiredTLSFeatures);
   }
 
 private:
@@ -142,6 +148,7 @@ private:
   Input nameConstraints;
   Input subjectAltName;
   Input criticalNetscapeCertificateType;
+  Input requiredTLSFeatures;
 
   Result RememberExtension(Reader& extnID, Input extnValue, bool critical,
                            /*out*/ bool& understood);

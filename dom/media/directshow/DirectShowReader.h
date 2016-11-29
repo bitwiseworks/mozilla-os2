@@ -9,22 +9,18 @@
 
 #include "windows.h" // HRESULT, DWORD
 #include "MediaDecoderReader.h"
+#include "MediaResource.h"
 #include "mozilla/RefPtr.h"
 #include "MP3FrameParser.h"
 
 struct IGraphBuilder;
 struct IMediaControl;
 struct IMediaSeeking;
-struct IMediaEventEx;
 
 namespace mozilla {
 
 class AudioSinkFilter;
 class SourceFilter;
-
-namespace dom {
-class TimeRanges;
-}
 
 // Decoder backend for decoding MP3 using DirectShow. DirectShow operates as
 // a filter graph. The basic design of the DirectShowReader is that we have
@@ -48,29 +44,20 @@ public:
 
   virtual ~DirectShowReader();
 
-  nsresult Init(MediaDecoderReader* aCloneDonor) override;
-
   bool DecodeAudioData() override;
   bool DecodeVideoFrame(bool &aKeyframeSkip,
                         int64_t aTimeThreshold) override;
 
-  bool HasAudio() override;
-  bool HasVideo() override;
-
   nsresult ReadMetadata(MediaInfo* aInfo,
                         MetadataTags** aTags) override;
 
-  nsRefPtr<SeekPromise>
+  RefPtr<SeekPromise>
   Seek(int64_t aTime, int64_t aEndTime) override;
 
-  void NotifyDataArrived(const char* aBuffer,
-                         uint32_t aLength,
-                         int64_t aOffset) override;
-
-  bool IsMediaSeekable() override;
+protected:
+  void NotifyDataArrivedInternal() override;
 
 private:
-
   // Notifies the filter graph that playback is complete. aStatus is
   // the code to send to the filter graph. Always returns false, so
   // that we can just "return Finish()" from DecodeAudioData().
@@ -114,6 +101,8 @@ private:
 
   // Duration of the stream, in microseconds.
   int64_t mDuration;
+
+  MediaByteRangeSet mLastCachedRanges;
 };
 
 } // namespace mozilla

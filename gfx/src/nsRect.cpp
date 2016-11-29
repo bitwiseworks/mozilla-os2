@@ -15,6 +15,11 @@ static_assert((int(NS_SIDE_TOP) == 0) &&
               (int(NS_SIDE_LEFT) == 3),
               "The mozilla::css::Side sequence must match the nsMargin nscoord sequence");
 
+const mozilla::gfx::IntRect& GetMaxSizedIntRect() {
+  static const mozilla::gfx::IntRect r(0, 0, INT32_MAX, INT32_MAX);
+  return r;
+}
+
 #ifdef DEBUG
 // Diagnostics
 

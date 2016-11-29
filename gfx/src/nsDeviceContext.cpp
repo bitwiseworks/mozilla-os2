@@ -35,6 +35,7 @@
 #include "nsString.h"               // for nsDependentString
 #include "nsTArray.h"                   // for nsTArray, nsTArray_Impl
 #include "nsThreadUtils.h"              // for NS_IsMainThread
+#include "mozilla/gfx/Logging.h"
 
 #if !XP_MACOSX
 #include "gfxPDFSurface.h"
@@ -393,7 +394,9 @@ nsDeviceContext::Init(nsIWidget *aWidget)
 already_AddRefed<gfxContext>
 nsDeviceContext::CreateRenderingContext()
 {
-    nsRefPtr<gfxASurface> printingSurface = mPrintingSurface;
+    MOZ_ASSERT(mWidth > 0 && mHeight > 0);
+
+    RefPtr<gfxASurface> printingSurface = mPrintingSurface;
 #ifdef XP_MACOSX
     // CreateRenderingContext() can be called (on reflow) after EndPage()
     // but before BeginPage().  On OS X (and only there) mPrintingSurface
@@ -410,13 +413,33 @@ nsDeviceContext::CreateRenderingContext()
       gfxPlatform::GetPlatform()->CreateDrawTargetForSurface(printingSurface,
                                                              gfx::IntSize(mWidth, mHeight));
 
+    // This can legitimately happen - CreateDrawTargetForSurface will fail
+    // to create a draw target if the size is too large, for instance.
+    if (!dt) {
+        gfxCriticalNote << "Failed to create draw target in device context sized " << mWidth << "x" << mHeight << " and pointers " << hexa(mPrintingSurface) << " and " << hexa(printingSurface);
+        return nullptr;
+    }
+
 #ifdef XP_MACOSX
     dt->AddUserData(&gfxContext::sDontUseAsSourceKey, dt, nullptr);
 #endif
     dt->AddUserData(&sDisablePixelSnapping, (void*)0x1, nullptr);
 
-    nsRefPtr<gfxContext> pContext = new gfxContext(dt);
-    pContext->SetMatrix(gfxMatrix::Scaling(mPrintingScale, mPrintingScale));
+    RefPtr<gfxContext> pContext = new gfxContext(dt);
+
+    gfxMatrix transform;
+    if (printingSurface->GetRotateForLandscape()) {
+      // Rotate page 90 degrees to draw landscape page on portrait paper
+      IntSize size = printingSurface->GetSize();
+      transform.Translate(gfxPoint(0, size.width));
+      gfxMatrix rotate(0, -1,
+                       1,  0,
+                       0,  0);
+      transform = rotate * transform;
+    }
+    transform.Scale(mPrintingScale, mPrintingScale);
+
+    pContext->SetMatrix(transform);
     return pContext.forget();
 }
 
@@ -494,7 +517,9 @@ nsDeviceContext::InitForPrinting(nsIDeviceContextSpec *aDevice)
 
     Init(nullptr);
 
-    CalcPrintingSize();
+    if (!CalcPrintingSize()) {
+        return NS_ERROR_FAILURE;
+    }
 
     return NS_OK;
 }
@@ -662,11 +687,12 @@ nsDeviceContext::FindScreen(nsIScreen** outScreen)
     }
 }
 
-void
+bool
 nsDeviceContext::CalcPrintingSize()
 {
-    if (!mPrintingSurface)
-        return;
+    if (!mPrintingSurface) {
+        return (mWidth > 0 && mHeight > 0);
+    }
 
     bool inPoints = true;
 
@@ -716,6 +742,7 @@ nsDeviceContext::CalcPrintingSize()
 #endif
 
     default:
+        gfxCriticalError() << "Printing to unknown surface type " << (int)mPrintingSurface->GetType();
         NS_ERROR("trying to print to unknown surface type");
     }
 
@@ -728,6 +755,8 @@ nsDeviceContext::CalcPrintingSize()
         mWidth = NSToIntRound(size.width);
         mHeight = NSToIntRound(size.height);
     }
+
+    return (mWidth > 0 && mHeight > 0);
 }
 
 bool nsDeviceContext::CheckDPIChange() {

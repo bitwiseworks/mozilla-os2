@@ -10,10 +10,8 @@ const LDAPSyncQueryContractID = "@mozilla.org/ldapsyncquery;1";
 const nsIPrefService = Components.interfaces.nsIPrefService;
 const PrefServiceContractID = "@mozilla.org/preferences-service;1";
 
-// set on a platform specific basis in platform.js
-platform = { value: "" };
-
 var gVersion;
+var gIsUTF8;
 
 function getPrefBranch() {
     
@@ -28,6 +26,14 @@ function pref(prefName, value) {
         var prefBranch = getPrefBranch();
 
         if (typeof value == "string") {
+            if (gIsUTF8) {
+                const nsISupportsString = Components.interfaces.nsISupportsString;
+                let string = Components.classes["@mozilla.org/supports-string;1"]
+                                       .createInstance(nsISupportsString);
+                string.data = value;
+                prefBranch.setComplexValue(prefName, nsISupportsString, string);
+                return;
+            }
             prefBranch.setCharPref(prefName, value);
         }
         else if (typeof value == "number") {
@@ -49,6 +55,14 @@ function defaultPref(prefName, value) {
                                     .getService(nsIPrefService);        
         var prefBranch = prefService.getDefaultBranch(null);
         if (typeof value == "string") {
+            if (gIsUTF8) {
+                const nsISupportsString = Components.interfaces.nsISupportsString;
+                let string = Components.classes["@mozilla.org/supports-string;1"]
+                                       .createInstance(nsISupportsString);
+                string.data = value;
+                prefBranch.setComplexValue(prefName, nsISupportsString, string);
+                return;
+            }
             prefBranch.setCharPref(prefName, value);
         }
         else if (typeof value == "number") {
@@ -100,6 +114,12 @@ function getPref(prefName) {
         switch (prefBranch.getPrefType(prefName)) {
             
         case prefBranch.PREF_STRING:
+            if (gIsUTF8) {
+                const nsISupportsString = Components.interfaces.nsISupportsString;
+                let string = Components.classes["@mozilla.org/supports-string;1"]
+                                       .createInstance(nsISupportsString);
+                return prefBranch.getComplexValue(prefName, nsISupportsString).data;
+            }
             return prefBranch.getCharPref(prefName);
             
         case prefBranch.PREF_INT:

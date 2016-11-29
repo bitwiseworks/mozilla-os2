@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -11,7 +12,6 @@
 #define nsDOMAttributeMap_h
 
 #include "mozilla/MemoryReporting.h"
-#include "mozilla/UniquePtr.h"
 #include "mozilla/dom/Attr.h"
 #include "mozilla/ErrorResult.h"
 #include "nsCycleCollectionParticipant.h"
@@ -35,10 +35,10 @@ public:
   int32_t  mNamespaceID;
 
   /**
-   * The atom for attribute, weak ref. is fine as we only use it for the
-   * hashcode, we never dereference it.
+   * The atom for attribute, stored as void*, to make sure that we only use it
+   * for the hashcode, and we can never dereference it.
    */
-  nsIAtom* mLocalName;
+  void* mLocalName;
 
   nsAttrKey(int32_t aNs, nsIAtom* aName)
     : mNamespaceID(aNs), mLocalName(aName) {}
@@ -82,8 +82,8 @@ private:
 };
 
 // Helper class that implements the nsIDOMMozNamedAttrMap interface.
-class nsDOMAttributeMap : public nsIDOMMozNamedAttrMap
-                        , public nsWrapperCache
+class nsDOMAttributeMap final : public nsIDOMMozNamedAttrMap
+                              , public nsWrapperCache
 {
 public:
   typedef mozilla::dom::Attr Attr;
@@ -128,29 +128,20 @@ public:
 
   typedef nsRefPtrHashtable<nsAttrHashKey, Attr> AttrCache;
 
-  /**
-   * Enumerates over the attribute nodess in the map and calls aFunc for each
-   * one. If aFunc returns PL_DHASH_STOP we'll stop enumerating at that point.
-   *
-   * @return The number of attribute nodes that aFunc was called for.
-   */
-  uint32_t Enumerate(AttrCache::EnumReadFunction aFunc, void *aUserArg) const;
+  static void BlastSubtreeToPieces(nsINode *aNode);
 
   Element* GetParentObject() const
   {
     return mContent;
   }
-  virtual JSObject* WrapObject(JSContext* aCx) override;
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   // WebIDL
   Attr* GetNamedItem(const nsAString& aAttrName);
   Attr* NamedGetter(const nsAString& aAttrName, bool& aFound);
   bool NameIsEnumerable(const nsAString& aName);
   already_AddRefed<Attr>
-  SetNamedItem(Attr& aAttr, ErrorResult& aError)
-  {
-    return SetNamedItemInternal(aAttr, false, aError);
-  }
+  RemoveNamedItem(mozilla::dom::NodeInfo* aNodeInfo, ErrorResult& aError);
   already_AddRefed<Attr>
   RemoveNamedItem(const nsAString& aName, ErrorResult& aError);
  
@@ -162,18 +153,13 @@ public:
   GetNamedItemNS(const nsAString& aNamespaceURI,
                  const nsAString& aLocalName);
   already_AddRefed<Attr>
-  SetNamedItemNS(Attr& aNode, ErrorResult& aError)
-  {
-    return SetNamedItemInternal(aNode, true, aError);
-  }
+  SetNamedItemNS(Attr& aNode, ErrorResult& aError);
   already_AddRefed<Attr>
   RemoveNamedItemNS(const nsAString& aNamespaceURI, const nsAString& aLocalName,
                     ErrorResult& aError);
 
-  void GetSupportedNames(unsigned, nsTArray<nsString>& aNames)
-  {
-    // No supported names we want to show up in iteration.
-  }
+  void
+  GetSupportedNames(unsigned aFlags, nsTArray<nsString>& aNames);
 
   size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
@@ -184,18 +170,9 @@ private:
   nsCOMPtr<Element> mContent;
 
   /**
-   * Cache of Attrs. It's usually empty, and thus initialized lazily.
+   * Cache of Attrs.
    */
-  mozilla::UniquePtr<AttrCache> mAttributeCache;
-
-  void EnsureAttributeCache();
-
-  /**
-   * SetNamedItem() (aWithNS = false) and SetNamedItemNS() (aWithNS =
-   * true) implementation.
-   */
-  already_AddRefed<Attr>
-  SetNamedItemInternal(Attr& aNode, bool aWithNS, ErrorResult& aError);
+  AttrCache mAttributeCache;
 
   already_AddRefed<mozilla::dom::NodeInfo>
   GetAttrNodeInfo(const nsAString& aNamespaceURI,

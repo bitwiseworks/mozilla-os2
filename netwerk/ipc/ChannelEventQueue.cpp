@@ -8,6 +8,7 @@
 #include "nsISupports.h"
 #include "mozilla/net/ChannelEventQueue.h"
 #include "nsThreadUtils.h"
+#include "mozilla/unused.h"
 
 namespace mozilla {
 namespace net {
@@ -19,6 +20,7 @@ ChannelEventQueue::FlushQueue()
   // destructor) unless we make sure its refcount doesn't drop to 0 while this
   // method is running.
   nsCOMPtr<nsISupports> kungFuDeathGrip(mOwner);
+  Unused << kungFuDeathGrip;
 
   // Prevent flushed events from flushing the queue recursively
   mFlushing = true;
@@ -52,7 +54,7 @@ ChannelEventQueue::Resume()
   }
 
   if (!--mSuspendCount) {
-    nsRefPtr<nsRunnableMethod<ChannelEventQueue> > event =
+    RefPtr<nsRunnableMethod<ChannelEventQueue> > event =
       NS_NewRunnableMethod(this, &ChannelEventQueue::CompleteResume);
     if (mTargetThread) {
       mTargetThread->Dispatch(event, NS_DISPATCH_NORMAL);
@@ -76,5 +78,5 @@ ChannelEventQueue::RetargetDeliveryTo(nsIEventTarget* aTargetThread)
   return NS_OK;
 }
 
-}
-}
+} // namespace net
+} // namespace mozilla

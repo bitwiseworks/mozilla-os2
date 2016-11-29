@@ -12,10 +12,15 @@
 #include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 
+#ifdef MOZ_WIDGET_GONK
+#include "nsINetworkInterface.h"
+#include "nsProxyRelease.h"
+#endif
+
 //-----------------------------------------------------------------------------
 
 class nsUDPSocket final : public nsASocketHandler
-                            , public nsIUDPSocket
+                        , public nsIUDPSocket
 {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
@@ -50,18 +55,25 @@ private:
                                   const PRNetAddr& aIface);
   nsresult SetMulticastInterfaceInternal(const PRNetAddr& aIface);
 
+  void SaveNetworkStats(bool aEnforce);
+
   // lock protects access to mListener;
   // so mListener is not cleared while being used/locked.
   mozilla::Mutex                       mLock;
   PRFileDesc                           *mFD;
   mozilla::net::NetAddr                mAddr;
+  uint32_t                             mAppId;
+  bool                                 mIsInBrowserElement;
   nsCOMPtr<nsIUDPSocketListener>       mListener;
   nsCOMPtr<nsIEventTarget>             mListenerTarget;
   bool                                 mAttached;
-  nsRefPtr<nsSocketTransportService>   mSts;
+  RefPtr<nsSocketTransportService>   mSts;
 
   uint64_t   mByteReadCount;
   uint64_t   mByteWriteCount;
+#ifdef MOZ_WIDGET_GONK
+  nsMainThreadPtrHandle<nsINetworkInfo> mActiveNetworkInfo;
+#endif
 };
 
 //-----------------------------------------------------------------------------
@@ -102,7 +114,7 @@ public:
 private:
   virtual ~nsUDPOutputStream();
 
-  nsRefPtr<nsUDPSocket>       mSocket;
+  RefPtr<nsUDPSocket>       mSocket;
   PRFileDesc                  *mFD;
   PRNetAddr                   mPrClientAddr;
   bool                        mIsClosed;

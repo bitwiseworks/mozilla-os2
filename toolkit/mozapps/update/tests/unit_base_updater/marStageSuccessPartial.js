@@ -5,16 +5,72 @@
 
 /* General Partial MAR File Staged Patch Apply Test */
 
+const STATE_AFTER_STAGE = IS_SERVICE_TEST ? STATE_APPLIED_SVC : STATE_APPLIED;
+
 function run_test() {
-  gStageUpdate = true;
-  setupTestCommon();
+  if (!setupTestCommon()) {
+    return;
+  }
   gTestFiles = gTestFilesPartialSuccess;
   gTestFiles[gTestFiles.length - 2].originalContents = null;
   gTestFiles[gTestFiles.length - 2].compareContents = "FromPartial\n";
   gTestFiles[gTestFiles.length - 2].comparePerms = 0o644;
   gTestDirs = gTestDirsPartialSuccess;
   preventDistributionFiles();
-  setupUpdaterTest(FILE_PARTIAL_MAR);
+  setupDistributionDir();
+  setupUpdaterTest(FILE_PARTIAL_MAR, true);
+}
+
+/**
+ * Called after the call to setupUpdaterTest finishes.
+ */
+function setupUpdaterTestFinished() {
+  stageUpdate();
+}
+
+/**
+ * Called after the call to stageUpdate finishes.
+ */
+function stageUpdateFinished() {
+  checkPostUpdateRunningFile(false);
+  checkFilesAfterUpdateSuccess(getStageDirFile, true);
+  checkUpdateLogContents(LOG_PARTIAL_SUCCESS_STAGE, true, false, true);
+  // Switch the application to the staged application that was updated.
+  runUpdate(STATE_SUCCEEDED, true, 0, false);
+}
+
+/**
+ * Called after the call to runUpdate finishes.
+ */
+function runUpdateFinished() {
+  checkPostUpdateAppLog();
+}
+
+/**
+ * Called after the call to checkPostUpdateAppLog finishes.
+ */
+function checkPostUpdateAppLogFinished() {
+  checkAppBundleModTime();
+  standardInit();
+  Assert.equal(readStatusState(), STATE_NONE,
+               "the status file state" + MSG_SHOULD_EQUAL);
+  Assert.ok(!gUpdateManager.activeUpdate,
+            "the active update should not be defined");
+  Assert.equal(gUpdateManager.updateCount, 1,
+               "the update manager updateCount attribute" + MSG_SHOULD_EQUAL);
+  Assert.equal(gUpdateManager.getUpdateAt(0).state, STATE_SUCCEEDED,
+               "the update state" + MSG_SHOULD_EQUAL);
+  checkPostUpdateRunningFile(true);
+  checkFilesAfterUpdateSuccess(getApplyDirFile, false, true);
+  checkUpdateLogContents(LOG_REPLACE_SUCCESS, false, true, true);
+  checkDistributionDir();
+  checkCallbackLog();
+}
+
+/**
+ * Setup the state of the distribution directory for the test.
+ */
+function setupDistributionDir() {
   if (IS_MACOSX) {
     // Create files in the old distribution directory location to verify that
     // the directory and its contents are moved to the new location on update.
@@ -23,93 +79,34 @@ function run_test() {
     testFile = getApplyDirFile(DIR_MACOS + "distribution/test/testFile", true);
     writeFile(testFile, "test\n");
   }
-
-  createUpdaterINI(false);
-
-  // For Mac OS X set the last modified time for the root directory to a date in
-  // the past to test that the last modified time is updated on all updates since
-  // the precomplete file in the root of the bundle is renamed, etc. (bug 600098).
-  if (IS_MACOSX) {
-    let now = Date.now();
-    let yesterday = now - (1000 * 60 * 60 * 24);
-    let applyToDir = getApplyDirFile();
-    applyToDir.lastModifiedTime = yesterday;
-  }
-
-  runUpdate(0, STATE_APPLIED, null);
-
-  checkFilesAfterUpdateSuccess(getStageDirFile, true, false);
-  checkUpdateLogContents(LOG_PARTIAL_SUCCESS, true);
-
-  if (IS_WIN || IS_MACOSX) {
-    // Check that the post update process was not launched when staging an
-    // update.
-    do_check_false(getPostUpdateFile(".running").exists());
-  }
-
-  // Switch the application to the staged application that was updated.
-  gStageUpdate = false;
-  gSwitchApp = true;
-  do_timeout(TEST_CHECK_TIMEOUT, function() {
-    runUpdate(0, STATE_SUCCEEDED);
-  });
 }
 
 /**
- * Checks if the post update binary was properly launched for the platforms that
- * support launching post update process.
+ * Checks the state of the distribution directory.
  */
-function checkUpdateApplied() {
-  if (IS_WIN || IS_MACOSX) {
-    gCheckFunc = finishCheckUpdateApplied;
-    checkPostUpdateAppLog();
-  } else {
-    finishCheckUpdateApplied();
-  }
-}
-
-/**
- * Checks if the update has finished and if it has finished performs checks for
- * the test.
- */
-function finishCheckUpdateApplied() {
-  if (IS_MACOSX) {
-    logTestInfo("testing last modified time on the apply to directory has " +
-                "changed after a successful update (bug 600098)");
-    let now = Date.now();
-    let applyToDir = getApplyDirFile();
-    let timeDiff = Math.abs(applyToDir.lastModifiedTime - now);
-    do_check_true(timeDiff < MAC_MAX_TIME_DIFFERENCE);
-  }
-
+function checkDistributionDir() {
   let distributionDir = getApplyDirFile(DIR_RESOURCES + "distribution", true);
   if (IS_MACOSX) {
-    logTestInfo("testing that the distribution directory is moved from the " +
-                "old location to the new location");
-    logTestInfo("testing " + distributionDir.path + " should exist");
-    do_check_true(distributionDir.exists());
+    Assert.ok(distributionDir.exists(),
+              MSG_SHOULD_EXIST + getMsgPath(distributionDir.path));
 
     let testFile = getApplyDirFile(DIR_RESOURCES + "distribution/testFile", true);
-    logTestInfo("testing " + testFile.path + " should exist");
-    do_check_true(testFile.exists());
+    Assert.ok(testFile.exists(),
+              MSG_SHOULD_EXIST + getMsgPath(testFile.path));
 
     testFile = getApplyDirFile(DIR_RESOURCES + "distribution/test/testFile", true);
-    logTestInfo("testing " + testFile.path + " should exist");
-    do_check_true(testFile.exists());
+    Assert.ok(testFile.exists(),
+              MSG_SHOULD_EXIST + getMsgPath(testFile.path));
 
     distributionDir = getApplyDirFile(DIR_MACOS + "distribution", true);
-    logTestInfo("testing " + distributionDir.path + " shouldn't exist");
-    do_check_false(distributionDir.exists());
+    Assert.ok(!distributionDir.exists(),
+              MSG_SHOULD_NOT_EXIST + getMsgPath(distributionDir.path));
 
-    checkUpdateLogContains("Moving old distribution directory to new location");
+    checkUpdateLogContains(MOVE_OLD_DIST_DIR);
   } else {
-    logTestInfo("testing that files aren't added with an add-if instruction " +
-                "when the file's destination directory doesn't exist");
-    logTestInfo("testing " + distributionDir.path + " shouldn't exist");
-    do_check_false(distributionDir.exists());
+    debugDump("testing that files aren't added with an add-if instruction " +
+              "when the file's destination directory doesn't exist");
+    Assert.ok(!distributionDir.exists(),
+              MSG_SHOULD_NOT_EXIST + getMsgPath(distributionDir.path));
   }
-
-  checkFilesAfterUpdateSuccess(getApplyDirFile, false, false);
-  checkUpdateLogContents(LOG_PARTIAL_SUCCESS, true);
-  checkCallbackAppLog();
 }

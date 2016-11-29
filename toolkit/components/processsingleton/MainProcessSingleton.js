@@ -9,14 +9,6 @@ const { utils: Cu, interfaces: Ci, classes: Cc, results: Cr } = Components;
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyServiceGetter(this, "ppmm",
-                                   "@mozilla.org/parentprocessmessagemanager;1",
-                                   "nsIMessageListenerManager");
-
-XPCOMUtils.defineLazyServiceGetter(this, "globalmm",
-                                   "@mozilla.org/globalmessagemanager;1",
-                                   "nsIMessageBroadcaster");
-
 XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
                                   "resource://gre/modules/NetUtil.jsm");
 
@@ -32,20 +24,15 @@ MainProcessSingleton.prototype = {
     Services.obs.notifyObservers(logMsg, "console-api-log-event", null);
   },
 
-  // Called when a webpage calls either window.external.AddSearchProvider or
-  // window.sidebar.addSearchEngine
-  addSearchEngine: function({ target: browser, data: { pageURL, engineURL, iconURL, type } }) {
+  // Called when a webpage calls window.external.AddSearchProvider
+  addSearchEngine: function({ target: browser, data: { pageURL, engineURL } }) {
     pageURL = NetUtil.newURI(pageURL);
     engineURL = NetUtil.newURI(engineURL, null, pageURL);
 
-    if (iconURL) {
-      iconURL = NetUtil.newURI(iconURL, null, pageURL);
-    }
-    else {
-      let tabbrowser = browser.getTabBrowser();
-      if (browser.mIconURL && (!tabbrowser || tabbrowser.shouldLoadFavIcon(pageURL)))
-        iconURL = NetUtil.newURI(browser.mIconURL);
-    }
+    let iconURL;
+    let tabbrowser = browser.getTabBrowser();
+    if (browser.mIconURL && (!tabbrowser || tabbrowser.shouldLoadFavIcon(pageURL)))
+      iconURL = NetUtil.newURI(browser.mIconURL);
 
     try {
       // Make sure the URLs are HTTP, HTTPS, or FTP.
@@ -58,7 +45,7 @@ MainProcessSingleton.prototype = {
         throw "Unsupported search icon URL: " + iconURL;
     }
     catch(ex) {
-      Cu.reportError("Invalid argument passed to window.sidebar.addSearchEngine: " + ex);
+      Cu.reportError("Invalid argument passed to window.external.AddSearchProvider: " + ex);
 
       var searchBundle = Services.strings.createBundle("chrome://global/locale/search/search.properties");
       var brandBundle = Services.strings.createBundle("chrome://branding/locale/brand.properties");
@@ -74,7 +61,7 @@ MainProcessSingleton.prototype = {
       if (status != Cr.NS_OK)
         return;
 
-      Services.search.addEngine(engineURL.spec, type, iconURL ? iconURL.spec : null, true);
+      Services.search.addEngine(engineURL.spec, null, iconURL ? iconURL.spec : null, true);
     })
   },
 
@@ -85,15 +72,16 @@ MainProcessSingleton.prototype = {
 
       // Load this script early so that console.* is initialized
       // before other frame scripts.
-      globalmm.loadFrameScript("chrome://global/content/browser-content.js", true);
-      ppmm.addMessageListener("Console:Log", this.logConsoleMessage);
-      globalmm.addMessageListener("Search:AddEngine", this.addSearchEngine);
+      Services.mm.loadFrameScript("chrome://global/content/browser-content.js", true);
+      Services.ppmm.loadProcessScript("chrome://global/content/process-content.js", true);
+      Services.ppmm.addMessageListener("Console:Log", this.logConsoleMessage);
+      Services.mm.addMessageListener("Search:AddEngine", this.addSearchEngine);
       break;
     }
 
     case "xpcom-shutdown":
-      ppmm.removeMessageListener("Console:Log", this.logConsoleMessage);
-      globalmm.removeMessageListener("Search:AddEngine", this.addSearchEngine);
+      Services.ppmm.removeMessageListener("Console:Log", this.logConsoleMessage);
+      Services.mm.removeMessageListener("Search:AddEngine", this.addSearchEngine);
       break;
     }
   },

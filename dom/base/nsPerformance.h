@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -13,6 +14,7 @@
 #include "nsContentUtils.h"
 #include "nsPIDOMWindow.h"
 #include "js/TypeDecls.h"
+#include "js/RootingAPI.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/DOMEventTargetHelper.h"
 
@@ -21,11 +23,16 @@ class nsPerformance;
 class nsIHttpChannel;
 
 namespace mozilla {
+
 class ErrorResult;
+
 namespace dom {
-  class PerformanceEntry;
-}
-}
+
+class PerformanceEntry;
+class PerformanceObserver;
+
+} // namespace dom
+} // namespace mozilla
 
 // Script "performance.timing" object
 class nsPerformanceTiming final : public nsWrapperCache
@@ -117,7 +124,7 @@ public:
     return duration.ToMilliseconds() + mZeroTime;
   }
 
-  virtual JSObject* WrapObject(JSContext *cx) override;
+  virtual JSObject* WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto) override;
 
   // PerformanceNavigation WebIDL methods
   DOMTimeMilliSec NavigationStart() const {
@@ -224,7 +231,7 @@ private:
   ~nsPerformanceTiming();
   bool IsInitialized() const;
   void InitializeTimingInfo(nsITimedChannel* aChannel);
-  nsRefPtr<nsPerformance> mPerformance;
+  RefPtr<nsPerformance> mPerformance;
   DOMHighResTimeStamp mFetchStart;
   // This is an offset that will be added to each timing ([ms] resolution).
   // There are only 2 possible values: (1) logicaly equal to navigationStart
@@ -271,7 +278,7 @@ public:
     return mPerformance;
   }
 
-  virtual JSObject* WrapObject(JSContext *cx) override;
+  virtual JSObject* WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto) override;
 
   // PerformanceNavigation WebIDL methods
   uint16_t Type() const {
@@ -283,21 +290,113 @@ public:
 
 private:
   ~nsPerformanceNavigation();
-  nsRefPtr<nsPerformance> mPerformance;
+  RefPtr<nsPerformance> mPerformance;
+};
+
+// Base class for main-thread and worker Performance API
+class PerformanceBase : public mozilla::DOMEventTargetHelper 
+{
+public:
+  NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(PerformanceBase,
+                                           DOMEventTargetHelper)
+
+  PerformanceBase();
+  explicit PerformanceBase(nsPIDOMWindow* aWindow);
+
+  typedef mozilla::dom::PerformanceEntry PerformanceEntry;
+  typedef mozilla::dom::PerformanceObserver PerformanceObserver;
+
+  void GetEntries(nsTArray<RefPtr<PerformanceEntry>>& aRetval);
+  void GetEntriesByType(const nsAString& aEntryType,
+                        nsTArray<RefPtr<PerformanceEntry>>& aRetval);
+  void GetEntriesByName(const nsAString& aName,
+                        const mozilla::dom::Optional<nsAString>& aEntryType,
+                        nsTArray<RefPtr<PerformanceEntry>>& aRetval);
+  void ClearResourceTimings();
+
+  virtual DOMHighResTimeStamp Now() const = 0;
+
+  void Mark(const nsAString& aName, mozilla::ErrorResult& aRv);
+  void ClearMarks(const mozilla::dom::Optional<nsAString>& aName);
+  void Measure(const nsAString& aName,
+               const mozilla::dom::Optional<nsAString>& aStartMark,
+               const mozilla::dom::Optional<nsAString>& aEndMark,
+               mozilla::ErrorResult& aRv);
+  void ClearMeasures(const mozilla::dom::Optional<nsAString>& aName);
+
+  void SetResourceTimingBufferSize(uint64_t aMaxSize);
+
+  void AddObserver(PerformanceObserver* aObserver);
+  void RemoveObserver(PerformanceObserver* aObserver);
+  void NotifyObservers();
+  void CancelNotificationObservers();
+
+protected:
+  virtual ~PerformanceBase();
+
+  virtual void InsertUserEntry(PerformanceEntry* aEntry);
+  void InsertResourceEntry(PerformanceEntry* aEntry);
+
+  void ClearUserEntries(const mozilla::dom::Optional<nsAString>& aEntryName,
+                        const nsAString& aEntryType);
+
+  DOMHighResTimeStamp ResolveTimestampFromName(const nsAString& aName,
+                                               mozilla::ErrorResult& aRv);
+
+  virtual nsISupports* GetAsISupports() = 0;
+
+  virtual void DispatchBufferFullEvent() = 0;
+
+  virtual mozilla::TimeStamp CreationTimeStamp() const = 0;
+
+  virtual DOMHighResTimeStamp CreationTime() const = 0;
+
+  virtual bool IsPerformanceTimingAttribute(const nsAString& aName) = 0;
+
+  virtual DOMHighResTimeStamp
+  GetPerformanceTimingFromString(const nsAString& aTimingName) = 0;
+
+  bool IsResourceEntryLimitReached() const
+  {
+    return mResourceEntries.Length() >= mResourceTimingBufferSize;
+  }
+
+  void LogEntry(PerformanceEntry* aEntry, const nsACString& aOwner) const;
+  void TimingNotification(PerformanceEntry* aEntry, const nsACString& aOwner, uint64_t epoch);
+
+  void RunNotificationObserversTask();
+  void QueueEntry(PerformanceEntry* aEntry);
+
+  DOMHighResTimeStamp RoundTime(double aTime) const;
+
+  nsTObserverArray<PerformanceObserver*> mObservers;
+
+private:
+  nsTArray<RefPtr<PerformanceEntry>> mUserEntries;
+  nsTArray<RefPtr<PerformanceEntry>> mResourceEntries;
+
+  uint64_t mResourceTimingBufferSize;
+  static const uint64_t kDefaultResourceTimingBufferSize = 150;
+  bool mPendingNotificationObserversTask;
 };
 
 // Script "performance" object
-class nsPerformance final : public mozilla::DOMEventTargetHelper
+class nsPerformance final : public PerformanceBase
 {
 public:
-  typedef mozilla::dom::PerformanceEntry PerformanceEntry;
   nsPerformance(nsPIDOMWindow* aWindow,
                 nsDOMNavigationTiming* aDOMTiming,
                 nsITimedChannel* aChannel,
                 nsPerformance* aParentPerformance);
 
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(nsPerformance, DOMEventTargetHelper)
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(nsPerformance,
+                                                         PerformanceBase)
+
+  static bool IsEnabled(JSContext* aCx, JSObject* aGlobal);
+
+  static bool IsObserverEnabled(JSContext* aCx, JSObject* aGlobal);
 
   nsDOMNavigationTiming* GetDOMTiming() const
   {
@@ -314,67 +413,60 @@ public:
     return mParentPerformance;
   }
 
-  nsPIDOMWindow* GetParentObject() const
-  {
-    return mWindow.get();
-  }
-
-  virtual JSObject* WrapObject(JSContext *cx) override;
+  JSObject* WrapObject(JSContext *cx,
+                       JS::Handle<JSObject*> aGivenProto) override;
 
   // Performance WebIDL methods
-  DOMHighResTimeStamp Now();
+  DOMHighResTimeStamp Now() const override;
+
   nsPerformanceTiming* Timing();
   nsPerformanceNavigation* Navigation();
 
-  void GetEntries(nsTArray<nsRefPtr<PerformanceEntry> >& retval);
-  void GetEntriesByType(const nsAString& entryType,
-                        nsTArray<nsRefPtr<PerformanceEntry> >& retval);
-  void GetEntriesByName(const nsAString& name,
-                        const mozilla::dom::Optional< nsAString >& entryType,
-                        nsTArray<nsRefPtr<PerformanceEntry> >& retval);
   void AddEntry(nsIHttpChannel* channel,
                 nsITimedChannel* timedChannel);
-  void ClearResourceTimings();
-  void SetResourceTimingBufferSize(uint64_t maxSize);
-  void Mark(const nsAString& aName, mozilla::ErrorResult& aRv);
-  void ClearMarks(const mozilla::dom::Optional<nsAString>& aName);
-  void Measure(const nsAString& aName,
-               const mozilla::dom::Optional<nsAString>& aStartMark,
-               const mozilla::dom::Optional<nsAString>& aEndMark,
-               mozilla::ErrorResult& aRv);
-  void ClearMeasures(const mozilla::dom::Optional<nsAString>& aName);
+
+  using PerformanceBase::GetEntries;
+  using PerformanceBase::GetEntriesByType;
+  using PerformanceBase::GetEntriesByName;
+  using PerformanceBase::ClearResourceTimings;
+
+  using PerformanceBase::Mark;
+  using PerformanceBase::ClearMarks;
+  using PerformanceBase::Measure;
+  using PerformanceBase::ClearMeasures;
+  using PerformanceBase::SetResourceTimingBufferSize;
+
+  void GetMozMemory(JSContext *aCx, JS::MutableHandle<JSObject*> aObj);
 
   IMPL_EVENT_HANDLER(resourcetimingbufferfull)
 
-private:
+  mozilla::TimeStamp CreationTimeStamp() const override;
+
+  DOMHighResTimeStamp CreationTime() const override;
+
+protected:
   ~nsPerformance();
-  bool IsPerformanceTimingAttribute(const nsAString& aName);
-  DOMHighResTimeStamp ResolveTimestampFromName(const nsAString& aName, mozilla::ErrorResult& aRv);
-  DOMTimeMilliSec GetPerformanceTimingFromString(const nsAString& aTimingName);
-  DOMHighResTimeStamp ConvertDOMMilliSecToHighRes(const DOMTimeMilliSec aTime);
-  void DispatchBufferFullEvent();
-  void InsertPerformanceEntry(PerformanceEntry* aEntry, bool aShouldPrint);
-  void ClearEntries(const mozilla::dom::Optional<nsAString>& aEntryName,
-                    const nsAString& aEntryType);
-  nsCOMPtr<nsPIDOMWindow> mWindow;
-  nsRefPtr<nsDOMNavigationTiming> mDOMTiming;
+
+  nsISupports* GetAsISupports() override
+  {
+    return this;
+  }
+
+  void InsertUserEntry(PerformanceEntry* aEntry) override;
+
+  bool IsPerformanceTimingAttribute(const nsAString& aName) override;
+
+  DOMHighResTimeStamp
+  GetPerformanceTimingFromString(const nsAString& aTimingName) override;
+
+  void DispatchBufferFullEvent() override;
+
+  RefPtr<nsDOMNavigationTiming> mDOMTiming;
   nsCOMPtr<nsITimedChannel> mChannel;
-  nsRefPtr<nsPerformanceTiming> mTiming;
-  nsRefPtr<nsPerformanceNavigation> mNavigation;
-  nsTArray<nsRefPtr<PerformanceEntry> > mEntries;
-  nsRefPtr<nsPerformance> mParentPerformance;
-  uint64_t mPrimaryBufferSize;
-
-  static const uint64_t kDefaultBufferSize = 150;
-
-  // Helper classes
-  class PerformanceEntryComparator {
-    public:
-      bool Equals(const PerformanceEntry* aElem1,
-                  const PerformanceEntry* aElem2) const;
-      bool LessThan(const PerformanceEntry* aElem1,
-                    const PerformanceEntry* aElem2) const;
-  };
+  RefPtr<nsPerformanceTiming> mTiming;
+  RefPtr<nsPerformanceNavigation> mNavigation;
+  RefPtr<nsPerformance> mParentPerformance;
+  JS::Heap<JSObject*> mMozMemory;
 };
 
 inline nsDOMNavigationTiming*

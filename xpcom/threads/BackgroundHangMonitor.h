@@ -7,8 +7,9 @@
 #ifndef mozilla_BackgroundHangMonitor_h
 #define mozilla_BackgroundHangMonitor_h
 
-#include "mozilla/RefPtr.h"
+#include "mozilla/HangAnnotations.h"
 #include "mozilla/Monitor.h"
+#include "mozilla/RefPtr.h"
 
 #include "nsString.h"
 
@@ -18,14 +19,14 @@ namespace mozilla {
 
 namespace Telemetry {
 class ThreadHangStats;
-};
+} // namespace Telemetry
 
 class BackgroundHangThread;
 class BackgroundHangManager;
 
 /**
  * The background hang monitor is responsible for detecting and reporting
- * hangs in background (non-main) threads. A thread registers itself using
+ * hangs in main and background threads. A thread registers itself using
  * the BackgroundHangMonitor object and periodically calls its methods to
  * inform the hang monitor of the thread's activity. Each thread is given
  * a thread name, a timeout, and a maximum timeout. If one of the thread's
@@ -233,6 +234,21 @@ public:
    * \see Prohibit()
    */
   static void Allow();
+
+  /**
+   * Register an annotator with BHR for the current thread.
+   * @param aAnnotator annotator to register
+   * @return true if the annotator was registered, otherwise false.
+   */
+  static bool RegisterAnnotator(HangMonitor::Annotator& aAnnotator);
+
+  /**
+   * Unregister an annotator that was previously registered via
+   * RegisterAnnotator.
+   * @param aAnnotator annotator to unregister
+   * @return true if there are still remaining annotators registered
+   */
+  static bool UnregisterAnnotator(HangMonitor::Annotator& aAnnotator);
 };
 
 } // namespace mozilla

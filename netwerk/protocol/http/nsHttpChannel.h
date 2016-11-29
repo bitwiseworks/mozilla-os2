@@ -9,6 +9,7 @@
 
 #include "HttpBaseChannel.h"
 #include "nsTArray.h"
+#include "nsIPackagedAppChannelListener.h"
 #include "nsICachingChannel.h"
 #include "nsICacheEntry.h"
 #include "nsICacheEntryOpenCallback.h"
@@ -22,8 +23,10 @@
 #include "nsWeakReference.h"
 #include "TimingStruct.h"
 #include "AutoClose.h"
+#include "nsIStreamListener.h"
+#include "nsISupportsPrimitives.h"
+#include "nsICorsPreflightCallback.h"
 
-class nsIPrincipal;
 class nsDNSPrefetch;
 class nsICancelable;
 class nsIHttpChannelAuthProvider;
@@ -33,6 +36,14 @@ class nsISSLStatus;
 namespace mozilla { namespace net {
 
 class Http2PushedStream;
+
+class HttpChannelSecurityWarningReporter
+{
+public:
+  virtual nsresult ReportSecurityMessage(const nsAString& aMessageTag,
+                                         const nsAString& aMessageCategory) = 0;
+};
+
 //-----------------------------------------------------------------------------
 // nsHttpChannel
 //-----------------------------------------------------------------------------
@@ -47,24 +58,27 @@ class Http2PushedStream;
 }
 
 class nsHttpChannel final : public HttpBaseChannel
-                              , public HttpAsyncAborter<nsHttpChannel>
-                              , public nsIStreamListener
-                              , public nsICachingChannel
-                              , public nsICacheEntryOpenCallback
-                              , public nsITransportEventSink
-                              , public nsIProtocolProxyCallback
-                              , public nsIHttpAuthenticableChannel
-                              , public nsIApplicationCacheChannel
-                              , public nsIAsyncVerifyRedirectCallback
-                              , public nsIThreadRetargetableRequest
-                              , public nsIThreadRetargetableStreamListener
-                              , public nsIDNSListener
-                              , public nsSupportsWeakReference
+                          , public HttpAsyncAborter<nsHttpChannel>
+                          , public nsIStreamListener
+                          , public nsIPackagedAppChannelListener
+                          , public nsICachingChannel
+                          , public nsICacheEntryOpenCallback
+                          , public nsITransportEventSink
+                          , public nsIProtocolProxyCallback
+                          , public nsIHttpAuthenticableChannel
+                          , public nsIApplicationCacheChannel
+                          , public nsIAsyncVerifyRedirectCallback
+                          , public nsIThreadRetargetableRequest
+                          , public nsIThreadRetargetableStreamListener
+                          , public nsIDNSListener
+                          , public nsSupportsWeakReference
+                          , public nsICorsPreflightCallback
 {
 public:
     NS_DECL_ISUPPORTS_INHERITED
     NS_DECL_NSIREQUESTOBSERVER
     NS_DECL_NSISTREAMLISTENER
+    NS_DECL_NSIPACKAGEDAPPCHANNELLISTENER
     NS_DECL_NSITHREADRETARGETABLESTREAMLISTENER
     NS_DECL_NSICACHEINFOCHANNEL
     NS_DECL_NSICACHINGCHANNEL
@@ -108,6 +122,9 @@ public:
 
     nsresult OnPush(const nsACString &uri, Http2PushedStream *pushedStream);
 
+    static bool IsRedirectStatus(uint32_t status);
+
+
     // Methods HttpBaseChannel didn't implement for us or that we override.
     //
     // nsIRequest
@@ -117,9 +134,12 @@ public:
     // nsIChannel
     NS_IMETHOD GetSecurityInfo(nsISupports **aSecurityInfo) override;
     NS_IMETHOD AsyncOpen(nsIStreamListener *listener, nsISupports *aContext) override;
+    NS_IMETHOD AsyncOpen2(nsIStreamListener *aListener) override;
+    // nsIHttpChannel
+    NS_IMETHOD GetEncodedBodySize(uint64_t *aEncodedBodySize) override;
     // nsIHttpChannelInternal
     NS_IMETHOD SetupFallbackChannel(const char *aFallbackKey) override;
-    NS_IMETHOD ContinueBeginConnect() override;
+    NS_IMETHOD ForceIntercepted(uint64_t aInterceptionID) override;
     // nsISupportsPriority
     NS_IMETHOD SetPriority(int32_t value) override;
     // nsIClassOfService
@@ -140,6 +160,15 @@ public:
     NS_IMETHOD GetRequestStart(mozilla::TimeStamp *aRequestStart) override;
     NS_IMETHOD GetResponseStart(mozilla::TimeStamp *aResponseStart) override;
     NS_IMETHOD GetResponseEnd(mozilla::TimeStamp *aResponseEnd) override;
+    // nsICorsPreflightCallback
+    NS_IMETHOD OnPreflightSucceeded() override;
+    NS_IMETHOD OnPreflightFailed(nsresult aError) override;
+
+    nsresult AddSecurityMessage(const nsAString& aMessageTag,
+                                const nsAString& aMessageCategory) override;
+
+    void SetWarningReporter(HttpChannelSecurityWarningReporter* aReporter)
+      { mWarningReporter = aReporter; }
 
 public: /* internal necko use only */
 
@@ -162,6 +191,11 @@ public: /* internal necko use only */
     nsresult SetTopWindowURI(nsIURI* aTopWindowURI) {
         mTopWindowURI = aTopWindowURI;
         return NS_OK;
+    }
+
+    uint32_t GetRequestTime() const
+    {
+        return mRequestTime;
     }
 
     nsresult OpenCacheEntry(bool usingSSL);
@@ -218,7 +252,9 @@ public: /* internal necko use only */
     };
 
     void MarkIntercepted();
+    NS_IMETHOD GetResponseSynthesized(bool* aSynthesized) override;
     bool AwaitingCacheCallbacks();
+    void SetCouldBeSynthesized();
 
 protected:
     virtual ~nsHttpChannel();
@@ -228,10 +264,12 @@ private:
 
     bool     RequestIsConditional();
     nsresult BeginConnect();
+    nsresult ContinueBeginConnectWithResult();
+    void     ContinueBeginConnect();
     nsresult Connect();
     void     SpeculativeConnect();
     nsresult SetupTransaction();
-    void     SetupTransactionLoadGroupInfo();
+    void     SetupTransactionSchedulingContext();
     nsresult CallOnStartRequest();
     nsresult ProcessResponse();
     nsresult ContinueProcessResponse(nsresult);
@@ -262,7 +300,9 @@ private:
     void     HandleAsyncFallback();
     nsresult ContinueHandleAsyncFallback(nsresult);
     nsresult PromptTempRedirect();
-    virtual  nsresult SetupReplacementChannel(nsIURI *, nsIChannel *, bool preserveMethod) override;
+    virtual  nsresult SetupReplacementChannel(nsIURI *, nsIChannel *,
+                                              bool preserveMethod,
+                                              uint32_t redirectFlags) override;
 
     // proxy specific methods
     nsresult ProxyFailover();
@@ -361,7 +401,6 @@ private:
 
     static bool HasQueryString(nsHttpRequestHead::ParsedMethodType method, nsIURI * uri);
     bool ResponseWouldVary(nsICacheEntry* entry) const;
-    bool MustValidateBasedOnQueryUrl() const;
     bool IsResumable(int64_t partialLen, int64_t contentLength,
                      bool ignoreMissingPartialLen = false) const;
     nsresult MaybeSetupByteRangeRequest(int64_t partialLen, int64_t contentLength,
@@ -374,12 +413,13 @@ private:
 
     void SetPushedStream(Http2PushedStream *stream);
 
+    void MaybeWarnAboutAppCache();
+
 private:
-    nsCOMPtr<nsISupports>             mSecurityInfo;
     nsCOMPtr<nsICancelable>           mProxyRequest;
 
-    nsRefPtr<nsInputStreamPump>       mTransactionPump;
-    nsRefPtr<nsHttpTransaction>       mTransaction;
+    RefPtr<nsInputStreamPump>       mTransactionPump;
+    RefPtr<nsHttpTransaction>       mTransaction;
 
     uint64_t                          mLogicalOffset;
 
@@ -387,7 +427,7 @@ private:
     nsCOMPtr<nsICacheEntry>           mCacheEntry;
     // We must close mCacheInputStream explicitly to avoid leaks.
     AutoClose<nsIInputStream>         mCacheInputStream;
-    nsRefPtr<nsInputStreamPump>       mCachePump;
+    RefPtr<nsInputStreamPump>       mCachePump;
     nsAutoPtr<nsHttpResponseHead>     mCachedResponseHead;
     nsCOMPtr<nsISupports>             mCachedSecurityInfo;
     uint32_t                          mPostID;
@@ -406,6 +446,9 @@ private:
         MAYBE_INTERCEPT,   // interception in progress, but can be cancelled
         INTERCEPTED,       // a synthesized response has been provided
     } mInterceptCache;
+    // ID of this channel for the interception purposes. Unique unless this
+    // channel is replacing an intercepted one via an redirection.
+    uint64_t mInterceptionID;
 
     bool PossiblyIntercepted() {
         return mInterceptCache != DO_NOT_INTERCEPT;
@@ -461,11 +504,23 @@ private:
     uint32_t                          mIsPartialRequest : 1;
     // true iff there is AutoRedirectVetoNotifier on the stack
     uint32_t                          mHasAutoRedirectVetoNotifier : 1;
+    // consumers set this to true to use cache pinning, this has effect
+    // only when the channel is in an app context (load context has an appid)
+    uint32_t                          mPinCacheContent : 1;
+    // Whether fetching the content is meant to be handled by the
+    // packaged app service, which behaves like a caching layer.
+    // Upon successfully fetching the package, the resource will be placed in
+    // the cache, and served by calling OnCacheEntryAvailable.
+    uint32_t                          mIsPackagedAppResource : 1;
+    // True if CORS preflight has been performed
+    uint32_t                          mIsCorsPreflightDone : 1;
+
+    nsCOMPtr<nsIChannel>              mPreflightChannel;
 
     nsTArray<nsContinueRedirectionFunc> mRedirectFuncStack;
 
     // Needed for accurate DNS timing
-    nsRefPtr<nsDNSPrefetch>           mDNSPrefetch;
+    RefPtr<nsDNSPrefetch>           mDNSPrefetch;
 
     Http2PushedStream                 *mPushedStream;
     // True if the channel's principal was found on a phishing, malware, or
@@ -478,6 +533,8 @@ private:
 
     nsCString mUsername;
 
+    // If non-null, warnings should be reported to this object.
+    HttpChannelSecurityWarningReporter* mWarningReporter;
 protected:
     virtual void DoNotifyListenerCleanup() override;
 
@@ -486,6 +543,7 @@ private: // cache telemetry
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsHttpChannel, NS_HTTPCHANNEL_IID)
-} } // namespace mozilla::net
+} // namespace net
+} // namespace mozilla
 
 #endif // nsHttpChannel_h__

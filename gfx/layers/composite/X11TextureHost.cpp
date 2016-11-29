@@ -22,7 +22,7 @@ X11TextureHost::X11TextureHost(TextureFlags aFlags,
                                const SurfaceDescriptorX11& aDescriptor)
  : TextureHost(aFlags)
 {
-  nsRefPtr<gfxXlibSurface> surface = aDescriptor.OpenForeign();
+  RefPtr<gfxXlibSurface> surface = aDescriptor.OpenForeign();
   mSurface = surface.get();
 
   if (!(aFlags & TextureFlags::DEALLOCATE_CLIENT)) {
@@ -83,7 +83,26 @@ X11TextureHost::GetFormat() const
 IntSize
 X11TextureHost::GetSize() const
 {
-  return ToIntSize(mSurface->GetSize());
+  return mSurface->GetSize();
+}
+
+already_AddRefed<gfx::DataSourceSurface>
+X11TextureHost::GetAsSurface()
+{
+  if (!mTextureSource || !mTextureSource->AsSourceBasic()) {
+    return nullptr;
+  }
+  RefPtr<DrawTarget> tempDT =
+    gfxPlatform::GetPlatform()->CreateOffscreenContentDrawTarget(
+      GetSize(), GetFormat());
+  if (!tempDT) {
+    return nullptr;
+  }
+  RefPtr<SourceSurface> surf = mTextureSource->AsSourceBasic()->GetSurface(tempDT);
+  if (!surf) {
+    return nullptr;
+  }
+  return surf->GetDataSurface();
 }
 
 }

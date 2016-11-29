@@ -9,20 +9,16 @@
 
 #include "mozilla/dom/AudioChannelBinding.h"
 #include "AudioNode.h"
-#include "nsIDOMEventListener.h"
 #include "nsIAudioChannelAgent.h"
-#include "AudioChannelCommon.h"
 
 namespace mozilla {
 namespace dom {
 
 class AudioContext;
-class EventProxyHandler;
 
 class AudioDestinationNode final : public AudioNode
-                                     , public nsIDOMEventListener
-                                     , public nsIAudioChannelAgentCallback
-                                     , public MainThreadMediaStreamListener
+                                 , public nsIAudioChannelAgentCallback
+                                 , public MainThreadMediaStreamListener
 {
 public:
   // This node type knows what MediaStreamGraph to use based on
@@ -40,7 +36,7 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(AudioDestinationNode, AudioNode)
   NS_DECL_NSIAUDIOCHANNELAGENTCALLBACK
 
-  virtual JSObject* WrapObject(JSContext* aCx) override;
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   virtual uint16_t NumberOfOutputs() const final override
   {
@@ -51,29 +47,33 @@ public:
   virtual void SetChannelCount(uint32_t aChannelCount,
                                ErrorResult& aRv) override;
 
+  // Returns the stream or null after unlink.
+  AudioNodeStream* Stream() { return mStream; }
+
   void Mute();
   void Unmute();
+
+  void Suspend();
+  void Resume();
 
   void StartRendering(Promise* aPromise);
 
   void OfflineShutdown();
 
-  // nsIDOMEventListener - by proxy
-  NS_IMETHOD HandleEvent(nsIDOMEvent* aEvent) override;
-
   AudioChannel MozAudioChannelType() const;
 
-  virtual void NotifyMainThreadStateChanged() override;
+  virtual void NotifyMainThreadStreamFinished() override;
   void FireOfflineCompletionEvent();
 
   // An amount that should be added to the MediaStream's current time to
   // get the AudioContext.currentTime.
-  double ExtraCurrentTime();
+  StreamTime ExtraCurrentTime();
 
   // When aIsOnlyNode is true, this is the only node for the AudioContext.
   void SetIsOnlyNodeForContext(bool aIsOnlyNode);
 
-  void CreateAudioChannelAgent();
+  nsresult CreateAudioChannelAgent();
+  void DestroyAudioChannelAgent();
 
   virtual const char* NodeType() const override
   {
@@ -93,7 +93,7 @@ private:
   void SetMozAudioChannelType(AudioChannel aValue, ErrorResult& aRv);
   bool CheckAudioChannelPermissions(AudioChannel aValue);
 
-  void SetCanPlay(bool aCanPlay);
+  void SetCanPlay(float aVolume, bool aMuted);
 
   void NotifyStableState();
   void ScheduleStableStateNotification();
@@ -102,24 +102,23 @@ private:
   uint32_t mFramesToProduce;
 
   nsCOMPtr<nsIAudioChannelAgent> mAudioChannelAgent;
+  RefPtr<MediaInputPort> mCaptureStreamPort;
 
-  nsRefPtr<EventProxyHandler> mEventProxyHelper;
-  nsRefPtr<Promise> mOfflineRenderingPromise;
+  RefPtr<Promise> mOfflineRenderingPromise;
 
   // Audio Channel Type.
   AudioChannel mAudioChannel;
   bool mIsOffline;
-  bool mHasFinished;
   bool mAudioChannelAgentPlaying;
 
   TimeStamp mStartedBlockingDueToBeingOnlyNode;
-  double mExtraCurrentTime;
-  double mExtraCurrentTimeSinceLastStartedBlocking;
+  StreamTime mExtraCurrentTimeSinceLastStartedBlocking;
   bool mExtraCurrentTimeUpdatedSinceLastStableState;
+  bool mCaptured;
 };
 
-}
-}
+} // namespace dom
+} // namespace mozilla
 
 #endif
 

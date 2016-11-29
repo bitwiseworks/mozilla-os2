@@ -1,4 +1,5 @@
-/* vim: set shiftwidth=2 tabstop=8 autoindent cindent expandtab: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -21,8 +22,8 @@ namespace dom {
 class EventTarget;
 
 class Touch final : public nsISupports
-                      , public nsWrapperCache
-                      , public WidgetPointerHelper
+                  , public nsWrapperCache
+                  , public WidgetPointerHelper
 {
 public:
   static bool PrefEnabled(JSContext* aCx, JSObject* aGlobal);
@@ -41,9 +42,10 @@ public:
         float aForce);
   Touch(int32_t aIdentifier,
         LayoutDeviceIntPoint aPoint,
-        nsIntPoint aRadius,
+        LayoutDeviceIntPoint aRadius,
         float aRotationAngle,
         float aForce);
+  Touch(const Touch& aOther);
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(Touch)
@@ -54,9 +56,9 @@ public:
 
   bool Equals(Touch* aTouch);
 
-  virtual JSObject* WrapObject(JSContext* aCx) override;
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
-  EventTarget* GetParentObject();
+  nsIGlobalObject* GetParentObject();
 
   // WebIDL
   int32_t Identifier() const { return mIdentifier; }
@@ -79,8 +81,8 @@ public:
   int32_t mIdentifier;
   CSSIntPoint mPagePoint;
   CSSIntPoint mClientPoint;
-  LayoutDeviceIntPoint mScreenPoint;
-  nsIntPoint mRadius;
+  CSSIntPoint mScreenPoint;
+  LayoutDeviceIntPoint mRadius;
   float mRotationAngle;
   float mForce;
 protected:

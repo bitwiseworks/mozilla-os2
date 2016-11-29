@@ -23,8 +23,8 @@ namespace layout {
 VsyncParent::Create()
 {
   AssertIsOnBackgroundThread();
-  nsRefPtr<gfx::VsyncSource> vsyncSource = gfxPlatform::GetPlatform()->GetHardwareVsync();
-  nsRefPtr<VsyncParent> vsyncParent = new VsyncParent();
+  RefPtr<gfx::VsyncSource> vsyncSource = gfxPlatform::GetPlatform()->GetHardwareVsync();
+  RefPtr<VsyncParent> vsyncParent = new VsyncParent();
   vsyncParent->mVsyncDispatcher = vsyncSource->GetRefreshTimerVsyncDispatcher();
   return vsyncParent.forget();
 }
@@ -49,7 +49,7 @@ VsyncParent::NotifyVsync(TimeStamp aTimeStamp)
 {
   // Called on hardware vsync thread. We should post to current ipc thread.
   MOZ_ASSERT(!IsOnBackgroundThread());
-  nsRefPtr<nsIRunnable> vsyncEvent =
+  nsCOMPtr<nsIRunnable> vsyncEvent =
     NS_NewRunnableMethodWithArg<TimeStamp>(this,
                                            &VsyncParent::DispatchVsyncEvent,
                                            aTimeStamp);
@@ -68,8 +68,17 @@ VsyncParent::DispatchVsyncEvent(TimeStamp aTimeStamp)
   // NotifyVsync(). We use mObservingVsync and mDestroyed flags to skip this
   // notification.
   if (mObservingVsync && !mDestroyed) {
-    unused << SendNotify(aTimeStamp);
+    Unused << SendNotify(aTimeStamp);
   }
+}
+
+bool
+VsyncParent::RecvRequestVsyncRate()
+{
+  AssertIsOnBackgroundThread();
+  TimeDuration vsyncRate = gfxPlatform::GetPlatform()->GetHardwareVsync()->GetGlobalDisplay().GetVsyncRate();
+  Unused << SendVsyncRate(vsyncRate.ToMilliseconds());
+  return true;
 }
 
 bool

@@ -198,6 +198,9 @@ xpcAccessibleDocument::GetAccessible(Accessible* aAccessible)
 void
 xpcAccessibleDocument::Shutdown()
 {
-  mCache.Clear();
+  for (auto iter = mCache.Iter(); !iter.Done(); iter.Next()) {
+    iter.Data()->Shutdown();
+    iter.Remove();
+  }
   xpcAccessibleGeneric::Shutdown();
 }

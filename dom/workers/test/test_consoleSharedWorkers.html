@@ -35,7 +35,8 @@
       if (aTopic == "console-api-log-event") {
         var obj = aSubject.wrappedJSObject;
         is (obj.arguments[0], "Hello world from a SharedWorker!", "A message from a SharedWorker \\o/");
-        is (aData, "SharedWorker", "The ID is SharedWorker");
+        is (obj.ID, "http://mochi.test:8888/tests/dom/workers/test/sharedWorker_console.js", "The ID is SharedWorker");
+        is (obj.innerID, "SharedWorker", "The ID is SharedWorker");
         is (order++, 1, "Then a log message.");
 
         SpecialPowers.removeObserver(this, "console-api-log-event");
@@ -46,10 +47,7 @@
   }
 
   var cl = new consoleListener();
-
-  SpecialPowers.pushPrefEnv({ set: [["dom.workers.sharedWorkers.enabled", true]] }, function() {
-    new SharedWorker('sharedWorker_console.js');
-  });
+  new SharedWorker('sharedWorker_console.js');
 
   SimpleTest.waitForExplicitFinish();
 

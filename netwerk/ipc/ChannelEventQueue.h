@@ -13,7 +13,6 @@
 
 class nsISupports;
 class nsIEventTarget;
-class nsIThread;
 
 namespace mozilla {
 namespace net {
@@ -32,8 +31,6 @@ class ChannelEvent
 // event loop (ex: IPDL rpc) could cause listener->OnDataAvailable (for
 // instance) to be dispatched and called before mListener->OnStartRequest has
 // completed.
-
-class AutoEventEnqueuerBase;
 
 class ChannelEventQueue final
 {
@@ -54,6 +51,7 @@ class ChannelEventQueue final
   // Puts IPDL-generated channel event into queue, to be run later
   // automatically when EndForcedQueueing and/or Resume is called.
   inline void Enqueue(ChannelEvent* callback);
+  inline nsresult PrependEvents(nsTArray<nsAutoPtr<ChannelEvent> >& aEvents);
 
   // After StartForcedQueueing is called, ShouldEnqueue() will return true and
   // no events will be run/flushed until EndForcedQueueing is called.
@@ -130,6 +128,19 @@ ChannelEventQueue::EndForcedQueueing()
   MaybeFlushQueue();
 }
 
+inline nsresult
+ChannelEventQueue::PrependEvents(nsTArray<nsAutoPtr<ChannelEvent> >& aEvents)
+{
+  if (!mEventQueue.InsertElementsAt(0, aEvents.Length())) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+
+  for (uint32_t i = 0; i < aEvents.Length(); i++) {
+    mEventQueue.ReplaceElementAt(i, aEvents[i].forget());
+  }
+  return NS_OK;
+}
+
 inline void
 ChannelEventQueue::Suspend()
 {
@@ -172,10 +183,10 @@ class MOZ_STACK_CLASS AutoEventEnqueuer
     mEventQueue->EndForcedQueueing();
   }
  private:
-  nsRefPtr<ChannelEventQueue> mEventQueue;
+  RefPtr<ChannelEventQueue> mEventQueue;
 };
 
-}
-}
+} // namespace net
+} // namespace mozilla
 
 #endif

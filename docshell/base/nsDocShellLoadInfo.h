@@ -19,13 +19,12 @@ class nsISHEntry;
 class nsIURI;
 class nsIDocShell;
 
-class nsDocShellLoadInfo : public nsIDocShellLoadInfo_ESR38
+class nsDocShellLoadInfo : public nsIDocShellLoadInfo
 {
 public:
   nsDocShellLoadInfo();
 
   NS_DECL_ISUPPORTS
-  NS_DECL_NSIDOCSHELLLOADINFO_ESR38
   NS_DECL_NSIDOCSHELLLOADINFO
 
 protected:
@@ -34,8 +33,8 @@ protected:
 protected:
   nsCOMPtr<nsIURI> mReferrer;
   nsCOMPtr<nsIURI> mOriginalURI;
-  bool mLoadReplace;
   nsCOMPtr<nsISupports> mOwner;
+  bool mLoadReplace;
   bool mInheritOwner;
   bool mOwnerIsExplicit;
   bool mSendReferrer;

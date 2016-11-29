@@ -81,7 +81,17 @@ enum class ImageFormat {
    * An Image type carries an opaque handle once for each stream.
    * The opaque handle would be a platform specific identifier.
    */
-  OVERLAY_IMAGE
+  OVERLAY_IMAGE,
+
+  /**
+   * A share handle to a ID3D11Texture2D.
+   */
+  D3D11_SHARE_HANDLE_TEXTURE,
+
+  /**
+   * A wrapper around a drawable TextureClient.
+   */
+  TEXTURE_WRAPPER
 };
 
 enum class StereoMode {
@@ -92,6 +102,6 @@ enum class StereoMode {
   TOP_BOTTOM
 };
 
-} // namespace
+} // namespace mozilla
 
 #endif

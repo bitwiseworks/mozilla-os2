@@ -8,15 +8,14 @@
 include protocol PNecko;
 include InputStreamParams;
 include URIParams;
+include PBackgroundSharedTypes;
+include NeckoChannelParams;
 
 include protocol PBlob; //FIXME: bug #792908
 
 include "mozilla/net/NeckoMessageUtils.h";
 
-using RequestHeaderTuples from "mozilla/net/PHttpChannelParams.h";
 using class nsHttpHeaderArray from "nsHttpHeaderArray.h";
-using class nsHttpResponseHead from "nsHttpResponseHead.h";
-using struct nsHttpAtom from "nsHttp.h";
 using mozilla::net::NetAddr from "mozilla/net/DNS.h";
 using struct mozilla::net::ResourceTimingStruct from "mozilla/net/TimingStruct.h";
 
@@ -46,7 +45,8 @@ parent:
 
   // Reports approval/veto of redirect by child process redirect observers
   Redirect2Verify(nsresult result, RequestHeaderTuples changedHeaders,
-                  OptionalURIParams apiRedirectTo);
+                  uint32_t loadFlags, OptionalURIParams apiRedirectTo,
+                  OptionalCorsPreflightArgs corsPreflightArgs);
 
   // For document loads we keep this protocol open after child's
   // OnStopRequest, and send this msg (instead of __delete__) to allow
@@ -79,6 +79,11 @@ parent:
   // Child has no more events/messages to divert to the parent.
   DivertComplete();
 
+  // Child has detected a CORS check failure, so needs to tell the parent
+  // to remove any matching entry from the CORS preflight cache.
+  RemoveCorsPreflightCacheEntry(URIParams uri,
+                                PrincipalInfo requestingPrincipal);
+
   __delete__();
 
 child:
@@ -93,7 +98,8 @@ child:
                  nsCString           securityInfoSerialization,
                  NetAddr             selfAddr,
                  NetAddr             peerAddr,
-                 int16_t             redirectCount);
+                 int16_t             redirectCount,
+                 uint32_t            cacheKey);
 
   // Combines a single OnDataAvailable and its associated OnProgress &
   // OnStatus calls into one IPDL message
@@ -120,7 +126,8 @@ child:
   Redirect1Begin(uint32_t           newChannelId,
                  URIParams          newUri,
                  uint32_t           redirectFlags,
-                 nsHttpResponseHead responseHead);
+                 nsHttpResponseHead responseHead,
+                 nsCString          securityInfoSerialization);
 
   // Called if redirect successful so that child can complete setup.
   Redirect3Complete();
@@ -139,9 +146,19 @@ child:
   // OnDataAvailable and OnStopRequest messages in the queue back to the parent.
   DivertMessages();
 
+  // Report a security message to the console associated with this
+  // channel.
+  ReportSecurityMessage(nsString messageTag, nsString messageCategory);
+
   // Tell child to delete channel (all IPDL deletes must be done from child to
   // avoid races: see bug 591708).
   DeleteSelf();
+
+  // Tell the child to issue a deprecation warning.
+  IssueDeprecationWarning(uint32_t warning, bool asError);
+
+  // Tell the child to report an error processing a redirection.
+  ReportRedirectionError();
 };
 
 

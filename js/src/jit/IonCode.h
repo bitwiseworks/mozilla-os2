@@ -15,6 +15,7 @@
 
 #include "gc/Heap.h"
 #include "jit/ExecutableAllocator.h"
+#include "jit/ICStubSpace.h"
 #include "jit/IonOptimizationLevels.h"
 #include "jit/IonTypes.h"
 #include "js/UbiNode.h"
@@ -22,15 +23,12 @@
 #include "vm/TypeInference.h"
 
 namespace js {
-
-class AsmJSModule;
-
 namespace jit {
 
 class MacroAssembler;
-class CodeOffsetLabel;
 class PatchableBackedge;
 class IonBuilder;
+class IonICEntry;
 
 typedef Vector<JSObject*, 4, JitAllocPolicy> ObjectVector;
 
@@ -107,14 +105,19 @@ class JitCode : public gc::TenuredCell
     size_t instructionsSize() const {
         return insnSize_;
     }
-    void trace(JSTracer* trc);
+    size_t bufferSize() const {
+        return bufferSize_;
+    }
+    size_t headerSize() const {
+        return headerSize_;
+    }
+
+    void traceChildren(JSTracer* trc);
     void finalize(FreeOp* fop);
     void fixupAfterMovingGC() {}
     void setInvalidated() {
         invalidated_ = true;
     }
-
-    void fixupNurseryObjects(JSContext* cx, const ObjectVector& nurseryObjects);
 
     void setHasBytecodeMap() {
         hasBytecodeMap_ = true;
@@ -261,6 +264,10 @@ struct IonScript
     uint32_t backedgeList_;
     uint32_t backedgeEntries_;
 
+    // List of entries to the shared stub.
+    uint32_t sharedStubList_;
+    uint32_t sharedStubEntries_;
+
     // Number of references from invalidation records.
     uint32_t invalidationCount_;
 
@@ -274,10 +281,11 @@ struct IonScript
     // a LOOPENTRY pc other than osrPc_.
     uint32_t osrPcMismatchCounter_;
 
+    // Allocated space for fallback stubs.
+    FallbackICStubSpace fallbackStubSpace_;
+
     // The tracelogger event used to log the start/stop of this IonScript.
     TraceLoggerEvent traceLoggerScriptEvent_;
-
-    IonBuilder* pendingBuilder_;
 
   private:
     inline uint8_t* bottomBuffer() {
@@ -288,14 +296,6 @@ struct IonScript
     }
 
   public:
-
-    // SHOULD ONLY BE CALLED FROM JSScript
-    void setPendingBuilderPrivate(IonBuilder* builder) {
-        pendingBuilder_ = builder;
-    }
-    IonBuilder* pendingBuilder() const {
-        return pendingBuilder_;
-    }
 
     SnapshotOffset* bailoutTable() {
         return (SnapshotOffset*) &bottomBuffer()[bailoutTable_];
@@ -339,7 +339,8 @@ struct IonScript
                           size_t constants, size_t safepointIndexEntries,
                           size_t osiIndexEntries, size_t cacheEntries,
                           size_t runtimeSize, size_t safepointsSize,
-                          size_t backedgeEntries, OptimizationLevel optimizationLevel);
+                          size_t backedgeEntries, size_t sharedStubEntries,
+                          OptimizationLevel optimizationLevel);
     static void Trace(JSTracer* trc, IonScript* script);
     static void Destroy(FreeOp* fop, IonScript* script);
 
@@ -498,6 +499,12 @@ struct IonScript
     size_t numCaches() const {
         return cacheEntries_;
     }
+    IonICEntry* sharedStubList() {
+        return (IonICEntry*) &bottomBuffer()[sharedStubList_];
+    }
+    size_t numSharedStubs() const {
+        return sharedStubEntries_;
+    }
     size_t runtimeSize() const {
         return runtimeSize_;
     }
@@ -507,7 +514,6 @@ struct IonScript
     }
     void toggleBarriers(bool enabled);
     void purgeCaches();
-    void destroyCaches();
     void unlinkFromRuntime(FreeOp* fop);
     void copySnapshots(const SnapshotWriter* writer);
     void copyRecovers(const RecoverWriter* writer);
@@ -568,6 +574,12 @@ struct IonScript
     void clearRecompiling() {
         recompiling_ = false;
     }
+
+    FallbackICStubSpace* fallbackStubSpace() {
+        return &fallbackStubSpace_;
+    }
+    void adoptFallbackStubs(FallbackICStubSpace* stubSpace);
+    void purgeOptimizedStubs(Zone* zone);
 
     enum ShouldIncreaseAge {
         IncreaseAge = true,
@@ -657,7 +669,7 @@ struct IonBlockCounts
     }
 
     void setCode(const char* code) {
-        char* ncode = (char*) js_malloc(strlen(code) + 1);
+        char* ncode = js_pod_malloc<char>(strlen(code) + 1);
         if (ncode) {
             strcpy(ncode, code);
             code_ = ncode;
@@ -691,13 +703,24 @@ struct IonScriptCounts
         for (size_t i = 0; i < numBlocks_; i++)
             blocks_[i].destroy();
         js_free(blocks_);
-        js_delete(previous_);
+        // The list can be long in some corner cases (bug 1140084), so
+        // unroll the recursion.
+        IonScriptCounts* victims = previous_;
+        while (victims) {
+            IonScriptCounts* victim = victims;
+            victims = victim->previous_;
+            victim->previous_ = nullptr;
+            js_delete(victim);
+        }
     }
 
     bool init(size_t numBlocks) {
-        numBlocks_ = numBlocks;
         blocks_ = js_pod_calloc<IonBlockCounts>(numBlocks);
-        return blocks_ != nullptr;
+        if (!blocks_)
+            return false;
+
+        numBlocks_ = numBlocks;
+        return true;
     }
 
     size_t numBlocks() const {
@@ -720,13 +743,10 @@ struct IonScriptCounts
 
 struct VMFunction;
 
-class JitCompartment;
-class JitRuntime;
-
 struct AutoFlushICache
 {
   private:
-#if defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_MIPS)
+#if defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
     uintptr_t start_;
     uintptr_t stop_;
     const char* name_;
@@ -762,8 +782,25 @@ IsMarked(const jit::VMFunction*)
 // instances with no associated compartment.
 namespace JS {
 namespace ubi {
-template<> struct Concrete<js::jit::JitCode> : TracerConcrete<js::jit::JitCode> { };
-}
-}
+template<>
+struct Concrete<js::jit::JitCode> : TracerConcrete<js::jit::JitCode> {
+    CoarseType coarseType() const final { return CoarseType::Script; }
+
+    Size size(mozilla::MallocSizeOf mallocSizeOf) const override {
+        Size size = js::gc::Arena::thingSize(get().asTenured().getAllocKind());
+        size += get().bufferSize();
+        size += get().headerSize();
+        return size;
+    }
+
+  protected:
+    explicit Concrete(js::jit::JitCode *ptr) : TracerConcrete<js::jit::JitCode>(ptr) { }
+
+  public:
+    static void construct(void *storage, js::jit::JitCode *ptr) { new (storage) Concrete(ptr); }
+};
+
+} // namespace ubi
+} // namespace JS
 
 #endif /* jit_IonCode_h */

@@ -50,7 +50,7 @@ NextPowerOfTwo(int aNumber)
 }
 
 static unsigned int
-DataOffset(const nsIntPoint &aPoint, int32_t aStride, SurfaceFormat aFormat)
+DataOffset(const IntPoint &aPoint, int32_t aStride, SurfaceFormat aFormat)
 {
   unsigned int data = aPoint.y * aStride;
   data += aPoint.x * BytesPerPixel(aFormat);
@@ -486,10 +486,10 @@ UploadImageDataToTexture(GLContext* gl,
             }
             internalFormat = LOCAL_GL_RGBA;
             break;
-        case SurfaceFormat::R5G6B5:
+        case SurfaceFormat::R5G6B5_UINT16:
             internalFormat = format = LOCAL_GL_RGB;
             type = LOCAL_GL_UNSIGNED_SHORT_5_6_5;
-            surfaceFormat = SurfaceFormat::R5G6B5;
+            surfaceFormat = SurfaceFormat::R5G6B5_UINT16;
             break;
         case SurfaceFormat::A8:
             internalFormat = format = LOCAL_GL_LUMINANCE;
@@ -502,10 +502,10 @@ UploadImageDataToTexture(GLContext* gl,
     }
 
     nsIntRegionRectIterator iter(paintRegion);
-    const nsIntRect *iterRect;
+    const IntRect *iterRect;
 
     // Top left point of the region's bounding rectangle.
-    nsIntPoint topLeft = paintRegion.GetBounds().TopLeft();
+    IntPoint topLeft = paintRegion.GetBounds().TopLeft();
 
     while ((iterRect = iter.Next())) {
         // The inital data pointer is at the top left point of the region's
@@ -556,7 +556,7 @@ UploadSurfaceToTexture(GLContext* gl,
                        const nsIntRegion& aDstRegion,
                        GLuint& aTexture,
                        bool aOverwrite,
-                       const nsIntPoint& aSrcPoint,
+                       const gfx::IntPoint& aSrcPoint,
                        bool aPixelBuffer,
                        GLenum aTextureUnit,
                        GLenum aTextureTarget)
@@ -582,5 +582,5 @@ CanUploadNonPowerOfTwo(GLContext* gl)
            gl->Renderer() != GLRenderer::Adreno205;
 }
 
-}
-}
+} // namespace gl
+} // namespace mozilla

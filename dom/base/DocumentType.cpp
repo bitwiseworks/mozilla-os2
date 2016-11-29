@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -29,7 +30,7 @@ NS_NewDOMDocumentType(nsIDOMDocumentType** aDocType,
   mozilla::ErrorResult rv;
   *aDocType = NS_NewDOMDocumentType(aNodeInfoManager, aName, aPublicId,
                                     aSystemId, aInternalSubset, rv).take();
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 already_AddRefed<mozilla::dom::DocumentType>
@@ -51,7 +52,7 @@ NS_NewDOMDocumentType(nsNodeInfoManager* aNodeInfoManager,
                                   nsIDOMNode::DOCUMENT_TYPE_NODE,
                                   aName);
 
-  nsRefPtr<mozilla::dom::DocumentType> docType =
+  RefPtr<mozilla::dom::DocumentType> docType =
     new mozilla::dom::DocumentType(ni, aPublicId, aSystemId, aInternalSubset);
   return docType.forget();
 }
@@ -60,9 +61,9 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-DocumentType::WrapNode(JSContext *cx)
+DocumentType::WrapNode(JSContext *cx, JS::Handle<JSObject*> aGivenProto)
 {
-  return DocumentTypeBinding::Wrap(cx, this);
+  return DocumentTypeBinding::Wrap(cx, this, aGivenProto);
 }
 
 DocumentType::DocumentType(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo,
@@ -141,7 +142,7 @@ DocumentType::MozRemove()
 nsGenericDOMDataNode*
 DocumentType::CloneDataNode(mozilla::dom::NodeInfo *aNodeInfo, bool aCloneText) const
 {
-  already_AddRefed<mozilla::dom::NodeInfo> ni = nsRefPtr<mozilla::dom::NodeInfo>(aNodeInfo).forget();
+  already_AddRefed<mozilla::dom::NodeInfo> ni = RefPtr<mozilla::dom::NodeInfo>(aNodeInfo).forget();
   return new DocumentType(ni, mPublicId, mSystemId, mInternalSubset);
 }
 

@@ -10,6 +10,7 @@
 #include "CrossProcessMutex.h"
 #include "mozilla/layers/GeckoContentController.h"
 #include "mozilla/layers/APZCTreeManager.h"
+#include "mozilla/layers/AsyncPanZoomAnimation.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/Monitor.h"
@@ -21,6 +22,7 @@
 #include "Axis.h"
 #include "InputQueue.h"
 #include "APZUtils.h"
+#include "Layers.h"                     // for Layer::ScrollDirection
 #include "LayersTypes.h"
 #include "TaskThrottler.h"
 #include "mozilla/gfx/Matrix.h"
@@ -34,10 +36,11 @@ namespace ipc {
 
 class SharedMemoryBasic;
 
-}
+} // namespace ipc
 
 namespace layers {
 
+class AsyncDragMetrics;
 struct ScrollableLayerGuid;
 class CompositorParent;
 class GestureEventListener;
@@ -47,6 +50,7 @@ class AsyncPanZoomAnimation;
 class FlingAnimation;
 class InputBlockState;
 class TouchBlockState;
+class PanGestureBlockState;
 class OverscrollHandoffChain;
 class StateChangeNotificationBlocker;
 
@@ -75,7 +79,6 @@ class AsyncPanZoomController {
 
   typedef mozilla::MonitorAutoLock MonitorAutoLock;
   typedef mozilla::gfx::Matrix4x4 Matrix4x4;
-  typedef uint32_t TouchBehaviorFlags;
 
 public:
   enum GestureBehavior {
@@ -99,8 +102,9 @@ public:
 
   AsyncPanZoomController(uint64_t aLayersId,
                          APZCTreeManager* aTreeManager,
-                         const nsRefPtr<InputQueue>& aInputQueue,
+                         const RefPtr<InputQueue>& aInputQueue,
                          GeckoContentController* aController,
+                         TaskThrottler* aPaintThrottler,
                          GestureBehavior aGestures = DEFAULT_GESTURES);
 
   // --------------------------------------------------------------------------
@@ -183,6 +187,11 @@ public:
   void NotifyLayersUpdated(const FrameMetrics& aLayerMetrics, bool aIsFirstPaint);
 
   /**
+   * Flush any pending repaint request.
+   */
+  void FlushRepaintIfPending();
+
+  /**
    * The platform implementation must set the compositor parent so that we can
    * request composites.
    */
@@ -234,6 +243,17 @@ public:
   Matrix4x4 GetTransformToLastDispatchedPaint() const;
 
   /**
+   * Returns the number of CSS pixels of checkerboard according to the metrics
+   * in this APZC.
+   */
+  uint32_t GetCheckerboardMagnitude() const;
+
+  /**
+   * Report the number of CSSPixel-milliseconds of checkerboard to telemetry.
+   */
+  void ReportCheckerboard(const TimeStamp& aSampleTime);
+
+  /**
    * Returns whether or not the APZC is currently in a state of checkerboarding.
    * This is a simple computation based on the last-painted content and whether
    * the async transform has pushed it so far that it doesn't fully contain the
@@ -252,17 +272,14 @@ public:
     const ParentLayerPoint& aVelocity,
     double aEstimatedPaintDuration);
 
-  /**
-   * Send an mozbrowserasyncscroll event.
-   * *** The monitor must be held while calling this.
-   */
-  void SendAsyncScrollEvent();
+  nsEventStatus HandleDragEvent(const MouseInput& aEvent,
+                                const AsyncDragMetrics& aDragMetrics);
 
   /**
    * Handler for events which should not be intercepted by the touch listener.
    */
   nsEventStatus HandleInputEvent(const InputData& aEvent,
-                                 const Matrix4x4& aTransformToApzc);
+                                 const ScreenToParentLayerMatrix4x4& aTransformToApzc);
 
   /**
    * Handler for gesture events.
@@ -288,6 +305,12 @@ public:
    */
   bool Matches(const ScrollableLayerGuid& aGuid);
 
+  /**
+   * Returns true if the tree manager of this APZC is the same as the one
+   * passed in.
+   */
+  bool HasTreeManager(const APZCTreeManager* aTreeManager) const;
+
   void StartAnimation(AsyncPanZoomAnimation* aAnimation);
 
   /**
@@ -303,17 +326,6 @@ public:
   void ClearOverscroll();
 
   /**
-   * Returns allowed touch behavior for the given point on the scrollable layer.
-   * Internally performs a kind of hit testing based on the regions constructed
-   * on the main thread and attached to the current scrollable layer. Each of such regions
-   * contains info about allowed touch behavior. If regions info isn't enough it returns
-   * UNKNOWN value and we should switch to the fallback approach - asking content.
-   * TODO: for now it's only a stub and returns hardcoded magic value. As soon as bug 928833
-   * is done we should integrate its logic here.
-   */
-  TouchBehaviorFlags GetAllowedTouchBehavior(ScreenIntPoint& aPoint);
-
-  /**
    * Returns whether this APZC is for an element marked with the 'scrollgrab'
    * attribute.
    */
@@ -325,10 +337,10 @@ public:
   bool IsPannable() const;
 
   /**
-   * Returns true if the APZC has a velocity greater than the stop-on-tap
-   * fling velocity threshold (which is pref-controlled).
+   * Returns true if the APZC has been flung with a velocity greater than the
+   * stop-on-tap fling velocity threshold (which is pref-controlled).
    */
-  bool IsMovingFast() const;
+  bool IsFlingingFast() const;
 
   /**
    * Returns the identifier of the touch in the last touch event processed by
@@ -343,7 +355,7 @@ public:
    * To respect the lock ordering, mMonitor must NOT be held when calling
    * this function (since this function acquires the tree lock).
    */
-  Matrix4x4 GetTransformToThis() const;
+  ScreenToParentLayerMatrix4x4 GetTransformToThis() const;
 
   /**
    * Convert the vector |aVector|, rooted at the point |aAnchor|, from
@@ -367,9 +379,26 @@ public:
   ParentLayerPoint ToParentLayerCoordinates(const ScreenPoint& aVector,
                                             const ScreenPoint& aAnchor) const;
 
+  // Return whether or not a wheel event will be able to scroll in either
+  // direction.
+  bool CanScroll(const InputData& aEvent) const;
+
+  // Return whether or not a scroll delta will be able to scroll in either
+  // direction.
+  bool CanScrollWithWheel(const ParentLayerPoint& aDelta) const;
+
+  // Return whether or not there is room to scroll this APZC
+  // in the given direction.
+  bool CanScroll(Layer::ScrollDirection aDirection) const;
+
+  void NotifyMozMouseScrollEvent(const nsString& aString) const;
+
 protected:
   // Protected destructor, to discourage deletion outside of Release():
-  ~AsyncPanZoomController();
+  virtual ~AsyncPanZoomController();
+
+  // Returns the cached current frame time.
+  TimeStamp GetFrameTime() const;
 
   /**
    * Helper method for touches beginning. Sets everything up for panning and any
@@ -428,6 +457,8 @@ protected:
    * Helper methods for handling scroll wheel events.
    */
   nsEventStatus OnScrollWheel(const ScrollWheelInput& aEvent);
+
+  ParentLayerPoint GetScrollWheelDelta(const ScrollWheelInput& aEvent) const;
 
   /**
    * Helper methods for long press gestures.
@@ -507,6 +538,11 @@ protected:
   const ParentLayerPoint GetVelocityVector() const;
 
   /**
+   * Sets the velocities of each axis.
+   */
+  void SetVelocityVector(const ParentLayerPoint& aVelocityVector);
+
+  /**
    * Gets the first touch point from a MultiTouchInput.  This gets only
    * the first one and assumes the rest are either missing or not relevant.
    */
@@ -584,23 +620,15 @@ protected:
   /**
    * Gets a ref to the input queue that is shared across the entire tree manager.
    */
-  const nsRefPtr<InputQueue>& GetInputQueue() const;
+  const RefPtr<InputQueue>& GetInputQueue() const;
 
   /**
-   * Timeout function for mozbrowserasyncscroll event. Because we throttle
-   * mozbrowserasyncscroll events in some conditions, this function ensures
-   * that the last mozbrowserasyncscroll event will be fired after a period of
-   * time.
-   */
-  void FireAsyncScrollOnTimeout();
-
-  /**
-   * Convert ScreenPoint relative to this APZC to CSSPoint relative
+   * Convert ScreenPoint relative to the screen to CSSPoint relative
    * to the parent document. This excludes the transient compositor transform.
    * NOTE: This must be converted to CSSPoint relative to the child
-   * document before sending over IPC.
+   * document before sending over IPC to a child process.
    */
-  bool ConvertToGecko(const ParentLayerPoint& aPoint, CSSPoint* aOut);
+  bool ConvertToGecko(const ScreenIntPoint& aPoint, CSSPoint* aOut);
 
   enum AxisLockMode {
     FREE,     /* No locking at all */
@@ -611,21 +639,33 @@ protected:
   static AxisLockMode GetAxisLockMode();
 
   // Helper function for OnSingleTapUp() and OnSingleTapConfirmed().
-  nsEventStatus GenerateSingleTap(const ParentLayerPoint& aPoint, mozilla::Modifiers aModifiers);
+  nsEventStatus GenerateSingleTap(const ScreenIntPoint& aPoint, mozilla::Modifiers aModifiers);
 
   // Common processing at the end of a touch block.
   void OnTouchEndOrCancel();
 
+  // This is called to request that the main thread snap the scroll position
+  // to a nearby snap position if appropriate. The current scroll position is
+  // used as the final destination.
+  void RequestSnap();
+
   uint64_t mLayersId;
-  nsRefPtr<CompositorParent> mCompositorParent;
-  TaskThrottler mPaintThrottler;
+  RefPtr<CompositorParent> mCompositorParent;
+  RefPtr<TaskThrottler> mPaintThrottler;
 
   /* Access to the following two fields is protected by the mRefPtrMonitor,
      since they are accessed on the UI thread but can be cleared on the
      compositor thread. */
-  nsRefPtr<GeckoContentController> mGeckoContentController;
-  nsRefPtr<GestureEventListener> mGestureEventListener;
+  RefPtr<GeckoContentController> mGeckoContentController;
+  RefPtr<GestureEventListener> mGestureEventListener;
   mutable Monitor mRefPtrMonitor;
+
+  // This is a raw pointer to avoid introducing a reference cycle between
+  // AsyncPanZoomController and APZCTreeManager. Since these objects don't
+  // live on the main thread, we can't use the cycle collector with them.
+  // The APZCTreeManager owns the lifetime of the APZCs, so nulling this
+  // pointer out in Destroy() will prevent accessing deleted memory.
+  Atomic<APZCTreeManager*> mTreeManager;
 
   /* Utility functions that return a addrefed pointer to the corresponding fields. */
   already_AddRefed<GeckoContentController> GetGeckoContentController() const;
@@ -685,24 +725,14 @@ private:
   // frame.
   TimeStamp mLastSampleTime;
 
+  // The last sample time at which we submitted a checkerboarding report.
+  TimeStamp mLastCheckerboardReport;
+
   // Stores the previous focus point if there is a pinch gesture happening. Used
   // to allow panning by moving multiple fingers (thus moving the focus point).
   ParentLayerPoint mLastZoomFocus;
 
-  // The last time and offset we fire the mozbrowserasyncscroll event when
-  // compositor has sampled the content transform for this frame.
-  TimeStamp mLastAsyncScrollTime;
-  CSSPoint mLastAsyncScrollOffset;
-
-  // The current offset drawn on the screen, it may not be sent since we have
-  // throttling policy for mozbrowserasyncscroll event.
-  CSSPoint mCurrentAsyncScrollOffset;
-
-  // The delay task triggered by the throttling mozbrowserasyncscroll event
-  // ensures the last mozbrowserasyncscroll event is always been fired.
-  CancelableTask* mAsyncScrollTimeoutTask;
-
-  nsRefPtr<AsyncPanZoomAnimation> mAnimation;
+  RefPtr<AsyncPanZoomAnimation> mAnimation;
 
   friend class Axis;
 
@@ -722,10 +752,7 @@ protected:
     PANNING_LOCKED_X,         /* touch-start followed by move (i.e. panning with axis lock) X axis */
     PANNING_LOCKED_Y,         /* as above for Y axis */
 
-    CROSS_SLIDING_X,          /* Panning disabled while user does a horizontal gesture
-                                 on a vertically-scrollable view. This used for the
-                                 Windows Metro "cross-slide" gesture. */
-    CROSS_SLIDING_Y,          /* as above for Y axis */
+    PAN_MOMENTUM,             /* like PANNING, but controlled by momentum PanGestureInput events */
 
     PINCHING,                 /* nth touch-start, where n > 1. this mode allows pan and zoom */
     ANIMATING_ZOOM,           /* animated zoom to a new rect */
@@ -733,6 +760,7 @@ protected:
                                  the finger is lifted. */
     SMOOTH_SCROLL,            /* Smooth scrolling to destination. Used by
                                  CSSOM-View smooth scroll-behavior */
+    WHEEL_SCROLL              /* Smooth scrolling to a destination for a wheel event. */
   };
 
   // This is in theory protected by |mMonitor|; that is, it should be held whenever
@@ -788,31 +816,20 @@ public:
   bool ArePointerEventsConsumable(TouchBlockState* aBlock, uint32_t aTouchPoints);
 
   /**
-   * Return true if there are are touch listeners registered on content
-   * scrolled by this APZC.
+   * Clear internal state relating to touch input handling.
    */
-  bool NeedToWaitForContent() const;
-
-  /**
-   * Clear internal state relating to input handling.
-   */
-  void ResetInputState();
+  void ResetTouchInputState();
 
 private:
-  nsRefPtr<InputQueue> mInputQueue;
+  void CancelAnimationAndGestureState();
+
+  RefPtr<InputQueue> mInputQueue;
   TouchBlockState* CurrentTouchBlock();
   bool HasReadyTouchBlock();
 
-
-  /* ===================================================================
-   * The functions and members in this section are used to manage
-   * pan gestures.
-   */
+  PanGestureBlockState* CurrentPanGestureBlock();
 
 private:
-  UniquePtr<InputBlockState> mPanGestureState;
-
-
   /* ===================================================================
    * The functions and members in this section are used to manage
    * fling animations, smooth scroll animations, and overscroll
@@ -820,22 +837,25 @@ private:
    */
 public:
   /**
-   * Attempt a fling with the given velocity. If we are not pannable, tehe fling
+   * Attempt a fling with the given velocity. If we are not pannable, the fling
    * is handed off to the next APZC in the handoff chain via
-   * mTreeManager->DspatchFling(). Returns true iff. any APZC (whether this
-   * one or one further in the handoff chain) accepted the fling.
+   * mTreeManager->DispatchFling(). Returns true iff. the entire velocity of
+   * the fling was consumed by this APZC. aVelocity is modified to contain any
+   * unused, residual velocity.
    * |aHandoff| should be true iff. the fling was handed off from a previous
    *            APZC, and determines whether acceleration is applied to the
    *            fling.
    */
-  bool AttemptFling(ParentLayerPoint aVelocity,
-                    const nsRefPtr<const OverscrollHandoffChain>& aOverscrollHandoffChain,
+  bool AttemptFling(ParentLayerPoint& aVelocity,
+                    const RefPtr<const OverscrollHandoffChain>& aOverscrollHandoffChain,
                     bool aHandoff);
 
 private:
   friend class FlingAnimation;
   friend class OverscrollAnimation;
   friend class SmoothScrollAnimation;
+  friend class WheelScrollAnimation;
+
   // The initial velocity of the most recent fling.
   ParentLayerPoint mLastFlingVelocity;
   // The time at which the most recent fling started.
@@ -847,19 +867,24 @@ private:
   // later in the handoff chain, or if there are no takers, continuing the
   // fling and entering an overscrolled state.
   void HandleFlingOverscroll(const ParentLayerPoint& aVelocity,
-                             const nsRefPtr<const OverscrollHandoffChain>& aOverscrollHandoffChain);
+                             const RefPtr<const OverscrollHandoffChain>& aOverscrollHandoffChain);
 
   void HandleSmoothScrollOverscroll(const ParentLayerPoint& aVelocity);
 
   // Helper function used by TakeOverFling() and HandleFlingOverscroll().
-  void AcceptFling(const ParentLayerPoint& aVelocity,
-                   const nsRefPtr<const OverscrollHandoffChain>& aOverscrollHandoffChain,
+  void AcceptFling(ParentLayerPoint& aVelocity,
+                   const RefPtr<const OverscrollHandoffChain>& aOverscrollHandoffChain,
                    bool aHandoff);
 
   // Start an overscroll animation with the given initial velocity.
   void StartOverscrollAnimation(const ParentLayerPoint& aVelocity);
 
-  void StartSmoothScroll();
+  void StartSmoothScroll(ScrollSource aSource);
+
+  // Returns whether overscroll is allowed during an event.
+  bool AllowScrollHandoffInCurrentBlock() const;
+
+  void AcknowledgeScrollUpdate() const;
 
   /* ===================================================================
    * The functions and members in this section are used to make ancestor chains
@@ -878,19 +903,25 @@ public:
   /* Returns true if there is no APZC higher in the tree with the same
    * layers id.
    */
-  bool IsRootForLayersId() const {
+  bool HasNoParentWithSameLayersId() const {
     return !mParent || (mParent->mLayersId != mLayersId);
   }
 
-private:
-  // This is a raw pointer to avoid introducing a reference cycle between
-  // AsyncPanZoomController and APZCTreeManager. Since these objects don't
-  // live on the main thread, we can't use the cycle collector with them.
-  // The APZCTreeManager owns the lifetime of the APZCs, so nulling this
-  // pointer out in Destroy() will prevent accessing deleted memory.
-  Atomic<APZCTreeManager*> mTreeManager;
+  bool IsRootForLayersId() const {
+    ReentrantMonitorAutoEnter lock(mMonitor);
+    return mFrameMetrics.IsLayersIdRoot();
+  }
 
-  nsRefPtr<AsyncPanZoomController> mParent;
+  bool IsRootContent() const {
+    ReentrantMonitorAutoEnter lock(mMonitor);
+    return mFrameMetrics.IsRootContent();
+  }
+
+private:
+  // |mTreeManager| belongs in this section but it's declaration is a bit
+  // further above due to initialization-order constraints.
+
+  RefPtr<AsyncPanZoomController> mParent;
 
 
   /* ===================================================================
@@ -921,8 +952,11 @@ public:
    * handoff chain, accepted the scroll (possibly entering an overscrolled
    * state). If this returns false, the caller APZC knows that it should enter
    * an overscrolled state itself if it can.
+   * aStartPoint and aEndPoint are modified depending on how much of the
+   * scroll gesture was consumed by APZCs in the handoff chain.
    */
-  bool AttemptScroll(const ParentLayerPoint& aStartPoint, const ParentLayerPoint& aEndPoint,
+  bool AttemptScroll(ParentLayerPoint& aStartPoint,
+                     ParentLayerPoint& aEndPoint,
                      OverscrollHandoffState& aOverscrollHandoffState);
 
   void FlushRepaintForOverscrollHandoff();
@@ -943,16 +977,16 @@ public:
    *   - When passing the chain to a function that uses it without storing it,
    *     pass it by reference-to-const (as in |const OverscrollHandoffChain&|).
    *   - When storing the chain, store it by RefPtr-to-const (as in
-   *     |nsRefPtr<const OverscrollHandoffChain>|). This ensures the chain is
+   *     |RefPtr<const OverscrollHandoffChain>|). This ensures the chain is
    *     kept alive. Note that queueing a task that uses the chain as an
    *     argument constitutes storing, as the task may outlive its queuer.
    *   - When passing the chain to a function that will store it, pass it as
-   *     |const nsRefPtr<const OverscrollHandoffChain>&|. This allows the
-   *     function to copy it into the |nsRefPtr<const OverscrollHandoffChain>|
+   *     |const RefPtr<const OverscrollHandoffChain>&|. This allows the
+   *     function to copy it into the |RefPtr<const OverscrollHandoffChain>|
    *     that will store it, while avoiding an unnecessary copy (and thus
    *     AddRef() and Release()) when passing it.
    */
-  nsRefPtr<const OverscrollHandoffChain> BuildOverscrollHandoffChain();
+  RefPtr<const OverscrollHandoffChain> BuildOverscrollHandoffChain();
 
 private:
   /**
@@ -960,8 +994,8 @@ private:
    * Guards against the case where the APZC is being concurrently destroyed
    * (and thus mTreeManager is being nulled out).
    */
-  bool CallDispatchScroll(const ParentLayerPoint& aStartPoint,
-                          const ParentLayerPoint& aEndPoint,
+  void CallDispatchScroll(ParentLayerPoint& aStartPoint,
+                          ParentLayerPoint& aEndPoint,
                           OverscrollHandoffState& aOverscrollHandoffState);
 
   /**
@@ -969,16 +1003,15 @@ private:
    * around OverscrollBy() that also implements restrictions on entering
    * overscroll based on the pan angle.
    */
-  bool OverscrollForPanning(ParentLayerPoint aOverscroll,
+  void OverscrollForPanning(ParentLayerPoint& aOverscroll,
                             const ScreenPoint& aPanDistance);
 
   /**
    * Try to overscroll by 'aOverscroll'.
-   * If we are pannable, 'aOverscroll' is added to any existing overscroll,
-   * and the function returns true.
-   * Otherwise, nothing happens and the function return false.
+   * If we are pannable on a particular axis, that component of 'aOverscroll'
+   * is transferred to any existing overscroll.
    */
-  bool OverscrollBy(const ParentLayerPoint& aOverscroll);
+  void OverscrollBy(ParentLayerPoint& aOverscroll);
 
 
   /* ===================================================================
@@ -995,8 +1028,16 @@ public:
     return mAncestorTransform;
   }
 
+  // Returns whether or not this apzc contains the given screen point within
+  // its composition bounds.
+  bool Contains(const ScreenIntPoint& aPoint) const;
+
   bool IsOverscrolled() const {
     return mX.IsOverscrolled() || mY.IsOverscrolled();
+  }
+
+  bool IsPannedIntoOverscroll() const {
+    return IsOverscrolled() && IsInPanningState();
   }
 
 private:
@@ -1014,7 +1055,7 @@ private:
    * shared FrameMeterics used in progressive tile painting. */
   const uint32_t mAPZCId;
 
-  nsRefPtr<ipc::SharedMemoryBasic> mSharedFrameMetricsBuffer;
+  RefPtr<ipc::SharedMemoryBasic> mSharedFrameMetricsBuffer;
   CrossProcessMutex* mSharedLock;
   /**
    * Called when ever mFrameMetrics is updated so that if it is being
@@ -1035,17 +1076,18 @@ private:
    */
 public:
   /**
-   * Sync panning and zooming animation using a fixed frame time.
-   * This will ensure that we animate the APZC correctly with other external
-   * animations to the same timestamp.
-   */
-  static void SetFrameTime(const TimeStamp& aMilliseconds);
-  /**
    * Set an extra offset for testing async scrolling.
    */
   void SetTestAsyncScrollOffset(const CSSPoint& aPoint)
   {
     mTestAsyncScrollOffset = aPoint;
+  }
+  /**
+   * Set an extra offset for testing async scrolling.
+   */
+  void SetTestAsyncZoom(const LayerToParentLayerScale& aZoom)
+  {
+    mTestAsyncZoom = aZoom;
   }
 
   void MarkAsyncTransformAppliedToContent()
@@ -1058,70 +1100,22 @@ public:
     return mAsyncTransformAppliedToContent;
   }
 
+  uint64_t GetLayersId() const
+  {
+    return mLayersId;
+  }
+
 private:
   // Extra offset to add in SampleContentTransformForFrame for testing
   CSSPoint mTestAsyncScrollOffset;
+  // Extra zoom to include in SampleContentTransformForFrame for testing
+  LayerToParentLayerScale mTestAsyncZoom;
   // Flag to track whether or not the APZ transform is not used. This
   // flag is recomputed for every composition frame.
   bool mAsyncTransformAppliedToContent;
 };
 
-class AsyncPanZoomAnimation {
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(AsyncPanZoomAnimation)
-
-public:
-  explicit AsyncPanZoomAnimation(const TimeDuration& aRepaintInterval =
-                                 TimeDuration::Forever())
-    : mRepaintInterval(aRepaintInterval)
-  { }
-
-  virtual bool DoSample(FrameMetrics& aFrameMetrics,
-                        const TimeDuration& aDelta) = 0;
-
-  bool Sample(FrameMetrics& aFrameMetrics,
-              const TimeDuration& aDelta) {
-    // In some situations, particularly when handoff is involved, it's possible
-    // for |aDelta| to be negative on the first call to sample. Ignore such a
-    // sample here, to avoid each derived class having to deal with this case.
-    if (aDelta.ToMilliseconds() <= 0) {
-      return true;
-    }
-
-    return DoSample(aFrameMetrics, aDelta);
-  }
-
-  /**
-   * Get the deferred tasks in |mDeferredTasks|. See |mDeferredTasks|
-   * for more information.
-   * Clears |mDeferredTasks|.
-   */
-  Vector<Task*> TakeDeferredTasks() {
-    Vector<Task*> result;
-    mDeferredTasks.swap(result);
-    return result;
-  }
-
-  /**
-   * Specifies how frequently (at most) we want to do repaints during the
-   * animation sequence. TimeDuration::Forever() will cause it to only repaint
-   * at the end of the animation.
-   */
-  TimeDuration mRepaintInterval;
-
-protected:
-  // Protected destructor, to discourage deletion outside of Release():
-  virtual ~AsyncPanZoomAnimation()
-  { }
-
-  /**
-   * Tasks scheduled for execution after the APZC's mMonitor is released.
-   * Derived classes can add tasks here in Sample(), and the APZC can call
-   * ExecuteDeferredTasks() to execute them.
-   */
-  Vector<Task*> mDeferredTasks;
-};
-
-}
-}
+} // namespace layers
+} // namespace mozilla
 
 #endif // mozilla_layers_PanZoomController_h

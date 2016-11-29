@@ -1,5 +1,5 @@
-/* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -21,10 +21,9 @@ namespace dom {
 namespace indexedDB {
 class IDBDatabase;
 class IDBFactory;
-class IDBObjectStore;
 class IDBOpenDBRequest;
 class IDBTransaction;
-}
+} // namespace indexedDB
 
 class DataStoreDBCallback;
 
@@ -60,12 +59,12 @@ private:
 
   nsString mDatabaseName;
 
-  nsRefPtr<indexedDB::IDBFactory> mFactory;
-  nsRefPtr<indexedDB::IDBOpenDBRequest> mRequest;
-  nsRefPtr<indexedDB::IDBDatabase> mDatabase;
-  nsRefPtr<indexedDB::IDBTransaction> mTransaction;
+  RefPtr<indexedDB::IDBFactory> mFactory;
+  RefPtr<indexedDB::IDBOpenDBRequest> mRequest;
+  RefPtr<indexedDB::IDBDatabase> mDatabase;
+  RefPtr<indexedDB::IDBTransaction> mTransaction;
 
-  nsRefPtr<DataStoreDBCallback> mCallback;
+  RefPtr<DataStoreDBCallback> mCallback;
 
   // Internal state to avoid strange use of this class.
   enum StateType {

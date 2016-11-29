@@ -19,7 +19,7 @@ MediaElementAudioSourceNode::MediaElementAudioSourceNode(AudioContext* aContext)
 MediaElementAudioSourceNode::Create(AudioContext* aContext,
                                     DOMMediaStream* aStream, ErrorResult& aRv)
 {
-  nsRefPtr<MediaElementAudioSourceNode> node =
+  RefPtr<MediaElementAudioSourceNode> node =
     new MediaElementAudioSourceNode(aContext);
 
   node->Init(aStream, aRv);
@@ -31,10 +31,10 @@ MediaElementAudioSourceNode::Create(AudioContext* aContext,
 }
 
 JSObject*
-MediaElementAudioSourceNode::WrapObject(JSContext* aCx)
+MediaElementAudioSourceNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return MediaElementAudioSourceNodeBinding::Wrap(aCx, this);
+  return MediaElementAudioSourceNodeBinding::Wrap(aCx, this, aGivenProto);
 }
 
-}
-}
+} // namespace dom
+} // namespace mozilla

@@ -27,8 +27,8 @@ CompositorD3D9::CompositorD3D9(PCompositorParent* aParent, nsIWidget *aWidget)
   : Compositor(aParent)
   , mWidget(aWidget)
   , mDeviceResetCount(0)
+  , mFailedResetAttempts(0)
 {
-  Compositor::SetBackend(LayersBackend::LAYERS_D3D9);
 }
 
 CompositorD3D9::~CompositorD3D9()
@@ -44,10 +44,7 @@ CompositorD3D9::Initialize()
 
   ScopedGfxFeatureReporter reporter("D3D9 Layers", force);
 
-  if (!gfxPlatform::CanUseDirect3D9()) {
-    NS_WARNING("Direct3D 9-accelerated layers are not supported on this system.");
-    return false;
-  }
+  MOZ_ASSERT(gfxPlatform::CanUseDirect3D9());
 
   mDeviceManager = gfxWindowsPlatform::GetPlatform()->GetD3D9DeviceManager();
   if (!mDeviceManager) {
@@ -58,6 +55,10 @@ CompositorD3D9::Initialize()
     CreateSwapChain((HWND)mWidget->GetNativeData(NS_NATIVE_WINDOW));
 
   if (!mSwapChain) {
+    return false;
+  }
+
+  if (!mWidget->InitCompositor(this)) {
     return false;
   }
 
@@ -93,13 +94,13 @@ CompositorD3D9::GetMaxTextureSize() const
   return mDeviceManager ? mDeviceManager->GetMaxTextureSize() : INT32_MAX;
 }
 
-TemporaryRef<DataTextureSource>
+already_AddRefed<DataTextureSource>
 CompositorD3D9::CreateDataTextureSource(TextureFlags aFlags)
 {
-  return new DataTextureSourceD3D9(SurfaceFormat::UNKNOWN, this, aFlags);
+  return MakeAndAddRef<DataTextureSourceD3D9>(SurfaceFormat::UNKNOWN, this, aFlags);
 }
 
-TemporaryRef<CompositingRenderTarget>
+already_AddRefed<CompositingRenderTarget>
 CompositorD3D9::CreateRenderTarget(const gfx::IntRect &aRect,
                                    SurfaceInitMode aInit)
 {
@@ -116,7 +117,7 @@ CompositorD3D9::CreateRenderTarget(const gfx::IntRect &aRect,
   RefPtr<IDirect3DTexture9> texture;
   HRESULT hr = device()->CreateTexture(aRect.width, aRect.height, 1,
                                        D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8,
-                                       D3DPOOL_DEFAULT, byRef(texture),
+                                       D3DPOOL_DEFAULT, getter_AddRefs(texture),
                                        nullptr);
   if (FAILED(hr)) {
     ReportFailure(NS_LITERAL_CSTRING("CompositorD3D9::CreateRenderTarget: Failed to create texture"),
@@ -124,13 +125,10 @@ CompositorD3D9::CreateRenderTarget(const gfx::IntRect &aRect,
     return nullptr;
   }
 
-  RefPtr<CompositingRenderTargetD3D9> rt =
-    new CompositingRenderTargetD3D9(texture, aInit, aRect);
-
-  return rt;
+  return MakeAndAddRef<CompositingRenderTargetD3D9>(texture, aInit, aRect);
 }
 
-TemporaryRef<CompositingRenderTarget>
+already_AddRefed<CompositingRenderTarget>
 CompositorD3D9::CreateRenderTargetFromSource(const gfx::IntRect &aRect,
                                              const CompositingRenderTarget *aSource,
                                              const gfx::IntPoint &aSourcePoint)
@@ -148,7 +146,7 @@ CompositorD3D9::CreateRenderTargetFromSource(const gfx::IntRect &aRect,
   RefPtr<IDirect3DTexture9> texture;
   HRESULT hr = device()->CreateTexture(aRect.width, aRect.height, 1,
                                        D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8,
-                                       D3DPOOL_DEFAULT, byRef(texture),
+                                       D3DPOOL_DEFAULT, getter_AddRefs(texture),
                                        nullptr);
   if (FAILED(hr)) {
     ReportFailure(NS_LITERAL_CSTRING("CompositorD3D9::CreateRenderTargetFromSource: Failed to create texture"),
@@ -157,10 +155,10 @@ CompositorD3D9::CreateRenderTargetFromSource(const gfx::IntRect &aRect,
   }
 
   if (aSource) {
-    nsRefPtr<IDirect3DSurface9> sourceSurface =
+    RefPtr<IDirect3DSurface9> sourceSurface =
       static_cast<const CompositingRenderTargetD3D9*>(aSource)->GetD3D9Surface();
 
-    nsRefPtr<IDirect3DSurface9> destSurface;
+    RefPtr<IDirect3DSurface9> destSurface;
     hr = texture->GetSurfaceLevel(0, getter_AddRefs(destSurface));
     if (FAILED(hr)) {
       NS_WARNING("Failed to get texture surface level for dest.");
@@ -191,12 +189,9 @@ CompositorD3D9::CreateRenderTargetFromSource(const gfx::IntRect &aRect,
     }
   }
 
-  RefPtr<CompositingRenderTargetD3D9> rt =
-    new CompositingRenderTargetD3D9(texture,
-                                    INIT_MODE_NONE,
-                                    aRect);
-
-  return rt;
+  return MakeAndAddRef<CompositingRenderTargetD3D9>(texture,
+                                                    INIT_MODE_NONE,
+                                                    aRect);
 }
 
 void
@@ -225,7 +220,7 @@ ShaderModeForEffectType(EffectTypes aEffectType, gfx::SurfaceFormat aFormat)
     return DeviceManagerD3D9::YCBCRLAYER;
   }
 
-  MOZ_CRASH("Bad effect type");
+  MOZ_CRASH("GFX: Bad effect type");
 }
 
 void
@@ -246,7 +241,8 @@ CompositorD3D9::DrawQuad(const gfx::Rect &aRect,
                          const gfx::Rect &aClipRect,
                          const EffectChain &aEffectChain,
                          gfx::Float aOpacity,
-                         const gfx::Matrix4x4 &aTransform)
+                         const gfx::Matrix4x4& aTransform,
+                         const gfx::Rect& aVisibleRect)
 {
   if (!mDeviceManager) {
     return;
@@ -269,7 +265,6 @@ CompositorD3D9::DrawQuad(const gfx::Rect &aRect,
                                                           aRect.width,
                                                           aRect.height),
                                        1);
-  bool target = false;
 
   if (aEffectChain.mPrimaryEffect->mType != EffectTypes::SOLID_COLOR) {
     float opacity[4];
@@ -415,7 +410,7 @@ CompositorD3D9::DrawQuad(const gfx::Rect &aRect,
         if (source->AsSourceD3D9()->GetStereoMode() != StereoMode::MONO) {
           mDeviceManager->GetNv3DVUtils()->SendNv3DVControl(mode, true, FIREFOX_3DV_APP_HANDLE);
 
-          nsRefPtr<IDirect3DSurface9> renderTarget;
+          RefPtr<IDirect3DSurface9> renderTarget;
           d3d9Device->GetRenderTarget(0, getter_AddRefs(renderTarget));
           mDeviceManager->GetNv3DVUtils()->SendNv3DVMetaData((unsigned int)aRect.width,
                                                              (unsigned int)aRect.height,
@@ -483,7 +478,7 @@ CompositorD3D9::DrawQuad(const gfx::Rect &aRect,
     d3d9Device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
   }
 
-  HRESULT hr = d3d9Device->DrawPrimitive(D3DPT_TRIANGLESTRIP, 0, 2);
+  d3d9Device->DrawPrimitive(D3DPT_TRIANGLESTRIP, 0, 2);
 
   if (!isPremultiplied) {
     d3d9Device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ONE);
@@ -558,6 +553,7 @@ CompositorD3D9::EnsureSwapChain()
   // We have a swap chain, lets initialise it
   DeviceManagerState state = mSwapChain->PrepareForRendering();
   if (state == DeviceOK) {
+    mFailedResetAttempts = 0;
     return true;
   }
   // Swap chain could not be initialised, handle the failure
@@ -585,7 +581,6 @@ CompositorD3D9::Ready()
     if (EnsureSwapChain()) {
       // We don't need to call VerifyReadyForRendering because that is
       // called by mSwapChain->PrepareForRendering() via EnsureSwapChain().
-
       CheckResetCount();
       return true;
     }
@@ -598,6 +593,7 @@ CompositorD3D9::Ready()
 
   mDeviceManager = gfxWindowsPlatform::GetPlatform()->GetD3D9DeviceManager();
   if (!mDeviceManager) {
+    FailedToResetDevice();
     mParent->SendInvalidateAll();
     return false;
   }
@@ -606,6 +602,16 @@ CompositorD3D9::Ready()
     return true;
   }
   return false;
+}
+
+void
+CompositorD3D9::FailedToResetDevice() {
+  mFailedResetAttempts += 1;
+  // 10 is a totally arbitrary number that we may want to increase or decrease
+  // depending on how things behave in the wild.
+  if (mFailedResetAttempts > 10) {
+    MOZ_CRASH("GFX: Unable to get a working D3D9 Compositor");
+  }
 }
 
 void
@@ -644,7 +650,7 @@ CompositorD3D9::BeginFrame(const nsIntRegion& aInvalidRegion,
   }
   device()->SetScissorRect(&r);
 
-  nsRefPtr<IDirect3DSurface9> backBuffer = mSwapChain->GetBackBuffer();
+  RefPtr<IDirect3DSurface9> backBuffer = mSwapChain->GetBackBuffer();
   mDefaultRT = new CompositingRenderTargetD3D9(backBuffer,
                                                INIT_MODE_CLEAR,
                                                IntRect(0, 0, mSize.width, mSize.height));
@@ -657,7 +663,7 @@ CompositorD3D9::EndFrame()
   if (mDeviceManager) {
     device()->EndScene();
 
-    nsIntSize oldSize = mSize;
+    IntSize oldSize = mSize;
     EnsureSize();
     if (oldSize == mSize) {
       if (mTarget) {
@@ -695,10 +701,10 @@ CompositorD3D9::PrepareViewport(const gfx::IntSize& aSize)
 void
 CompositorD3D9::EnsureSize()
 {
-  nsIntRect rect;
+  LayoutDeviceIntRect rect;
   mWidget->GetClientBounds(rect);
 
-  mSize = rect.Size();
+  mSize = rect.Size().ToUnknownSize();
 }
 
 void
@@ -726,8 +732,8 @@ CompositorD3D9::PaintToTarget()
     return;
   }
 
-  nsRefPtr<IDirect3DSurface9> backBuff;
-  nsRefPtr<IDirect3DSurface9> destSurf;
+  RefPtr<IDirect3DSurface9> backBuff;
+  RefPtr<IDirect3DSurface9> destSurf;
   device()->GetRenderTarget(0, getter_AddRefs(backBuff));
 
   D3DSURFACE_DESC desc;

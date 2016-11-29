@@ -4,6 +4,7 @@ Cu.import("resource://gre/modules/Services.jsm");
 var httpServer = null;
 // Need to randomize, because apparently no one clears our cache
 var randomPath = "/redirect/" + Math.random();
+var systemPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
 
 XPCOMUtils.defineLazyGetter(this, "randomURI", function() {
   return "http://localhost:" + httpServer.identity.primaryPort + randomPath;
@@ -18,7 +19,7 @@ function make_channel(url, callback, ctx) {
                          "",
                          null,
                          null,      // aLoadingNode
-                         Services.scriptSecurityManager.getSystemPrincipal(),
+                         systemPrincipal,
                          null,      // aTriggeringPrincipal
                          Ci.nsILoadInfo.SEC_NORMAL,
                          Ci.nsIContentPolicy.TYPE_OTHER);
@@ -72,10 +73,10 @@ function run_test()
 
   var pm = Cc["@mozilla.org/permissionmanager;1"]
     .getService(Ci.nsIPermissionManager);
+  var ssm = Cc["@mozilla.org/scriptsecuritymanager;1"]
+              .getService(Ci.nsIScriptSecurityManager);
   var uri = make_uri("http://localhost:" + httpServer.identity.primaryPort);
-  var principal = Components.classes["@mozilla.org/scriptsecuritymanager;1"]
-                    .getService(Ci.nsIScriptSecurityManager)
-                    .getNoAppCodebasePrincipal(uri);
+  var principal = ssm.createCodebasePrincipal(uri, {});
 
   if (pm.testPermissionFromPrincipal(principal, "offline-app") != 0) {
     dump("Previous test failed to clear offline-app permission!  Expect failures.\n");
@@ -112,6 +113,7 @@ function run_test()
                              httpServer.identity.primaryPort + "/manifest"),
                     make_uri("http://localhost:" +
                              httpServer.identity.primaryPort + "/masterEntry"),
+                    systemPrincipal,
                     null);
 
   do_test_pending();

@@ -8,23 +8,23 @@
 // 3. run `[path to]/run-mozilla.sh [path to]/xpcshell \
 //                                  [path to]/genHPKPStaticpins.js \
 //                                  [absolute path to]/PreloadedHPKPins.json \
-//                                  [absolute path to]/default-ee.der \
+//                                  [an unused argument - see bug 1205406] \
 //                                  [absolute path to]/StaticHPKPins.h
 
 if (arguments.length != 3) {
   throw "Usage: genHPKPStaticPins.js " +
         "<absolute path to PreloadedHPKPins.json> " +
-        "<absolute path to default-ee.der> " +
+        "<an unused argument - see bug 1205406> " +
         "<absolute path to StaticHPKPins.h>";
 }
 
-const { 'classes': Cc, 'interfaces': Ci, 'utils': Cu, 'results': Cr } = Components;
+var { 'classes': Cc, 'interfaces': Ci, 'utils': Cu, 'results': Cr } = Components;
 
-let { NetUtil } = Cu.import("resource://gre/modules/NetUtil.jsm", {});
-let { FileUtils } = Cu.import("resource://gre/modules/FileUtils.jsm", {});
-let { Services } = Cu.import("resource://gre/modules/Services.jsm", {});
+var { NetUtil } = Cu.import("resource://gre/modules/NetUtil.jsm", {});
+var { FileUtils } = Cu.import("resource://gre/modules/FileUtils.jsm", {});
+var { Services } = Cu.import("resource://gre/modules/Services.jsm", {});
 
-let gCertDB = Cc["@mozilla.org/security/x509certdb;1"]
+var gCertDB = Cc["@mozilla.org/security/x509certdb;1"]
                 .getService(Ci.nsIX509CertDB);
 
 const BUILT_IN_NICK_PREFIX = "Builtin Object Token:";
@@ -67,13 +67,14 @@ const PINSETDEF = "/* Pinsets are each an ordered list by the actual value of th
   "};\n\n";
 
 // Command-line arguments
-let gStaticPins = parseJson(arguments[0]);
-let gTestCertFile = arguments[1];
+var gStaticPins = parseJson(arguments[0]);
+
+// arguments[1] is ignored for now. See bug 1205406.
 
 // Open the output file.
-let file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsILocalFile);
+var file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsILocalFile);
 file.initWithPath(arguments[2]);
-let gFileOutputStream = FileUtils.openSafeFileOutputStream(file);
+var gFileOutputStream = FileUtils.openSafeFileOutputStream(file);
 
 function writeString(string) {
   gFileOutputStream.write(string, string.length);
@@ -414,7 +415,7 @@ function downloadAndParseChromePins(filename,
 
 // Returns a pair of maps [certNameToSKD, certSKDToName] between cert
 // nicknames and digests of the SPKInfo for the mozilla trust store
-function loadNSSCertinfo(derTestFile, extraCertificates) {
+function loadNSSCertinfo(extraCertificates) {
   let allCerts = gCertDB.getCerts();
   let enumerator = allCerts.getEnumerator();
   let certNameToSKD = {};
@@ -438,13 +439,10 @@ function loadNSSCertinfo(derTestFile, extraCertificates) {
   }
 
   {
-    // A certificate for *.example.com.
-    let der = readFileToString(derTestFile);
-    let testCert = gCertDB.constructX509(der, der.length);
-    // We can't include this cert in the previous loop, because it skips
-    // non-builtin certs and the nickname is not built-in to the cert.
+    // This is the pinning test certificate. The key hash identifies the
+    // default RSA key from pykey.
     let name = "End Entity Test Cert";
-    let SKD  = testCert.sha256SubjectPublicKeyInfoDigest;
+    let SKD = "VCIlmPM9NkgFQtrs4Oa5TeFcDu6MWRTKSNdePEhOgD8=";
     certNameToSKD[name] = SKD;
     certSKDToName[SKD] = name;
   }
@@ -662,12 +660,11 @@ function loadExtraCertificates(certStringList) {
   return constructedCerts;
 }
 
-let extraCertificates = loadExtraCertificates(gStaticPins.extra_certificates);
-let [ certNameToSKD, certSKDToName ] = loadNSSCertinfo(gTestCertFile,
-                                                       extraCertificates);
-let [ chromeNameToHash, chromeNameToMozName ] = downloadAndParseChromeCerts(
+var extraCertificates = loadExtraCertificates(gStaticPins.extra_certificates);
+var [ certNameToSKD, certSKDToName ] = loadNSSCertinfo(extraCertificates);
+var [ chromeNameToHash, chromeNameToMozName ] = downloadAndParseChromeCerts(
   gStaticPins.chromium_data.cert_file_url, certSKDToName);
-let [ chromeImportedPinsets, chromeImportedEntries ] =
+var [ chromeImportedPinsets, chromeImportedEntries ] =
   downloadAndParseChromePins(gStaticPins.chromium_data.json_file_url,
     chromeNameToHash, chromeNameToMozName, certNameToSKD, certSKDToName);
 

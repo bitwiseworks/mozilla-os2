@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -32,6 +33,7 @@
 #include "nsServiceManagerUtils.h"
 #include "nsNetUtil.h"
 #include "nsIFile.h"
+#include "nsFrameLoader.h"
 #include "nsIWebNavigation.h"
 #include "nsIDocShell.h"
 #include "nsIContent.h"
@@ -52,8 +54,10 @@
 #include "mozilla/dom/DataTransfer.h"
 #include "nsIMIMEInfo.h"
 #include "nsRange.h"
+#include "TabParent.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/HTMLAreaElement.h"
+#include "nsVariant.h"
 
 using namespace mozilla::dom;
 
@@ -347,7 +351,7 @@ DragDataProducer::GetNodeString(nsIContent* inNode,
   // use a range to get the text-equivalent of the node
   nsCOMPtr<nsIDocument> doc = node->OwnerDoc();
   mozilla::ErrorResult rv;
-  nsRefPtr<nsRange> range = doc->CreateRange(rv);
+  RefPtr<nsRange> range = doc->CreateRange(rv);
   if (range) {
     range->SelectNode(*node, rv);
     range->ToString(outNodeString);
@@ -389,7 +393,7 @@ DragDataProducer::Produce(DataTransfer* aDataTransfer,
       return NS_OK;
   }
   else {
-    mWindow->GetSelection(getter_AddRefs(selection));
+    selection = mWindow->GetSelection();
     if (!selection)
       return NS_OK;
 
@@ -414,8 +418,21 @@ DragDataProducer::Produce(DataTransfer* aDataTransfer,
     dsti && dsti->ItemType() == nsIDocShellTreeItem::typeChrome;
 
   // In chrome shells, only allow dragging inside editable areas.
-  if (isChromeShell && !editingElement)
+  if (isChromeShell && !editingElement) {
+    nsCOMPtr<nsIFrameLoaderOwner> flo = do_QueryInterface(mTarget);
+    if (flo) {
+      RefPtr<nsFrameLoader> fl = flo->GetFrameLoader();
+      if (fl) {
+        TabParent* tp = static_cast<TabParent*>(fl->GetRemoteBrowser());
+        if (tp) {
+          // We have a TabParent, so it may have data for dnd in case the child
+          // process started a dnd session.
+          tp->AddInitialDnDDataTo(aDataTransfer);
+        }
+      }
+    }
     return NS_OK;
+  }
 
   if (isChromeShell && textControl) {
     // Only use the selection if the target node is in the selection.
@@ -710,11 +727,9 @@ DragDataProducer::AddString(DataTransfer* aDataTransfer,
                             const nsAString& aData,
                             nsIPrincipal* aPrincipal)
 {
-  nsCOMPtr<nsIWritableVariant> variant = do_CreateInstance(NS_VARIANT_CONTRACTID);
-  if (variant) {
-    variant->SetAsAString(aData);
-    aDataTransfer->SetDataWithPrincipal(aFlavor, variant, 0, aPrincipal);
-  }
+  RefPtr<nsVariantCC> variant = new nsVariantCC();
+  variant->SetAsAString(aData);
+  aDataTransfer->SetDataWithPrincipal(aFlavor, variant, 0, aPrincipal);
 }
 
 nsresult
@@ -768,12 +783,10 @@ DragDataProducer::AddStringsToDataTransfer(nsIContent* aDragNode,
   // a new flavor so as not to confuse anyone who is really registered
   // for image/gif or image/jpg.
   if (mImage) {
-    nsCOMPtr<nsIWritableVariant> variant = do_CreateInstance(NS_VARIANT_CONTRACTID);
-    if (variant) {
-      variant->SetAsISupports(mImage);
-      aDataTransfer->SetDataWithPrincipal(NS_LITERAL_STRING(kNativeImageMime),
-                                          variant, 0, principal);
-    }
+    RefPtr<nsVariantCC> variant = new nsVariantCC();
+    variant->SetAsISupports(mImage);
+    aDataTransfer->SetDataWithPrincipal(NS_LITERAL_STRING(kNativeImageMime),
+                                        variant, 0, principal);
 
     // assume the image comes from a file, and add a file promise. We
     // register ourselves as a nsIFlavorDataProvider, and will use the
@@ -782,12 +795,10 @@ DragDataProducer::AddStringsToDataTransfer(nsIContent* aDragNode,
     nsCOMPtr<nsIFlavorDataProvider> dataProvider =
       new nsContentAreaDragDropDataProvider();
     if (dataProvider) {
-      nsCOMPtr<nsIWritableVariant> variant = do_CreateInstance(NS_VARIANT_CONTRACTID);
-      if (variant) {
-        variant->SetAsISupports(dataProvider);
-        aDataTransfer->SetDataWithPrincipal(NS_LITERAL_STRING(kFilePromiseMime),
-                                            variant, 0, principal);
-      }
+      RefPtr<nsVariantCC> variant = new nsVariantCC();
+      variant->SetAsISupports(dataProvider);
+      aDataTransfer->SetDataWithPrincipal(NS_LITERAL_STRING(kFilePromiseMime),
+                                          variant, 0, principal);
     }
 
     AddString(aDataTransfer, NS_LITERAL_STRING(kFilePromiseURLMime),

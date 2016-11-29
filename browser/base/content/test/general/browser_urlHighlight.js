@@ -16,7 +16,8 @@ function testVal(aExpected) {
     value = value.substring(pos + range.length);
   }
   result += value;
-  is(result, aExpected, "Correct part of the urlbar contents is highlighted");
+  is(result, aExpected,
+     "Correct part of the urlbar contents is highlighted");
 }
 
 function test() {
@@ -45,6 +46,9 @@ function test() {
   testVal("<www.>mozilla.org");
   testVal("<sub.>mozilla.org");
   testVal("<sub1.sub2.sub3.>mozilla.org");
+  testVal("<mozilla.com.>mozilla.com");
+  testVal("<https://mozilla.com:mozilla.com@>mozilla.com");
+  testVal("<mozilla.com:mozilla.com@>mozilla.com");
 
   testVal("<http://ftp.>mozilla.org");
   testVal("<ftp://ftp.>mozilla.org");
@@ -53,6 +57,8 @@ function test() {
   testVal("<https://sub1.sub2.sub3.>mozilla.org");
   testVal("<https://user:pass@sub1.sub2.sub3.>mozilla.org");
   testVal("<https://user:pass@>mozilla.org");
+  testVal("<user:pass@sub1.sub2.sub3.>mozilla.org");
+  testVal("<user:pass@>mozilla.org");
 
   testVal("<https://>mozilla.org</file.ext>");
   testVal("<https://>mozilla.org</sub/file.ext>");
@@ -60,6 +66,19 @@ function test() {
   testVal("<https://>mozilla.org</sub/file.ext?foo&bar>");
   testVal("<https://>mozilla.org</sub/file.ext?foo&bar#top>");
   testVal("<https://>mozilla.org</sub/file.ext?foo&bar#top>");
+  testVal("foo.bar<?q=test>");
+  testVal("foo.bar<#mozilla.org>");
+  testVal("foo.bar<?somewhere.mozilla.org>");
+  testVal("foo.bar<?@mozilla.org>");
+  testVal("foo.bar<#x@mozilla.org>");
+  testVal("foo.bar<#@x@mozilla.org>");
+  testVal("foo.bar<?x@mozilla.org>");
+  testVal("foo.bar<?@x@mozilla.org>");
+  testVal("<foo.bar@x@>mozilla.org");
+  testVal("<foo.bar@:baz@>mozilla.org");
+  testVal("<foo.bar:@baz@>mozilla.org");
+  testVal("<foo.bar@:ba:z@>mozilla.org");
+  testVal("<foo.:bar:@baz@>mozilla.org");
 
   testVal("<https://sub.>mozilla.org<:666/file.ext>");
   testVal("<sub.>mozilla.org<:666/file.ext>");
@@ -93,7 +112,7 @@ function test() {
     testVal("<https://>" + IP);
     testVal("<https://>" + IP + "</file.ext>");
     testVal("<https://user:pass@>" + IP + "<:666/file.ext>");
-    testVal("<http://user:pass@>" + IP + "<:666/file.ext>");
+    testVal("<user:pass@>" + IP + "<:666/file.ext>");
   });
 
   testVal("mailto:admin@mozilla.org");

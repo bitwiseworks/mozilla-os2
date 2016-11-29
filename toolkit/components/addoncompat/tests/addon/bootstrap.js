@@ -10,6 +10,9 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 const baseURL = "http://mochi.test:8888/browser/" +
   "toolkit/components/addoncompat/tests/browser/";
 
+var contentSecManager = Cc["@mozilla.org/contentsecuritymanager;1"]
+                          .getService(Ci.nsIContentSecurityManager);
+
 function forEachWindow(f)
 {
   let wins = Services.ww.getWindowEnumerator("navigator:browser");
@@ -29,9 +32,20 @@ function addLoadListener(target, listener)
   }, true);
 }
 
-let gWin;
-let gBrowser;
-let ok, is, info;
+var gWin;
+var gBrowser;
+var ok, is, info;
+
+function removeTab(tab, done)
+{
+  // Remove the tab in a different turn of the event loop. This way
+  // the nested event loop in removeTab doesn't conflict with the
+  // event listener shims.
+  gWin.setTimeout(() => {
+    gBrowser.removeTab(tab);
+    done();
+  }, 0);
+}
 
 // Make sure that the shims for window.content, browser.contentWindow,
 // and browser.contentDocument are working.
@@ -53,8 +67,7 @@ function testContentWindow()
       // FIXME: Waiting on bug 1073631.
       //is(browser.contentWindow.wrappedJSObject.global, 3, "global available on document");
 
-      gBrowser.removeTab(tab);
-      resolve();
+      removeTab(tab, resolve);
     });
   });
 }
@@ -105,8 +118,7 @@ function testListeners()
           is(event.target.documentURI, url2, "second load is for second page loaded");
           is(loadWithRemoveCount, 1, "load handler is only called once");
 
-          gBrowser.removeTab(tab);
-          resolve();
+          removeTab(tab, resolve);
         }
       }, true);
 
@@ -159,8 +171,7 @@ function testCapturing()
       gBrowser.removeEventListener("mousedown", capturingHandler, true);
       gBrowser.removeEventListener("mousedown", nonCapturingHandler, false);
 
-      gBrowser.removeTab(tab);
-      resolve();
+      removeTab(tab, resolve);
     });
   });
 }
@@ -191,8 +202,7 @@ function testObserver()
 
         is(observerFired, 1, "got observer notification");
 
-        gBrowser.removeTab(tab);
-        resolve();
+        removeTab(tab, resolve);
       }
     }, true);
   });
@@ -229,8 +239,7 @@ function testSandbox()
       is(browser.contentDocument.getElementById("output").innerHTML, "hello2",
          "EP sandbox code ran successfully");
 
-      gBrowser.removeTab(tab);
-      resolve();
+      removeTab(tab, resolve);
     }, true);
   });
 }
@@ -252,10 +261,8 @@ function testAddonContent()
     let tab = gBrowser.addTab(url);
     let browser = tab.linkedBrowser;
     addLoadListener(browser, function handler() {
-      gBrowser.removeTab(tab);
       res.setSubstitution("addonshim1", null);
-
-      resolve();
+      removeTab(tab, resolve);
     });
   });
 }
@@ -270,8 +277,9 @@ function testAboutModuleRegistration()
 
   let modulesToUnregister = new Map();
 
-  function TestChannel(uri, aboutName) {
+  function TestChannel(uri, aLoadInfo, aboutName) {
     this.aboutName = aboutName;
+    this.loadInfo = aLoadInfo;
     this.URI = this.originalURI = uri;
   }
 
@@ -292,6 +300,12 @@ function testAboutModuleRegistration()
         }
       };
       Services.tm.currentThread.dispatch(runnable, Ci.nsIEventTarget.DISPATCH_NORMAL);
+    },
+
+    asyncOpen2: function(listener) {
+      // throws an error if security checks fail
+      var outListener = contentSecManager.performSecurityCheck(this, listener);
+      return this.asyncOpen(outListener, null);
     },
 
     open: function() {
@@ -319,6 +333,12 @@ function testAboutModuleRegistration()
       let stream = Cc["@mozilla.org/io/string-input-stream;1"].createInstance(Ci.nsIStringInputStream);
       stream.setData(data, data.length);
       return stream;
+    },
+
+    open2: function() {
+      // throws an error if security checks fail
+      contentSecManager.performSecurityCheck(this, null);
+      return this.open();
     },
 
     isPending: function() {
@@ -361,8 +381,8 @@ function testAboutModuleRegistration()
       contractID: `@mozilla.org/network/protocol/about;1?what=${aboutName}`,
       QueryInterface: XPCOMUtils.generateQI([Ci.nsIAboutModule]),
 
-      newChannel: (aURI) => {
-        return new TestChannel(aURI, aboutName);
+      newChannel: (aURI, aLoadInfo) => {
+        return new TestChannel(aURI, aLoadInfo, aboutName);
       },
 
       getURIFlags: (aURI) => {
@@ -485,10 +505,101 @@ function testAboutModuleRegistration()
 
     addLoadListener(browser, function() {
       testAboutModulesWork(browser).then(() => {
-        gBrowser.removeTab(newTab);
         unregisterModules();
-        resolve();
+        removeTab(newTab, resolve);
       });
+    });
+  });
+}
+
+function testProgressListener()
+{
+  const url = baseURL + "browser_addonShims_testpage.html";
+
+  let sawGlobalLocChange = false;
+  let sawTabsLocChange = false;
+
+  let globalListener = {
+    onLocationChange: function(webProgress, request, uri) {
+      if (uri.spec == url) {
+        sawGlobalLocChange = true;
+        ok(request instanceof Ci.nsIHttpChannel, "Global listener channel is an HTTP channel");
+      }
+    },
+  };
+
+  let tabsListener = {
+    onLocationChange: function(browser, webProgress, request, uri) {
+      if (uri.spec == url) {
+        sawTabsLocChange = true;
+        ok(request instanceof Ci.nsIHttpChannel, "Tab listener channel is an HTTP channel");
+      }
+    },
+  };
+
+  gBrowser.addProgressListener(globalListener);
+  gBrowser.addTabsProgressListener(tabsListener);
+  info("Added progress listeners");
+
+  return new Promise(function(resolve, reject) {
+    let tab = gBrowser.addTab(url);
+    gBrowser.selectedTab = tab;
+    addLoadListener(tab.linkedBrowser, function handler() {
+      ok(sawGlobalLocChange, "Saw global onLocationChange");
+      ok(sawTabsLocChange, "Saw tabs onLocationChange");
+
+      gBrowser.removeProgressListener(globalListener);
+      gBrowser.removeTabsProgressListener(tabsListener);
+      removeTab(tab, resolve);
+    });
+  });
+}
+
+function testRootTreeItem()
+{
+  return new Promise(function(resolve, reject) {
+    const url = baseURL + "browser_addonShims_testpage.html";
+    let tab = gBrowser.addTab(url);
+    gBrowser.selectedTab = tab;
+    let browser = tab.linkedBrowser;
+    addLoadListener(browser, function handler() {
+      let win = browser.contentWindow;
+
+      // Add-ons love this crap.
+      let root = win.QueryInterface(Components.interfaces.nsIInterfaceRequestor)
+                    .getInterface(Components.interfaces.nsIWebNavigation)
+                    .QueryInterface(Components.interfaces.nsIDocShellTreeItem)
+                    .rootTreeItem
+                    .QueryInterface(Components.interfaces.nsIInterfaceRequestor)
+                    .getInterface(Components.interfaces.nsIDOMWindow);
+      is(root, gWin, "got correct chrome window");
+
+      removeTab(tab, resolve);
+    });
+  });
+}
+
+function testImportNode()
+{
+  return new Promise(function(resolve, reject) {
+    const url = baseURL + "browser_addonShims_testpage.html";
+    let tab = gBrowser.addTab(url);
+    gBrowser.selectedTab = tab;
+    let browser = tab.linkedBrowser;
+    addLoadListener(browser, function handler() {
+      let node = gWin.document.createElement("div");
+      let doc = browser.contentDocument;
+      let result;
+      try {
+        result = doc.importNode(node, false);
+      } catch (e) {
+        ok(false, "importing threw an exception");
+      }
+      if (browser.isRemoteBrowser) {
+        is(result, node, "got expected import result");
+      }
+
+      removeTab(tab, resolve);
     });
   });
 }
@@ -508,7 +619,11 @@ function runTests(win, funcs)
     then(testObserver).
     then(testSandbox).
     then(testAddonContent).
-    then(testAboutModuleRegistration);
+    then(testAboutModuleRegistration).
+    then(testProgressListener).
+    then(testRootTreeItem).
+    then(testImportNode).
+    then(Promise.resolve());
 }
 
 /*

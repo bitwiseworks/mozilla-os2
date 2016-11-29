@@ -2,11 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
+var { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
-Cu.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
+                                  "resource://gre/modules/PrivateBrowsingUtils.jsm");
 
 var WebcompatReporter = {
   menuItem: null,
@@ -15,7 +17,14 @@ var WebcompatReporter = {
     Services.obs.addObserver(this, "DesktopMode:Change", false);
     Services.obs.addObserver(this, "chrome-document-global-created", false);
     Services.obs.addObserver(this, "content-document-global-created", false);
-    this.addMenuItem();
+
+    let visible = true;
+    if ("@mozilla.org/parental-controls-service;1" in Cc) {
+      let pc = Cc["@mozilla.org/parental-controls-service;1"].createInstance(Ci.nsIParentalControlsService);
+      visible = !pc.parentalControlsEnabled;
+    }
+
+    this.addMenuItem(visible);
   },
 
   observe: function(subject, topic, data) {
@@ -45,7 +54,7 @@ var WebcompatReporter = {
     }
   },
 
-  addMenuItem: function() {
+  addMenuItem: function(visible) {
     this.menuItem = NativeWindow.menu.add({
       name: this.strings.GetStringFromName("webcompat.menu.name"),
       callback: () => {
@@ -53,6 +62,7 @@ var WebcompatReporter = {
         this.reportIssue(currentURI);
       },
       enabled: false,
+      visible: visible,
     });
   },
 

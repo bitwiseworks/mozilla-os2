@@ -34,7 +34,7 @@ class nsPACMan;
         { 0xad, 0x62, 0x0c, 0x87, 0x35, 0x1e, 0x64, 0x0d } }
 
 class nsProtocolProxyService final : public nsIProtocolProxyService2
-                                       , public nsIObserver
+                                   , public nsIObserver
 {
 public:
     NS_DECL_ISUPPORTS
@@ -177,6 +177,10 @@ protected:
      *        The proxy host name (UTF-8 ok).
      * @param port
      *        The proxy port number.
+     * @param username
+     *        The username for the proxy (ASCII). May be "", but not null.
+     * @param password
+     *        The password for the proxy (ASCII). May be "", but not null.
      * @param flags
      *        The proxy flags (nsIProxyInfo::flags).
      * @param timeout
@@ -191,6 +195,8 @@ protected:
     nsresult NewProxyInfo_Internal(const char *type,
                                                const nsACString &host,
                                                int32_t port,
+                                               const nsACString &username,
+                                               const nsACString &password,
                                                uint32_t flags,
                                                uint32_t timeout,
                                                nsIProxyInfo *next,
@@ -205,6 +211,10 @@ protected:
      *
      * @param channel
      *        The channel to test.
+     * @param appId
+     *        The id of the app making the query.
+     * @param isInBrowser
+     *        True if the iframe has mozbrowser but has no mozapp attribute.
      * @param info
      *        Information about the URI's protocol.
      * @param flags
@@ -216,10 +226,12 @@ protected:
      *        The resulting proxy info or null.
      */
     nsresult Resolve_Internal(nsIChannel *channel,
-                                          const nsProtocolInfo &info,
-                                          uint32_t flags,
-                                          bool *usePAC, 
-                                          nsIProxyInfo **result);
+                              uint32_t appId,
+                              bool isInBrowser,
+                              const nsProtocolInfo &info,
+                              uint32_t flags,
+                              bool *usePAC,
+                              nsIProxyInfo **result);
 
     /**
      * This method applies the registered filters to the given proxy info
@@ -325,7 +337,7 @@ protected:
             { /* other members intentionally uninitialized */ }
        ~HostInfo() {
             if (!is_ipaddr && name.host)
-                nsMemory::Free(name.host);
+                free(name.host);
         }
     };
 
@@ -377,7 +389,7 @@ protected:
     bool                         mSOCKSProxyRemoteDNS;
     bool                         mProxyOverTLS;
 
-    nsRefPtr<nsPACMan>           mPACMan;  // non-null if we are using PAC
+    RefPtr<nsPACMan>           mPACMan;  // non-null if we are using PAC
     nsCOMPtr<nsISystemProxySettings> mSystemProxySettings;
 
     PRTime                       mSessionStart;

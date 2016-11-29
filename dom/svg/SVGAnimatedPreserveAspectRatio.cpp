@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -29,9 +30,9 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DOMSVGAnimatedPreserveAspectRatio)
 NS_INTERFACE_MAP_END
 
 JSObject*
-DOMSVGAnimatedPreserveAspectRatio::WrapObject(JSContext* aCx)
+DOMSVGAnimatedPreserveAspectRatio::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGAnimatedPreserveAspectRatioBinding::Wrap(aCx, this);
+  return SVGAnimatedPreserveAspectRatioBinding::Wrap(aCx, this, aGivenProto);
 }
 
 /* Implementation */
@@ -99,7 +100,7 @@ GetMeetOrSliceString(nsAString& aMeetOrSliceString, uint16_t aMeetOrSlice)
 already_AddRefed<DOMSVGPreserveAspectRatio>
 DOMSVGAnimatedPreserveAspectRatio::BaseVal()
 {
-  nsRefPtr<DOMSVGPreserveAspectRatio> domBaseVal =
+  RefPtr<DOMSVGPreserveAspectRatio> domBaseVal =
     sBaseSVGPAspectRatioTearoffTable.GetTearoff(mVal);
   if (!domBaseVal) {
     domBaseVal = new DOMSVGPreserveAspectRatio(mVal, mSVGElement, true);
@@ -121,7 +122,7 @@ DOMSVGPreserveAspectRatio::~DOMSVGPreserveAspectRatio()
 already_AddRefed<DOMSVGPreserveAspectRatio>
 DOMSVGAnimatedPreserveAspectRatio::AnimVal()
 {
-  nsRefPtr<DOMSVGPreserveAspectRatio> domAnimVal =
+  RefPtr<DOMSVGPreserveAspectRatio> domAnimVal =
     sAnimSVGPAspectRatioTearoffTable.GetTearoff(mVal);
   if (!domAnimVal) {
     domAnimVal = new DOMSVGPreserveAspectRatio(mVal, mSVGElement, false);
@@ -281,7 +282,7 @@ already_AddRefed<DOMSVGAnimatedPreserveAspectRatio>
 SVGAnimatedPreserveAspectRatio::ToDOMAnimatedPreserveAspectRatio(
   nsSVGElement *aSVGElement)
 {
-  nsRefPtr<DOMSVGAnimatedPreserveAspectRatio> domAnimatedPAspectRatio =
+  RefPtr<DOMSVGAnimatedPreserveAspectRatio> domAnimatedPAspectRatio =
     sSVGAnimatedPAspectRatioTearoffTable.GetTearoff(this);
   if (!domAnimatedPAspectRatio) {
     domAnimatedPAspectRatio = new DOMSVGAnimatedPreserveAspectRatio(this, aSVGElement);

@@ -1,4 +1,5 @@
-/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/.
@@ -20,7 +21,7 @@ namespace dom {
 namespace workers {
 
 class ServiceWorkerClients final : public nsISupports,
-                                       public nsWrapperCache
+                                   public nsWrapperCache
 {
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -29,10 +30,19 @@ public:
   explicit ServiceWorkerClients(ServiceWorkerGlobalScope* aWorkerScope);
 
   already_AddRefed<Promise>
+  Get(const nsAString& aClientId, ErrorResult& aRv);
+
+  already_AddRefed<Promise>
   MatchAll(const ClientQueryOptions& aOptions, ErrorResult& aRv);
 
+  already_AddRefed<Promise>
+  OpenWindow(const nsAString& aUrl, ErrorResult& aRv);
+
+  already_AddRefed<Promise>
+  Claim(ErrorResult& aRv);
+
   JSObject*
-  WrapObject(JSContext* aCx) override;
+  WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   ServiceWorkerGlobalScope*
   GetParentObject() const
@@ -45,7 +55,7 @@ private:
   {
   }
 
-  nsRefPtr<ServiceWorkerGlobalScope> mWorkerScope;
+  RefPtr<ServiceWorkerGlobalScope> mWorkerScope;
 };
 
 } // namespace workers

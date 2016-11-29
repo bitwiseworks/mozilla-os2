@@ -5,29 +5,35 @@
 #ifndef INDEX_H_
 #define INDEX_H_
 
-#include "media/stagefright/MediaSource.h"
-#include "mp4_demuxer/mp4_demuxer.h"
+#include "MediaData.h"
+#include "MediaResource.h"
+#include "TimeUnits.h"
+#include "mp4_demuxer/MoofParser.h"
+#include "mp4_demuxer/Interval.h"
+#include "mp4_demuxer/Stream.h"
+#include "nsISupportsImpl.h"
+
+template<class T> class nsAutoPtr;
 
 namespace mp4_demuxer
 {
 
-template <typename T> class Interval;
-class MoofParser;
-class Sample;
 class Index;
+
+typedef int64_t Microseconds;
 
 class SampleIterator
 {
 public:
   explicit SampleIterator(Index* aIndex);
-  MP4Sample* GetNext();
+  already_AddRefed<mozilla::MediaRawData> GetNext();
   void Seek(Microseconds aTime);
   Microseconds GetNextKeyframeTime();
 
 private:
   Sample* Get();
   void Next();
-  nsRefPtr<Index> mIndex;
+  RefPtr<Index> mIndex;
   size_t mCurrentMoof;
   size_t mCurrentSample;
 };
@@ -37,15 +43,62 @@ class Index
 public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(Index)
 
-  Index(const nsTArray<stagefright::MediaSource::Indice>& aIndex,
-        Stream* aSource, uint32_t aTrackId, bool aIsAudio, Monitor* aMonitor);
+  struct Indice
+  {
+    uint64_t start_offset;
+    uint64_t end_offset;
+    uint64_t start_composition;
+    uint64_t end_composition;
+    uint64_t start_decode;
+    bool sync;
+  };
 
-  void UpdateMoofIndex(const nsTArray<mozilla::MediaByteRange>& aByteRanges);
+  struct MP4DataOffset
+  {
+    MP4DataOffset(uint32_t aIndex, int64_t aStartOffset)
+      : mIndex(aIndex)
+      , mStartOffset(aStartOffset)
+      , mEndOffset(0)
+    {}
+
+    bool operator==(int64_t aStartOffset) const {
+      return mStartOffset == aStartOffset;
+    }
+
+    bool operator!=(int64_t aStartOffset) const {
+      return mStartOffset != aStartOffset;
+    }
+
+    bool operator<(int64_t aStartOffset) const {
+      return mStartOffset < aStartOffset;
+    }
+
+    struct EndOffsetComparator {
+      bool Equals(const MP4DataOffset& a, const int64_t& b) const {
+        return a.mEndOffset == b;
+      }
+
+      bool LessThan(const MP4DataOffset& a, const int64_t& b) const {
+        return a.mEndOffset < b;
+      }
+    };
+
+    uint32_t mIndex;
+    int64_t mStartOffset;
+    int64_t mEndOffset;
+    Interval<Microseconds> mTime;
+  };
+
+  Index(const nsTArray<Indice>& aIndex,
+        Stream* aSource,
+        uint32_t aTrackId,
+        bool aIsAudio);
+
+  void UpdateMoofIndex(const mozilla::MediaByteRangeSet& aByteRanges);
   Microseconds GetEndCompositionIfBuffered(
-    const nsTArray<mozilla::MediaByteRange>& aByteRanges);
-  void ConvertByteRangesToTimeRanges(
-    const nsTArray<mozilla::MediaByteRange>& aByteRanges,
-    nsTArray<Interval<Microseconds>>* aTimeRanges);
+    const mozilla::MediaByteRangeSet& aByteRanges);
+  mozilla::media::TimeIntervals ConvertByteRangesToTimeRanges(
+    const mozilla::MediaByteRangeSet& aByteRanges);
   uint64_t GetEvictionOffset(Microseconds aTime);
   bool IsFragmented() { return mMoofParser; }
 
@@ -55,9 +108,14 @@ private:
   ~Index();
 
   Stream* mSource;
-  nsTArray<Sample> mIndex;
+  FallibleTArray<Sample> mIndex;
+  FallibleTArray<MP4DataOffset> mDataOffset;
   nsAutoPtr<MoofParser> mMoofParser;
-  Monitor* mMonitor;
+
+  // ConvertByteRangesToTimeRanges cache
+  mozilla::MediaByteRangeSet mLastCachedRanges;
+  mozilla::media::TimeIntervals mLastBufferedRanges;
+  bool mIsAudio;
 };
 }
 

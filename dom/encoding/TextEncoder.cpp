@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -20,14 +21,14 @@ TextEncoder::Init(const nsAString& aEncoding, ErrorResult& aRv)
   // If encoding is failure, or is none of utf-8, utf-16, and utf-16be,
   // throw a RangeError (https://encoding.spec.whatwg.org/#dom-textencoder).
   if (!EncodingUtils::FindEncodingForLabel(label, mEncoding)) {
-    aRv.ThrowRangeError(MSG_ENCODING_NOT_SUPPORTED, &label);
+    aRv.ThrowRangeError<MSG_ENCODING_NOT_SUPPORTED>(label);
     return;
   }
 
   if (!mEncoding.EqualsLiteral("UTF-8") &&
       !mEncoding.EqualsLiteral("UTF-16LE") &&
       !mEncoding.EqualsLiteral("UTF-16BE")) {
-    aRv.ThrowRangeError(MSG_DOM_ENCODING_NOT_UTF);
+    aRv.ThrowRangeError<MSG_DOM_ENCODING_NOT_UTF>();
     return;
   }
 
@@ -45,7 +46,7 @@ TextEncoder::Encode(JSContext* aCx,
   // Run the steps of the encoding algorithm.
   int32_t srcLen = aString.Length();
   int32_t maxLen;
-  const char16_t* data = PromiseFlatString(aString).get();
+  const char16_t* data = aString.BeginReading();
   nsresult rv = mEncoder->GetMaxLength(data, srcLen, &maxLen);
   if (NS_FAILED(rv)) {
     aRv.Throw(rv);
@@ -94,5 +95,5 @@ TextEncoder::GetEncoding(nsAString& aEncoding)
   nsContentUtils::ASCIIToLower(aEncoding);
 }
 
-} // dom
-} // mozilla
+} // namespace dom
+} // namespace mozilla

@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=4 et sw=4 tw=80:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -10,6 +11,7 @@
 #include "nsString.h"
 #include "gfxPoint.h"
 #include "gfxFont.h"
+#include "gfxFontConstants.h"
 #include "nsTArray.h"
 #include "gfxSkipChars.h"
 #include "gfxPlatform.h"
@@ -24,6 +26,7 @@
 
 class gfxContext;
 class gfxFontGroup;
+class gfxUserFontEntry;
 class gfxUserFontSet;
 class gfxTextContextPaint;
 class nsIAtom;
@@ -39,10 +42,9 @@ struct gfxTextRunDrawCallbacks {
     /**
      * Constructs a new DrawCallbacks object.
      *
-     * @param aShouldPaintSVGGlyphs If true, SVG glyphs will be
-     *   painted and the NotifyBeforeSVGGlyphPainted/NotifyAfterSVGGlyphPainted
-     *   callbacks will be invoked for each SVG glyph.  If false, SVG glyphs
-     *   will not be painted; fallback plain glyphs are not emitted either.
+     * @param aShouldPaintSVGGlyphs If true, SVG glyphs will be painted.  If
+     *   false, SVG glyphs will not be painted; fallback plain glyphs are not
+     *   emitted either.
      */
     explicit gfxTextRunDrawCallbacks(bool aShouldPaintSVGGlyphs = false)
       : mShouldPaintSVGGlyphs(aShouldPaintSVGGlyphs)
@@ -55,16 +57,6 @@ struct gfxTextRunDrawCallbacks {
      * due to partial ligatures and intervening SVG glyphs.
      */
     virtual void NotifyGlyphPathEmitted() = 0;
-
-    /**
-     * Called just before an SVG glyph has been painted to the gfxContext.
-     */
-    virtual void NotifyBeforeSVGGlyphPainted() { }
-
-    /**
-     * Called just after an SVG glyph has been painted to the gfxContext.
-     */
-    virtual void NotifyAfterSVGGlyphPainted() { }
 
     bool mShouldPaintSVGGlyphs;
 };
@@ -92,9 +84,9 @@ class gfxTextRun : public gfxShapedText {
 public:
 
     // Override operator delete to properly free the object that was
-    // allocated via moz_malloc.
+    // allocated via malloc.
     void operator delete(void* p) {
-        moz_free(p);
+        free(p);
     }
 
     virtual ~gfxTextRun();
@@ -137,9 +129,9 @@ public:
         NS_ASSERTION(aPos < GetLength(), "aPos out of range");
         return mCharacterGlyphs[aPos].CharIsNewline();
     }
-    bool CharIsLowSurrogate(uint32_t aPos) const {
+    bool CharMayHaveEmphasisMark(uint32_t aPos) const {
         NS_ASSERTION(aPos < GetLength(), "aPos out of range");
-        return mCharacterGlyphs[aPos].CharIsLowSurrogate();
+        return mCharacterGlyphs[aPos].CharMayHaveEmphasisMark();
     }
 
     // All uint32_t aStart, uint32_t aLength ranges below are restricted to
@@ -258,6 +250,16 @@ public:
               PropertyProvider *aProvider,
               gfxFloat *aAdvanceWidth, gfxTextContextPaint *aContextPaint,
               gfxTextRunDrawCallbacks *aCallbacks = nullptr);
+
+    /**
+     * Draws the emphasis marks for this text run. Uses only GetSpacing
+     * from aProvider. The provided point is the baseline origin of the
+     * line of emphasis marks.
+     */
+    void DrawEmphasisMarks(gfxContext* aContext, gfxTextRun* aMark,
+                           gfxFloat aMarkAdvance, gfxPoint aPt,
+                           uint32_t aStart, uint32_t aLength,
+                           PropertyProvider* aProvider);
 
     /**
      * Computes the ReflowMetrics for a substring.
@@ -422,7 +424,7 @@ public:
 
     // The text is divided into GlyphRuns as necessary
     struct GlyphRun {
-        nsRefPtr<gfxFont> mFont;   // never null
+        RefPtr<gfxFont> mFont;   // never null
         uint32_t          mCharacterOffset; // into original UTF16 string
         uint8_t           mMatchType;
         uint16_t          mOrientation; // gfxTextRunFactory::TEXT_ORIENT_* value
@@ -488,7 +490,7 @@ public:
     void SortGlyphRuns();
     void SanitizeGlyphRuns();
 
-    CompressedGlyph* GetCharacterGlyphs() {
+    CompressedGlyph* GetCharacterGlyphs() final {
         NS_ASSERTION(mCharacterGlyphs, "failed to initialize mCharacterGlyphs");
         return mCharacterGlyphs;
     }
@@ -512,9 +514,8 @@ public:
     // Returns true if it was able to set simple glyph data for the space;
     // if it returns false, the caller needs to fall back to some other
     // means to create the necessary (detailed) glyph data.
-    bool SetSpaceGlyphIfSimple(gfxFont *aFont, gfxContext *aContext,
-                               uint32_t aCharIndex, char16_t aSpaceChar,
-                               uint16_t aOrientation);
+    bool SetSpaceGlyphIfSimple(gfxFont *aFont, uint32_t aCharIndex,
+                               char16_t aSpaceChar, uint16_t aOrientation);
 
     // Record the positions of specific characters that layout may need to
     // detect in the textrun, even though it doesn't have an explicit copy
@@ -523,30 +524,13 @@ public:
     // to "complex" ones as the Tab and Newline flags are not present in
     // simple CompressedGlyph records.
     void SetIsTab(uint32_t aIndex) {
-        CompressedGlyph *g = &mCharacterGlyphs[aIndex];
-        if (g->IsSimpleGlyph()) {
-            DetailedGlyph *details = AllocateDetailedGlyphs(aIndex, 1);
-            details->mGlyphID = g->GetSimpleGlyph();
-            details->mAdvance = g->GetSimpleAdvance();
-            details->mXOffset = details->mYOffset = 0;
-            SetGlyphs(aIndex, CompressedGlyph().SetComplex(true, true, 1), details);
-        }
-        g->SetIsTab();
+        EnsureComplexGlyph(aIndex).SetIsTab();
     }
     void SetIsNewline(uint32_t aIndex) {
-        CompressedGlyph *g = &mCharacterGlyphs[aIndex];
-        if (g->IsSimpleGlyph()) {
-            DetailedGlyph *details = AllocateDetailedGlyphs(aIndex, 1);
-            details->mGlyphID = g->GetSimpleGlyph();
-            details->mAdvance = g->GetSimpleAdvance();
-            details->mXOffset = details->mYOffset = 0;
-            SetGlyphs(aIndex, CompressedGlyph().SetComplex(true, true, 1), details);
-        }
-        g->SetIsNewline();
+        EnsureComplexGlyph(aIndex).SetIsNewline();
     }
-    void SetIsLowSurrogate(uint32_t aIndex) {
-        SetGlyphs(aIndex, CompressedGlyph().SetComplex(false, false, 0), nullptr);
-        mCharacterGlyphs[aIndex].SetIsLowSurrogate();
+    void SetNoEmphasisMark(uint32_t aIndex) {
+        EnsureComplexGlyph(aIndex).SetNoEmphasisMark();
     }
 
     /**
@@ -636,6 +620,24 @@ public:
         mShapingState = aShapingState;
     }
 
+    int32_t GetAdvanceForGlyph(uint32_t aIndex)
+    {
+        const CompressedGlyph& glyphData = mCharacterGlyphs[aIndex];
+        if (glyphData.IsSimpleGlyph()) {
+            return glyphData.GetSimpleAdvance();
+        }
+        uint32_t glyphCount = glyphData.GetGlyphCount();
+        if (!glyphCount) {
+            return 0;
+        }
+        const DetailedGlyph* details = GetDetailedGlyphs(aIndex);
+        int32_t advance = 0;
+        for (uint32_t j = 0; j < glyphCount; ++j, ++details) {
+            advance += details->mAdvance;
+        }
+        return advance;
+    }
+
 #ifdef DEBUG
     void Dump(FILE* aOutput);
 #endif
@@ -675,6 +677,12 @@ private:
                                    PropertyProvider *aProvider,
                                    uint32_t aSpacingStart, uint32_t aSpacingEnd,
                                    nsTArray<PropertyProvider::Spacing> *aSpacing);
+
+    CompressedGlyph& EnsureComplexGlyph(uint32_t aIndex)
+    {
+        gfxShapedText::EnsureComplexGlyph(aIndex, mCharacterGlyphs[aIndex]);
+        return mCharacterGlyphs[aIndex];
+    }
 
     //  **** ligature helpers ****
     // (Platforms do the actual ligaturization, but we need to do a bunch of stuff
@@ -742,8 +750,10 @@ public:
     static void Shutdown(); // platform must call this to release the languageAtomService
 
     gfxFontGroup(const mozilla::FontFamilyList& aFontFamilyList,
-                 const gfxFontStyle *aStyle,
-                 gfxUserFontSet *aUserFontSet = nullptr);
+                 const gfxFontStyle* aStyle,
+                 gfxTextPerfMetrics* aTextPerf,
+                 gfxUserFontSet* aUserFontSet,
+                 gfxFloat aDevToCssSize);
 
     virtual ~gfxFontGroup();
 
@@ -841,18 +851,6 @@ public:
                         int32_t aRunScript, gfxFont *aPrevMatchedFont,
                         uint8_t *aMatchType);
 
-    // search through pref fonts for a character, return nullptr if no matching pref font
-    virtual already_AddRefed<gfxFont> WhichPrefFontSupportsChar(uint32_t aCh);
-
-    already_AddRefed<gfxFont>
-        WhichSystemFontSupportsChar(uint32_t aCh, uint32_t aNextCh,
-                                    int32_t aRunScript);
-
-    template<typename T>
-    void ComputeRanges(nsTArray<gfxTextRange>& mRanges,
-                       const T *aString, uint32_t aLength,
-                       int32_t aRunScript, uint16_t aOrientation);
-
     gfxUserFontSet* GetUserFontSet();
 
     // With downloadable fonts, the composition of the font group can change as fonts are downloaded
@@ -866,7 +864,6 @@ public:
 
     // used when logging text performance
     gfxTextPerfMetrics *GetTextPerfMetrics() { return mTextPerf; }
-    void SetTextPerfMetrics(gfxTextPerfMetrics *aTextPerf) { mTextPerf = aTextPerf; }
 
     // This will call UpdateUserFonts() if the user font set is changed.
     void SetUserFontSet(gfxUserFontSet *aUserFontSet);
@@ -874,6 +871,9 @@ public:
     // If there is a user font set, check to see whether the font list or any
     // caches need updating.
     virtual void UpdateUserFonts();
+
+    // search for a specific userfont in the list of fonts
+    bool ContainsUserFont(const gfxUserFontEntry* aUserFont);
 
     bool ShouldSkipDrawing() const {
         return mSkipDrawing;
@@ -885,29 +885,36 @@ public:
     };
     // The gfxFontGroup keeps ownership of this textrun.
     // It is only guaranteed to exist until the next call to GetEllipsisTextRun
-    // (which might use a different appUnitsPerDev value) for the font group,
-    // or until UpdateUserFonts is called, or the fontgroup is destroyed.
+    // (which might use a different appUnitsPerDev value or flags) for the font
+    // group, or until UpdateUserFonts is called, or the fontgroup is destroyed.
     // Get it/use it/forget it :) - don't keep a reference that might go stale.
-    gfxTextRun* GetEllipsisTextRun(int32_t aAppUnitsPerDevPixel,
+    gfxTextRun* GetEllipsisTextRun(int32_t aAppUnitsPerDevPixel, uint32_t aFlags,
                                    LazyReferenceContextGetter& aRefContextGetter);
 
-    // helper method for resolving generic font families
-    static void
-    ResolveGenericFontNames(mozilla::FontFamilyType aGenericType,
-                            nsIAtom *aLanguage,
-                            nsTArray<nsString>& aGenericFamilies);
-
 protected:
+    // search through pref fonts for a character, return nullptr if no matching pref font
+    already_AddRefed<gfxFont> WhichPrefFontSupportsChar(uint32_t aCh);
+
+    already_AddRefed<gfxFont>
+        WhichSystemFontSupportsChar(uint32_t aCh, uint32_t aNextCh,
+                                    int32_t aRunScript);
+
+    template<typename T>
+    void ComputeRanges(nsTArray<gfxTextRange>& mRanges,
+                       const T *aString, uint32_t aLength,
+                       int32_t aRunScript, uint16_t aOrientation);
+
     class FamilyFace {
     public:
         FamilyFace() : mFamily(nullptr), mFontEntry(nullptr),
                        mNeedsBold(false), mFontCreated(false),
-                       mLoading(false), mInvalid(false)
+                       mLoading(false), mInvalid(false),
+                       mCheckForFallbackFaces(false)
         { }
 
         FamilyFace(gfxFontFamily* aFamily, gfxFont* aFont)
             : mFamily(aFamily), mNeedsBold(false), mFontCreated(true),
-              mLoading(false), mInvalid(false)
+              mLoading(false), mInvalid(false), mCheckForFallbackFaces(false)
         {
             NS_ASSERTION(aFont, "font pointer must not be null");
             NS_ASSERTION(!aFamily ||
@@ -920,7 +927,7 @@ protected:
         FamilyFace(gfxFontFamily* aFamily, gfxFontEntry* aFontEntry,
                    bool aNeedsBold)
             : mFamily(aFamily), mNeedsBold(aNeedsBold), mFontCreated(false),
-              mLoading(false), mInvalid(false)
+              mLoading(false), mInvalid(false), mCheckForFallbackFaces(false)
         {
             NS_ASSERTION(aFontEntry, "font entry pointer must not be null");
             NS_ASSERTION(!aFamily ||
@@ -935,7 +942,8 @@ protected:
               mNeedsBold(aOtherFamilyFace.mNeedsBold),
               mFontCreated(aOtherFamilyFace.mFontCreated),
               mLoading(aOtherFamilyFace.mLoading),
-              mInvalid(aOtherFamilyFace.mInvalid)
+              mInvalid(aOtherFamilyFace.mInvalid),
+              mCheckForFallbackFaces(aOtherFamilyFace.mCheckForFallbackFaces)
         {
             if (mFontCreated) {
                 mFont = aOtherFamilyFace.mFont;
@@ -998,6 +1006,8 @@ protected:
         void CheckState(bool& aSkipDrawing);
         void SetLoading(bool aIsLoading) { mLoading = aIsLoading; }
         void SetInvalid() { mInvalid = true; }
+        bool CheckForFallbackFaces() const { return mCheckForFallbackFaces; }
+        void SetCheckForFallbackFaces() { mCheckForFallbackFaces = true; }
 
         void SetFont(gfxFont* aFont)
         {
@@ -1013,8 +1023,10 @@ protected:
             mLoading = false;
         }
 
+        bool EqualsUserFont(const gfxUserFontEntry* aUserFont) const;
+
     private:
-        nsRefPtr<gfxFontFamily> mFamily;
+        RefPtr<gfxFontFamily> mFamily;
         // either a font or a font entry exists
         union {
             gfxFont*            mFont;
@@ -1024,6 +1036,7 @@ protected:
         bool                    mFontCreated : 1;
         bool                    mLoading     : 1;
         bool                    mInvalid     : 1;
+        bool                    mCheckForFallbackFaces : 1;
     };
 
     // List of font families, either named or generic.
@@ -1035,24 +1048,25 @@ protected:
     // Code should be careful about addressing this array directly.
     nsTArray<FamilyFace> mFonts;
 
-    nsRefPtr<gfxFont> mDefaultFont;
+    RefPtr<gfxFont> mDefaultFont;
     gfxFontStyle mStyle;
 
     gfxFloat mUnderlineOffset;
     gfxFloat mHyphenWidth;
+    gfxFloat mDevToCssSize;
 
-    nsRefPtr<gfxUserFontSet> mUserFontSet;
+    RefPtr<gfxUserFontSet> mUserFontSet;
     uint64_t mCurrGeneration;  // track the current user font set generation, rebuild font list if needed
 
     gfxTextPerfMetrics *mTextPerf;
 
     // Cache a textrun representing an ellipsis (useful for CSS text-overflow)
-    // at a specific appUnitsPerDevPixel size
+    // at a specific appUnitsPerDevPixel size and orientation
     nsAutoPtr<gfxTextRun>   mCachedEllipsisTextRun;
 
     // cache the most recent pref font to avoid general pref font lookup
-    nsRefPtr<gfxFontFamily> mLastPrefFamily;
-    nsRefPtr<gfxFont>       mLastPrefFont;
+    RefPtr<gfxFontFamily> mLastPrefFamily;
+    RefPtr<gfxFont>       mLastPrefFont;
     eFontPrefLang           mLastPrefLang;       // lang group for last pref font
     eFontPrefLang           mPageLang;
     bool                    mLastPrefFirstFont;  // is this the first font in the list of pref fonts for this lang group?
@@ -1060,6 +1074,9 @@ protected:
     bool                    mSkipDrawing; // hide text while waiting for a font
                                           // download to complete (or fallback
                                           // timer to fire)
+
+    // xxx - gfxPangoFontGroup skips UpdateUserFonts
+    bool                    mSkipUpdateUserFonts;
 
     /**
      * Textrun creation short-cuts for special cases where we don't need to
@@ -1117,20 +1134,20 @@ protected:
     already_AddRefed<gfxFont>
     FindNonItalicFaceForChar(gfxFontFamily* aFamily, uint32_t aCh);
 
-    // helper methods for looking up fonts
+    // search all faces in a family for a fallback in cases where it's unclear
+    // whether the family might have a font for a given character
+    already_AddRefed<gfxFont>
+    FindFallbackFaceForChar(gfxFontFamily* aFamily, uint32_t aCh,
+                            int32_t aRunScript);
 
-    // iterate over the fontlist, lookup names and expand generics
-    void EnumerateFontList(nsIAtom *aLanguage, void *aClosure = nullptr);
-
-    // expand a generic to a list of specific names based on prefs
-    void FindGenericFonts(mozilla::FontFamilyType aGenericType,
-                          nsIAtom *aLanguage,
-                          void *aClosure);
+   // helper methods for looking up fonts
 
     // lookup and add a font with a given name (i.e. *not* a generic!)
-    virtual void FindPlatformFont(const nsAString& aName,
-                                  bool aUseFontSet,
-                                  void *aClosure);
+    void AddPlatformFont(const nsAString& aName,
+                         nsTArray<gfxFontFamily*>& aFamilyList);
+
+    // do style selection and add entries to list
+    void AddFamilyToFontList(gfxFontFamily* aFamily);
 
     static nsILanguageAtomService* gLangService;
 };

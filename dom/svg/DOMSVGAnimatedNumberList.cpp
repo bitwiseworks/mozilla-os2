@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -35,9 +36,9 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DOMSVGAnimatedNumberList)
 NS_INTERFACE_MAP_END
 
 JSObject*
-DOMSVGAnimatedNumberList::WrapObject(JSContext* aCx)
+DOMSVGAnimatedNumberList::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return mozilla::dom::SVGAnimatedNumberListBinding::Wrap(aCx, this);
+  return mozilla::dom::SVGAnimatedNumberListBinding::Wrap(aCx, this, aGivenProto);
 }
 
 already_AddRefed<DOMSVGNumberList>
@@ -46,7 +47,7 @@ DOMSVGAnimatedNumberList::BaseVal()
   if (!mBaseVal) {
     mBaseVal = new DOMSVGNumberList(this, InternalAList().GetBaseValue());
   }
-  nsRefPtr<DOMSVGNumberList> baseVal = mBaseVal;
+  RefPtr<DOMSVGNumberList> baseVal = mBaseVal;
   return baseVal.forget();
 }
 
@@ -56,7 +57,7 @@ DOMSVGAnimatedNumberList::AnimVal()
   if (!mAnimVal) {
     mAnimVal = new DOMSVGNumberList(this, InternalAList().GetAnimValue());
   }
-  nsRefPtr<DOMSVGNumberList> animVal = mAnimVal;
+  RefPtr<DOMSVGNumberList> animVal = mAnimVal;
   return animVal.forget();
 }
 
@@ -65,7 +66,7 @@ DOMSVGAnimatedNumberList::GetDOMWrapper(SVGAnimatedNumberList *aList,
                                         nsSVGElement *aElement,
                                         uint8_t aAttrEnum)
 {
-  nsRefPtr<DOMSVGAnimatedNumberList> wrapper =
+  RefPtr<DOMSVGAnimatedNumberList> wrapper =
     SVGAnimatedNumberListTearoffTable().GetTearoff(aList);
   if (!wrapper) {
     wrapper = new DOMSVGAnimatedNumberList(aElement, aAttrEnum);
@@ -97,7 +98,7 @@ DOMSVGAnimatedNumberList::InternalBaseValListWillChangeTo(const SVGNumberList& a
   // able to access "items" at indexes that are out of bounds (read/write to
   // bad memory)!!
 
-  nsRefPtr<DOMSVGAnimatedNumberList> kungFuDeathGrip;
+  RefPtr<DOMSVGAnimatedNumberList> kungFuDeathGrip;
   if (mBaseVal) {
     if (aNewValue.Length() < mBaseVal->LengthNoFlush()) {
       // InternalListLengthWillChange might clear last reference to |this|.
