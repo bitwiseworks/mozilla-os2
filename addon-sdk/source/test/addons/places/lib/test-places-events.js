@@ -27,9 +27,9 @@ const isOSX10_6 = (() => {
 
 const { search } = require('sdk/places/history');
 const {
-  invalidResolve, invalidReject, createTree, createBookmark,
+  invalidResolve, createTree, createBookmark,
   compareWithHost, addVisits, resetPlaces, createBookmarkItem,
-  removeVisits
+  removeVisits, historyBatch
 } = require('./places-helper');
 const { save, MENU, UNSORTED } = require('sdk/places/bookmarks');
 const { promisedEmitter } = require('sdk/places/utils');
@@ -236,9 +236,8 @@ exports['test history-start-batch, history-end-batch, history-start-clear'] = fu
   on(startEvent, 'data', startHandler);
   on(clearEvent, 'data', clearHandler);
 
-  createBookmark().then(() => {
-    resetPlaces(complete);
-  })
+  historyBatch();
+  resetPlaces(complete);
 };
 
 exports['test history-visit, history-title-changed'] = function (assert, done) {
@@ -317,7 +316,7 @@ after(exports, (name, assert, done) => setTimeout(() => resetPlaces(done), 1));
 before(exports, (name, assert, done) => resetPlaces(done));
 
 function saveP () {
-  return promisedEmitter(save.apply(null, Array.slice(arguments)));
+  return promisedEmitter(save.apply(null, Array.prototype.slice.call(arguments)));
 }
 
 function makeCompleted (done, countTo) {

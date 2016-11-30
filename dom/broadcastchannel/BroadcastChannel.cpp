@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -7,18 +8,17 @@
 #include "BroadcastChannelChild.h"
 #include "mozilla/dom/BroadcastChannelBinding.h"
 #include "mozilla/dom/Navigator.h"
-#include "mozilla/dom/StructuredCloneUtils.h"
+#include "mozilla/dom/File.h"
+#include "mozilla/dom/StructuredCloneHolder.h"
 #include "mozilla/ipc/BackgroundChild.h"
 #include "mozilla/ipc/BackgroundUtils.h"
 #include "mozilla/ipc/PBackgroundChild.h"
-#include "mozilla/Preferences.h"
+#include "nsContentUtils.h"
 #include "WorkerPrivate.h"
 #include "WorkerRunnable.h"
 
-#include "nsIAppsService.h"
+#include "nsIBFCacheEntry.h"
 #include "nsIDocument.h"
-#include "nsIScriptSecurityManager.h"
-#include "nsServiceManagerUtils.h"
 #include "nsISupportsPrimitives.h"
 
 #ifdef XP_WIN
@@ -33,77 +33,22 @@ namespace dom {
 
 using namespace workers;
 
-class BroadcastChannelMessage final
+class BroadcastChannelMessage final : public StructuredCloneHolder
 {
 public:
   NS_INLINE_DECL_REFCOUNTING(BroadcastChannelMessage)
 
-  JSAutoStructuredCloneBuffer mBuffer;
-  StructuredCloneClosure mClosure;
-
   BroadcastChannelMessage()
-  { }
+    : StructuredCloneHolder(CloningSupported, TransferringNotSupported,
+                            DifferentProcess)
+  {}
 
 private:
   ~BroadcastChannelMessage()
-  { }
+  {}
 };
 
 namespace {
-
-void
-GetOrigin(nsIPrincipal* aPrincipal, nsAString& aOrigin, ErrorResult& aRv)
-{
-  MOZ_ASSERT(aPrincipal);
-
-  uint16_t appStatus = aPrincipal->GetAppStatus();
-
-  if (appStatus == nsIPrincipal::APP_STATUS_NOT_INSTALLED) {
-    nsAutoString tmp;
-    aRv = nsContentUtils::GetUTFOrigin(aPrincipal, tmp);
-    if (NS_WARN_IF(aRv.Failed())) {
-      return;
-    }
-
-    aOrigin = tmp;
-    if (aOrigin.EqualsASCII("null")) {
-      nsCOMPtr<nsIURI> uri;
-      aRv = aPrincipal->GetURI(getter_AddRefs(uri));
-      if (NS_WARN_IF(aRv.Failed())) {
-        return;
-      }
-
-      if (NS_WARN_IF(!uri)) {
-        aRv.Throw(NS_ERROR_FAILURE);
-        return;
-      }
-
-      nsAutoCString spec;
-      aRv = uri->GetSpec(spec);
-      if (NS_WARN_IF(aRv.Failed())) {
-        return;
-      }
-
-      aOrigin = NS_ConvertUTF8toUTF16(spec);
-    }
-
-    return;
-  }
-
-  uint32_t appId = aPrincipal->GetAppId();
-
-  // If we are in "app code", use manifest URL as unique origin since
-  // multiple apps can share the same origin but not same broadcast messages.
-  nsresult rv;
-  nsCOMPtr<nsIAppsService> appsService =
-    do_GetService("@mozilla.org/AppsService;1", &rv);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    aRv.Throw(rv);
-    return;
-  }
-
-  appsService->GetManifestURLByLocalId(appId, aOrigin);
-}
 
 nsIPrincipal*
 GetPrincipalFromWorkerPrivate(WorkerPrivate* aWorkerPrivate)
@@ -125,7 +70,7 @@ GetPrincipalFromWorkerPrivate(WorkerPrivate* aWorkerPrivate)
 class InitializeRunnable final : public WorkerMainThreadRunnable
 {
 public:
-  InitializeRunnable(WorkerPrivate* aWorkerPrivate, nsAString& aOrigin,
+  InitializeRunnable(WorkerPrivate* aWorkerPrivate, nsACString& aOrigin,
                      PrincipalInfo& aPrincipalInfo, bool& aPrivateBrowsing,
                      ErrorResult& aRv)
     : WorkerMainThreadRunnable(aWorkerPrivate)
@@ -164,7 +109,7 @@ public:
       return true;
     }
 
-    GetOrigin(principal, mOrigin, mRv);
+    mRv = principal->GetOrigin(mOrigin);
     if (NS_WARN_IF(mRv.Failed())) {
       return true;
     }
@@ -184,9 +129,6 @@ public:
     nsIDocument* doc = window->GetExtantDoc();
     if (doc) {
       mPrivateBrowsing = nsContentUtils::IsInPrivateBrowsing(doc);
-
-      // No bfcache when BroadcastChannel is used.
-      doc->DisallowBFCaching();
     }
 
     return true;
@@ -194,7 +136,7 @@ public:
 
 private:
   WorkerPrivate* mWorkerPrivate;
-  nsAString& mOrigin;
+  nsACString& mOrigin;
   PrincipalInfo& mPrincipalInfo;
   bool& mPrivateBrowsing;
   ErrorResult& mRv;
@@ -223,20 +165,21 @@ public:
     ClonedMessageData message;
 
     SerializedStructuredCloneBuffer& buffer = message.data();
-    buffer.data = mData->mBuffer.data();
-    buffer.dataLength = mData->mBuffer.nbytes();
+    buffer.data = mData->BufferData();
+    buffer.dataLength = mData->BufferSize();
 
     PBackgroundChild* backgroundManager = mActor->Manager();
     MOZ_ASSERT(backgroundManager);
 
-    const nsTArray<nsRefPtr<File>>& blobs = mData->mClosure.mBlobs;
+    const nsTArray<RefPtr<BlobImpl>>& blobImpls = mData->BlobImpls();
 
-    if (!blobs.IsEmpty()) {
-      message.blobsChild().SetCapacity(blobs.Length());
+    if (!blobImpls.IsEmpty()) {
+      message.blobsChild().SetCapacity(blobImpls.Length());
 
-      for (uint32_t i = 0, len = blobs.Length(); i < len; ++i) {
+      for (uint32_t i = 0, len = blobImpls.Length(); i < len; ++i) {
         PBlobChild* blobChild =
-          BackgroundChild::GetOrCreateActorForBlob(backgroundManager, blobs[i]);
+          BackgroundChild::GetOrCreateActorForBlobImpl(backgroundManager,
+                                                       blobImpls[i]);
         MOZ_ASSERT(blobChild);
 
         message.blobsChild().AppendElement(blobChild);
@@ -256,8 +199,8 @@ public:
 private:
   ~BCPostMessageRunnable() {}
 
-  nsRefPtr<BroadcastChannelChild> mActor;
-  nsRefPtr<BroadcastChannelMessage> mData;
+  RefPtr<BroadcastChannelChild> mActor;
+  RefPtr<BroadcastChannelMessage> mData;
 };
 
 NS_IMPL_ISUPPORTS(BCPostMessageRunnable, nsICancelableRunnable, nsIRunnable)
@@ -288,7 +231,7 @@ public:
 private:
   ~CloseRunnable() {}
 
-  nsRefPtr<BroadcastChannel> mBC;
+  RefPtr<BroadcastChannel> mBC;
 };
 
 NS_IMPL_ISUPPORTS(CloseRunnable, nsICancelableRunnable, nsIRunnable)
@@ -322,7 +265,7 @@ public:
 private:
   ~TeardownRunnable() {}
 
-  nsRefPtr<BroadcastChannelChild> mActor;
+  RefPtr<BroadcastChannelChild> mActor;
 };
 
 NS_IMPL_ISUPPORTS(TeardownRunnable, nsICancelableRunnable, nsIRunnable)
@@ -354,53 +297,11 @@ private:
   }
 };
 
-class PrefEnabledRunnable final : public WorkerMainThreadRunnable
-{
-public:
-  explicit PrefEnabledRunnable(WorkerPrivate* aWorkerPrivate)
-    : WorkerMainThreadRunnable(aWorkerPrivate)
-    , mEnabled(false)
-  { }
-
-  bool MainThreadRun() override
-  {
-    AssertIsOnMainThread();
-    mEnabled = Preferences::GetBool("dom.broadcastChannel.enabled", false);
-    return true;
-  }
-
-  bool IsEnabled() const
-  {
-    return mEnabled;
-  }
-
-private:
-  bool mEnabled;
-};
-
-} // anonymous namespace
-
-/* static */ bool
-BroadcastChannel::IsEnabled(JSContext* aCx, JSObject* aGlobal)
-{
-  if (NS_IsMainThread()) {
-    return Preferences::GetBool("dom.broadcastChannel.enabled", false);
-  }
-
-  WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
-  MOZ_ASSERT(workerPrivate);
-  workerPrivate->AssertIsOnWorkerThread();
-
-  nsRefPtr<PrefEnabledRunnable> runnable =
-    new PrefEnabledRunnable(workerPrivate);
-  runnable->Dispatch(workerPrivate->GetJSContext());
-
-  return runnable->IsEnabled();
-}
+} // namespace
 
 BroadcastChannel::BroadcastChannel(nsPIDOMWindow* aWindow,
                                    const PrincipalInfo& aPrincipalInfo,
-                                   const nsAString& aOrigin,
+                                   const nsACString& aOrigin,
                                    const nsAString& aChannel,
                                    bool aPrivateBrowsing)
   : DOMEventTargetHelper(aWindow)
@@ -423,9 +324,9 @@ BroadcastChannel::~BroadcastChannel()
 }
 
 JSObject*
-BroadcastChannel::WrapObject(JSContext* aCx)
+BroadcastChannel::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return BroadcastChannelBinding::Wrap(aCx, this);
+  return BroadcastChannelBinding::Wrap(aCx, this, aGivenProto);
 }
 
 /* static */ already_AddRefed<BroadcastChannel>
@@ -436,7 +337,7 @@ BroadcastChannel::Constructor(const GlobalObject& aGlobal,
   nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aGlobal.GetAsSupports());
   // Window is null in workers.
 
-  nsAutoString origin;
+  nsAutoCString origin;
   PrincipalInfo principalInfo;
   bool privateBrowsing = false;
   WorkerPrivate* workerPrivate = nullptr;
@@ -466,7 +367,7 @@ BroadcastChannel::Constructor(const GlobalObject& aGlobal,
       return nullptr;
     }
 
-    GetOrigin(principal, origin, aRv);
+    aRv = principal->GetOrigin(origin);
     if (NS_WARN_IF(aRv.Failed())) {
       return nullptr;
     }
@@ -479,26 +380,23 @@ BroadcastChannel::Constructor(const GlobalObject& aGlobal,
     nsIDocument* doc = window->GetExtantDoc();
     if (doc) {
       privateBrowsing = nsContentUtils::IsInPrivateBrowsing(doc);
-
-      // No bfcache when BroadcastChannel is used.
-      doc->DisallowBFCaching();
     }
   } else {
     JSContext* cx = aGlobal.Context();
     workerPrivate = GetWorkerPrivateFromContext(cx);
     MOZ_ASSERT(workerPrivate);
 
-    nsRefPtr<InitializeRunnable> runnable =
+    RefPtr<InitializeRunnable> runnable =
       new InitializeRunnable(workerPrivate, origin, principalInfo,
                              privateBrowsing, aRv);
-    runnable->Dispatch(cx);
+    runnable->Dispatch(aRv);
   }
 
   if (aRv.Failed()) {
     return nullptr;
   }
 
-  nsRefPtr<BroadcastChannel> bc =
+  RefPtr<BroadcastChannel> bc =
     new BroadcastChannel(window, principalInfo, origin, aChannel,
                          privateBrowsing);
 
@@ -551,19 +449,11 @@ BroadcastChannel::PostMessageInternal(JSContext* aCx,
                                       JS::Handle<JS::Value> aMessage,
                                       ErrorResult& aRv)
 {
-  nsRefPtr<BroadcastChannelMessage> data = new BroadcastChannelMessage();
+  RefPtr<BroadcastChannelMessage> data = new BroadcastChannelMessage();
 
-  if (!WriteStructuredClone(aCx, aMessage, data->mBuffer, data->mClosure)) {
-    aRv.Throw(NS_ERROR_DOM_DATA_CLONE_ERR);
+  data->Write(aCx, aMessage, aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
     return;
-  }
-
-  const nsTArray<nsRefPtr<File>>& blobs = data->mClosure.mBlobs;
-  for (uint32_t i = 0, len = blobs.Length(); i < len; ++i) {
-    if (!blobs[i]->Impl()->MayBeClonedToOtherThreads()) {
-      aRv.Throw(NS_ERROR_DOM_DATA_CLONE_ERR);
-      return;
-    }
   }
 
   PostMessageData(data);
@@ -572,8 +462,10 @@ BroadcastChannel::PostMessageInternal(JSContext* aCx,
 void
 BroadcastChannel::PostMessageData(BroadcastChannelMessage* aData)
 {
+  RemoveDocFromBFCache();
+
   if (mActor) {
-    nsRefPtr<BCPostMessageRunnable> runnable =
+    RefPtr<BCPostMessageRunnable> runnable =
       new BCPostMessageRunnable(mActor, aData);
 
     if (NS_FAILED(NS_DispatchToCurrentThread(runnable))) {
@@ -599,7 +491,7 @@ BroadcastChannel::Close()
     // StateClosed and we shutdown the actor asynchrounsly.
 
     mState = StateClosed;
-    nsRefPtr<CloseRunnable> runnable = new CloseRunnable(this);
+    RefPtr<CloseRunnable> runnable = new CloseRunnable(this);
 
     if (NS_FAILED(NS_DispatchToCurrentThread(runnable))) {
       NS_WARNING("Failed to dispatch to the current thread!");
@@ -660,7 +552,7 @@ BroadcastChannel::Shutdown()
   if (mActor) {
     mActor->SetParent(nullptr);
 
-    nsRefPtr<TeardownRunnable> runnable = new TeardownRunnable(mActor);
+    RefPtr<TeardownRunnable> runnable = new TeardownRunnable(mActor);
     NS_DispatchToCurrentThread(runnable);
 
     mActor = nullptr;
@@ -698,11 +590,11 @@ BroadcastChannel::SetOnmessage(EventHandlerNonNull* aCallback)
 void
 BroadcastChannel::AddEventListener(const nsAString& aType,
                                    EventListener* aCallback,
-                                   bool aCapture,
+                                   const AddEventListenerOptionsOrBoolean& aOptions,
                                    const dom::Nullable<bool>& aWantsUntrusted,
                                    ErrorResult& aRv)
 {
-  DOMEventTargetHelper::AddEventListener(aType, aCallback, aCapture,
+  DOMEventTargetHelper::AddEventListener(aType, aCallback, aOptions,
                                          aWantsUntrusted, aRv);
 
   if (aRv.Failed()) {
@@ -715,10 +607,10 @@ BroadcastChannel::AddEventListener(const nsAString& aType,
 void
 BroadcastChannel::RemoveEventListener(const nsAString& aType,
                                       EventListener* aCallback,
-                                      bool aCapture,
+                                      const EventListenerOptionsOrBoolean& aOptions,
                                       ErrorResult& aRv)
 {
-  DOMEventTargetHelper::RemoveEventListener(aType, aCallback, aCapture, aRv);
+  DOMEventTargetHelper::RemoveEventListener(aType, aCallback, aOptions, aRv);
 
   if (aRv.Failed()) {
     return;
@@ -772,6 +664,31 @@ BroadcastChannel::Observe(nsISupports* aSubject, const char* aTopic,
   return NS_OK;
 }
 
+void
+BroadcastChannel::RemoveDocFromBFCache()
+{
+  if (!NS_IsMainThread()) {
+    return;
+  }
+
+  nsPIDOMWindow* window = GetOwner();
+  if (!window) {
+    return;
+  }
+
+  nsIDocument* doc = window->GetExtantDoc();
+  if (!doc) {
+    return;
+  }
+
+  nsCOMPtr<nsIBFCacheEntry> bfCacheEntry = doc->GetBFCacheEntry();
+  if (!bfCacheEntry) {
+    return;
+  }
+
+  bfCacheEntry->RemoveFromBFCacheSync();
+}
+
 NS_IMPL_CYCLE_COLLECTION_CLASS(BroadcastChannel)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(BroadcastChannel,
@@ -791,5 +708,5 @@ NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 NS_IMPL_ADDREF_INHERITED(BroadcastChannel, DOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(BroadcastChannel, DOMEventTargetHelper)
 
-} // dom namespace
-} // mozilla namespace
+} // namespace dom
+} // namespace mozilla

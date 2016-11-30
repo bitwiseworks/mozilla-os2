@@ -8,9 +8,9 @@
 #ifndef nsHTMLReflowMetrics_h___
 #define nsHTMLReflowMetrics_h___
 
-#include "nsRect.h"
+#include "mozilla/WritingModes.h"
 #include "nsBoundingMetrics.h"
-#include "WritingModes.h"
+#include "nsRect.h"
 
 //----------------------------------------------------------------------
 
@@ -219,24 +219,29 @@ public:
   // width in horizontal writing modes, height in vertical ones), and BSize is
   // the size in the block-progression direction.
   nscoord ISize(mozilla::WritingMode aWritingMode) const {
-    CHECK_WRITING_MODE(aWritingMode);
+    NS_ASSERTION(!aWritingMode.IsOrthogonalTo(mWritingMode),
+                 "mismatched writing mode");
     return mISize;
   }
   nscoord BSize(mozilla::WritingMode aWritingMode) const {
-    CHECK_WRITING_MODE(aWritingMode);
+    NS_ASSERTION(!aWritingMode.IsOrthogonalTo(mWritingMode),
+                 "mismatched writing mode");
     return mBSize;
   }
   mozilla::LogicalSize Size(mozilla::WritingMode aWritingMode) const {
-    CHECK_WRITING_MODE(aWritingMode);
+    NS_ASSERTION(!aWritingMode.IsOrthogonalTo(mWritingMode),
+                 "mismatched writing mode");
     return mozilla::LogicalSize(aWritingMode, mISize, mBSize);
   }
 
   nscoord& ISize(mozilla::WritingMode aWritingMode) {
-    CHECK_WRITING_MODE(aWritingMode);
+    NS_ASSERTION(!aWritingMode.IsOrthogonalTo(mWritingMode),
+                 "mismatched writing mode");
     return mISize;
   }
   nscoord& BSize(mozilla::WritingMode aWritingMode) {
-    CHECK_WRITING_MODE(aWritingMode);
+    NS_ASSERTION(!aWritingMode.IsOrthogonalTo(mWritingMode),
+                 "mismatched writing mode");
     return mBSize;
   }
 
@@ -271,6 +276,11 @@ public:
 
   nscoord& Width() { return mWritingMode.IsVertical() ? mBSize : mISize; }
   nscoord& Height() { return mWritingMode.IsVertical() ? mISize : mBSize; }
+
+  nsSize PhysicalSize()
+  {
+    return Size(mWritingMode).GetPhysicalSize(mWritingMode);
+  }
 
   void SetBlockStartAscent(nscoord aAscent)
   {

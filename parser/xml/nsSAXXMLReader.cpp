@@ -87,7 +87,7 @@ nsSAXXMLReader::HandleStartElement(const char16_t *aName,
   if (!mContentHandler)
     return NS_OK;
 
-  nsRefPtr<nsSAXAttributes> atts = new nsSAXAttributes();
+  RefPtr<nsSAXAttributes> atts = new nsSAXAttributes();
   if (!atts)
     return NS_ERROR_OUT_OF_MEMORY;
   nsAutoString uri, localName, qName;
@@ -496,9 +496,8 @@ nsSAXXMLReader::ParseFromStream(nsIInputStream *aStream,
   rv = EnsureBaseURI();
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<nsIPrincipal> nullPrincipal =
-    do_CreateInstance("@mozilla.org/nullprincipal;1", &rv);
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsCOMPtr<nsIPrincipal> nullPrincipal = nsNullPrincipal::Create();
+  NS_ENSURE_TRUE(nullPrincipal, NS_ERROR_FAILURE);
 
   nsCOMPtr<nsIChannel> parserChannel;
   rv = NS_NewInputStreamChannel(getter_AddRefs(parserChannel),

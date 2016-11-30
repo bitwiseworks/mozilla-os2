@@ -28,7 +28,7 @@
           <children/>
           <html:input anonid="input" class="autocomplete-textbox textbox-input"
                       allowevents="true"
-                      xbl:inherits="tooltiptext=inputtooltiptext,value,type,maxlength,disabled,size,readonly,placeholder,tabindex,accesskey,mozactionhint"/>
+                      xbl:inherits="tooltiptext=inputtooltiptext,value,type=inputtype,maxlength,disabled,size,readonly,placeholder,tabindex,accesskey,mozactionhint"/>
         </xul:hbox>
         <children includes="hbox"/>
       </xul:hbox>
@@ -130,7 +130,7 @@
       <property name="timeout"
                 onset="this.setAttribute('timeout', val); return val;">
         <getter><![CDATA[
-          // For security reasons delay searches on pasted values. 
+          // For security reasons delay searches on pasted values.
           if (this._valueIsPasted) {
             let t = parseInt(this.getAttribute('pastetimeout'));
             return isNaN(t) ? 1000 : t;
@@ -148,10 +148,16 @@
       <property name="searchCount" readonly="true"
                 onget="this.initSearchNames(); return this.mSearchNames.length;"/>
 
+      <field name="shrinkDelay" readonly="true">
+        parseInt(this.getAttribute("shrinkdelay")) || 0
+      </field>
+
       <field name="PrivateBrowsingUtils" readonly="true">
-        let utils = {};
-        Components.utils.import("resource://gre/modules/PrivateBrowsingUtils.jsm", utils);
-        utils.PrivateBrowsingUtils
+        {
+          let utils = {};
+          Components.utils.import("resource://gre/modules/PrivateBrowsingUtils.jsm", utils);
+          utils.PrivateBrowsingUtils
+        }
       </field>
 
       <property name="inPrivateContext" readonly="true"
@@ -203,6 +209,8 @@
 
       <method name="onSearchBegin">
         <body><![CDATA[
+          if (this.popup && typeof this.popup.onSearchBegin == "function")
+            this.popup.onSearchBegin();
           if (this._searchBeginHandler)
             this._searchBeginHandler();
         ]]></body>
@@ -214,6 +222,11 @@
             this.setAttribute("nomatch", "true");
           else
             this.removeAttribute("nomatch");
+
+          if (this.ignoreBlurWhileSearching && !this.focused) {
+            this.handleEnter();
+            this.detachController();
+          }
 
           if (this._searchCompleteHandler)
             this._searchCompleteHandler();
@@ -304,8 +317,14 @@
       <!-- option to allow scrolling through the list via the tab key, rather than
            tab moving focus out of the textbox -->
       <property name="tabScrolling"
-                onset="return this.setAttribute('tabscrolling', val); return val;"
+                onset="this.setAttribute('tabscrolling', val); return val;"
                 onget="return this.getAttribute('tabscrolling') == 'true';"/>
+
+      <!-- option to completely ignore any blur events while searches are
+           still going on. -->
+      <property name="ignoreBlurWhileSearching"
+                onset="this.setAttribute('ignoreblurwhilesearching', val); return val;"
+                onget="return this.getAttribute('ignoreblurwhilesearching') == 'true';"/>
 
       <!-- disable key navigation handling in the popup results -->
       <property name="disableKeyNavigation"
@@ -338,7 +357,8 @@
 
       <method name="openPopup">
         <body><![CDATA[
-          this.popup.openAutocompletePopup(this, this);
+          if (this.focused)
+            this.popup.openAutocompletePopup(this, this);
         ]]></body>
       </method>
 
@@ -412,6 +432,13 @@
       <method name="onKeyPress">
         <parameter name="aEvent"/>
         <body><![CDATA[
+          return this.handleKeyPress(aEvent);
+        ]]></body>
+      </method>
+
+      <method name="handleKeyPress">
+        <parameter name="aEvent"/>
+        <body><![CDATA[
           if (aEvent.target.localName != "textbox")
             return true; // Let child buttons of autocomplete take input
 
@@ -478,14 +505,14 @@
                   kind: "key"
                 };
               }
-              cancel = this.mController.handleEnter(false);
+              cancel = this.handleEnter();
               break;
             case KeyEvent.DOM_VK_DELETE:
 #ifdef XP_MACOSX
             case KeyEvent.DOM_VK_BACK_SPACE:
               if (aEvent.shiftKey)
 #endif
-              cancel = this.mController.handleDelete();
+              cancel = this.handleDelete();
               break;
             case KeyEvent.DOM_VK_DOWN:
             case KeyEvent.DOM_VK_UP:
@@ -505,6 +532,18 @@
           }
 
           return true;
+        ]]></body>
+      </method>
+
+      <method name="handleEnter">
+        <body><![CDATA[
+          return this.mController.handleEnter(false);
+        ]]></body>
+      </method>
+
+      <method name="handleDelete">
+        <body><![CDATA[
+          return this.mController.handleDelete();
         ]]></body>
       </method>
 
@@ -544,7 +583,7 @@
         ({
           _autocomplete: this,
           _kGlobalClipboard: Components.interfaces.nsIClipboard.kGlobalClipboard,
-          supportsCommand: function(aCommand) aCommand == "cmd_paste",
+          supportsCommand: aCommand => aCommand == "cmd_paste",
           doCommand: function(aCommand) {
             this._autocomplete._valueIsPasted = true;
             this._autocomplete.editor.paste(this._kGlobalClipboard);
@@ -589,9 +628,29 @@
 
       <handler event="blur" phase="capturing"><![CDATA[
         if (!this._dontBlur) {
-          if (this.forceComplete && this.mController.matchCount >= 1)
+          if (this.forceComplete && this.mController.matchCount >= 1) {
+            // mousemove sets selected index. Don't blindly use that selected
+            // index in this blur handler since if the popup is open you can
+            // easily "select" another match just by moving the mouse over it.
+            let filledVal = this.value.replace(/.+ >> /, "").toLowerCase();
+            let selectedVal = null;
+            if (this.popup.selectedIndex >= 0) {
+              selectedVal = this.mController.getFinalCompleteValueAt(
+                this.popup.selectedIndex);
+            }
+            if (selectedVal && filledVal != selectedVal.toLowerCase()) {
+              for (let i = 0; i < this.mController.matchCount; i++) {
+                let matchVal = this.mController.getFinalCompleteValueAt(i);
+                if (matchVal.toLowerCase() == filledVal) {
+                  this.popup.selectedIndex = i;
+                  break;
+                }
+              }
+            }
             this.mController.handleEnter(false);
-          this.detachController();
+          }
+          if (!this.ignoreBlurWhileSearching)
+            this.detachController();
         }
       ]]></handler>
     </handlers>
@@ -707,9 +766,9 @@
 
           var height = rows * bx.rowHeight;
 
-          if (height == 0)
+          if (height == 0) {
             this.tree.setAttribute("collapsed", "true");
-          else {
+          } else {
             if (this.tree.hasAttribute("collapsed"))
               this.tree.removeAttribute("collapsed");
 
@@ -967,6 +1026,7 @@ extends="chrome://global/content/bindings/popup.xml#popup">
     <implementation implements="nsIAutoCompletePopup">
       <field name="_currentIndex">0</field>
       <field name="_rowHeight">0</field>
+      <field name="_rlbAnimated">false</field>
 
       <!-- =================== nsIAutoCompletePopup =================== -->
 
@@ -985,6 +1045,12 @@ extends="chrome://global/content/bindings/popup.xml#popup">
         ]]>
         </setter>
       </property>
+
+      <method name="onSearchBegin">
+        <body><![CDATA[
+          this.richlistbox.mouseSelectedIndex = -1;
+        ]]></body>
+      </method>
 
       <method name="openAutocompletePopup">
         <parameter name="aInput"/>
@@ -1021,38 +1087,39 @@ extends="chrome://global/content/bindings/popup.xml#popup">
       </method>
 
       <method name="invalidate">
+        <parameter name="reason"/>
         <body>
           <![CDATA[
           // Don't bother doing work if we're not even showing
           if (!this.mPopupOpen)
             return;
 
-          this._invalidate();
+          this._invalidate(reason);
           ]]>
         </body>
       </method>
 
       <method name="_invalidate">
+        <parameter name="reason"/>
         <body>
           <![CDATA[
-          if (!this.hasAttribute("height")) {
-            // collapsed if no matches
-            this.richlistbox.collapsed = (this._matchCount == 0);
+          // collapsed if no matches
+          this.richlistbox.collapsed = (this._matchCount == 0);
 
-            // Dynamically update height until richlistbox.rows works (bug 401939)
-            // Adjust the height immediately and after the row contents update
-            this.adjustHeight();
-            setTimeout(function(self) self.adjustHeight(), 0, this);
+          // Update the richlistbox height.
+          if (this._adjustHeightTimeout) {
+            clearTimeout(this._adjustHeightTimeout);
           }
-
-          // make sure to collapse any existing richlistitems
-          // that aren't going to be used
-          var existingItemsCount = this.richlistbox.childNodes.length;
-          for (var i = this._matchCount; i < existingItemsCount; i++)
-            this.richlistbox.childNodes[i].collapsed = true;
+          if (this._shrinkTimeout) {
+            clearTimeout(this._shrinkTimeout);
+          }
+          this._adjustHeightTimeout = setTimeout(() => this.adjustHeight(), 0);
 
           this._currentIndex = 0;
-          this._appendCurrentResult();
+          if (this._appendResultTimeout) {
+            clearTimeout(this._appendResultTimeout);
+          }
+          this._appendCurrentResult(reason);
         ]]>
         </body>
       </method>
@@ -1075,6 +1142,17 @@ extends="chrome://global/content/bindings/popup.xml#popup">
         </getter>
       </property>
 
+      <method name="_collapseUnusedItems">
+        <body>
+          <![CDATA[
+            let existingItemsCount = this.richlistbox.childNodes.length;
+            for (let i = this._matchCount; i < existingItemsCount; ++i) {
+              this.richlistbox.childNodes[i].collapsed = true;
+            }
+          ]]>
+        </body>
+      </method>
+
       <method name="adjustHeight">
         <body>
           <![CDATA[
@@ -1082,45 +1160,58 @@ extends="chrome://global/content/bindings/popup.xml#popup">
           let rows = this.richlistbox.childNodes;
           let numRows = Math.min(this._matchCount, this.maxRows, rows.length);
 
+          this.removeAttribute("height");
+
           // Default the height to 0 if we have no rows to show
           let height = 0;
           if (numRows) {
             if (!this._rowHeight) {
               let firstRowRect = rows[0].getBoundingClientRect();
               this._rowHeight = firstRowRect.height;
+
+              let transition =
+                window.getComputedStyle(this.richlistbox).transitionProperty;
+              this._rlbAnimated = transition && transition != "none";
+
+              // Set a fixed max-height to avoid flicker when growing the panel.
+              this.richlistbox.style.maxHeight = (this._rowHeight * this.maxRows) + "px";
             }
 
             // Calculate the height to have the first row to last row shown
             height = this._rowHeight * numRows;
           }
 
-          // Only update the height if we have a non-zero height and if it
-          // changed (the richlistbox is collapsed if there are no results)
-          if (height && height != this.richlistbox.height)
-            this.richlistbox.height = height;
-          ]]>
-        </body>
-      </method>
-
-      <method name="_getImageURLForResolution">
-        <parameter name="aWin"/>
-        <parameter name="aURL"/>
-        <parameter name="aWidth"/>
-        <parameter name="aHeight"/>
-        <body>
-          <![CDATA[
-          if (!aURL.endsWith('.ico') && !aURL.endsWith('.ICO')) {
-            return aURL;
+          let animate = this._rlbAnimated &&
+                        this.getAttribute("dontanimate") != "true";
+          let currentHeight = this.richlistbox.getBoundingClientRect().height;
+          if (height > currentHeight) {
+            // Grow immediately.
+            if (animate) {
+              this.richlistbox.removeAttribute("height");
+              this.richlistbox.style.height = height + "px";
+            } else {
+              this.richlistbox.style.removeProperty("height");
+              this.richlistbox.height = height;
+            }
+          } else {
+            // Delay shrinking to avoid flicker.
+            this._shrinkTimeout = setTimeout(() => {
+              this._collapseUnusedItems();
+              if (animate) {
+                this.richlistbox.removeAttribute("height");
+                this.richlistbox.style.height = height + "px";
+              } else {
+                this.richlistbox.style.removeProperty("height");
+                this.richlistbox.height = height;
+              }
+            }, this.mInput.shrinkDelay);
           }
-          let width  = Math.round(aWidth * aWin.devicePixelRatio);
-          let height = Math.round(aHeight * aWin.devicePixelRatio);
-          return aURL + (aURL.contains("#") ? "&" : "#") +
-                 "-moz-resolution=" + width + "," + height;
           ]]>
         </body>
       </method>
 
       <method name="_appendCurrentResult">
+        <parameter name="invalidateReason"/>
         <body>
           <![CDATA[
           var controller = this.mInput.controller;
@@ -1146,9 +1237,15 @@ extends="chrome://global/content/bindings/popup.xml#popup">
               // re-use the existing item
               item = this.richlistbox.childNodes[this._currentIndex];
 
-              // Completely re-use the existing richlistitem if it's the same
+              // Completely reuse the existing richlistitem for invalidation
+              // due to new results, but only when: the item is the same, *OR*
+              // we are about to replace the currently mouse-selected item, to
+              // avoid surprising the user.
+              let iface = Components.interfaces.nsIAutoCompletePopup;
               if (item.getAttribute("text") == trimmedSearchString &&
-                  item.getAttribute("url") == url) {
+                  invalidateReason == iface.INVALIDATE_REASON_NEW_RESULT &&
+                  (item.getAttribute("url") == url ||
+                   this.richlistbox.mouseSelectedIndex === this._currentIndex)) {
                 item.collapsed = false;
                 this._currentIndex++;
                 continue;
@@ -1161,7 +1258,7 @@ extends="chrome://global/content/bindings/popup.xml#popup">
 
             // set these attributes before we set the class
             // so that we can use them from the constructor
-            let iconURI = this._getImageURLForResolution(window, controller.getImageAt(this._currentIndex), 16, 16);
+            let iconURI = controller.getImageAt(this._currentIndex);
             item.setAttribute("image", iconURI);
             item.setAttribute("url", url);
             item.setAttribute("title", controller.getCommentAt(this._currentIndex));
@@ -1189,7 +1286,7 @@ extends="chrome://global/content/bindings/popup.xml#popup">
           if (this._currentIndex < matchCount) {
             // yield after each batch of items so that typing the url bar is
             // responsive
-            setTimeout(function (self) { self._appendCurrentResult(); }, 0, this);
+            this._appendResultTimeout = setTimeout(() => this._appendCurrentResult(), 0);
           }
         ]]>
         </body>
@@ -1300,24 +1397,23 @@ extends="chrome://global/content/bindings/popup.xml#popup">
       <property name="label" readonly="true">
         <getter>
           <![CDATA[
-            var title = this.getAttribute("title");
-            var url = this.getAttribute("url");
-            var panel = this.parentNode.parentNode;
+            // This property is a string that is read aloud by screen readers,
+            // so it must not contain anything that should not be user-facing.
+
+            let parts = [
+              this.getAttribute("title"),
+              this.getAttribute("url"),
+            ];
+            let label = parts.filter(str => str).join(" ")
 
             // allow consumers that have extended popups to override
             // the label values for the richlistitems
+            let panel = this.parentNode.parentNode;
             if (panel.createResultLabel) {
-              let types = this.getAttribute("type").split(/\s+/);
-              // We only want one type for createResultLabel, so get the first
-              // that isn't "action".
-              let type = types.find(v => v != "action");
-
-              return panel.createResultLabel(title, url, type);
+              return panel.createResultLabel(this, label);
             }
 
-            // aType (ex: "ac-result-type-<aType>") is related to the class of the image,
-            // and is not "visible" text so don't use it for the label (for accessibility).
-            return title + " " + url;
+            return label;
           ]]>
         </getter>
       </property>
@@ -1358,7 +1454,7 @@ extends="chrome://global/content/bindings/popup.xml#popup">
 
           // Find which regions of text match the search terms
           let regions = [];
-          for each (let search in aSearchTokens) {
+          for (let search of Array.prototype.slice.call(aSearchTokens)) {
             let matchIndex;
             let startIndex = 0;
             let searchLen = search.length;
@@ -1527,11 +1623,10 @@ extends="chrome://global/content/bindings/popup.xml#popup">
                 let index = (match[1] || 1) - 1;
 
                 if (index >= 0 && index < aReplacements.length) {
-                  let replacement = aReplacements[index];
-                  pairs.push([...replacement]);
+                  pairs.push([...aReplacements[index]]);
                 }
               } else {
-                pairs.push([part, false]);
+                pairs.push([part]);
               }
             }
 
@@ -1560,8 +1655,15 @@ extends="chrome://global/content/bindings/popup.xml#popup">
             if (emphasise) {
               let span = aDescriptionElement.appendChild(
                 document.createElementNS("http://www.w3.org/1999/xhtml", "span"));
-              span.className = "ac-emphasize-text";
               span.textContent = text;
+              switch(emphasise) {
+                case "match":
+                  span.className = "ac-emphasize-text";
+                  break;
+                case "selected":
+                  span.className = "ac-selected-text";
+                  break;
+              }
             } else {
               aDescriptionElement.appendChild(document.createTextNode(text));
             }
@@ -1602,10 +1704,18 @@ extends="chrome://global/content/bindings/popup.xml#popup">
           this._titleOverflowEllipsis.hidden = false;
 
           let types = new Set(type.split(/\s+/));
+
+          // Remove types that should ultimately not be in the `type` string.
           let initialTypes = new Set(types);
+          types.delete("action");
+          types.delete("autofill");
+          types.delete("heuristic");
+          types.delete("search");
+
+          type = [...types][0] || "";
 
           // If the type includes an action, set up the item appropriately.
-          if (types.has("action")) {
+          if (initialTypes.has("action")) {
             let action = this._parseActionUrl(url);
             this.setAttribute("actiontype", action.type);
 
@@ -1614,14 +1724,52 @@ extends="chrome://global/content/bindings/popup.xml#popup">
               displayUrl = action.params.url;
               let desc = this._stringBundle.GetStringFromName("switchToTab");
               this._setUpDescription(this._action, desc, true);
+            } else if (action.type == "remotetab") {
+              displayUrl = action.params.url;
+              let desc = action.params.deviceName;
+              this._setUpDescription(this._action, desc, true);
             } else if (action.type == "searchengine") {
               emphasiseUrl = false;
 
-              let sourceStr = this._stringBundle.GetStringFromName("searchWithEngineForQuery");
-              title = this._generateEmphasisPairs(sourceStr, [
-                                                    [action.params.engineName, false],
-                                                    [action.params.searchQuery, true]
-                                                  ]);
+              // The order here is not localizable, we default to appending
+              // "- Search with Engine" to the search string, to be able to
+              // properly generate emphasis pairs. That said, no localization
+              // changed the order while it was possible, so doesn't look like
+              // there's a strong need for that.
+              let {engineName, searchSuggestion, searchQuery} = action.params;
+              let engineStr = " - " +
+                this._stringBundle.formatStringFromName("searchWithEngine",
+                                                        [engineName], 1);
+
+              // Make the title by generating an array of pairs and its
+              // corresponding interpolation string (e.g., "%1$S") to pass to
+              // _generateEmphasisPairs.
+              let pairs;
+              if (searchSuggestion) {
+                // Check if the search query appears in the suggestion.  It may
+                // not.  If it does, then emphasize the query in the suggestion
+                // and otherwise just include the suggestion without emphasis.
+                let idx = searchSuggestion.indexOf(searchQuery);
+                if (idx >= 0) {
+                  pairs = [
+                    [searchSuggestion.substring(0, idx), ""],
+                    [searchQuery, "match"],
+                    [searchSuggestion.substring(idx + searchQuery.length), ""],
+                  ];
+                } else {
+                  pairs = [
+                    [searchSuggestion, ""],
+                  ];
+                }
+              } else {
+                pairs = [
+                  [searchQuery, ""],
+                ];
+              }
+              pairs.push([engineStr, "selected"]);
+              let interpStr = pairs.map((pair, i) => `%${i + 1}$S`).join("");
+              title = this._generateEmphasisPairs(interpStr, pairs);
+
               // If this is a default search match, we remove the image so we
               // can style it ourselves with a generic search icon.
               // We don't do this when matching an aliased search engine,
@@ -1637,17 +1785,14 @@ extends="chrome://global/content/bindings/popup.xml#popup">
 
               let sourceStr = this._stringBundle.GetStringFromName("visitURL");
               title = this._generateEmphasisPairs(sourceStr, [
-                                                    [displayUrl, true],
+                                                    [displayUrl, "match"],
                                                   ]);
             }
 
-            // Remove the "action" substring so that the correct style, if any,
-            // is applied below.
-            types.delete("action");
           }
 
           // Check if we have a search engine name
-          if (types.has("search")) {
+          if (initialTypes.has("search")) {
             emphasiseUrl = false;
 
             const TITLE_SEARCH_ENGINE_SEPARATOR = " \u00B7\u2013\u00B7 ";
@@ -1655,25 +1800,17 @@ extends="chrome://global/content/bindings/popup.xml#popup">
             let searchEngine = "";
             [title, searchEngine] = title.split(TITLE_SEARCH_ENGINE_SEPARATOR);
             displayUrl = this._stringBundle.formatStringFromName("searchWithEngine", [searchEngine], 1);
-
-            // Remove the "search" substring so that the correct style, if any,
-            // is applied below.
-            types.delete("search");
           }
 
           // Check if we have an auto-fill URL
-          if (types.has("autofill")) {
+          if (initialTypes.has("autofill")) {
             emphasiseUrl = false;
 
             let sourceStr = this._stringBundle.GetStringFromName("visitURL");
             title = this._generateEmphasisPairs(sourceStr, [
-                                                 [displayUrl, true],
+                                                 [displayUrl, "match"],
                                                 ]);
-
-            types.delete("autofill");
           }
-
-          type = [...types].join(" ");
 
           // If we have a tag match, show the tags and icon
           if (type == "tag" || type == "bookmark-tag") {
@@ -1876,15 +2013,16 @@ extends="chrome://global/content/bindings/popup.xml#popup">
   <binding id="autocomplete-richlistbox" extends="chrome://global/content/bindings/richlistbox.xml#richlistbox">
     <implementation>
       <field name="mLastMoveTime">Date.now()</field>
+      <field name="mouseSelectedIndex">-1</field>
     </implementation>
     <handlers>
       <handler event="mouseup">
         <![CDATA[
         // don't call onPopupClick for the scrollbar buttons, thumb, slider, etc.
-        var item = event.originalTarget;
-
-        while (item && item.localName != "richlistitem")
+        let item = event.originalTarget;
+        while (item && item.localName != "richlistitem") {
           item = item.parentNode;
+        }
 
         if (!item)
           return;
@@ -1896,17 +2034,18 @@ extends="chrome://global/content/bindings/popup.xml#popup">
       <handler event="mousemove">
         <![CDATA[
         if (Date.now() - this.mLastMoveTime > 30) {
-         var item = event.target;
-
-         while (item && item.localName != "richlistitem")
+         let item = event.target;
+         while (item && item.localName != "richlistitem") {
            item = item.parentNode;
+         }
 
          if (!item)
            return;
 
-         var rc = this.getIndexOfItem(item);
-         if (rc != this.selectedIndex)
-            this.selectedIndex = rc;
+         let index = this.getIndexOfItem(item);
+         if (index != this.selectedIndex) {
+            this.mouseSelectedIndex = this.selectedIndex = index;
+         }
 
          this.mLastMoveTime = Date.now();
         }

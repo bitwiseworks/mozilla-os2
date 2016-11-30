@@ -14,34 +14,11 @@ add_task(function flush_on_tabclose() {
   let browser = tab.linkedBrowser;
 
   yield modifySessionStorage(browser, {test: "on-tab-close"});
-  gBrowser.removeTab(tab);
+  yield promiseRemoveTab(tab);
 
   let [{state: {storage}}] = JSON.parse(ss.getClosedTabData(window));
   is(storage["http://example.com"].test, "on-tab-close",
     "sessionStorage data has been flushed on TabClose");
-});
-
-/**
- * This test ensures we won't lose tab data queued in the content script when
- * the application tries to quit.
- */
-add_task(function flush_on_quit_requested() {
-  let tab = yield createTabWithStorageData(["http://example.com"]);
-  let browser = tab.linkedBrowser;
-
-  yield modifySessionStorage(browser, {test: "on-quit-requested"});
-
-  // Note that sending quit-application-requested should not interfere with
-  // other tests and code. We're just notifying about a shutdown request but
-  // we will not send quit-application-granted. Observers will thus assume
-  // that some other observer has canceled the request.
-  sendQuitApplicationRequested();
-
-  let {storage} = JSON.parse(ss.getTabState(tab));
-  is(storage["http://example.com"].test, "on-quit-requested",
-    "sessionStorage data has been flushed when a quit is requested");
-
-  gBrowser.removeTab(tab);
 });
 
 /**
@@ -54,13 +31,10 @@ add_task(function flush_on_duplicate() {
 
   yield modifySessionStorage(browser, {test: "on-duplicate"});
   let tab2 = ss.duplicateTab(window, tab);
-  let {storage} = JSON.parse(ss.getTabState(tab2));
-  is(storage["http://example.com"].test, "on-duplicate",
-    "sessionStorage data has been flushed when duplicating tabs");
-
   yield promiseTabRestored(tab2);
-  gBrowser.removeTab(tab2);
-  [{state: {storage}}] = JSON.parse(ss.getClosedTabData(window));
+
+  yield promiseRemoveTab(tab2);
+  let [{state: {storage}}] = JSON.parse(ss.getClosedTabData(window));
   is(storage["http://example.com"].test, "on-duplicate",
     "sessionStorage data has been flushed when duplicating tabs");
 
@@ -77,7 +51,7 @@ add_task(function flush_on_windowclose() {
   let browser = tab.linkedBrowser;
 
   yield modifySessionStorage(browser, {test: "on-window-close"});
-  yield closeWindow(win);
+  yield BrowserTestUtils.closeWindow(win);
 
   let [{tabs: [_, {storage}]}] = JSON.parse(ss.getClosedWindowData());
   is(storage["http://example.com"].test, "on-window-close",
@@ -93,7 +67,7 @@ add_task(function flush_on_settabstate() {
   let browser = tab.linkedBrowser;
 
   // Flush to make sure our tab state is up-to-date.
-  TabState.flush(browser);
+  yield TabStateFlusher.flush(browser);
 
   let state = ss.getTabState(tab);
   yield modifySessionStorage(browser, {test: "on-set-tab-state"});
@@ -121,14 +95,14 @@ add_task(function flush_on_tabclose_racy() {
   let browser = tab.linkedBrowser;
 
   // Flush to make sure we start with an empty queue.
-  TabState.flush(browser);
+  yield TabStateFlusher.flush(browser);
 
   yield modifySessionStorage(browser, {test: "on-tab-close-racy"});
 
   // Flush all data contained in the content script but send it using
   // asynchronous messages.
   TabState.flushAsync(browser);
-  gBrowser.removeTab(tab);
+  yield promiseRemoveTab(tab);
 
   let [{state: {storage}}] = JSON.parse(ss.getClosedTabData(window));
   is(storage["http://example.com"].test, "on-tab-close-racy",
@@ -138,24 +112,6 @@ add_task(function flush_on_tabclose_racy() {
 function promiseNewWindow() {
   let deferred = Promise.defer();
   whenNewWindowLoaded({private: false}, deferred.resolve);
-  return deferred.promise;
-}
-
-function closeWindow(win) {
-  let deferred = Promise.defer();
-  let outerID = win.QueryInterface(Ci.nsIInterfaceRequestor)
-                   .getInterface(Ci.nsIDOMWindowUtils)
-                   .outerWindowID;
-
-  Services.obs.addObserver(function obs(subject, topic) {
-    let id = subject.QueryInterface(Ci.nsISupportsPRUint64).data;
-    if (id == outerID) {
-      Services.obs.removeObserver(obs, topic);
-      deferred.resolve();
-    }
-  }, "outer-window-destroyed", false);
-
-  win.close();
   return deferred.promise;
 }
 
@@ -172,19 +128,4 @@ function createTabWithStorageData(urls, win = window) {
 
     throw new Task.Result(tab);
   });
-}
-
-function waitForStorageEvent(browser) {
-  return promiseContentMessage(browser, "ss-test:MozStorageChanged");
-}
-
-function sendQuitApplicationRequested() {
-  let cancelQuit = Cc["@mozilla.org/supports-PRBool;1"]
-                     .createInstance(Ci.nsISupportsPRBool);
-  Services.obs.notifyObservers(cancelQuit, "quit-application-requested", null);
-}
-
-function modifySessionStorage(browser, data) {
-  browser.messageManager.sendAsyncMessage("ss-test:modifySessionStorage", data);
-  return waitForStorageEvent(browser);
 }

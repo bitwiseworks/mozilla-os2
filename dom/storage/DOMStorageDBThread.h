@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -9,6 +10,7 @@
 #include "prthread.h"
 #include "prinrval.h"
 #include "nsTArray.h"
+#include "mozilla/Atomics.h"
 #include "mozilla/Monitor.h"
 #include "mozilla/storage/StatementCache.h"
 #include "nsString.h"
@@ -150,8 +152,8 @@ public:
 
     friend class PendingOperations;
     OperationType mType;
-    nsRefPtr<DOMStorageCacheBridge> mCache;
-    nsRefPtr<DOMStorageUsageBridge> mUsage;
+    RefPtr<DOMStorageCacheBridge> mCache;
+    RefPtr<DOMStorageUsageBridge> mUsage;
     nsString mKey;
     nsString mValue;
     nsCString mScope;
@@ -280,7 +282,7 @@ private:
   PRThread* mThread;
 
   // Used to observe runnables dispatched to our thread and to monitor it.
-  nsRefPtr<ThreadObserver> mThreadObserver;
+  RefPtr<ThreadObserver> mThreadObserver;
 
   // Flag to stop, protected by the monitor returned by
   // mThreadObserver->GetMonitor().
@@ -291,7 +293,7 @@ private:
 
   // Whether DB has already been open, avoid races between main thread reads
   // and pending DB init in the background I/O thread
-  bool mDBReady;
+  Atomic<bool, ReleaseAcquire> mDBReady;
 
   // State of the database initiation
   nsresult mStatus;
@@ -299,14 +301,14 @@ private:
   // List of scopes having data, for optimization purposes only
   nsTHashtable<nsCStringHashKey> mScopesHavingData;
 
-  StatementCache mWorkerStatements;
-  StatementCache mReaderStatements;
-
   // Connection used by the worker thread for all read and write ops
   nsCOMPtr<mozIStorageConnection> mWorkerConnection;
 
   // Connection used only on the main thread for sync read operations
   nsCOMPtr<mozIStorageConnection> mReaderConnection;
+
+  StatementCache mWorkerStatements;
+  StatementCache mReaderStatements;
 
   // Time the first pending operation has been added to the pending operations
   // list
@@ -370,7 +372,7 @@ private:
   void ThreadFunc();
 };
 
-} // ::dom
-} // ::mozilla
+} // namespace dom
+} // namespace mozilla
 
 #endif /* DOMStorageDBThread_h___ */

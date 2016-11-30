@@ -14,6 +14,7 @@
 #include "nsIDOMWindow.h"
 #include "nsNetUtil.h"
 #include "nsAutoPtr.h"
+#include "nsQueryObject.h"
 #include "nsIHttpChannel.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsError.h"
@@ -24,10 +25,6 @@
 #include "nsIMultiPartChannel.h"
 
 using namespace mozilla;
-
-//*****************************************************************************
-//***    nsDSURIContentListener: Object Management
-//*****************************************************************************
 
 nsDSURIContentListener::nsDSURIContentListener(nsDocShell* aDocShell)
   : mDocShell(aDocShell)
@@ -49,10 +46,6 @@ nsDSURIContentListener::Init()
   return rv;
 }
 
-//*****************************************************************************
-// nsDSURIContentListener::nsISupports
-//*****************************************************************************
-
 NS_IMPL_ADDREF(nsDSURIContentListener)
 NS_IMPL_RELEASE(nsDSURIContentListener)
 
@@ -62,16 +55,11 @@ NS_INTERFACE_MAP_BEGIN(nsDSURIContentListener)
   NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
 NS_INTERFACE_MAP_END
 
-//*****************************************************************************
-// nsDSURIContentListener::nsIURIContentListener
-//*****************************************************************************
-
 NS_IMETHODIMP
 nsDSURIContentListener::OnStartURIOpen(nsIURI* aURI, bool* aAbortOpen)
 {
-  // If mDocShell is null here, that means someone's starting a load
-  // in our docshell after it's already been destroyed.  Don't let
-  // that happen.
+  // If mDocShell is null here, that means someone's starting a load in our
+  // docshell after it's already been destroyed.  Don't let that happen.
   if (!mDocShell) {
     *aAbortOpen = true;
     return NS_OK;
@@ -87,7 +75,7 @@ nsDSURIContentListener::OnStartURIOpen(nsIURI* aURI, bool* aAbortOpen)
 }
 
 NS_IMETHODIMP
-nsDSURIContentListener::DoContent(const char* aContentType,
+nsDSURIContentListener::DoContent(const nsACString& aContentType,
                                   bool aIsContentPreferred,
                                   nsIRequest* aRequest,
                                   nsIStreamListener** aContentHandler,
@@ -131,10 +119,10 @@ nsDSURIContentListener::DoContent(const char* aContentType,
   }
 
   bool reuseCV = baseChannel && baseChannel == mExistingJPEGRequest &&
-                 nsDependentCString(aContentType).EqualsLiteral("image/jpeg");
+                 aContentType.EqualsLiteral("image/jpeg");
 
   if (mExistingJPEGStreamListener && reuseCV) {
-    nsRefPtr<nsIStreamListener> copy(mExistingJPEGStreamListener);
+    RefPtr<nsIStreamListener> copy(mExistingJPEGStreamListener);
     copy.forget(aContentHandler);
     rv = NS_OK;
   } else {
@@ -160,8 +148,8 @@ nsDSURIContentListener::DoContent(const char* aContentType,
   }
 
   if (loadFlags & nsIChannel::LOAD_RETARGETED_DOCUMENT_URI) {
-    nsCOMPtr<nsIDOMWindow> domWindow =
-      mDocShell ? mDocShell->GetWindow() : nullptr;
+    nsCOMPtr<nsPIDOMWindow> domWindow = do_QueryInterface(
+      mDocShell ? mDocShell->GetWindow() : nullptr);
     NS_ENSURE_TRUE(domWindow, NS_ERROR_FAILURE);
     domWindow->Focus();
   }
@@ -187,17 +175,16 @@ nsDSURIContentListener::IsPreferred(const char* aContentType,
                                        aDesiredContentType,
                                        aCanHandle);
   }
-  // we used to return false here if we didn't have a parent properly
-  // registered at the top of the docshell hierarchy to dictate what
-  // content types this docshell should be a preferred handler for.  But
-  // this really makes it hard for developers using iframe or browser tags
-  // because then they need to make sure they implement
-  // nsIURIContentListener otherwise all link clicks would get sent to
-  // another window because we said we weren't the preferred handler type.
-  // I'm going to change the default now...if we can handle the content,
-  // and someone didn't EXPLICITLY set a nsIURIContentListener at the top
-  // of our docshell chain, then we'll now always attempt to process the
-  // content ourselves...
+  // we used to return false here if we didn't have a parent properly registered
+  // at the top of the docshell hierarchy to dictate what content types this
+  // docshell should be a preferred handler for. But this really makes it hard
+  // for developers using iframe or browser tags because then they need to make
+  // sure they implement nsIURIContentListener otherwise all link clicks would
+  // get sent to another window because we said we weren't the preferred handler
+  // type. I'm going to change the default now... if we can handle the content,
+  // and someone didn't EXPLICITLY set a nsIURIContentListener at the top of our
+  // docshell chain, then we'll now always attempt to process the content
+  // ourselves...
   return CanHandleContent(aContentType, true, aDesiredContentType, aCanHandle);
 }
 
@@ -236,7 +223,7 @@ NS_IMETHODIMP
 nsDSURIContentListener::SetLoadCookie(nsISupports* aLoadCookie)
 {
 #ifdef DEBUG
-  nsRefPtr<nsDocLoader> cookieAsDocLoader =
+  RefPtr<nsDocLoader> cookieAsDocLoader =
     nsDocLoader::GetAsDocLoader(aLoadCookie);
   NS_ASSERTION(cookieAsDocLoader && cookieAsDocLoader == mDocShell,
                "Invalid load cookie being set!");
@@ -307,7 +294,7 @@ nsDSURIContentListener::CheckOneFrameOptionsPolicy(nsIHttpChannel* aHttpChannel,
   // window, if we're not the top.  X-F-O: SAMEORIGIN requires that the
   // document must be same-origin with top window.  X-F-O: DENY requires that
   // the document must never be framed.
-  nsCOMPtr<nsIDOMWindow> thisWindow = mDocShell->GetWindow();
+  nsCOMPtr<nsPIDOMWindow> thisWindow = mDocShell->GetWindow();
   // If we don't have DOMWindow there is no risk of clickjacking
   if (!thisWindow) {
     return true;
@@ -315,8 +302,7 @@ nsDSURIContentListener::CheckOneFrameOptionsPolicy(nsIHttpChannel* aHttpChannel,
 
   // GetScriptableTop, not GetTop, because we want this to respect
   // <iframe mozbrowser> boundaries.
-  nsCOMPtr<nsIDOMWindow> topWindow;
-  thisWindow->GetScriptableTop(getter_AddRefs(topWindow));
+  nsCOMPtr<nsPIDOMWindow> topWindow = thisWindow->GetScriptableTop();
 
   // if the document is in the top window, it's not in a frame.
   if (thisWindow == topWindow) {

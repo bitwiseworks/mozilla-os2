@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -10,9 +12,11 @@
 
 #include "ipc/IPCMessageUtils.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/AutoRestore.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/TypedEnumBits.h"
+#include "mozilla/UniquePtr.h"
 #include "mozilla/WeakPtr.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/Promise.h"
@@ -21,145 +25,81 @@
 #include "mozilla/dom/ServiceWorkerRegistrar.h"
 #include "mozilla/dom/ServiceWorkerRegistrarTypes.h"
 #include "mozilla/ipc/BackgroundUtils.h"
-#include "nsIIPCBackgroundChildCreateCallback.h"
 #include "nsClassHashtable.h"
 #include "nsDataHashtable.h"
+#include "nsIIPCBackgroundChildCreateCallback.h"
 #include "nsRefPtrHashtable.h"
 #include "nsTArrayForwardDeclare.h"
 #include "nsTObserverArray.h"
 
-class nsIScriptError;
+class mozIApplicationClearPrivateDataParams;
 
 namespace mozilla {
 
-namespace ipc {
-class BackgroundChild;
-}
+class PrincipalOriginAttributes;
 
 namespace dom {
 
-class ServiceWorkerRegistration;
+class ServiceWorkerRegistrationListener;
 
 namespace workers {
 
 class ServiceWorker;
+class ServiceWorkerClientInfo;
 class ServiceWorkerInfo;
-
+class ServiceWorkerJob;
 class ServiceWorkerJobQueue;
+class ServiceWorkerManagerChild;
+class ServiceWorkerPrivate;
 
-class ServiceWorkerJob : public nsISupports
-{
-protected:
-  // The queue keeps the jobs alive, so they can hold a rawptr back to the
-  // queue.
-  ServiceWorkerJobQueue* mQueue;
-
-public:
-  NS_DECL_ISUPPORTS
-
-  virtual void Start() = 0;
-
-protected:
-  explicit ServiceWorkerJob(ServiceWorkerJobQueue* aQueue)
-    : mQueue(aQueue)
-  {
-  }
-
-  virtual ~ServiceWorkerJob()
-  { }
-
-  void
-  Done(nsresult aStatus);
-};
-
-class ServiceWorkerJobQueue final
-{
-  friend class ServiceWorkerJob;
-
-  nsTArray<nsRefPtr<ServiceWorkerJob>> mJobs;
-
-public:
-  ~ServiceWorkerJobQueue()
-  {
-    if (!mJobs.IsEmpty()) {
-      NS_WARNING("Pending/running jobs still around on shutdown!");
-    }
-  }
-
-  void
-  Append(ServiceWorkerJob* aJob)
-  {
-    MOZ_ASSERT(aJob);
-    MOZ_ASSERT(!mJobs.Contains(aJob));
-    bool wasEmpty = mJobs.IsEmpty();
-    mJobs.AppendElement(aJob);
-    if (wasEmpty) {
-      aJob->Start();
-    }
-  }
-
-  // Only used by HandleError, keep it that way!
-  ServiceWorkerJob*
-  Peek()
-  {
-    MOZ_ASSERT(!mJobs.IsEmpty());
-    return mJobs[0];
-  }
-
-private:
-  void
-  Pop()
-  {
-    MOZ_ASSERT(!mJobs.IsEmpty());
-    mJobs.RemoveElementAt(0);
-    if (!mJobs.IsEmpty()) {
-      mJobs[0]->Start();
-    }
-  }
-
-  void
-  Done(ServiceWorkerJob* aJob)
-  {
-    MOZ_ASSERT(!mJobs.IsEmpty());
-    MOZ_ASSERT(mJobs[0] == aJob);
-    Pop();
-  }
-};
-
-// Needs to inherit from nsISupports because NS_ProxyRelease() does not support
-// non-ISupports classes.
-class ServiceWorkerRegistrationInfo final : public nsISupports
+class ServiceWorkerRegistrationInfo final
+  : public nsIServiceWorkerRegistrationInfo
 {
   uint32_t mControlledDocumentsCounter;
+
+  enum
+  {
+    NoUpdate,
+    NeedTimeCheckAndUpdate,
+    NeedUpdate
+  } mUpdateState;
+
+  uint64_t mLastUpdateCheckTime;
 
   virtual ~ServiceWorkerRegistrationInfo();
 
 public:
   NS_DECL_ISUPPORTS
+  NS_DECL_NSISERVICEWORKERREGISTRATIONINFO
 
   nsCString mScope;
-  // The scriptURL for the registration. This may be completely different from
-  // the URLs of the following three workers.
-  nsCString mScriptSpec;
 
   nsCOMPtr<nsIPrincipal> mPrincipal;
 
-  nsRefPtr<ServiceWorkerInfo> mActiveWorker;
-  nsRefPtr<ServiceWorkerInfo> mWaitingWorker;
-  nsRefPtr<ServiceWorkerInfo> mInstallingWorker;
+  RefPtr<ServiceWorkerInfo> mActiveWorker;
+  RefPtr<ServiceWorkerInfo> mWaitingWorker;
+  RefPtr<ServiceWorkerInfo> mInstallingWorker;
+
+  nsTArray<nsCOMPtr<nsIServiceWorkerRegistrationInfoListener>> mListeners;
+
+  // According to the spec, Soft Update shouldn't queue an update job
+  // if the registration queue is not empty. Because our job queue
+  // works slightly different, we use a flag to determine if the registration
+  // is already updating.
+  bool mUpdating;
 
   // When unregister() is called on a registration, it is not immediately
   // removed since documents may be controlled. It is marked as
   // pendingUninstall and when all controlling documents go away, removed.
   bool mPendingUninstall;
 
-  explicit ServiceWorkerRegistrationInfo(const nsACString& aScope,
-                                         nsIPrincipal* aPrincipal);
+  ServiceWorkerRegistrationInfo(const nsACString& aScope,
+                                nsIPrincipal* aPrincipal);
 
   already_AddRefed<ServiceWorkerInfo>
-  Newest()
+  Newest() const
   {
-    nsRefPtr<ServiceWorkerInfo> newest;
+    RefPtr<ServiceWorkerInfo> newest;
     if (mInstallingWorker) {
       newest = mInstallingWorker;
     } else if (mWaitingWorker) {
@@ -171,6 +111,9 @@ public:
     return newest.forget();
   }
 
+  already_AddRefed<ServiceWorkerInfo>
+  GetServiceWorkerInfoById(uint64_t aId);
+
   void
   StartControllingADocument()
   {
@@ -180,17 +123,21 @@ public:
   void
   StopControllingADocument()
   {
+    MOZ_ASSERT(mControlledDocumentsCounter);
     --mControlledDocumentsCounter;
   }
 
   bool
   IsControllingDocuments() const
   {
-    return mActiveWorker && mControlledDocumentsCounter > 0;
+    return mActiveWorker && mControlledDocumentsCounter;
   }
 
   void
   Clear();
+
+  void
+  PurgeActiveWorker();
 
   void
   TryToActivate();
@@ -202,8 +149,38 @@ public:
   FinishActivate(bool aSuccess);
 
   void
-  QueueStateChangeEvent(ServiceWorkerInfo* aInfo,
-                        ServiceWorkerState aState) const;
+  RefreshLastUpdateCheckTime();
+
+  bool
+  IsLastUpdateCheckTimeOverOneDay() const;
+
+  void
+  NotifyListenersOnChange();
+
+  void
+  MaybeScheduleTimeCheckAndUpdate();
+
+  void
+  MaybeScheduleUpdate();
+
+  bool
+  CheckAndClearIfUpdateNeeded();
+};
+
+class ServiceWorkerUpdateFinishCallback
+{
+protected:
+  virtual ~ServiceWorkerUpdateFinishCallback()
+  {}
+
+public:
+  NS_INLINE_DECL_REFCOUNTING(ServiceWorkerUpdateFinishCallback)
+
+  virtual
+  void UpdateSucceeded(ServiceWorkerRegistrationInfo* aInfo) = 0;
+
+  virtual
+  void UpdateFailed(ErrorResult& aStatus) = 0;
 };
 
 /*
@@ -212,23 +189,61 @@ public:
  * _GetNewestWorker(serviceWorkerRegistration)", we represent the description
  * by this class and spawn a ServiceWorker in the right global when required.
  */
-class ServiceWorkerInfo final
+class ServiceWorkerInfo final : public nsIServiceWorkerInfo
 {
 private:
   const ServiceWorkerRegistrationInfo* mRegistration;
   nsCString mScriptSpec;
+  nsString mCacheName;
   ServiceWorkerState mState;
 
-  ~ServiceWorkerInfo()
-  { }
+  // This id is shared with WorkerPrivate to match requests issued by service
+  // workers to their corresponding serviceWorkerInfo.
+  uint64_t mServiceWorkerID;
+
+  // We hold rawptrs since the ServiceWorker constructor and destructor ensure
+  // addition and removal.
+  // There is a high chance of there being at least one ServiceWorker
+  // associated with this all the time.
+  nsAutoTArray<ServiceWorker*, 1> mInstances;
+
+  RefPtr<ServiceWorkerPrivate> mServiceWorkerPrivate;
+  bool mSkipWaitingFlag;
+
+  ~ServiceWorkerInfo();
+
+  // Generates a unique id for the service worker, with zero being treated as
+  // invalid.
+  uint64_t
+  GetNextID() const;
 
 public:
-  NS_INLINE_DECL_REFCOUNTING(ServiceWorkerInfo)
+  NS_DECL_ISUPPORTS
+  NS_DECL_NSISERVICEWORKERINFO
+
+  class ServiceWorkerPrivate*
+  WorkerPrivate() const
+  {
+    MOZ_ASSERT(mServiceWorkerPrivate);
+    return mServiceWorkerPrivate;
+  }
+
+  nsIPrincipal*
+  GetPrincipal() const
+  {
+    return mRegistration->mPrincipal;
+  }
 
   const nsCString&
   ScriptSpec() const
   {
     return mScriptSpec;
+  }
+
+  const nsCString&
+  Scope() const
+  {
+    return mRegistration->mScope;
   }
 
   void SetScriptSpec(const nsCString& aSpec)
@@ -237,14 +252,21 @@ public:
     mScriptSpec = aSpec;
   }
 
-  explicit ServiceWorkerInfo(ServiceWorkerRegistrationInfo* aReg,
-                             const nsACString& aScriptSpec)
-    : mRegistration(aReg)
-    , mScriptSpec(aScriptSpec)
-    , mState(ServiceWorkerState::EndGuard_)
+  bool SkipWaitingFlag() const
   {
-    MOZ_ASSERT(mRegistration);
+    AssertIsOnMainThread();
+    return mSkipWaitingFlag;
   }
+
+  void SetSkipWaitingFlag()
+  {
+    AssertIsOnMainThread();
+    mSkipWaitingFlag = true;
+  }
+
+  ServiceWorkerInfo(ServiceWorkerRegistrationInfo* aReg,
+                    const nsACString& aScriptSpec,
+                    const nsAString& aCacheName);
 
   ServiceWorkerState
   State() const
@@ -252,24 +274,34 @@ public:
     return mState;
   }
 
-  void
-  UpdateState(ServiceWorkerState aState)
+  const nsString&
+  CacheName() const
   {
-#ifdef DEBUG
-    // Any state can directly transition to redundant, but everything else is
-    // ordered.
-    if (aState != ServiceWorkerState::Redundant) {
-      MOZ_ASSERT_IF(mState == ServiceWorkerState::EndGuard_, aState == ServiceWorkerState::Installing);
-      MOZ_ASSERT_IF(mState == ServiceWorkerState::Installing, aState == ServiceWorkerState::Installed);
-      MOZ_ASSERT_IF(mState == ServiceWorkerState::Installed, aState == ServiceWorkerState::Activating);
-      MOZ_ASSERT_IF(mState == ServiceWorkerState::Activating, aState == ServiceWorkerState::Activated);
-    }
-    // Activated can only go to redundant.
-    MOZ_ASSERT_IF(mState == ServiceWorkerState::Activated, aState == ServiceWorkerState::Redundant);
-#endif
-    mState = aState;
-    mRegistration->QueueStateChangeEvent(this, mState);
+    return mCacheName;
   }
+
+  uint64_t
+  ID() const
+  {
+    return mServiceWorkerID;
+  }
+
+  void
+  UpdateState(ServiceWorkerState aState);
+
+  // Only used to set initial state when loading from disk!
+  void
+  SetActivateStateUncheckedWithoutEvent(ServiceWorkerState aState)
+  {
+    AssertIsOnMainThread();
+    mState = aState;
+  }
+
+  void
+  AppendWorker(ServiceWorker* aWorker);
+
+  void
+  RemoveWorker(ServiceWorker* aWorker);
 };
 
 #define NS_SERVICEWORKERMANAGER_IMPL_IID                 \
@@ -288,77 +320,106 @@ public:
 class ServiceWorkerManager final
   : public nsIServiceWorkerManager
   , public nsIIPCBackgroundChildCreateCallback
+  , public nsIObserver
 {
   friend class GetReadyPromiseRunnable;
   friend class GetRegistrationsRunnable;
   friend class GetRegistrationRunnable;
+  friend class ServiceWorkerJobQueue;
+  friend class ServiceWorkerInstallJob;
   friend class ServiceWorkerRegisterJob;
+  friend class ServiceWorkerJobBase;
+  friend class ServiceWorkerScriptJobBase;
   friend class ServiceWorkerRegistrationInfo;
   friend class ServiceWorkerUnregisterJob;
+  friend class UpdateTimerCallback;
 
 public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSISERVICEWORKERMANAGER
   NS_DECL_NSIIPCBACKGROUNDCHILDCREATECALLBACK
-  NS_DECLARE_STATIC_IID_ACCESSOR(NS_SERVICEWORKERMANAGER_IMPL_IID)
+  NS_DECL_NSIOBSERVER
 
-  static ServiceWorkerManager* FactoryCreate()
-  {
-    AssertIsOnMainThread();
+  struct RegistrationDataPerPrincipal;
+  nsClassHashtable<nsCStringHashKey, RegistrationDataPerPrincipal> mRegistrationInfos;
 
-    ServiceWorkerManager* res = new ServiceWorkerManager;
-    NS_ADDREF(res);
-    return res;
-  }
-
-  // Ordered list of scopes for glob matching.
-  // Each entry is an absolute URL representing the scope.
-  //
-  // An array is used for now since the number of controlled scopes per
-  // domain is expected to be relatively low. If that assumption was proved
-  // wrong this should be replaced with a better structure to avoid the
-  // memmoves associated with inserting stuff in the middle of the array.
-  nsTArray<nsCString> mOrderedScopes;
-
-  // Scope to registration. 
-  // The scope should be a fully qualified valid URL.
-  nsRefPtrHashtable<nsCStringHashKey, ServiceWorkerRegistrationInfo> mServiceWorkerRegistrationInfos;
-
-  nsTObserverArray<ServiceWorkerRegistration*> mServiceWorkerRegistrations;
+  nsTObserverArray<ServiceWorkerRegistrationListener*> mServiceWorkerRegistrationListeners;
 
   nsRefPtrHashtable<nsISupportsHashKey, ServiceWorkerRegistrationInfo> mControlledDocuments;
 
-  // Maps scopes to job queues.
-  nsClassHashtable<nsCStringHashKey, ServiceWorkerJobQueue> mJobQueues;
+  // Set of all documents that may be controlled by a service worker.
+  nsTHashtable<nsISupportsHashKey> mAllDocuments;
 
-  nsDataHashtable<nsCStringHashKey, bool> mSetOfScopesBeingUpdated;
+  // Track all documents that have attempted to register a service worker for a
+  // given scope.
+  typedef nsTArray<nsCOMPtr<nsIWeakReference>> WeakDocumentList;
+  nsClassHashtable<nsCStringHashKey, WeakDocumentList> mRegisteringDocuments;
+
+  // Track all intercepted navigation channels for a given scope.  Channels are
+  // placed in the appropriate list before dispatch the FetchEvent to the worker
+  // thread and removed once FetchEvent processing dispatches back to the main
+  // thread.
+  //
+  // Note: Its safe to use weak references here because a RAII-style callback
+  //       is registered with the channel before its added to this list.  We
+  //       are guaranteed the callback will fire before and remove the ref
+  //       from this list before the channel is destroyed.
+  typedef nsTArray<nsIInterceptedChannel*> InterceptionList;
+  nsClassHashtable<nsCStringHashKey, InterceptionList> mNavigationInterceptions;
+
+  bool
+  IsAvailable(const PrincipalOriginAttributes& aOriginAttributes, nsIURI* aURI);
+
+  bool
+  IsControlled(nsIDocument* aDocument, ErrorResult& aRv);
+
+  already_AddRefed<nsIRunnable>
+  PrepareFetchEvent(const PrincipalOriginAttributes& aOriginAttributes,
+                    nsIDocument* aDoc,
+                    const nsAString& aDocumentIdForTopLevelNavigation,
+                    nsIInterceptedChannel* aChannel,
+                    bool aIsReload,
+                    bool aIsSubresourceLoad,
+                    ErrorResult& aRv);
+
+  void
+  DispatchPreparedFetchEvent(nsIInterceptedChannel* aChannel,
+                             nsIRunnable* aPreparedRunnable,
+                             ErrorResult& aRv);
+
+  void
+  Update(nsIPrincipal* aPrincipal,
+         const nsACString& aScope,
+         ServiceWorkerUpdateFinishCallback* aCallback);
+
+  void
+  SoftUpdate(const OriginAttributes& aOriginAttributes,
+             const nsACString& aScope);
+
+  void
+  PropagateSoftUpdate(const PrincipalOriginAttributes& aOriginAttributes,
+                      const nsAString& aScope);
+
+  void
+  PropagateRemove(const nsACString& aHost);
+
+  void
+  Remove(const nsACString& aHost);
+
+  void
+  PropagateRemoveAll();
+
+  void
+  RemoveAll();
 
   already_AddRefed<ServiceWorkerRegistrationInfo>
-  GetRegistration(const nsCString& aScope) const
-  {
-    nsRefPtr<ServiceWorkerRegistrationInfo> reg;
-    mServiceWorkerRegistrationInfos.Get(aScope, getter_AddRefs(reg));
-    return reg.forget();
-  }
+  GetRegistration(nsIPrincipal* aPrincipal, const nsACString& aScope) const;
 
   ServiceWorkerRegistrationInfo*
   CreateNewRegistration(const nsCString& aScope, nsIPrincipal* aPrincipal);
 
   void
-  RemoveRegistration(ServiceWorkerRegistrationInfo* aRegistration)
-  {
-    MOZ_ASSERT(aRegistration);
-    MOZ_ASSERT(!aRegistration->IsControllingDocuments());
-    MOZ_ASSERT(mServiceWorkerRegistrationInfos.Contains(aRegistration->mScope));
-    ServiceWorkerManager::RemoveScope(mOrderedScopes, aRegistration->mScope);
-    mServiceWorkerRegistrationInfos.Remove(aRegistration->mScope);
-  }
-
-  ServiceWorkerJobQueue*
-  GetOrCreateJobQueue(const nsCString& aScope)
-  {
-    return mJobQueues.LookupOrAdd(aScope);
-  }
+  RemoveRegistration(ServiceWorkerRegistrationInfo* aRegistration);
 
   void StoreRegistration(nsIPrincipal* aPrincipal,
                          ServiceWorkerRegistrationInfo* aRegistration);
@@ -366,32 +427,95 @@ public:
   void
   FinishFetch(ServiceWorkerRegistrationInfo* aRegistration);
 
-  // Returns true if the error was handled, false if normal worker error
-  // handling should continue.
-  bool
+  void
+  ReportToAllClients(const nsCString& aScope,
+                     const nsString& aMessage,
+                     const nsString& aFilename,
+                     const nsString& aLine,
+                     uint32_t aLineNumber,
+                     uint32_t aColumnNumber,
+                     uint32_t aFlags);
+
+  // Always consumes the error by reporting to consoles of all controlled
+  // documents.
+  void
   HandleError(JSContext* aCx,
+              nsIPrincipal* aPrincipal,
               const nsCString& aScope,
               const nsString& aWorkerURL,
-              nsString aMessage,
-              nsString aFilename,
-              nsString aLine,
+              const nsString& aMessage,
+              const nsString& aFilename,
+              const nsString& aLine,
               uint32_t aLineNumber,
               uint32_t aColumnNumber,
-              uint32_t aFlags);
+              uint32_t aFlags,
+              JSExnType aExnType);
+
+  UniquePtr<ServiceWorkerClientInfo>
+  GetClient(nsIPrincipal* aPrincipal,
+            const nsAString& aClientId,
+            ErrorResult& aRv);
 
   void
-  GetAllClients(const nsCString& aScope,
-                nsTArray<uint64_t>* aControlledDocuments);
+  GetAllClients(nsIPrincipal* aPrincipal,
+                const nsCString& aScope,
+                bool aIncludeUncontrolled,
+                nsTArray<ServiceWorkerClientInfo>& aDocuments);
+
+  void
+  MaybeClaimClient(nsIDocument* aDocument,
+                   ServiceWorkerRegistrationInfo* aWorkerRegistration);
+
+  nsresult
+  ClaimClients(nsIPrincipal* aPrincipal, const nsCString& aScope, uint64_t aId);
+
+  nsresult
+  SetSkipWaitingFlag(nsIPrincipal* aPrincipal, const nsCString& aScope,
+                     uint64_t aServiceWorkerID);
 
   static already_AddRefed<ServiceWorkerManager>
   GetInstance();
 
- void LoadRegistrations(
-                 const nsTArray<ServiceWorkerRegistrationData>& aRegistrations);
+ void
+ LoadRegistration(const ServiceWorkerRegistrationData& aRegistration);
+
+  void
+  LoadRegistrations(const nsTArray<ServiceWorkerRegistrationData>& aRegistrations);
+
+  // Used by remove() and removeAll() when clearing history.
+  // MUST ONLY BE CALLED FROM UnregisterIfMatchesHost!
+  void
+  ForceUnregister(RegistrationDataPerPrincipal* aRegistrationData,
+                  ServiceWorkerRegistrationInfo* aRegistration);
+
+  NS_IMETHOD
+  AddRegistrationEventListener(const nsAString& aScope,
+                               ServiceWorkerRegistrationListener* aListener);
+
+  NS_IMETHOD
+  RemoveRegistrationEventListener(const nsAString& aScope,
+                                  ServiceWorkerRegistrationListener* aListener);
+
+  void
+  MaybeCheckNavigationUpdate(nsIDocument* aDoc);
 
 private:
   ServiceWorkerManager();
   ~ServiceWorkerManager();
+
+  void
+  Init();
+
+  ServiceWorkerJobQueue*
+  GetOrCreateJobQueue(const nsACString& aOriginSuffix,
+                      const nsACString& aScope);
+
+  void
+  MaybeRemoveRegistrationInfo(const nsACString& aScopeKey);
+
+  already_AddRefed<ServiceWorkerRegistrationInfo>
+  GetRegistration(const nsACString& aScopeKey,
+                  const nsACString& aScope) const;
 
   void
   AbortCurrentUpdate(ServiceWorkerRegistrationInfo* aRegistration);
@@ -400,19 +524,8 @@ private:
   Update(ServiceWorkerRegistrationInfo* aRegistration);
 
   nsresult
-  GetDocumentRegistration(nsIDocument* aDoc, ServiceWorkerRegistrationInfo** aRegistrationInfo);
-
-  NS_IMETHOD
-  CreateServiceWorkerForWindow(nsPIDOMWindow* aWindow,
-                               const nsACString& aScriptSpec,
-                               const nsACString& aScope,
-                               ServiceWorker** aServiceWorker);
-
-  NS_IMETHOD
-  CreateServiceWorker(nsIPrincipal* aPrincipal,
-                      const nsACString& aScriptSpec,
-                      const nsACString& aScope,
-                      ServiceWorker** aServiceWorker);
+  GetDocumentRegistration(nsIDocument* aDoc,
+                          ServiceWorkerRegistrationInfo** aRegistrationInfo);
 
   NS_IMETHODIMP
   GetServiceWorkerForScope(nsIDOMWindow* aWindow,
@@ -420,9 +533,27 @@ private:
                            WhichServiceWorker aWhichWorker,
                            nsISupports** aServiceWorker);
 
+  ServiceWorkerInfo*
+  GetActiveWorkerInfoForScope(const PrincipalOriginAttributes& aOriginAttributes,
+                              const nsACString& aScope);
+
+  ServiceWorkerInfo*
+  GetActiveWorkerInfoForDocument(nsIDocument* aDocument);
+
   void
   InvalidateServiceWorkerRegistrationWorker(ServiceWorkerRegistrationInfo* aRegistration,
                                             WhichServiceWorker aWhichOnes);
+
+  void
+  NotifyServiceWorkerRegistrationRemoved(ServiceWorkerRegistrationInfo* aRegistration);
+
+  void
+  StartControllingADocument(ServiceWorkerRegistrationInfo* aRegistration,
+                            nsIDocument* aDoc,
+                            const nsAString& aDocumentId);
+
+  void
+  StopControllingADocument(ServiceWorkerRegistrationInfo* aRegistration);
 
   already_AddRefed<ServiceWorkerRegistrationInfo>
   GetServiceWorkerRegistrationInfo(nsPIDOMWindow* aWindow);
@@ -431,37 +562,50 @@ private:
   GetServiceWorkerRegistrationInfo(nsIDocument* aDoc);
 
   already_AddRefed<ServiceWorkerRegistrationInfo>
-  GetServiceWorkerRegistrationInfo(nsIURI* aURI);
+  GetServiceWorkerRegistrationInfo(nsIPrincipal* aPrincipal, nsIURI* aURI);
+
+  already_AddRefed<ServiceWorkerRegistrationInfo>
+  GetServiceWorkerRegistrationInfo(const PrincipalOriginAttributes& aOriginAttributes,
+                                   nsIURI* aURI);
+
+  already_AddRefed<ServiceWorkerRegistrationInfo>
+  GetServiceWorkerRegistrationInfo(const nsACString& aScopeKey,
+                                   nsIURI* aURI);
+
+  // This method generates a key using appId and isInElementBrowser from the
+  // principal. We don't use the origin because it can change during the
+  // loading.
+  static nsresult
+  PrincipalToScopeKey(nsIPrincipal* aPrincipal, nsACString& aKey);
 
   static void
-  AddScope(nsTArray<nsCString>& aList, const nsACString& aScope);
+  AddScopeAndRegistration(const nsACString& aScope,
+                          ServiceWorkerRegistrationInfo* aRegistation);
 
-  static nsCString
-  FindScopeForPath(nsTArray<nsCString>& aList, const nsACString& aPath);
+  static bool
+  FindScopeForPath(const nsACString& aScopeKey,
+                   const nsACString& aPath,
+                   RegistrationDataPerPrincipal** aData, nsACString& aMatch);
+
+  static bool
+  HasScope(nsIPrincipal* aPrincipal, const nsACString& aScope);
 
   static void
-  RemoveScope(nsTArray<nsCString>& aList, const nsACString& aScope);
+  RemoveScopeAndRegistration(ServiceWorkerRegistrationInfo* aRegistration);
 
   void
   QueueFireEventOnServiceWorkerRegistrations(ServiceWorkerRegistrationInfo* aRegistration,
                                              const nsAString& aName);
 
   void
-  FireEventOnServiceWorkerRegistrations(ServiceWorkerRegistrationInfo* aRegistration,
-                                        const nsAString& aName);
-
-  void
-  FireUpdateFound(ServiceWorkerRegistrationInfo* aRegistration)
-  {
-    FireEventOnServiceWorkerRegistrations(aRegistration,
-                                          NS_LITERAL_STRING("updatefound"));
-  }
+  FireUpdateFoundOnServiceWorkerRegistrations(ServiceWorkerRegistrationInfo* aRegistration);
 
   void
   FireControllerChange(ServiceWorkerRegistrationInfo* aRegistration);
 
   void
-  StorePendingReadyPromise(nsPIDOMWindow* aWindow, nsIURI* aURI, Promise* aPromise);
+  StorePendingReadyPromise(nsPIDOMWindow* aWindow, nsIURI* aURI,
+                           Promise* aPromise);
 
   void
   CheckPendingReadyPromises();
@@ -469,14 +613,14 @@ private:
   bool
   CheckReadyPromise(nsPIDOMWindow* aWindow, nsIURI* aURI, Promise* aPromise);
 
-  struct PendingReadyPromise
+  struct PendingReadyPromise final
   {
     PendingReadyPromise(nsIURI* aURI, Promise* aPromise)
       : mURI(aURI), mPromise(aPromise)
-    { }
+    {}
 
     nsCOMPtr<nsIURI> mURI;
-    nsRefPtr<Promise> mPromise;
+    RefPtr<Promise> mPromise;
   };
 
   void AppendPendingOperation(nsIRunnable* aRunnable);
@@ -488,24 +632,58 @@ private:
     return !!mActor;
   }
 
-  static PLDHashOperator
-  CheckPendingReadyPromisesEnumerator(nsISupports* aSupports,
-                                      nsAutoPtr<PendingReadyPromise>& aData,
-                                      void* aUnused);
-
   nsClassHashtable<nsISupportsHashKey, PendingReadyPromise> mPendingReadyPromises;
- 
+
   void
   MaybeRemoveRegistration(ServiceWorkerRegistrationInfo* aRegistration);
 
-  mozilla::ipc::PBackgroundChild* mActor;
+  // Does all cleanup except removing the registration from
+  // mServiceWorkerRegistrationInfos. This is useful when we clear
+  // registrations via remove()/removeAll() since we are iterating over the
+  // hashtable and can cleanly remove within the hashtable enumeration
+  // function.
+  void
+  RemoveRegistrationInternal(ServiceWorkerRegistrationInfo* aRegistration);
+
+  // Removes all service worker registrations that matches the given
+  // mozIApplicationClearPrivateDataParams.
+  void
+  RemoveAllRegistrations(PrincipalOriginAttributes* aParams);
+
+  RefPtr<ServiceWorkerManagerChild> mActor;
 
   struct PendingOperation;
   nsTArray<PendingOperation> mPendingOperations;
-};
 
-NS_DEFINE_STATIC_IID_ACCESSOR(ServiceWorkerManager,
-                              NS_SERVICEWORKERMANAGER_IMPL_IID);
+  bool mShuttingDown;
+
+  nsTArray<nsCOMPtr<nsIServiceWorkerManagerListener>> mListeners;
+
+  void
+  NotifyListenersOnRegister(nsIServiceWorkerRegistrationInfo* aRegistration);
+
+  void
+  NotifyListenersOnUnregister(nsIServiceWorkerRegistrationInfo* aRegistration);
+
+  void
+  AddRegisteringDocument(const nsACString& aScope, nsIDocument* aDoc);
+
+  class InterceptionReleaseHandle;
+
+  void
+  AddNavigationInterception(const nsACString& aScope,
+                            nsIInterceptedChannel* aChannel);
+
+  void
+  RemoveNavigationInterception(const nsACString& aScope,
+                               nsIInterceptedChannel* aChannel);
+
+  void
+  ScheduleUpdateTimer(nsIPrincipal* aPrincipal, const nsACString& aScope);
+
+  void
+  UpdateTimerFired(nsIPrincipal* aPrincipal, const nsACString& aScope);
+};
 
 } // namespace workers
 } // namespace dom

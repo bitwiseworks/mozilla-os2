@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -23,9 +24,9 @@ HTMLTableSectionElement::~HTMLTableSectionElement()
 }
 
 JSObject*
-HTMLTableSectionElement::WrapNode(JSContext *aCx)
+HTMLTableSectionElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLTableSectionElementBinding::Wrap(aCx, this);
+  return HTMLTableSectionElementBinding::Wrap(aCx, this, aGivenProto);
 }
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(HTMLTableSectionElement)
@@ -78,11 +79,11 @@ HTMLTableSectionElement::InsertRow(int32_t aIndex, ErrorResult& aError)
   bool doInsert = (aIndex < int32_t(rowCount)) && (aIndex != -1);
 
   // create the row
-  nsRefPtr<mozilla::dom::NodeInfo> nodeInfo;
+  RefPtr<mozilla::dom::NodeInfo> nodeInfo;
   nsContentUtils::NameChanged(mNodeInfo, nsGkAtoms::tr,
                               getter_AddRefs(nodeInfo));
 
-  nsRefPtr<nsGenericHTMLElement> rowContent =
+  RefPtr<nsGenericHTMLElement> rowContent =
     NS_NewHTMLTableRowElement(nodeInfo.forget());
   if (!rowContent) {
     aError.Throw(NS_ERROR_OUT_OF_MEMORY);
@@ -90,7 +91,8 @@ HTMLTableSectionElement::InsertRow(int32_t aIndex, ErrorResult& aError)
   }
 
   if (doInsert) {
-    nsINode::InsertBefore(*rowContent, rows->Item(aIndex), aError);
+    nsCOMPtr<nsINode> refNode = rows->Item(aIndex);
+    nsINode::InsertBefore(*rowContent, refNode, aError);
   } else {
     nsINode::AppendChild(*rowContent, aError);
   }

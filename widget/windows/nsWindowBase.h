@@ -43,7 +43,7 @@ public:
    * @param aPoint message position in physical coordinates.
    */
   virtual void InitEvent(mozilla::WidgetGUIEvent& aEvent,
-                         nsIntPoint* aPoint = nullptr) = 0;
+                         LayoutDeviceIntPoint* aPoint = nullptr) = 0;
 
   /*
    * Dispatch a gecko event for this widget.
@@ -56,14 +56,21 @@ public:
    * is called by KeyboardLayout to dispatch gecko events.
    * Returns true if it's consumed.  Otherwise, false.
    */
-  virtual bool DispatchKeyboardEvent(mozilla::WidgetGUIEvent* aEvent) = 0;
+  virtual bool DispatchKeyboardEvent(mozilla::WidgetKeyboardEvent* aEvent) = 0;
 
   /*
-   * Dispatch a gecko scroll event for this widget. This
+   * Dispatch a gecko wheel event for this widget. This
    * is called by ScrollHandler to dispatch gecko events.
    * Returns true if it's consumed.  Otherwise, false.
    */
-  virtual bool DispatchScrollEvent(mozilla::WidgetGUIEvent* aEvent) = 0;
+  virtual bool DispatchWheelEvent(mozilla::WidgetWheelEvent* aEvent) = 0;
+
+  /*
+   * Dispatch a gecko content command event for this widget. This
+   * is called by ScrollHandler to dispatch gecko events.
+   * Returns true if it's consumed.  Otherwise, false.
+   */
+  virtual bool DispatchContentCommandEvent(mozilla::WidgetContentCommandEvent* aEvent) = 0;
 
   /*
    * Default dispatch of a plugin event.
@@ -83,10 +90,11 @@ public:
    */
   virtual nsresult SynthesizeNativeTouchPoint(uint32_t aPointerId,
                                               TouchPointerState aPointerState,
-                                              nsIntPoint aPointerScreenPoint,
+                                              ScreenIntPoint aPointerScreenPoint,
                                               double aPointerPressure,
-                                              uint32_t aPointerOrientation);
-  virtual nsresult ClearNativeTouchSequence();
+                                              uint32_t aPointerOrientation,
+                                              nsIObserver* aObserver) override;
+  virtual nsresult ClearNativeTouchSequence(nsIObserver* aObserver) override;
 
   /*
    * WM_APPCOMMAND common handler.
@@ -97,24 +105,22 @@ public:
 
 protected:
   static bool InitTouchInjection();
-  bool InjectTouchPoint(uint32_t aId, nsIntPoint& aPointerScreenPoint,
+  bool InjectTouchPoint(uint32_t aId, ScreenIntPoint& aPointerScreenPoint,
                         POINTER_FLAGS aFlags, uint32_t aPressure = 1024,
                         uint32_t aOrientation = 90);
 
   class PointerInfo
   {
   public:
-    PointerInfo(int32_t aPointerId, nsIntPoint& aPoint) :
+    PointerInfo(int32_t aPointerId, ScreenIntPoint& aPoint) :
       mPointerId(aPointerId),
       mPosition(aPoint)
     {
     }
 
     int32_t mPointerId;
-    nsIntPoint mPosition;
+    ScreenIntPoint mPosition;
   };
-
-  static PLDHashOperator CancelTouchPoints(const unsigned int& aPointerId, nsAutoPtr<PointerInfo>& aInfo, void* aUserArg);
 
   nsClassHashtable<nsUint32HashKey, PointerInfo> mActivePointers;
   static bool sTouchInjectInitialized;

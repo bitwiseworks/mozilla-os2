@@ -14,7 +14,7 @@
 # define INCL_PM
 # include <os2.h>
 
-#elif defined(XP_MACOSX) || defined(DARWIN) || defined(XP_UNIX)
+#elif defined(XP_DARWIN) || defined(DARWIN) || defined(XP_UNIX)
 # include <pthread.h>
 
 # if defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
@@ -51,6 +51,10 @@ js::GetNativeStackBaseImpl()
 # elif defined(_M_X64)
     PNT_TIB64 pTib = reinterpret_cast<PNT_TIB64>(NtCurrentTeb());
     return reinterpret_cast<void*>(pTib->StackBase);
+
+# elif defined(_M_ARM)
+    PNT_TIB pTib = reinterpret_cast<PNT_TIB>(NtCurrentTeb());
+    return static_cast<void*>(pTib->StackBase);
 
 # elif defined(_WIN32) && defined(__GNUC__)
     NT_TIB* pTib;
@@ -107,7 +111,7 @@ void*
 js::GetNativeStackBaseImpl()
 {
     pthread_t thread = pthread_self();
-# if defined(XP_MACOSX) || defined(DARWIN)
+# if defined(XP_DARWIN) || defined(DARWIN)
     return pthread_get_stackaddr_np(thread);
 
 # else
@@ -139,7 +143,15 @@ js::GetNativeStackBaseImpl()
         // thread (see bug 846670). So we scan /proc/self/maps to find the
         // segment which contains the stack.
         rc = -1;
-        FILE* fs = fopen("/proc/self/maps", "r");
+
+        // Put the string on the stack, otherwise there is the danger that it
+        // has not been decompressed by the the on-demand linker. Bug 1165460.
+        //
+        // The volatile keyword should stop the compiler from trying to omit
+        // the stack copy in the future (hopefully).
+        volatile char path[] = "/proc/self/maps";
+        FILE* fs = fopen((const char*)path, "r");
+
         if (fs) {
             char line[100];
             unsigned long stackAddr = (unsigned long)&sattr;

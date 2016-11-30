@@ -139,8 +139,10 @@ nsTextEquivUtils::AppendTextEquivFromTextContent(nsIContent *aContent,
     if (aContent->TextLength() > 0) {
       nsIFrame *frame = aContent->GetPrimaryFrame();
       if (frame) {
-        nsresult rv = frame->GetRenderedText(aString);
-        NS_ENSURE_SUCCESS(rv, rv);
+        nsIFrame::RenderedText text = frame->GetRenderedText(0,
+            UINT32_MAX, nsIFrame::TextOffsetType::OFFSETS_IN_CONTENT_TEXT,
+            nsIFrame::TrailingWhitespace::DONT_TRIM_TRAILING_WHITESPACE);
+        aString->Append(text.mString);
       } else {
         // If aContent is an object that is display: none, we have no a frame.
         aContent->AppendTextTo(*aString);
@@ -153,7 +155,7 @@ nsTextEquivUtils::AppendTextEquivFromTextContent(nsIContent *aContent,
     return NS_OK;
   }
   
-  if (aContent->IsHTML() &&
+  if (aContent->IsHTMLElement() &&
       aContent->NodeInfo()->Equals(nsGkAtoms::br)) {
     aString->AppendLiteral("\r\n");
     return NS_OK;
@@ -301,7 +303,7 @@ nsTextEquivUtils::AppendFromDOMNode(nsIContent *aContent, nsAString *aString)
   if (rv != NS_OK_NO_NAME_CLAUSE_HANDLED)
     return NS_OK;
 
-  if (aContent->IsXUL()) {
+  if (aContent->IsXULElement()) {
     nsAutoString textEquivalent;
     nsCOMPtr<nsIDOMXULLabeledControlElement> labeledEl =
       do_QueryInterface(aContent);

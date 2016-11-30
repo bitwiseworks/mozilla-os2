@@ -12,8 +12,13 @@ XPIDL_SOURCES += [
 
 XPIDL_MODULE = 'alerts'
 
+EXPORTS += [
+    'nsAlertsUtils.h',
+]
+
 UNIFIED_SOURCES += [
     'nsAlertsService.cpp',
+    'nsAlertsUtils.cpp',
     'nsXULAlerts.cpp',
 ]
 
@@ -23,4 +28,8 @@ FINAL_LIBRARY = 'xul'
 
 JAR_MANIFESTS += ['jar.mn']
 
-FAIL_ON_WARNINGS = True
+with Files('**'):
+    BUG_COMPONENT = ('Toolkit', 'Notifications and Alerts')
+
+if CONFIG['GNU_CXX']:
+    CXXFLAGS += ['-Wshadow']

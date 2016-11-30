@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -51,6 +52,7 @@ protected:
   void GetFileName(nsAString& aResult, nsIChannel* aChannel);
 
   nsresult LinkStylesheet(const nsAString& aStylesheet);
+  nsresult LinkScript(const nsAString& aScript);
 
   // |aFormatNames[]| needs to have four elements in the following order: 
   // a format name with neither dimension nor file, a format name with
@@ -94,7 +96,7 @@ public:
 
   NS_DECL_NSISTREAMLISTENER
 
-  nsRefPtr<MediaDocument>      mDocument;
+  RefPtr<MediaDocument>      mDocument;
   nsCOMPtr<nsIStreamListener>  mNextStream;
 };
 

@@ -106,14 +106,6 @@
 #endif
 #define NS_FROZENCALL __cdecl
 
-/*
-  These are needed to mark static members in exported classes, due to
-  gcc bug XXX insert bug# here.
- */
-
-#define NS_EXPORT_STATIC_MEMBER_(type) type
-#define NS_IMPORT_STATIC_MEMBER_(type) type
-
 #elif defined(XP_OS2)
 
 #define NS_IMPORT __declspec(dllimport)
@@ -141,9 +133,13 @@
 #define NS_CALLBACK_(_type, _name) _type (* _name)
 #define NS_STDCALL
 #define NS_FROZENCALL
-#define NS_EXPORT_STATIC_MEMBER_(type) NS_EXTERNAL_VIS_(type)
-#define NS_IMPORT_STATIC_MEMBER_(type) NS_EXTERNAL_VIS_(type)
 
+#endif
+
+#ifdef MOZ_WIDGET_GONK
+#define B2G_ACL_EXPORT NS_EXPORT
+#else
+#define B2G_ACL_EXPORT
 #endif
 
 /**
@@ -253,7 +249,7 @@
  * sense to touch memory pages and free that memory at shutdown,
  * unless we are running leak stats.
  */
-#if defined(NS_BUILD_REFCNT_LOGGING) || defined(MOZ_VALGRIND)
+#if defined(NS_BUILD_REFCNT_LOGGING) || defined(MOZ_VALGRIND) || defined(MOZ_ASAN)
 #define NS_FREE_PERMANENT_DATA
 #endif
 
@@ -302,10 +298,6 @@ typedef MozRefCountType nsrefcnt;
  */
 #if defined(XPCOM_GLUE) && !defined(XPCOM_GLUE_USE_NSPR)
 #define XPCOM_GLUE_AVOID_NSPR
-#endif
-
-#if defined(HAVE_THREAD_TLS_KEYWORD)
-#define NS_TLS __thread
 #endif
 
 /*

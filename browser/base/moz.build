@@ -15,6 +15,7 @@ MOCHITEST_CHROME_MANIFESTS += [
 ]
 
 BROWSER_CHROME_MANIFESTS += [
+    'content/test/alerts/browser.ini',
     'content/test/chat/browser.ini',
     'content/test/general/browser.ini',
     'content/test/newtab/browser.ini',
@@ -22,9 +23,11 @@ BROWSER_CHROME_MANIFESTS += [
     'content/test/popupNotifications/browser.ini',
     'content/test/referrer/browser.ini',
     'content/test/social/browser.ini',
+    'content/test/urlbar/browser.ini',
 ]
 
 DEFINES['MOZ_APP_VERSION'] = CONFIG['MOZ_APP_VERSION']
+DEFINES['MOZ_APP_VERSION_DISPLAY'] = CONFIG['MOZ_APP_VERSION_DISPLAY']
 
 DEFINES['APP_LICENSE_BLOCK'] = '%s/content/overrides/app-license.html' % SRCDIR
 

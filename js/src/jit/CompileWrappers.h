@@ -85,6 +85,9 @@ class CompileRuntime
     const MathCache* maybeGetMathCache();
 
     const Nursery& gcNursery();
+    void setMinorGCShouldCancelIonCompilations();
+
+    bool runtimeMatches(JSRuntime* rt);
 };
 
 class CompileZone
@@ -101,6 +104,8 @@ class CompileZone
     const void* addressOfFreeListLast(gc::AllocKind allocKind);
 };
 
+class JitCompartment;
+
 class CompileCompartment
 {
     JSCompartment* compartment();
@@ -112,6 +117,7 @@ class CompileCompartment
     CompileRuntime* runtime();
 
     const void* addressOfEnumerators();
+    const void* addressOfRandomNumberGenerator();
 
     const JitCompartment* jitCompartment();
 
@@ -135,9 +141,14 @@ class JitCompileOptions
         return spsSlowAssertionsEnabled_;
     }
 
+    bool offThreadCompilationAvailable() const {
+        return offThreadCompilationAvailable_;
+    }
+
   private:
     bool cloneSingletons_;
     bool spsSlowAssertionsEnabled_;
+    bool offThreadCompilationAvailable_;
 };
 
 } // namespace jit

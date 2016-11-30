@@ -8,6 +8,7 @@
 
 #include "mozilla/Array.h"
 #include "mozilla/Assertions.h"
+#include "mozilla/HangAnnotations.h"
 #include "mozilla/Move.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/PodOperations.h"
@@ -46,10 +47,14 @@ public:
 
 /* HangStack stores an array of const char pointers,
    with optional internal storage for strings. */
-class HangStack : public mozilla::Vector<const char*, 8>
+class HangStack
 {
+public:
+  static const size_t sMaxInlineStorage = 8;
+
 private:
-  typedef mozilla::Vector<const char*, 8> Base;
+  typedef mozilla::Vector<const char*, sMaxInlineStorage> Impl;
+  Impl mImpl;
 
   // Stack entries can either be a static const char*
   // or a pointer to within this buffer.
@@ -59,7 +64,7 @@ public:
   HangStack() { }
 
   HangStack(HangStack&& aOther)
-    : Base(mozilla::Move(aOther))
+    : mImpl(mozilla::Move(aOther.mImpl))
     , mBuffer(mozilla::Move(aOther.mBuffer))
   {
   }
@@ -77,8 +82,34 @@ public:
     return !operator==(aOther);
   }
 
+  const char*& operator[](size_t aIndex) {
+    return mImpl[aIndex];
+  }
+
+  const char* const& operator[](size_t aIndex) const {
+    return mImpl[aIndex];
+  }
+
+  size_t capacity() const { return mImpl.capacity(); }
+  size_t length() const { return mImpl.length(); }
+  bool empty() const { return mImpl.empty(); }
+  bool canAppendWithoutRealloc(size_t aNeeded) const {
+    return mImpl.canAppendWithoutRealloc(aNeeded);
+  }
+  void infallibleAppend(const char* aEntry) { mImpl.infallibleAppend(aEntry); }
+  bool reserve(size_t aRequest) { return mImpl.reserve(aRequest); }
+  const char** begin() { return mImpl.begin(); }
+  const char* const* begin() const { return mImpl.begin(); }
+  const char** end() { return mImpl.end(); }
+  const char* const* end() const { return mImpl.end(); }
+  const char*& back() { return mImpl.back(); }
+  void erase(const char** aEntry) { mImpl.erase(aEntry); }
+  void erase(const char** aBegin, const char** aEnd) {
+    mImpl.erase(aBegin, aEnd);
+  }
+
   void clear() {
-    Base::clear();
+    mImpl.clear();
     mBuffer.clear();
   }
 
@@ -119,6 +150,8 @@ private:
   HangStack mNativeStack;
   // Use a hash to speed comparisons
   const uint32_t mHash;
+  // Annotations attributed to this stack
+  HangMonitor::HangAnnotationsVector mAnnotations;
 
 public:
   explicit HangHistogram(HangStack&& aStack)
@@ -131,6 +164,7 @@ public:
     , mStack(mozilla::Move(aOther.mStack))
     , mNativeStack(mozilla::Move(aOther.mNativeStack))
     , mHash(mozilla::Move(aOther.mHash))
+    , mAnnotations(mozilla::Move(aOther.mAnnotations))
   {
   }
   bool operator==(const HangHistogram& aOther) const;
@@ -147,16 +181,27 @@ public:
   const HangStack& GetNativeStack() const {
     return mNativeStack;
   }
+  const HangMonitor::HangAnnotationsVector& GetAnnotations() const {
+    return mAnnotations;
+  }
+  void Add(PRIntervalTime aTime, HangMonitor::HangAnnotationsPtr aAnnotations) {
+    TimeHistogram::Add(aTime);
+    if (aAnnotations) {
+      mAnnotations.append(Move(aAnnotations));
+    }
+  }
 };
 
 /* Thread hang stats consist of
  - thread name
  - time histogram of all task run times
- - hang histograms of individual hangs. */
+ - hang histograms of individual hangs
+ - annotations for each hang
+*/
 class ThreadHangStats
 {
 private:
-  nsAutoCString mName;
+  nsCString mName;
 
 public:
   TimeHistogram mActivity;
@@ -179,4 +224,5 @@ public:
 
 } // namespace Telemetry
 } // namespace mozilla
+
 #endif // mozilla_BackgroundHangTelemetry_h

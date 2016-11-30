@@ -9,13 +9,13 @@
 #include "gfxContext.h"
 #include "mozilla/Attributes.h"
 #include "nsCOMPtr.h"
-#include "nsRefPtr.h"
+#include "mozilla/RefPtr.h"
 
 namespace mozilla {
 namespace gfx {
 class DrawTarget;
-}
-}
+} // namespace gfx
+} // namespace mozilla
 
 class MOZ_STACK_CLASS nsRenderingContext final
 {
@@ -44,7 +44,7 @@ public:
     DrawTarget *GetDrawTarget() { return mThebes->GetDrawTarget(); }
 
 private:
-    nsRefPtr<gfxContext> mThebes;
+    RefPtr<gfxContext> mThebes;
 };
 
 #endif  // NSRENDERINGCONTEXT__H__

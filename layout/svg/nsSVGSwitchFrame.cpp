@@ -80,7 +80,7 @@ nsSVGSwitchFrame::Init(nsIContent*       aContent,
                        nsContainerFrame* aParent,
                        nsIFrame*         aPrevInFlow)
 {
-  NS_ASSERTION(aContent->IsSVG(nsGkAtoms::svgSwitch),
+  NS_ASSERTION(aContent->IsSVGElement(nsGkAtoms::svgSwitch),
                "Content is not an SVG switch");
 
   nsSVGSwitchFrameBase::Init(aContent, aParent, aPrevInFlow);
@@ -120,9 +120,9 @@ nsSVGSwitchFrame::PaintSVG(gfxContext& aContext,
   nsIFrame *kid = GetActiveChildFrame();
   if (kid) {
     gfxMatrix tm = aTransform;
-    if (kid->GetContent()->IsSVG()) {
+    if (kid->GetContent()->IsSVGElement()) {
       tm = static_cast<nsSVGElement*>(kid->GetContent())->
-             PrependLocalTransformsTo(tm, nsSVGElement::eUserSpaceToParent);
+             PrependLocalTransformsTo(tm, eUserSpaceToParent);
     }
     nsSVGUtils::PaintFrameWithEffects(kid, aContext, tm, aDirtyRect);
   }
@@ -145,9 +145,9 @@ nsSVGSwitchFrame::GetFrameForPoint(const gfxPoint& aPoint)
     gfxPoint point = aPoint;
     gfxMatrix m =
       static_cast<const nsSVGElement*>(mContent)->
-        PrependLocalTransformsTo(gfxMatrix(), nsSVGElement::eChildToUserSpace);
+        PrependLocalTransformsTo(gfxMatrix(), eChildToUserSpace);
     m = static_cast<const nsSVGElement*>(kid->GetContent())->
-          PrependLocalTransformsTo(m, nsSVGElement::eUserSpaceToParent);
+          PrependLocalTransformsTo(m, eUserSpaceToParent);
     if (!m.IsIdentity()) {
       if (!m.Invert()) {
         return nullptr;
@@ -241,7 +241,7 @@ nsSVGSwitchFrame::GetBBoxContribution(const Matrix &aToBBoxUserspace,
   if (svgKid) {
     nsIContent *content = kid->GetContent();
     gfxMatrix transform = ThebesMatrix(aToBBoxUserspace);
-    if (content->IsSVG()) {
+    if (content->IsSVGElement()) {
       transform = static_cast<nsSVGElement*>(content)->
                     PrependLocalTransformsTo(transform);
     }

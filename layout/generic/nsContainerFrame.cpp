@@ -32,17 +32,9 @@
 #include "nsPrintfCString.h"
 #include <algorithm>
 
-#ifdef DEBUG
-#undef NOISY
-#else
-#undef NOISY
-#endif
-
 using namespace mozilla;
 using namespace mozilla::dom;
 using namespace mozilla::layout;
-
-NS_IMPL_FRAMEARENA_HELPERS(nsContainerFrame)
 
 nsContainerFrame::~nsContainerFrame()
 {
@@ -602,21 +594,22 @@ IsTopLevelWidget(nsIWidget* aWidget)
   nsWindowType windowType = aWidget->WindowType();
   return windowType == eWindowType_toplevel ||
          windowType == eWindowType_dialog ||
+         windowType == eWindowType_popup ||
          windowType == eWindowType_sheet;
-  // popups aren't toplevel so they're not handled here
 }
 
 void
 nsContainerFrame::SyncWindowProperties(nsPresContext*       aPresContext,
                                        nsIFrame*            aFrame,
-                                       nsView*             aView,
-                                       nsRenderingContext*  aRC)
+                                       nsView*              aView,
+                                       nsRenderingContext*  aRC,
+                                       uint32_t             aFlags)
 {
 #ifdef MOZ_XUL
   if (!aView || !nsCSSRendering::IsCanvasFrame(aFrame) || !aView->HasWidget())
     return;
 
-  nsIWidget* windowWidget = GetPresContextContainerWidget(aPresContext);
+  nsCOMPtr<nsIWidget> windowWidget = GetPresContextContainerWidget(aPresContext);
   if (!windowWidget || !IsTopLevelWidget(windowWidget))
     return;
 
@@ -627,7 +620,7 @@ nsContainerFrame::SyncWindowProperties(nsPresContext*       aPresContext,
     return;
 
   Element* rootElement = aPresContext->Document()->GetRootElement();
-  if (!rootElement || !rootElement->IsXUL()) {
+  if (!rootElement || !rootElement->IsXULElement()) {
     // Scrollframes use native widgets which don't work well with
     // translucent windows, at least in Windows XP. So if the document
     // has a root scrollrame it's useless to try to make it transparent,
@@ -650,14 +643,27 @@ nsContainerFrame::SyncWindowProperties(nsPresContext*       aPresContext,
   if (!rootFrame)
     return;
 
+  if (aFlags & SET_ASYNC) {
+    aView->SetNeedsWindowPropertiesSync();
+    return;
+  }
+
+  RefPtr<nsPresContext> kungFuDeathGrip(aPresContext);
+  nsWeakFrame weak(rootFrame);
+
   nsTransparencyMode mode = nsLayoutUtils::GetFrameTransparency(aFrame, rootFrame);
-  nsIWidget* viewWidget = aView->GetWidget();
+  int32_t shadow = rootFrame->StyleUIReset()->mWindowShadow;
+  nsCOMPtr<nsIWidget> viewWidget = aView->GetWidget();
   viewWidget->SetTransparencyMode(mode);
-  windowWidget->SetWindowShadowStyle(rootFrame->StyleUIReset()->mWindowShadow);
+  windowWidget->SetWindowShadowStyle(shadow);
 
   if (!aRC)
     return;
-  
+
+  if (!weak.IsAlive()) {
+    return;
+  }
+
   nsBoxLayoutState aState(aPresContext, aRC);
   nsSize minSize = rootFrame->GetMinSize(aState);
   nsSize maxSize = rootFrame->GetMaxSize(aState);
@@ -671,12 +677,12 @@ void nsContainerFrame::SetSizeConstraints(nsPresContext* aPresContext,
                                           const nsSize& aMinSize,
                                           const nsSize& aMaxSize)
 {
-  nsIntSize devMinSize(aPresContext->AppUnitsToDevPixels(aMinSize.width),
-                       aPresContext->AppUnitsToDevPixels(aMinSize.height));
-  nsIntSize devMaxSize(aMaxSize.width == NS_INTRINSICSIZE ? NS_MAXSIZE :
-                         aPresContext->AppUnitsToDevPixels(aMaxSize.width),
-                       aMaxSize.height == NS_INTRINSICSIZE ? NS_MAXSIZE :
-                         aPresContext->AppUnitsToDevPixels(aMaxSize.height));
+  LayoutDeviceIntSize devMinSize(aPresContext->AppUnitsToDevPixels(aMinSize.width),
+                                 aPresContext->AppUnitsToDevPixels(aMinSize.height));
+  LayoutDeviceIntSize devMaxSize(aMaxSize.width == NS_INTRINSICSIZE ? NS_MAXSIZE :
+                                 aPresContext->AppUnitsToDevPixels(aMaxSize.width),
+                                 aMaxSize.height == NS_INTRINSICSIZE ? NS_MAXSIZE :
+                                 aPresContext->AppUnitsToDevPixels(aMaxSize.height));
 
   // MinSize has a priority over MaxSize
   if (devMinSize.width > devMaxSize.width)
@@ -689,7 +695,8 @@ void nsContainerFrame::SetSizeConstraints(nsPresContext* aPresContext,
   // The sizes are in inner window sizes, so convert them into outer window sizes.
   // Use a size of (200, 200) as only the difference between the inner and outer
   // size is needed.
-  nsIntSize windowSize = aWidget->ClientToWindowSize(nsIntSize(200, 200));
+  LayoutDeviceIntSize windowSize =
+    aWidget->ClientToWindowSize(LayoutDeviceIntSize(200, 200));
   if (constraints.mMinSize.width)
     constraints.mMinSize.width += windowSize.width - 200;
   if (constraints.mMinSize.height)
@@ -754,16 +761,10 @@ nsContainerFrame::SyncFrameViewProperties(nsPresContext*  aPresContext,
             ? nsViewVisibility_kShow : nsViewVisibility_kHide);
   }
 
-  // See if the frame is being relatively positioned or absolutely
-  // positioned
-  bool isPositioned = aFrame->IsPositioned();
-
   int32_t zIndex = 0;
   bool    autoZIndex = false;
 
-  if (!isPositioned) {
-    autoZIndex = true;
-  } else {
+  if (aFrame->IsAbsPosContaininingBlock()) {
     // Make sure z-index is correct
     const nsStylePosition* position = aStyleContext->StylePosition();
 
@@ -772,6 +773,8 @@ nsContainerFrame::SyncFrameViewProperties(nsPresContext*  aPresContext,
     } else if (position->mZIndex.GetUnit() == eStyleUnit_Auto) {
       autoZIndex = true;
     }
+  } else {
+    autoZIndex = true;
   }
 
   vm->SetViewZIndex(aView, autoZIndex, zIndex);
@@ -796,14 +799,11 @@ nsContainerFrame::DoInlineIntrinsicISize(nsRenderingContext *aRenderingContext,
   NS_PRECONDITION(aType == nsLayoutUtils::MIN_ISIZE ||
                   aType == nsLayoutUtils::PREF_ISIZE, "bad type");
 
-  mozilla::css::Side startSide, endSide;
-  if (StyleVisibility()->mDirection == NS_STYLE_DIRECTION_LTR) {
-    startSide = NS_SIDE_LEFT;
-    endSide = NS_SIDE_RIGHT;
-  } else {
-    startSide = NS_SIDE_RIGHT;
-    endSide = NS_SIDE_LEFT;
-  }
+  WritingMode wm = GetWritingMode();
+  mozilla::css::Side startSide =
+    wm.PhysicalSideForInlineAxis(eLogicalEdgeStart);
+  mozilla::css::Side endSide =
+    wm.PhysicalSideForInlineAxis(eLogicalEdgeEnd);
 
   const nsStylePadding *stylePadding = StylePadding();
   const nsStyleBorder *styleBorder = StyleBorder();
@@ -844,7 +844,7 @@ nsContainerFrame::DoInlineIntrinsicISize(nsRenderingContext *aRenderingContext,
   }
 
   const nsLineList_iterator* savedLine = aData->line;
-  nsIFrame* const savedLineContainer = aData->lineContainer;
+  nsIFrame* const savedLineContainer = aData->LineContainer();
 
   nsContainerFrame *lastInFlow;
   for (nsContainerFrame *nif = this; nif;
@@ -852,8 +852,7 @@ nsContainerFrame::DoInlineIntrinsicISize(nsRenderingContext *aRenderingContext,
     if (aData->currentLine == 0) {
       aData->currentLine = clonePBM;
     }
-    for (nsIFrame *kid = nif->mFrames.FirstChild(); kid;
-         kid = kid->GetNextSibling()) {
+    for (nsIFrame* kid : nif->mFrames) {
       if (aType == nsLayoutUtils::MIN_ISIZE)
         kid->AddInlineMinISize(aRenderingContext,
                                static_cast<InlineMinISizeData*>(aData));
@@ -865,13 +864,13 @@ nsContainerFrame::DoInlineIntrinsicISize(nsRenderingContext *aRenderingContext,
     // After we advance to our next-in-flow, the stored line and line container
     // may no longer be correct. Just forget them.
     aData->line = nullptr;
-    aData->lineContainer = nullptr;
+    aData->SetLineContainer(nullptr);
 
     lastInFlow = nif;
   }
 
   aData->line = savedLine;
-  aData->lineContainer = savedLineContainer;
+  aData->SetLineContainer(savedLineContainer);
 
   // This goes at the end no matter how things are broken and how
   // messy the bidi situations are, since per CSS2.1 section 8.6
@@ -902,9 +901,7 @@ nsContainerFrame::ComputeAutoSize(nsRenderingContext* aRenderingContext,
   // replaced elements always shrink-wrap
   if (aShrinkWrap || IsFrameOfType(eReplaced)) {
     // don't bother setting it if the result won't be used
-    const nsStyleCoord& inlineStyleCoord =
-      aWM.IsVertical() ? StylePosition()->mHeight : StylePosition()->mWidth;
-    if (inlineStyleCoord.GetUnit() == eStyleUnit_Auto) {
+    if (StylePosition()->ISize(aWM).GetUnit() == eStyleUnit_Auto) {
       result.ISize(aWM) = ShrinkWidthToFit(aRenderingContext, availBased);
     }
   } else {
@@ -916,35 +913,52 @@ nsContainerFrame::ComputeAutoSize(nsRenderingContext* aRenderingContext,
     // wrapping inside of us should not apply font size inflation.
     AutoMaybeDisableFontInflation an(this);
 
-    // XXX todo: make this aware of vertical writing modes
+    WritingMode tableWM = GetParent()->GetWritingMode();
     uint8_t captionSide = StyleTableBorder()->mCaptionSide;
-    if (captionSide == NS_STYLE_CAPTION_SIDE_LEFT ||
-        captionSide == NS_STYLE_CAPTION_SIDE_RIGHT) {
-      result.ISize(aWM) = GetMinISize(aRenderingContext);
-    } else if (captionSide == NS_STYLE_CAPTION_SIDE_TOP ||
-               captionSide == NS_STYLE_CAPTION_SIDE_BOTTOM) {
-      // The outer frame constrains our available width to the width of
-      // the table.  Grow if our min-width is bigger than that, but not
-      // larger than the containing block width.  (It would really be nice
-      // to transmit that information another way, so we could grow up to
-      // the table's available width, but that's harder.)
-      nscoord min = GetMinISize(aRenderingContext);
-      if (min > aCBSize.ISize(aWM)) {
-        min = aCBSize.ISize(aWM);
+
+    if (aWM.IsOrthogonalTo(tableWM)) {
+      if (captionSide == NS_STYLE_CAPTION_SIDE_TOP ||
+          captionSide == NS_STYLE_CAPTION_SIDE_TOP_OUTSIDE ||
+          captionSide == NS_STYLE_CAPTION_SIDE_BOTTOM ||
+          captionSide == NS_STYLE_CAPTION_SIDE_BOTTOM_OUTSIDE) {
+        // For an orthogonal caption on a block-dir side of the table,
+        // shrink-wrap to min-isize.
+        result.ISize(aWM) = GetMinISize(aRenderingContext);
+      } else {
+        // An orthogonal caption on an inline-dir side of the table
+        // is constrained to the containing block.
+        nscoord pref = GetPrefISize(aRenderingContext);
+        if (pref > aCBSize.ISize(aWM)) {
+          pref = aCBSize.ISize(aWM);
+        }
+        if (pref < result.ISize(aWM)) {
+          result.ISize(aWM) = pref;
+        }
       }
-      if (min > result.ISize(aWM)) {
-        result.ISize(aWM) = min;
+    } else {
+      if (captionSide == NS_STYLE_CAPTION_SIDE_LEFT ||
+          captionSide == NS_STYLE_CAPTION_SIDE_RIGHT) {
+        result.ISize(aWM) = GetMinISize(aRenderingContext);
+      } else if (captionSide == NS_STYLE_CAPTION_SIDE_TOP ||
+                 captionSide == NS_STYLE_CAPTION_SIDE_BOTTOM) {
+        // The outer frame constrains our available isize to the isize of
+        // the table.  Grow if our min-isize is bigger than that, but not
+        // larger than the containing block isize.  (It would really be nice
+        // to transmit that information another way, so we could grow up to
+        // the table's available isize, but that's harder.)
+        nscoord min = GetMinISize(aRenderingContext);
+        if (min > aCBSize.ISize(aWM)) {
+          min = aCBSize.ISize(aWM);
+        }
+        if (min > result.ISize(aWM)) {
+          result.ISize(aWM) = min;
+        }
       }
     }
   }
   return result;
 }
 
-/**
- * Invokes the WillReflow() function, positions the frame and its view (if
- * requested), and then calls Reflow(). If the reflow succeeds and the child
- * frame is complete, deletes any next-in-flows using DeleteNextInFlowChild()
- */
 void
 nsContainerFrame::ReflowChild(nsIFrame*                aKidFrame,
                               nsPresContext*           aPresContext,
@@ -952,23 +966,20 @@ nsContainerFrame::ReflowChild(nsIFrame*                aKidFrame,
                               const nsHTMLReflowState& aReflowState,
                               const WritingMode&       aWM,
                               const LogicalPoint&      aPos,
-                              nscoord                  aContainerWidth,
+                              const nsSize&            aContainerSize,
                               uint32_t                 aFlags,
                               nsReflowStatus&          aStatus,
                               nsOverflowContinuationTracker* aTracker)
 {
   NS_PRECONDITION(aReflowState.frame == aKidFrame, "bad reflow state");
   if (aWM.IsVerticalRL() || (!aWM.IsVertical() && !aWM.IsBidiLTR())) {
-    NS_ASSERTION(aContainerWidth != NS_UNCONSTRAINEDSIZE,
-                 "FinishReflowChild with unconstrained container width!");
+    NS_ASSERTION(aContainerSize.width != NS_UNCONSTRAINEDSIZE,
+                 "ReflowChild with unconstrained container width!");
   }
 
-  // Send the WillReflow() notification, and position the child frame
-  // and its view if requested
-  aKidFrame->WillReflow(aPresContext);
-
+  // Position the child frame and its view if requested.
   if (NS_FRAME_NO_MOVE_FRAME != (aFlags & NS_FRAME_NO_MOVE_FRAME)) {
-    aKidFrame->SetPosition(aWM, aPos, aContainerWidth);
+    aKidFrame->SetPosition(aWM, aPos, aContainerSize);
   }
 
   if (0 == (aFlags & NS_FRAME_NO_MOVE_VIEW)) {
@@ -1008,10 +1019,7 @@ nsContainerFrame::ReflowChild(nsIFrame*                aKidFrame,
 {
   NS_PRECONDITION(aReflowState.frame == aKidFrame, "bad reflow state");
 
-  // Send the WillReflow() notification, and position the child frame
-  // and its view if requested
-  aKidFrame->WillReflow(aPresContext);
-
+  // Position the child frame and its view if requested.
   if (NS_FRAME_NO_MOVE_FRAME != (aFlags & NS_FRAME_NO_MOVE_FRAME)) {
     aKidFrame->SetPosition(nsPoint(aX, aY));
   }
@@ -1098,11 +1106,11 @@ nsContainerFrame::FinishReflowChild(nsIFrame*                  aKidFrame,
                                     const nsHTMLReflowState*   aReflowState,
                                     const WritingMode&         aWM,
                                     const LogicalPoint&        aPos,
-                                    nscoord                    aContainerWidth,
+                                    const nsSize&              aContainerSize,
                                     uint32_t                   aFlags)
 {
   if (aWM.IsVerticalRL() || (!aWM.IsVertical() && !aWM.IsBidiLTR())) {
-    NS_ASSERTION(aContainerWidth != NS_UNCONSTRAINEDSIZE,
+    NS_ASSERTION(aContainerSize.width != NS_UNCONSTRAINEDSIZE,
                  "FinishReflowChild with unconstrained container width!");
   }
 
@@ -1113,7 +1121,7 @@ nsContainerFrame::FinishReflowChild(nsIFrame*                  aKidFrame,
 
   if (NS_FRAME_NO_MOVE_FRAME != (aFlags & NS_FRAME_NO_MOVE_FRAME)) {
     aKidFrame->SetRect(aWM, LogicalRect(aWM, aPos, convertedSize),
-                       aContainerWidth);
+                       aContainerSize);
   } else {
     aKidFrame->SetSize(aWM, convertedSize);
   }
@@ -1229,8 +1237,7 @@ nsContainerFrame::ReflowOverflowContainerChildren(nsPresContext*           aPres
   nsOverflowContinuationTracker tracker(this, false, false);
   bool shouldReflowAllKids = aReflowState.ShouldReflowAllKids();
 
-  for (nsIFrame* frame = overflowContainers->FirstChild(); frame;
-       frame = frame->GetNextSibling()) {
+  for (nsIFrame* frame : *overflowContainers) {
     if (frame->GetPrevInFlow()->GetParent() != GetPrevInFlow()) {
       // frame's prevInFlow has moved, skip reflowing this frame;
       // it will get reflowed once it's been placed
@@ -1246,8 +1253,8 @@ nsContainerFrame::ReflowOverflowContainerChildren(nsPresContext*           aPres
       NS_ASSERTION(frame->GetStateBits() & NS_FRAME_IS_OVERFLOW_CONTAINER,
                    "overflow container frame must have overflow container bit set");
       WritingMode wm = frame->GetWritingMode();
-      nscoord containerWidth = aReflowState.AvailableSize(wm).Width(wm);
-      LogicalRect prevRect = prevInFlow->GetLogicalRect(wm, containerWidth);
+      nsSize containerSize = aReflowState.AvailableSize(wm).GetPhysicalSize(wm);
+      LogicalRect prevRect = prevInFlow->GetLogicalRect(wm, containerSize);
 
       // Initialize reflow params
       LogicalSize availSpace(wm, prevRect.ISize(wm),
@@ -1260,11 +1267,11 @@ nsContainerFrame::ReflowOverflowContainerChildren(nsPresContext*           aPres
       // Reflow
       LogicalPoint pos(wm, prevRect.IStart(wm), 0);
       ReflowChild(frame, aPresContext, desiredSize, frameState,
-                  wm, pos, containerWidth, aFlags, frameStatus, &tracker);
+                  wm, pos, containerSize, aFlags, frameStatus, &tracker);
       //XXXfr Do we need to override any shrinkwrap effects here?
       // e.g. desiredSize.Width() = prevRect.width;
       FinishReflowChild(frame, aPresContext, desiredSize, &frameState,
-                        wm, pos, containerWidth, aFlags);
+                        wm, pos, containerSize, aFlags);
 
       // Handle continuations
       if (!NS_FRAME_IS_FULLY_COMPLETE(frameStatus)) {
@@ -1306,7 +1313,7 @@ nsContainerFrame::ReflowOverflowContainerChildren(nsPresContext*           aPres
       if (aReflowState.mFloatManager) {
         nsBlockFrame::RecoverFloatsFor(frame, *aReflowState.mFloatManager,
                                        aReflowState.GetWritingMode(),
-                                       aReflowState.ComputedWidth());
+                                       aReflowState.ComputedPhysicalSize());
       }
     }
     ConsiderChildOverflow(aOverflowRects, frame);
@@ -1320,8 +1327,7 @@ nsContainerFrame::DisplayOverflowContainers(nsDisplayListBuilder*   aBuilder,
 {
   nsFrameList* overflowconts = GetPropTableFrames(OverflowContainersProperty());
   if (overflowconts) {
-    for (nsIFrame* frame = overflowconts->FirstChild(); frame;
-         frame = frame->GetNextSibling()) {
+    for (nsIFrame* frame : *overflowconts) {
       BuildDisplayListForChild(aBuilder, frame, aDirtyRect, aLists);
     }
   }
@@ -1694,6 +1700,24 @@ nsContainerFrame::PullNextInFlowChild(ContinuationTraversingState& aState)
     nsContainerFrame::ReparentFrameView(frame, nextInFlow, this);
   }
   return frame;
+}
+
+bool
+nsContainerFrame::ResolvedOrientationIsVertical()
+{
+  uint8_t orient = StyleDisplay()->mOrient;
+  switch (orient) {
+    case NS_STYLE_ORIENT_HORIZONTAL:
+      return false;
+    case NS_STYLE_ORIENT_VERTICAL:
+      return true;
+    case NS_STYLE_ORIENT_INLINE:
+      return GetWritingMode().IsVertical();
+    case NS_STYLE_ORIENT_BLOCK:
+      return !GetWritingMode().IsVertical();
+  }
+  NS_NOTREACHED("unexpected -moz-orient value");
+  return false;
 }
 
 nsOverflowContinuationTracker::nsOverflowContinuationTracker(nsContainerFrame* aFrame,

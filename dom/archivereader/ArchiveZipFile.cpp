@@ -1,5 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -21,7 +21,7 @@ USING_ARCHIVEREADER_NAMESPACE
  * Input stream object for zip files
  */
 class ArchiveInputStream final : public nsIInputStream,
-                                     public nsISeekableStream
+                                 public nsISeekableStream
 {
 public:
   ArchiveInputStream(uint64_t aParentSize,
@@ -355,28 +355,29 @@ ArchiveInputStream::SetEOF()
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
-// ArchiveZipFileImpl
+// ArchiveZipBlobImpl
 
-nsresult
-ArchiveZipFileImpl::GetInternalStream(nsIInputStream** aStream)
+void
+ArchiveZipBlobImpl::GetInternalStream(nsIInputStream** aStream,
+                                      ErrorResult& aRv)
 {
   if (mLength > INT32_MAX) {
-    return NS_ERROR_FAILURE;
+    aRv.Throw(NS_ERROR_FAILURE);
+    return;
   }
 
-  ErrorResult rv;
-  uint64_t size = mFileImpl->GetSize(rv);
-  if (NS_WARN_IF(rv.Failed())) {
-    return rv.ErrorCode();
+  uint64_t size = mBlobImpl->GetSize(aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return;
   }
 
   nsCOMPtr<nsIInputStream> inputStream;
-  rv = mFileImpl->GetInternalStream(getter_AddRefs(inputStream));
-  if (NS_WARN_IF(rv.Failed()) || !inputStream) {
-    return NS_ERROR_UNEXPECTED;
+  mBlobImpl->GetInternalStream(getter_AddRefs(inputStream), aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return;
   }
 
-  nsRefPtr<ArchiveInputStream> stream = new ArchiveInputStream(size,
+  RefPtr<ArchiveInputStream> stream = new ArchiveInputStream(size,
                                                                inputStream,
                                                                mFilename,
                                                                mStart,
@@ -384,19 +385,18 @@ ArchiveZipFileImpl::GetInternalStream(nsIInputStream** aStream)
                                                                mCentral);
 
   stream.forget(aStream);
-  return NS_OK;
 }
 
-already_AddRefed<mozilla::dom::FileImpl>
-ArchiveZipFileImpl::CreateSlice(uint64_t aStart,
+already_AddRefed<mozilla::dom::BlobImpl>
+ArchiveZipBlobImpl::CreateSlice(uint64_t aStart,
                                 uint64_t aLength,
                                 const nsAString& aContentType,
                                 mozilla::ErrorResult& aRv)
 {
-  nsRefPtr<FileImpl> impl =
-    new ArchiveZipFileImpl(mFilename, mContentType, aStart, mLength, mCentral,
-                           mFileImpl);
+  RefPtr<BlobImpl> impl =
+    new ArchiveZipBlobImpl(mFilename, mContentType, aStart, mLength, mCentral,
+                           mBlobImpl);
   return impl.forget();
 }
 
-NS_IMPL_ISUPPORTS_INHERITED0(ArchiveZipFileImpl, FileImpl)
+NS_IMPL_ISUPPORTS_INHERITED0(ArchiveZipBlobImpl, BlobImpl)

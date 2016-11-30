@@ -8,14 +8,10 @@
 #include "HttpLog.h"
 
 #include "nsHttp.h"
-#include "pldhash.h"
+#include "PLDHashTable.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/HashFunctions.h"
 #include "nsCRT.h"
-
-#if defined(PR_LOGGING)
-PRLogModuleInfo *gHttpLog = nullptr;
-#endif
 
 namespace mozilla {
 namespace net {
@@ -42,7 +38,7 @@ struct HttpHeapAtom {
     char                 value[1];
 };
 
-static PLDHashTable         sAtomTable;
+static PLDHashTable        *sAtomTable;
 static struct HttpHeapAtom *sHeapAtoms = nullptr;
 static Mutex               *sLock = nullptr;
 
@@ -87,8 +83,8 @@ StringCompare(PLDHashTable *table, const PLDHashEntryHdr *entry,
 static const PLDHashTableOps ops = {
     StringHash,
     StringCompare,
-    PL_DHashMoveEntryStub,
-    PL_DHashClearEntryStub,
+    PLDHashTable::MoveEntryStub,
+    PLDHashTable::ClearEntryStub,
     nullptr
 };
 
@@ -96,7 +92,7 @@ static const PLDHashTableOps ops = {
 nsresult
 nsHttp::CreateAtomTable()
 {
-    MOZ_ASSERT(!sAtomTable.IsInitialized(), "atom table already initialized");
+    MOZ_ASSERT(!sAtomTable, "atom table already initialized");
 
     if (!sLock) {
         sLock = new Mutex("nsHttp.sLock");
@@ -105,10 +101,8 @@ nsHttp::CreateAtomTable()
     // The initial length for this table is a value greater than the number of
     // known atoms (NUM_HTTP_ATOMS) because we expect to encounter a few random
     // headers right off the bat.
-    if (!PL_DHashTableInit(&sAtomTable, &ops, sizeof(PLDHashEntryStub),
-                           fallible, NUM_HTTP_ATOMS + 10)) {
-        return NS_ERROR_OUT_OF_MEMORY;
-    }
+    sAtomTable = new PLDHashTable(&ops, sizeof(PLDHashEntryStub),
+                                  NUM_HTTP_ATOMS + 10);
 
     // fill the table with our known atoms
     const char *const atoms[] = {
@@ -119,8 +113,8 @@ nsHttp::CreateAtomTable()
     };
 
     for (int i = 0; atoms[i]; ++i) {
-        PLDHashEntryStub *stub = reinterpret_cast<PLDHashEntryStub *>
-            (PL_DHashTableAdd(&sAtomTable, atoms[i], fallible));
+        auto stub = static_cast<PLDHashEntryStub*>
+                               (sAtomTable->Add(atoms[i], fallible));
         if (!stub)
             return NS_ERROR_OUT_OF_MEMORY;
 
@@ -134,9 +128,8 @@ nsHttp::CreateAtomTable()
 void
 nsHttp::DestroyAtomTable()
 {
-    if (sAtomTable.IsInitialized()) {
-        PL_DHashTableFinish(&sAtomTable);
-    }
+    delete sAtomTable;
+    sAtomTable = nullptr;
 
     while (sHeapAtoms) {
         HttpHeapAtom *next = sHeapAtoms->next;
@@ -144,10 +137,8 @@ nsHttp::DestroyAtomTable()
         sHeapAtoms = next;
     }
 
-    if (sLock) {
-        delete sLock;
-        sLock = nullptr;
-    }
+    delete sLock;
+    sLock = nullptr;
 }
 
 Mutex *
@@ -162,13 +153,12 @@ nsHttp::ResolveAtom(const char *str)
 {
     nsHttpAtom atom = { nullptr };
 
-    if (!str || !sAtomTable.IsInitialized())
+    if (!str || !sAtomTable)
         return atom;
 
     MutexAutoLock lock(*sLock);
 
-    PLDHashEntryStub *stub = reinterpret_cast<PLDHashEntryStub *>
-        (PL_DHashTableAdd(&sAtomTable, str, fallible));
+    auto stub = static_cast<PLDHashEntryStub*>(sAtomTable->Add(str, fallible));
     if (!stub)
         return atom;  // out of memory
 
@@ -235,6 +225,26 @@ nsHttp::IsValidToken(const char *start, const char *end)
     }
 
     return true;
+}
+
+const char*
+nsHttp::GetProtocolVersion(uint32_t pv)
+{
+    switch (pv) {
+    case SPDY_VERSION_31:
+        return "spdy/3.1";
+    case HTTP_VERSION_2:
+    case NS_HTTP_VERSION_2_0:
+        return "h2";
+    case NS_HTTP_VERSION_1_0:
+        return "http/1.0";
+    case NS_HTTP_VERSION_1_1:
+        return "http/1.1";
+    default:
+        NS_WARNING(nsPrintfCString("Unkown protocol version: 0x%X. "
+                                   "Please file a bug", pv).get());
+        return "http/1.1";
+    }
 }
 
 // static
@@ -309,7 +319,7 @@ nsHttp::IsPermanentRedirect(uint32_t httpStatus)
 
 
 template<typename T> void
-localEnsureBuffer(nsAutoArrayPtr<T> &buf, uint32_t newSize,
+localEnsureBuffer(UniquePtr<T[]> &buf, uint32_t newSize,
              uint32_t preserve, uint32_t &objSize)
 {
   if (objSize >= newSize)
@@ -322,20 +332,20 @@ localEnsureBuffer(nsAutoArrayPtr<T> &buf, uint32_t newSize,
   objSize = (newSize + 2048 + 4095) & ~4095;
 
   static_assert(sizeof(T) == 1, "sizeof(T) must be 1");
-  nsAutoArrayPtr<T> tmp(new T[objSize]);
+  auto tmp = MakeUnique<T[]>(objSize);
   if (preserve) {
-    memcpy(tmp, buf, preserve);
+    memcpy(tmp.get(), buf.get(), preserve);
   }
-  buf = tmp;
+  buf = Move(tmp);
 }
 
-void EnsureBuffer(nsAutoArrayPtr<char> &buf, uint32_t newSize,
+void EnsureBuffer(UniquePtr<char[]> &buf, uint32_t newSize,
                   uint32_t preserve, uint32_t &objSize)
 {
     localEnsureBuffer<char> (buf, newSize, preserve, objSize);
 }
 
-void EnsureBuffer(nsAutoArrayPtr<uint8_t> &buf, uint32_t newSize,
+void EnsureBuffer(UniquePtr<uint8_t[]> &buf, uint32_t newSize,
                   uint32_t preserve, uint32_t &objSize)
 {
     localEnsureBuffer<uint8_t> (buf, newSize, preserve, objSize);
@@ -463,5 +473,5 @@ ParsedHeaderValueListList::ParsedHeaderValueListList(const nsCString &fullHeader
     }
 }
 
-} // namespace mozilla::net
+} // namespace net
 } // namespace mozilla

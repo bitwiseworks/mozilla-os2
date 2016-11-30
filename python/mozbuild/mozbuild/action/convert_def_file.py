@@ -5,6 +5,8 @@
 # Convert Windows-style export files into a single Unix-style linker
 # script, applying any necessary preprocessing.
 
+from __future__ import absolute_import
+
 import itertools
 import re
 import sys
@@ -14,10 +16,10 @@ from mozbuild.preprocessor import Preprocessor
 from mozbuild.util import FileAvoidWrite
 
 def preprocess_file(pp, deffile):
-    output = StringIO()
-    with open(deffile, 'r') as input:
-        pp.processFile(input=input, output=output)
-    return output.getvalue().splitlines()
+    pp.out = StringIO()
+    with open(deffile, 'rU') as input:
+        pp.do_include(input, False)
+    return pp.out.getvalue().splitlines()
 
 # NSS .def files serve multiple masters, as this copied comment indicates:
 #

@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim:set tw=80 expandtab softtabstop=2 ts=2 sw=2: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -45,12 +45,12 @@ protected:
 
   virtual void EnsureFresh() override;
 
-  nsRefPtr<HTMLPropertiesCollection> mCollection;
+  RefPtr<HTMLPropertiesCollection> mCollection;
 };
 
 class HTMLPropertiesCollection final : public nsIHTMLCollection,
-                                           public nsStubMutationObserver,
-                                           public nsWrapperCache
+                                       public nsStubMutationObserver,
+                                       public nsWrapperCache
 {
   friend class PropertyNodeList;
   friend class PropertyStringList;
@@ -59,7 +59,8 @@ public:
 
   // nsWrapperCache
   using nsWrapperCache::GetWrapperPreserveColor;
-  virtual JSObject* WrapObject(JSContext* aCx) override;
+  using nsWrapperCache::GetWrapper;
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 protected:
   virtual ~HTMLPropertiesCollection();
 
@@ -130,16 +131,16 @@ protected:
   }
 
   // the items that make up this collection
-  nsTArray<nsRefPtr<nsGenericHTMLElement> > mProperties;
+  nsTArray<RefPtr<nsGenericHTMLElement> > mProperties;
 
   // the itemprop attribute of the properties
-  nsRefPtr<PropertyStringList> mNames;
+  RefPtr<PropertyStringList> mNames;
 
   // The cached PropertyNodeLists that are NamedItems of this collection
   nsRefPtrHashtable<nsStringHashKey, PropertyNodeList> mNamedItemEntries;
 
   // The element this collection is rooted at
-  nsRefPtr<nsGenericHTMLElement> mRoot;
+  RefPtr<nsGenericHTMLElement> mRoot;
 
   // The document mRoot is in, if any
   nsCOMPtr<nsIDocument> mDoc;
@@ -149,13 +150,13 @@ protected:
 };
 
 class PropertyNodeList final : public nsINodeList,
-                                   public nsStubMutationObserver
+                               public nsStubMutationObserver
 {
 public:
   PropertyNodeList(HTMLPropertiesCollection* aCollection,
                    nsIContent* aRoot, const nsAString& aName);
 
-  virtual JSObject* WrapObject(JSContext *cx) override;
+  virtual JSObject* WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto) override;
 
   void SetDocument(nsIDocument* aDocument);
 
@@ -204,13 +205,13 @@ protected:
   nsCOMPtr<nsIDocument> mDoc;
 
   // the collection that this list is a named item of
-  nsRefPtr<HTMLPropertiesCollection> mCollection;
+  RefPtr<HTMLPropertiesCollection> mCollection;
 
   // the node this list is rooted at
   nsCOMPtr<nsINode> mParent;
 
   // the properties that make up this list
-  nsTArray<nsRefPtr<nsGenericHTMLElement> > mElements;
+  nsTArray<RefPtr<nsGenericHTMLElement> > mElements;
 
   // True if there have been DOM modifications since the last EnsureFresh call. 
   bool mIsDirty;
@@ -218,4 +219,5 @@ protected:
 
 } // namespace dom
 } // namespace mozilla
+
 #endif // HTMLPropertiesCollection_h_

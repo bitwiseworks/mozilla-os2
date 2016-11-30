@@ -49,6 +49,7 @@ XPCOMUtils.defineLazyGetter(this, "DEFAULT_AREA_PLACEMENTS", function() {
       "urlbar-container",
       "search-container",
       "bookmarks-menu-button",
+      "pocket-button",
       "downloads-button",
       "home-button",
       "social-share-button",
@@ -77,10 +78,6 @@ XPCOMUtils.defineLazyGetter(this, "DEFAULT_AREA_PLACEMENTS", function() {
     result["PanelUI-contents"].push("characterencoding-button");
   }
 
-  if (Services.metro && Services.metro.supported) {
-    result["PanelUI-contents"].push("switch-to-metro-button");
-  }
-
   return result;
 });
 
@@ -95,8 +92,6 @@ XPCOMUtils.defineLazyGetter(this, "PALETTE_ITEMS", function() {
     "feed-button",
     "email-link-button",
     "sync-button",
-    "tabview-button",
-    "web-apps-button",
   ];
 
   let panelPlacements = DEFAULT_AREA_PLACEMENTS["PanelUI-contents"];
@@ -444,6 +439,12 @@ this.BrowserUITelemetry = {
   _checkForBuiltinItem: function(aEvent) {
     let item = aEvent.originalTarget;
 
+    // We don't want to count clicks on the private browsing
+    // button for privacy reasons. See bug 1176391.
+    if (item.id == "privatebrowsing-button") {
+      return;
+    }
+
     // We special-case the bookmarks-menu-button, since we want to
     // monitor more than just clicks on it.
     if (item.id == "bookmarks-menu-button" ||
@@ -568,7 +569,7 @@ this.BrowserUITelemetry = {
     if (Components.isSuccessCode(searchResult)) {
       result.currentSearchEngine = Services.search.currentEngine.name;
     }
-    result.oneOffSearchEnabled = Services.prefs.getBoolPref("browser.search.showOneOffButtons");
+
     return result;
   },
 
@@ -654,7 +655,9 @@ this.BrowserUITelemetry = {
     "navigation", "back", "forward", "reload", "stop", "bookmarkpage",
     "spell-no-suggestions", "spell-add-to-dictionary",
     "spell-undo-add-to-dictionary", "openlinkincurrent", "openlinkintab",
-    "openlink", "openlinkprivate", "bookmarklink", "sharelink", "savelink",
+    "openlink",
+    // "openlinkprivate" intentionally omitted for privacy reasons. See bug 1176391.
+    "bookmarklink", "sharelink", "savelink",
     "marklinkMenu", "copyemail", "copylink", "media-play", "media-pause",
     "media-mute", "media-unmute", "media-playbackrate",
     "media-playbackrate-050x", "media-playbackrate-100x",
@@ -665,7 +668,7 @@ this.BrowserUITelemetry = {
     "copyvideourl", "copyaudiourl", "saveimage", "shareimage", "sendimage",
     "setDesktopBackground", "viewimageinfo", "viewimagedesc", "savevideo",
     "sharevideo", "saveaudio", "video-saveimage", "sendvideo", "sendaudio",
-    "ctp-play", "ctp-hide", "sharepage", "savepage", "markpageMenu",
+    "ctp-play", "ctp-hide", "sharepage", "savepage", "pocket", "markpageMenu",
     "viewbgimage", "undo", "cut", "copy", "paste", "delete", "selectall",
     "keywordfield", "searchselect", "shareselect", "frame", "showonlythisframe",
     "openframeintab", "openframe", "reloadframe", "bookmarkframe", "saveframe",
@@ -682,6 +685,13 @@ this.BrowserUITelemetry = {
 
   registerContextMenuInteraction: function(keys, itemID) {
     if (itemID) {
+      if (itemID == "openlinkprivate") {
+        // Don't record anything, not even an other-item count
+        // if the user chose to open in a private window. See
+        // bug 1176391.
+        return;
+      }
+
       if (!this._contextMenuItemWhitelist.has(itemID)) {
         itemID = "other-item";
       }
@@ -701,18 +711,24 @@ this.BrowserUITelemetry = {
   /**
    * Default bucket name, when no other bucket is active.
    */
-  get BUCKET_DEFAULT() BUCKET_DEFAULT,
+  get BUCKET_DEFAULT() {
+    return BUCKET_DEFAULT;
+  },
 
   /**
    * Bucket prefix, for named buckets.
    */
-  get BUCKET_PREFIX() BUCKET_PREFIX,
+  get BUCKET_PREFIX() {
+    return BUCKET_PREFIX;
+  },
 
   /**
    * Standard separator to use between different parts of a bucket name, such
    * as primary name and the time step string.
    */
-  get BUCKET_SEPARATOR() BUCKET_SEPARATOR,
+  get BUCKET_SEPARATOR() {
+    return BUCKET_SEPARATOR;
+  },
 
   get currentBucket() {
     return this._bucket;

@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim:set tw=80 expandtab softtabstop=2 ts=2 sw=2: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -19,8 +19,8 @@ class EventChainPreVisitor;
 namespace dom {
 
 class HTMLAnchorElement final : public nsGenericHTMLElement,
-                                    public nsIDOMHTMLAnchorElement,
-                                    public Link
+                                public nsIDOMHTMLAnchorElement,
+                                public Link
 {
 public:
   using Element::GetText;
@@ -43,10 +43,7 @@ public:
   virtual bool Draggable() const override;
 
   // Element
-  virtual bool IsInteractiveHTMLContent(bool aIgnoreTabindex) const override
-  {
-    return true;
-  }
+  virtual bool IsInteractiveHTMLContent(bool aIgnoreTabindex) const override;
 
   // nsIDOMHTMLAnchorElement
   NS_DECL_NSIDOMHTMLANCHORELEMENT
@@ -92,10 +89,8 @@ public:
   virtual bool HasDeferredDNSPrefetchRequest() override;
 
   // WebIDL API
-  void GetHref(nsAString& aValue, ErrorResult& rv)
-  {
-    GetHTMLURIAttr(nsGkAtoms::href, aValue);
-  }
+
+  // The XPCOM GetHref is OK for us
   void SetHref(const nsAString& aValue, mozilla::ErrorResult& rv)
   {
     SetHTMLAttr(nsGkAtoms::href, aValue, rv);
@@ -126,6 +121,14 @@ public:
   {
     SetHTMLAttr(nsGkAtoms::rel, aValue, rv);
   }
+  void SetReferrerPolicy(const nsAString& aValue, mozilla::ErrorResult& rv)
+  {
+    SetHTMLAttr(nsGkAtoms::referrerpolicy, aValue, rv);
+  }
+  void GetReferrerPolicy(nsAString& aReferrer)
+  {
+    GetHTMLAttr(nsGkAtoms::referrerpolicy, aReferrer);
+  }
   nsDOMTokenList* RelList();
   void GetHreflang(DOMString& aValue)
   {
@@ -151,8 +154,8 @@ public:
 
   // Link::GetOrigin is OK for us
 
-  using Link::GetProtocol;
-  using Link::SetProtocol;
+  // Link::GetProtocol is OK for us
+  // Link::SetProtocol is OK for us
 
   // Link::GetUsername is OK for us
   // Link::SetUsername is OK for us
@@ -160,23 +163,23 @@ public:
   // Link::GetPassword is OK for us
   // Link::SetPassword is OK for us
 
-  using Link::GetHost;
-  using Link::SetHost;
+  // Link::Link::GetHost is OK for us
+  // Link::Link::SetHost is OK for us
 
-  using Link::GetHostname;
-  using Link::SetHostname;
+  // Link::Link::GetHostname is OK for us
+  // Link::Link::SetHostname is OK for us
 
-  using Link::GetPort;
-  using Link::SetPort;
+  // Link::Link::GetPort is OK for us
+  // Link::Link::SetPort is OK for us
 
-  using Link::GetPathname;
-  using Link::SetPathname;
+  // Link::Link::GetPathname is OK for us
+  // Link::Link::SetPathname is OK for us
 
-  using Link::GetSearch;
-  using Link::SetSearch;
+  // Link::Link::GetSearch is OK for us
+  // Link::Link::SetSearch is OK for us
 
-  using Link::GetHash;
-  using Link::SetHash;
+  // Link::Link::GetHash is OK for us
+  // Link::Link::SetHash is OK for us
 
   // The XPCOM URI decomposition attributes are fine for us
   void GetCoords(DOMString& aValue)
@@ -219,9 +222,9 @@ public:
   {
     SetHTMLAttr(nsGkAtoms::shape, aValue, rv);
   }
-  void Stringify(nsAString& aResult, ErrorResult& aError)
+  void Stringify(nsAString& aResult)
   {
-    GetHref(aResult, aError);
+    GetHref(aResult);
   }
 
 protected:
@@ -229,8 +232,8 @@ protected:
 
   virtual void GetItemValueText(DOMString& text) override;
   virtual void SetItemValueText(const nsAString& text) override;
-  virtual JSObject* WrapNode(JSContext *aCx) override;
-  nsRefPtr<nsDOMTokenList > mRelList;
+  virtual JSObject* WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto) override;
+  RefPtr<nsDOMTokenList > mRelList;
 };
 
 } // namespace dom

@@ -44,15 +44,17 @@ class VCSToolsScript(VCSScript):
             for vcs_tool in VCS_TOOLS:
                 file_path = self.which(vcs_tool)
 
+                if not file_path:
+                    file_path = self.query_exe(vcs_tool)
+
                 # If the tool is specified and it is a list is
                 # because we're running on Windows and we won't check
                 if type(self.query_exe(vcs_tool)) is list:
                     continue
 
-                if not self.is_exe(file_path):
-                    self.critical("%s is not executable." % file_path)
-
                 if file_path is None:
                     self.fatal("This machine is missing %s, if this is your "
                                "local machine you can use --cfg "
                                "developer_config.py" % vcs_tool)
+                elif not self.is_exe(file_path):
+                    self.critical("%s is not executable." % file_path)

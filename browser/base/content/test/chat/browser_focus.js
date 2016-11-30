@@ -7,6 +7,8 @@
 Components.utils.import("resource://gre/modules/Promise.jsm", this);
 const CHAT_URL = "https://example.com/browser/browser/base/content/test/chat/chat.html";
 
+requestLongerTimeout(2);
+
 // Is the currently opened tab focused?
 function isTabFocused() {
   let tabb = gBrowser.getBrowserForTab(gBrowser.selectedTab);
@@ -22,7 +24,7 @@ function isChatFocused(chat) {
   return elt == chat.content;
 }
 
-let chatbar = document.getElementById("pinnedchats");
+var chatbar = document.getElementById("pinnedchats");
 
 function* setUp() {
   // Note that (probably) due to bug 604289, if a tab is focused but the

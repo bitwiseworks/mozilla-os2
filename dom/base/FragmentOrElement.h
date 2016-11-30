@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -17,7 +18,6 @@
 #include "nsAttrAndChildArray.h"          // member
 #include "nsCycleCollectionParticipant.h" // NS_DECL_CYCLE_*
 #include "nsIContent.h"                   // base class
-#include "nsINodeList.h"                  // base class
 #include "nsIWeakReference.h"             // base class
 #include "nsNodeUtils.h"                  // class member nsNodeUtils::CloneNodeImpl
 #include "nsIHTMLCollection.h"
@@ -35,52 +35,8 @@ class nsIURI;
 namespace mozilla {
 namespace dom {
 class Element;
-}
-}
-
-/**
- * Class that implements the nsIDOMNodeList interface (a list of children of
- * the content), by holding a reference to the content and delegating GetLength
- * and Item to its existing child list.
- * @see nsIDOMNodeList
- */
-class nsChildContentList final : public nsINodeList
-{
-public:
-  explicit nsChildContentList(nsINode* aNode)
-    : mNode(aNode)
-  {
-  }
-
-  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_CYCLE_COLLECTION_SKIPPABLE_SCRIPT_HOLDER_CLASS(nsChildContentList)
-
-  // nsWrapperCache
-  virtual JSObject* WrapObject(JSContext *cx) override;
-
-  // nsIDOMNodeList interface
-  NS_DECL_NSIDOMNODELIST
-
-  // nsINodeList interface
-  virtual int32_t IndexOf(nsIContent* aContent) override;
-  virtual nsIContent* Item(uint32_t aIndex) override;
-
-  void DropReference()
-  {
-    mNode = nullptr;
-  }
-
-  virtual nsINode* GetParentObject() override
-  {
-    return mNode;
-  }
-
-private:
-  ~nsChildContentList() {}
-
-  // The node whose children make up the list (weak reference)
-  nsINode* mNode;
-};
+} // namespace dom
+} // namespace mozilla
 
 /**
  * A class that implements nsIWeakReference
@@ -109,7 +65,7 @@ public:
 private:
   ~nsNodeWeakReference();
 
-  nsINode* mNode;
+  nsINode* MOZ_NON_OWNING_REF mNode;
 };
 
 /**
@@ -186,8 +142,8 @@ public:
   virtual bool TextIsOnlyWhitespace() override;
   virtual bool HasTextForTranslation() override;
   virtual void AppendTextTo(nsAString& aResult) override;
-  virtual bool AppendTextTo(nsAString& aResult,
-                            const mozilla::fallible_t&) override NS_WARN_UNUSED_RESULT; 
+  MOZ_WARN_UNUSED_RESULT
+  virtual bool AppendTextTo(nsAString& aResult, const mozilla::fallible_t&) override;
   virtual nsIContent *GetBindingParent() const override;
   virtual nsXBLBinding *GetXBLBinding() const override;
   virtual void SetXBLBinding(nsXBLBinding* aBinding,
@@ -321,7 +277,7 @@ public:
      * The .undoManager property.
      * @see nsGenericHTMLElement::GetUndoManager
      */
-    nsRefPtr<UndoManager> mUndoManager;
+    RefPtr<UndoManager> mUndoManager;
 
     /**
      * SMIL Overridde style rules (for SMIL animation of CSS properties)
@@ -330,15 +286,15 @@ public:
     nsCOMPtr<nsICSSDeclaration> mSMILOverrideStyle;
 
     /**
-     * Holds any SMIL override style rules for this element.
+     * Holds any SMIL override style declaration for this element.
      */
-    nsRefPtr<mozilla::css::StyleRule> mSMILOverrideStyleRule;
+    RefPtr<mozilla::css::Declaration> mSMILOverrideStyleDeclaration;
 
     /**
      * An object implementing nsIDOMMozNamedAttrMap for this content (attributes)
      * @see FragmentOrElement::GetAttributes
      */
-    nsRefPtr<nsDOMAttributeMap> mAttributeMap;
+    RefPtr<nsDOMAttributeMap> mAttributeMap;
 
     union {
       /**
@@ -356,22 +312,22 @@ public:
     /**
      * An object implementing the .children property for this element.
      */
-    nsRefPtr<nsContentList> mChildrenList;
+    RefPtr<nsContentList> mChildrenList;
 
     /**
      * An object implementing the .classList property for this element.
      */
-    nsRefPtr<nsDOMTokenList> mClassList;
+    RefPtr<nsDOMTokenList> mClassList;
 
     /**
      * ShadowRoot bound to the element.
      */
-    nsRefPtr<ShadowRoot> mShadowRoot;
+    RefPtr<ShadowRoot> mShadowRoot;
 
     /**
      * The root ShadowRoot of this element if it is in a shadow tree.
      */
-    nsRefPtr<ShadowRoot> mContainingShadow;
+    RefPtr<ShadowRoot> mContainingShadow;
 
     /**
      * An array of web component insertion points to which this element
@@ -382,7 +338,7 @@ public:
     /**
      * XBL binding installed on the element.
      */
-    nsRefPtr<nsXBLBinding> mXBLBinding;
+    RefPtr<nsXBLBinding> mXBLBinding;
 
     /**
      * XBL binding installed on the lement.
@@ -392,7 +348,7 @@ public:
     /**
      * Web components custom element data.
      */
-    nsRefPtr<CustomElementData> mCustomElementData;
+    RefPtr<CustomElementData> mCustomElementData;
   };
 
 protected:

@@ -1,23 +1,22 @@
-/* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_dom_bluetooth_bluetoothhfpmanager_h__
-#define mozilla_dom_bluetooth_bluetoothhfpmanager_h__
+#ifndef mozilla_dom_bluetooth_bluedroid_BluetoothHfpManager_h
+#define mozilla_dom_bluetooth_bluedroid_BluetoothHfpManager_h
 
 #include "BluetoothInterface.h"
 #include "BluetoothCommon.h"
 #include "BluetoothHfpManagerBase.h"
 #include "BluetoothRilListener.h"
 #include "BluetoothSocketObserver.h"
-#include "mozilla/ipc/UnixSocket.h"
+#include "mozilla/ipc/SocketBase.h"
 #include "mozilla/Hal.h"
 
 BEGIN_BLUETOOTH_NAMESPACE
 
-class BluetoothReplyRunnable;
 class BluetoothSocket;
 class Call;
 
@@ -74,6 +73,12 @@ class BluetoothHfpManager : public BluetoothHfpManagerBase
                           , public BluetoothHandsfreeNotificationHandler
                           , public BatteryObserver
 {
+  enum {
+    MODE_HEADSET = 0x00,
+    MODE_NARROWBAND_SPEECH = 0x01,
+    MODE_NARRAWBAND_WIDEBAND_SPEECH = 0x02
+  };
+
 public:
   BT_DECL_HFP_MGR_BASE
 
@@ -88,7 +93,6 @@ public:
   }
 
   static BluetoothHfpManager* Get();
-  virtual ~BluetoothHfpManager();
   static void InitHfpInterface(BluetoothProfileResultHandler* aRes);
   static void DeinitHfpInterface(BluetoothProfileResultHandler* aRes);
 
@@ -111,39 +115,63 @@ public:
   void IgnoreWaitingCall();
   void ToggleCalls();
 
+  // Handle unexpected backend crash
+  void HandleBackendError();
+
   //
   // Bluetooth notifications
   //
 
   void ConnectionStateNotification(BluetoothHandsfreeConnectionState aState,
-                                   const nsAString& aBdAddress) override;
+                                   const BluetoothAddress& aBdAddress) override;
   void AudioStateNotification(BluetoothHandsfreeAudioState aState,
-                              const nsAString& aBdAddress) override;
-  void AnswerCallNotification(const nsAString& aBdAddress) override;
-  void HangupCallNotification(const nsAString& aBdAddress) override;
+                              const BluetoothAddress& aBdAddress) override;
+  void AnswerCallNotification(const BluetoothAddress& aBdAddress) override;
+  void HangupCallNotification(const BluetoothAddress& aBdAddress) override;
   void VolumeNotification(BluetoothHandsfreeVolumeType aType,
                           int aVolume,
-                          const nsAString& aBdAddress) override;
+                          const BluetoothAddress& aBdAddress) override;
   void DtmfNotification(char aDtmf,
-                        const nsAString& aBdAddress) override;
+                        const BluetoothAddress& aBdAddress) override;
+  void NRECNotification(BluetoothHandsfreeNRECState aNrec,
+                        const BluetoothAddress& aBdAddr) override;
   void CallHoldNotification(BluetoothHandsfreeCallHoldType aChld,
-                            const nsAString& aBdAddress) override;
+                            const BluetoothAddress& aBdAddress) override;
   void DialCallNotification(const nsAString& aNumber,
-                            const nsAString& aBdAddress) override;
-  void CnumNotification(const nsAString& aBdAddress) override;
-  void CindNotification(const nsAString& aBdAddress) override;
-  void CopsNotification(const nsAString& aBdAddress) override;
-  void ClccNotification(const nsAString& aBdAddress) override;
+                            const BluetoothAddress& aBdAddress) override;
+  void CnumNotification(const BluetoothAddress& aBdAddress) override;
+  void CindNotification(const BluetoothAddress& aBdAddress) override;
+  void CopsNotification(const BluetoothAddress& aBdAddress) override;
+  void ClccNotification(const BluetoothAddress& aBdAddress) override;
   void UnknownAtNotification(const nsACString& aAtString,
-                             const nsAString& aBdAddress) override;
-  void KeyPressedNotification(const nsAString& aBdAddress) override;
+                             const BluetoothAddress& aBdAddress) override;
+  void KeyPressedNotification(const BluetoothAddress& aBdAddress) override;
+
+protected:
+  virtual ~BluetoothHfpManager();
 
 private:
-  class GetVolumeTask;
-  class CloseScoTask;
+  class AtResponseResultHandler;
+  class CindResponseResultHandler;
+  class ConnectAudioResultHandler;
+  class ConnectResultHandler;
+  class CopsResponseResultHandler;
+  class ClccResponseResultHandler;
   class CloseScoRunnable;
-  class RespondToBLDNTask;
+  class CloseScoTask;
+  class DeinitProfileResultHandlerRunnable;
+  class DeviceStatusNotificationResultHandler;
+  class DisconnectAudioResultHandler;
+  class DisconnectResultHandler;
+  class FormattedAtResponseResultHandler;
+  class GetVolumeTask;
+  class InitProfileResultHandlerRunnable;
   class MainThreadTask;
+  class PhoneStateChangeResultHandler;
+  class RegisterModuleResultHandler;
+  class RespondToBLDNTask;
+  class UnregisterModuleResultHandler;
+  class VolumeControlResultHandler;
 
   friend class BluetoothHfpManagerObserver;
   friend class GetVolumeTask;
@@ -153,6 +181,7 @@ private:
 
   BluetoothHfpManager();
   bool Init();
+
   void Cleanup();
 
   void HandleShutdown();
@@ -189,15 +218,17 @@ private:
   int mCurrentVgs;
   int mCurrentVgm;
   bool mReceiveVgsFlag;
+  // This flag is for HFP only, not for HSP.
   bool mDialingRequestProcessed;
+  bool mNrecEnabled;
   PhoneType mPhoneType;
-  nsString mDeviceAddress;
+  BluetoothAddress mDeviceAddress;
   nsString mMsisdn;
   nsString mOperatorName;
 
   nsTArray<Call> mCurrentCallArray;
   nsAutoPtr<BluetoothRilListener> mListener;
-  nsRefPtr<BluetoothProfileController> mController;
+  RefPtr<BluetoothProfileController> mController;
 
   // CDMA-specific variable
   Call mCdmaSecondCall;
@@ -205,4 +236,4 @@ private:
 
 END_BLUETOOTH_NAMESPACE
 
-#endif
+#endif // mozilla_dom_bluetooth_bluedroid_BluetoothHfpManager_h

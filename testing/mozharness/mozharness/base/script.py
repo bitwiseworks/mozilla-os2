@@ -45,6 +45,7 @@ except ImportError:
 
 from mozprocess import ProcessHandler
 from mozharness.base.config import BaseConfig
+from mozharness.base.errors import ZipErrorList
 from mozharness.base.log import SimpleFileLogger, MultiFileLogger, \
     LogMixin, OutputParser, DEBUG, INFO, ERROR, FATAL
 
@@ -274,8 +275,13 @@ class ScriptMixin(PlatformMixin):
             if file_attr & win32file.FILE_ATTRIBUTE_DIRECTORY:
                 self._rmtree_windows(full_name)
             else:
-                win32file.SetFileAttributesW('\\\\?\\' + full_name, win32file.FILE_ATTRIBUTE_NORMAL)
-                win32file.DeleteFile('\\\\?\\' + full_name)
+                try:
+                    win32file.SetFileAttributesW('\\\\?\\' + full_name, win32file.FILE_ATTRIBUTE_NORMAL)
+                    win32file.DeleteFile('\\\\?\\' + full_name)
+                except:
+                    # DeleteFile fails on long paths, del /f /q works just fine
+                    self.run_command('del /F /Q "%s"' % full_name)
+
         win32file.RemoveDirectory('\\\\?\\' + path)
 
     def get_filename_from_url(self, url):
@@ -314,7 +320,9 @@ class ScriptMixin(PlatformMixin):
         .. _urllib2.urlopen:
         https://docs.python.org/2/library/urllib2.html#urllib2.urlopen
         """
-        return urllib2.urlopen(url, **kwargs)
+        # http://bugs.python.org/issue13359 - urllib2 does not automatically quote the URL
+        url_quoted = urllib2.quote(url, safe='%/:=&?~#+!$,;\'@()*[]|')
+        return urllib2.urlopen(url_quoted, **kwargs)
 
     def _download_file(self, url, file_name):
         """ Helper script for download_file()
@@ -390,12 +398,14 @@ class ScriptMixin(PlatformMixin):
             self.warning("Socket error when accessing %s: %s" % (url, str(e)))
             raise
 
-    def _retry_download_file(self, url, file_name, error_level, retry_config=None):
-        """ Helper method to retry _download_file().
+    def _retry_download(self, url, error_level, file_name=None, retry_config=None):
+        """ Helper method to retry download methods
         Split out so we can alter the retry logic in mozharness.mozilla.testing.gaia_test.
 
         This method calls `self.retry` on `self._download_file` using the passed
-        parameters.
+        parameters if a file_name is specified. If no file is specified, we will
+        instead call `self._urlopen`, which grabs the contents of a url but does
+        not create a file on disk.
 
         Args:
             url (str): URL path where the file is located.
@@ -421,11 +431,58 @@ class ScriptMixin(PlatformMixin):
         if retry_config:
             retry_args.update(retry_config)
 
+        download_func = self._urlopen
+        kwargs = {"url": url}
+        if file_name:
+            download_func = self._download_file
+            kwargs = {"url": url, "file_name": file_name}
+
         return self.retry(
-            self._download_file,
-            args=(url, file_name),
+            download_func,
+            kwargs=kwargs,
             **retry_args
         )
+
+    def download_unzip(self, url, parent_dir, target_unzip_dirs=None, halt_on_failure=True):
+        """Generic method to download and extract a zip file.
+
+        The downloaded file will always be saved to the working directory and is not getting
+        deleted after extracting.
+
+        Args:
+            url (str): URL where the file to be downloaded is located.
+            parent_dir (str): directory where the downloaded file will
+                              be extracted to.
+            target_unzip_dirs (list, optional): directories inside the zip file to extract.
+                                                Defaults to `None`.
+            halt_on_failure (bool, optional): whether or not to redefine the
+                                              log level as `FATAL` on errors. Defaults to True.
+
+        """
+        dirs = self.query_abs_dirs()
+        zipfile = self.download_file(url, parent_dir=dirs['abs_work_dir'],
+                                     error_level=FATAL)
+
+        command = self.query_exe('unzip', return_type='list')
+        # Always overwrite to not get an input in a hidden pipe if files already exist
+        command.extend(['-q', '-o', zipfile, '-d', parent_dir])
+        if target_unzip_dirs:
+            command.extend(target_unzip_dirs)
+        # TODO error_list: http://www.info-zip.org/mans/unzip.html#DIAGNOSTICS
+        # unzip return code 11 is 'no matching files were found'
+        self.run_command(command,
+                         error_list=ZipErrorList,
+                         halt_on_failure=halt_on_failure,
+                         fatal_exit_code=3,
+                         success_codes=[0, 11],
+                         )
+
+    def load_json_url(self, url, error_level=None, *args, **kwargs):
+        """ Returns a json object from a url (it retries). """
+        contents = self._retry_download(
+            url=url, error_level=error_level, *args, **kwargs
+        )
+        return json.loads(contents.read())
 
     # http://www.techniqal.com/blog/2008/07/31/python-file-read-write-with-urllib2/
     # TODO thinking about creating a transfer object.
@@ -467,7 +524,12 @@ class ScriptMixin(PlatformMixin):
             if create_parent_dir:
                 self.mkdir_p(parent_dir, error_level=error_level)
         self.info("Downloading %s to %s" % (url, file_name))
-        status = self._retry_download_file(url, file_name, error_level, retry_config=retry_config)
+        status = self._retry_download(
+            url=url,
+            error_level=error_level,
+            file_name=file_name,
+            retry_config=retry_config
+        )
         if status == file_name:
             self.info("Downloaded %d bytes." % os.path.getsize(file_name))
         return status
@@ -1082,6 +1144,7 @@ class ScriptMixin(PlatformMixin):
                     self.info("Automation Error: mozprocess timed out after %s seconds running %s" % (str(output_timeout), str(command)))
 
                 p = ProcessHandler(command,
+                                   shell=shell,
                                    env=env,
                                    cwd=cwd,
                                    storeOutput=False,
@@ -1577,6 +1640,7 @@ class BaseScript(ScriptMixin, LogMixin, object):
         elif error_if_missing:
             self.error("No such method %s!" % method_name)
 
+    @PostScriptRun
     def copy_logs_to_upload_dir(self):
         """Copies logs to the upload directory"""
         self.info("Copying logs to upload dir...")

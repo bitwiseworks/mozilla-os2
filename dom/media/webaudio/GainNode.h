@@ -15,7 +15,7 @@ namespace dom {
 
 class AudioContext;
 
-class GainNode : public AudioNode
+class GainNode final : public AudioNode
 {
 public:
   explicit GainNode(AudioContext* aContext);
@@ -23,7 +23,7 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(GainNode, AudioNode)
 
-  virtual JSObject* WrapObject(JSContext* aCx) override;
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   AudioParam* Gain() const
   {
@@ -42,14 +42,11 @@ protected:
   virtual ~GainNode();
 
 private:
-  static void SendGainToStream(AudioNode* aNode);
-
-private:
-  nsRefPtr<AudioParam> mGain;
+  RefPtr<AudioParam> mGain;
 };
 
-}
-}
+} // namespace dom
+} // namespace mozilla
 
 #endif
 

@@ -18,7 +18,6 @@ namespace mozilla {
 namespace dom {
 
 class Promise;
-class TVProgram;
 class TVSource;
 
 class TVChannel final : public DOMEventTargetHelper
@@ -33,7 +32,7 @@ public:
 
   // WebIDL (internal functions)
 
-  virtual JSObject* WrapObject(JSContext *aCx) override;
+  virtual JSObject* WrapObject(JSContext *aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   nsresult DispatchTVEvent(nsIDOMEvent* aEvent);
 
@@ -71,7 +70,7 @@ private:
   bool Init(nsITVChannelData* aData);
 
   nsCOMPtr<nsITVService> mTVService;
-  nsRefPtr<TVSource> mSource;
+  RefPtr<TVSource> mSource;
   nsString mNetworkId;
   nsString mTransportStreamId;
   nsString mServiceId;

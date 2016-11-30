@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -22,9 +23,9 @@ NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(SVGAnimatedTransformList, AddRef)
 NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(SVGAnimatedTransformList, Release)
 
 JSObject*
-SVGAnimatedTransformList::WrapObject(JSContext* aCx)
+SVGAnimatedTransformList::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGAnimatedTransformListBinding::Wrap(aCx, this);
+  return SVGAnimatedTransformListBinding::Wrap(aCx, this, aGivenProto);
 }
 
 //----------------------------------------------------------------------
@@ -34,7 +35,7 @@ SVGAnimatedTransformList::BaseVal()
   if (!mBaseVal) {
     mBaseVal = new DOMSVGTransformList(this, InternalAList().GetBaseValue());
   }
-  nsRefPtr<DOMSVGTransformList> baseVal = mBaseVal;
+  RefPtr<DOMSVGTransformList> baseVal = mBaseVal;
   return baseVal.forget();
 }
 
@@ -44,7 +45,7 @@ SVGAnimatedTransformList::AnimVal()
   if (!mAnimVal) {
     mAnimVal = new DOMSVGTransformList(this, InternalAList().GetAnimValue());
   }
-  nsRefPtr<DOMSVGTransformList> animVal = mAnimVal;
+  RefPtr<DOMSVGTransformList> animVal = mAnimVal;
   return animVal.forget();
 }
 
@@ -52,7 +53,7 @@ SVGAnimatedTransformList::AnimVal()
 SVGAnimatedTransformList::GetDOMWrapper(nsSVGAnimatedTransformList *aList,
                                         nsSVGElement *aElement)
 {
-  nsRefPtr<SVGAnimatedTransformList> wrapper =
+  RefPtr<SVGAnimatedTransformList> wrapper =
     sSVGAnimatedTransformListTearoffTable.GetTearoff(aList);
   if (!wrapper) {
     wrapper = new SVGAnimatedTransformList(aElement);
@@ -86,7 +87,7 @@ SVGAnimatedTransformList::InternalBaseValListWillChangeLengthTo(
   // able to access "items" at indexes that are out of bounds (read/write to
   // bad memory)!!
 
-  nsRefPtr<SVGAnimatedTransformList> kungFuDeathGrip;
+  RefPtr<SVGAnimatedTransformList> kungFuDeathGrip;
   if (mBaseVal) {
     if (aNewLength < mBaseVal->LengthNoFlush()) {
       // InternalListLengthWillChange might clear last reference to |this|.

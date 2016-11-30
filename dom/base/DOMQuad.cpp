@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -38,9 +39,9 @@ DOMQuad::~DOMQuad()
 }
 
 JSObject*
-DOMQuad::WrapObject(JSContext* aCx)
+DOMQuad::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return DOMQuadBinding::Wrap(aCx, this);
+  return DOMQuadBinding::Wrap(aCx, this, aGivenProto);
 }
 
 already_AddRefed<DOMQuad>
@@ -51,7 +52,7 @@ DOMQuad::Constructor(const GlobalObject& aGlobal,
                      const DOMPointInit& aP4,
                      ErrorResult& aRV)
 {
-  nsRefPtr<DOMQuad> obj = new DOMQuad(aGlobal.GetAsSupports());
+  RefPtr<DOMQuad> obj = new DOMQuad(aGlobal.GetAsSupports());
   obj->mPoints[0] = DOMPoint::Constructor(aGlobal, aP1, aRV);
   obj->mPoints[1] = DOMPoint::Constructor(aGlobal, aP2, aRV);
   obj->mPoints[2] = DOMPoint::Constructor(aGlobal, aP3, aRV);
@@ -69,7 +70,7 @@ DOMQuad::Constructor(const GlobalObject& aGlobal, const DOMRectReadOnly& aRect,
   points[1] = CSSPoint(x + w, y);
   points[2] = CSSPoint(x + w, y + h);
   points[3] = CSSPoint(x, y + h);
-  nsRefPtr<DOMQuad> obj = new DOMQuad(aGlobal.GetAsSupports(), points);
+  RefPtr<DOMQuad> obj = new DOMQuad(aGlobal.GetAsSupports(), points);
   return obj.forget();
 }
 
@@ -138,7 +139,7 @@ public:
 protected:
   virtual ~QuadBounds() {}
 
-  nsRefPtr<DOMQuad> mQuad;
+  RefPtr<DOMQuad> mQuad;
 };
 
 NS_IMPL_CYCLE_COLLECTION_INHERITED(DOMQuad::QuadBounds, DOMRectReadOnly, mQuad)

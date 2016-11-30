@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -43,14 +44,12 @@ using namespace mozilla::dom;
 #define INDENT_STRING "  "
 #define INDENT_STRING_LENGTH 2
 
-nsresult NS_NewXMLContentSerializer(nsIContentSerializer** aSerializer)
+nsresult
+NS_NewXMLContentSerializer(nsIContentSerializer** aSerializer)
 {
-  nsXMLContentSerializer* it = new nsXMLContentSerializer();
-  if (!it) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-
-  return CallQueryInterface(it, aSerializer);
+  RefPtr<nsXMLContentSerializer> it = new nsXMLContentSerializer();
+  it.forget(aSerializer);
+  return NS_OK;
 }
 
 nsXMLContentSerializer::nsXMLContentSerializer()
@@ -112,6 +111,8 @@ nsXMLContentSerializer::Init(uint32_t aFlags, uint32_t aWrapColumn,
   mDoFormat = (mFlags & nsIDocumentEncoder::OutputFormatted && !mDoRaw);
 
   mDoWrap = (mFlags & nsIDocumentEncoder::OutputWrap && !mDoRaw);
+
+  mAllowLineBreaking = !(mFlags & nsIDocumentEncoder::OutputDisallowLineBreaking);
 
   if (!aWrapColumn) {
     mMaxColumn = 72;
@@ -773,9 +774,9 @@ bool
 nsXMLContentSerializer::IsJavaScript(nsIContent * aContent, nsIAtom* aAttrNameAtom,
                                      int32_t aAttrNamespaceID, const nsAString& aValueString)
 {
-  bool isHtml = aContent->IsHTML();
-  bool isXul = aContent->IsXUL();
-  bool isSvg = aContent->IsSVG();
+  bool isHtml = aContent->IsHTMLElement();
+  bool isXul = aContent->IsXULElement();
+  bool isSvg = aContent->IsSVGElement();
 
   if (aAttrNamespaceID == kNameSpaceID_None &&
       (isHtml || isXul || isSvg) &&
@@ -907,7 +908,7 @@ nsXMLContentSerializer::AppendElementStart(Element* aElement,
   uint32_t skipAttr = ScanNamespaceDeclarations(content,
                           aOriginalElement, tagNamespaceURI);
 
-  nsIAtom *name = content->Tag();
+  nsIAtom *name = content->NodeInfo()->NameAtom();
   bool lineBreakBeforeOpen = LineBreakBeforeOpen(content->GetNameSpaceID(), name);
 
   if ((mDoFormat || forceFormat) && !mDoRaw && !PreLevel()) {
@@ -999,7 +1000,7 @@ nsXMLContentSerializer::AppendElementEnd(Element* aElement,
   bool forceFormat = false, outputElementEnd;
   outputElementEnd = CheckElementEnd(content, forceFormat, aStr);
 
-  nsIAtom *name = content->Tag();
+  nsIAtom *name = content->NodeInfo()->NameAtom();
 
   if ((mDoFormat || forceFormat) && !mDoRaw && !PreLevel()) {
     DecrIndentation(name);
@@ -1540,22 +1541,24 @@ nsXMLContentSerializer::AppendWrapped_NonWhitespaceSequence(
         // we must wrap
         onceAgainBecauseWeAddedBreakInFront = false;
         bool foundWrapPosition = false;
-        int32_t wrapPosition;
+        int32_t wrapPosition = 0;
 
-        nsILineBreaker *lineBreaker = nsContentUtils::LineBreaker();
+        if (mAllowLineBreaking) {
+          nsILineBreaker *lineBreaker = nsContentUtils::LineBreaker();
 
-        wrapPosition = lineBreaker->Prev(aSequenceStart,
-                                         (aEnd - aSequenceStart),
-                                         (aPos - aSequenceStart) + 1);
-        if (wrapPosition != NS_LINEBREAKER_NEED_MORE_TEXT) {
-          foundWrapPosition = true;
-        }
-        else {
-          wrapPosition = lineBreaker->Next(aSequenceStart,
+          wrapPosition = lineBreaker->Prev(aSequenceStart,
                                            (aEnd - aSequenceStart),
-                                           (aPos - aSequenceStart));
+                                           (aPos - aSequenceStart) + 1);
           if (wrapPosition != NS_LINEBREAKER_NEED_MORE_TEXT) {
             foundWrapPosition = true;
+          }
+          else {
+            wrapPosition = lineBreaker->Next(aSequenceStart,
+                                             (aEnd - aSequenceStart),
+                                             (aPos - aSequenceStart));
+            if (wrapPosition != NS_LINEBREAKER_NEED_MORE_TEXT) {
+              foundWrapPosition = true;
+            }
           }
         }
 

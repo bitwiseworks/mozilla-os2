@@ -8,8 +8,6 @@
 
 #include "HTMLFormControlAccessible.h"
 
-class nsIMutableArray;
-
 namespace mozilla {
 namespace a11y {
 
@@ -198,7 +196,7 @@ protected:
   Accessible* SelectedOption() const;
 
 private:
-  nsRefPtr<HTMLComboboxListAccessible> mListAccessible;
+  RefPtr<HTMLComboboxListAccessible> mListAccessible;
 };
 
 /*

@@ -19,6 +19,8 @@
 #include "nsISupportsImpl.h"
 #include "nsNativeCharsetUtils.h"
 #include "nsNetUtil.h"
+#include "nsIFileProtocolHandler.h"
+#include "nsIURI.h"
 #include "nsUnicharUtils.h"
 #include "nsTArray.h"
 #include "nsTextFormatter.h"
@@ -279,7 +281,7 @@ nsCommandLine::ResolveFile(const nsAString& aArgument, nsIFile* *aResult)
   CFRelease(newurl);
   if (NS_FAILED(rv)) return rv;
 
-  NS_ADDREF(*aResult = newfile);
+  newfile.forget(aResult);
   return NS_OK;
 
 #elif defined(XP_UNIX)
@@ -310,7 +312,7 @@ nsCommandLine::ResolveFile(const nsAString& aArgument, nsIFile* *aResult)
   rv = lf->Normalize();
   if (NS_FAILED(rv)) return rv;
 
-  NS_ADDREF(*aResult = lf);
+  lf.forget(aResult);
   return NS_OK;
 
 #elif defined(XP_WIN32)
@@ -337,7 +339,7 @@ nsCommandLine::ResolveFile(const nsAString& aArgument, nsIFile* *aResult)
     rv = lf->InitWithPath(nsDependentString(pathBuf));
     if (NS_FAILED(rv)) return rv;
   }
-  NS_ADDREF(*aResult = lf);
+  lf.forget(aResult);
   return NS_OK;
 
 #elif defined(XP_OS2)
@@ -519,7 +521,7 @@ LogConsoleMessage(const char16_t* fmt, ...)
   if (cs)
     cs->LogStringMessage(msg);
 
-  NS_Free(msg);
+  free(msg);
 }
 
 nsresult

@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim:set ts=2 sw=2 sts=2 et cindent: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -29,18 +29,18 @@ SubtleCrypto::SubtleCrypto(nsIGlobalObject* aParent)
 }
 
 JSObject*
-SubtleCrypto::WrapObject(JSContext* aCx)
+SubtleCrypto::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SubtleCryptoBinding::Wrap(aCx, this);
+  return SubtleCryptoBinding::Wrap(aCx, this, aGivenProto);
 }
 
 #define SUBTLECRYPTO_METHOD_BODY(Operation, aRv, ...)                   \
   MOZ_ASSERT(mParent);                                                  \
-  nsRefPtr<Promise> p = Promise::Create(mParent, aRv);                  \
+  RefPtr<Promise> p = Promise::Create(mParent, aRv);                  \
   if (aRv.Failed()) {                                                   \
     return nullptr;                                                     \
   }                                                                     \
-  nsRefPtr<WebCryptoTask> task = WebCryptoTask::Create ## Operation ## Task(__VA_ARGS__); \
+  RefPtr<WebCryptoTask> task = WebCryptoTask::Create ## Operation ## Task(__VA_ARGS__); \
   task->DispatchWithPromise(p); \
   return p.forget();
 

@@ -29,6 +29,7 @@
     const SAMPLE_URL = "http://www.mozilla.org/";
     const SAMPLE_TEXT = "Some text in a text field.";
     const SEARCH_TEXT = "Text Test";
+    const NOT_FOUND_TEXT = "This text is not on the page."
 
     var gFindBar = null;
     var gBrowser;
@@ -122,6 +123,7 @@
       yield testFailedStringReset();
       gFindBar.close();
       yield testQuickFindClose();
+      yield Task.spawn(testFindAgainNotFound);
       finish();
     });
 
@@ -446,9 +448,9 @@
       let timeout = gFindBar._matchesCountTimeoutLength + 20;
 
       function assertMatches(aTest, aMatches) {
-        is(aMatches[1], aTest.current,
+        is(aMatches[1], String(aTest.current),
           "Currently highlighted match should be at " + aTest.current);
-        is(aMatches[2], aTest.total,
+        is(aMatches[2], String(aTest.total),
           "Total amount of matches should be " + aTest.total);
       }
 
@@ -502,11 +504,11 @@
       prefsvc.setIntPref("accessibility.typeaheadfind.casesensitive", 0);
 
       enterStringIntoFindField("t");
-      is(gBrowser.contentWindow.getSelection(), "T", "First T should be selected.");
+      is(String(gBrowser.contentWindow.getSelection()), "T", "First T should be selected.");
 
       prefsvc.setIntPref("accessibility.typeaheadfind.casesensitive", 1);
       setTimeout(function() {
-        is(gBrowser.contentWindow.getSelection(), "t", "First t should be selected.");
+        is(String(gBrowser.contentWindow.getSelection()), "t", "First t should be selected.");
         deferred.resolve();
       }, 0);
       return deferred.promise;
@@ -523,11 +525,11 @@
       prefsvc.setIntPref("accessibility.typeaheadfind.casesensitive", 1);
 
       enterStringIntoFindField(SEARCH_TEXT.toUpperCase());
-      is(gBrowser.contentWindow.getSelection(), "", "Not found.");
+      is(String(gBrowser.contentWindow.getSelection()), "", "Not found.");
 
       prefsvc.setIntPref("accessibility.typeaheadfind.casesensitive", 0);
       setTimeout(function() {
-        is(gBrowser.contentWindow.getSelection(), SEARCH_TEXT, "Search text should be selected.");
+        is(String(gBrowser.contentWindow.getSelection()), SEARCH_TEXT, "Search text should be selected.");
         deferred.resolve();
       }, 0);
       return deferred.resolve();
@@ -543,6 +545,38 @@
       ok(searchStr.toLowerCase() == aExpected.toLowerCase(),
         "testClipboardSearchString: search string not set to '" + aExpected +
         "', instead found '" + searchStr + "'");
+    }
+
+    // See bug 967982.
+    function* testFindAgainNotFound() {
+      yield openFindbar();
+      yield findAndWaitForResult(NOT_FOUND_TEXT);
+      gFindBar.close();
+      ok(gFindBar.hidden, "The findbar is closed.");
+      yield findAndWaitForResult();
+      ok(!gFindBar.hidden, "Unsuccessful Find Again opens the find bar.");
+
+      yield findAndWaitForResult(SEARCH_TEXT);
+      gFindBar.close();
+      ok(gFindBar.hidden, "The findbar is closed.");
+      yield findAndWaitForResult();
+      ok(gFindBar.hidden, "Successful Find Again leaves the find bar closed.");
+    }
+
+    function findAndWaitForResult(aText) {
+      return new Promise(resolve => {
+        gFindBar.browser.finder.addResultListener({
+          onFindResult: function(aData) {
+            gFindBar.browser.finder.removeResultListener(this);
+            resolve(aData);
+          }
+        });
+        if (aText) {
+          enterStringIntoFindField(aText);
+        } else {
+          gFindBar.onFindAgainCommand();
+        }
+      });
     }
   ]]></script>
 

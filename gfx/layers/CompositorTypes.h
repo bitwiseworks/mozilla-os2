@@ -51,19 +51,21 @@ enum class TextureFlags : uint32_t {
   // deallocation.
   // The default behaviour is to deallocate on the host side.
   DEALLOCATE_CLIENT  = 1 << 6,
+  DEALLOCATE_SYNC    = 1 << 6, // XXX - make it a separate flag.
+  DEALLOCATE_MAIN_THREAD = 1 << 8,
   // After being shared ith the compositor side, an immutable texture is never
   // modified, it can only be read. It is safe to not Lock/Unlock immutable
   // textures.
-  IMMUTABLE          = 1 << 7,
+  IMMUTABLE          = 1 << 9,
   // The contents of the texture must be uploaded or copied immediately
   // during the transaction, because the producer may want to write
   // to it again.
-  IMMEDIATE_UPLOAD   = 1 << 8,
+  IMMEDIATE_UPLOAD   = 1 << 10,
   // The texture is part of a component-alpha pair
-  COMPONENT_ALPHA    = 1 << 9,
+  COMPONENT_ALPHA    = 1 << 11,
 
   // OR union of all valid bits
-  ALL_BITS           = (1 << 10) - 1,
+  ALL_BITS           = (1 << 12) - 1,
   // the default flags
   DEFAULT = NO_FLAGS
 };
@@ -107,7 +109,9 @@ enum class DiagnosticFlags : uint16_t {
   TILE            = 1 << 5,
   BIGIMAGE        = 1 << 6,
   COMPONENT_ALPHA = 1 << 7,
-  REGION_RECT     = 1 << 8
+  REGION_RECT     = 1 << 8,
+  NV12            = 1 << 9,
+  YCBCR           = 1 << 10
 };
 MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(DiagnosticFlags)
 
@@ -121,6 +125,7 @@ enum class EffectTypes : uint8_t {
   MAX_SECONDARY, // sentinel for the count of secondary effect types
   RGB,
   YCBCR,
+  NV12,
   COMPONENT_ALPHA,
   SOLID_COLOR,
   RENDER_TARGET,
@@ -133,8 +138,6 @@ enum class EffectTypes : uint8_t {
  */
 enum class CompositableType : uint8_t {
   UNKNOWN,
-  CONTENT_INC,     // painted layer interface, only sends incremental
-                   // updates to a texture on the compositor side.
   CONTENT_TILED,   // tiled painted layer
   IMAGE,           // image with single buffering
   IMAGE_OVERLAY,   // image without buffer
@@ -143,19 +146,6 @@ enum class CompositableType : uint8_t {
   CONTENT_DOUBLE,  // painted layer interface, double buffering
   COUNT
 };
-
-/**
- * How the texture host is used for composition,
- * XXX - Only used by ContentClientIncremental
- */
-enum class DeprecatedTextureHostFlags : uint8_t {
-  DEFAULT = 0,       // The default texture host for the given SurfaceDescriptor
-  TILED = 1 << 0,    // A texture host that supports tiling
-  COPY_PREVIOUS = 1 << 1, // Texture contents should be initialized
-                                      // from the previous texture.
-  ALL_BITS = (1 << 2) - 1
-};
-MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(DeprecatedTextureHostFlags)
 
 #ifdef XP_WIN
 typedef void* SyncHandle;
@@ -195,20 +185,6 @@ struct TextureFactoryIdentifier
 };
 
 /**
- * Identify a texture to a compositable. Many textures can have the same id, but
- * the id is unique for any texture owned by a particular compositable.
- * XXX - We don't really need this, it will be removed along with the incremental
- * ContentClient/Host.
- */
-enum class TextureIdentifier : uint8_t {
-  Front = 1,
-  Back = 2,
-  OnWhiteFront = 3,
-  OnWhiteBack = 4,
-  HighBound
-};
-
-/**
  * Information required by the compositor from the content-side for creating or
  * using compositables and textures.
  * XXX - TextureInfo is a bad name: this information is useful for the compositable,
@@ -218,27 +194,22 @@ enum class TextureIdentifier : uint8_t {
 struct TextureInfo
 {
   CompositableType mCompositableType;
-  // XXX - only used by ContentClientIncremental
-  DeprecatedTextureHostFlags mDeprecatedTextureHostFlags;
   TextureFlags mTextureFlags;
 
   TextureInfo()
     : mCompositableType(CompositableType::UNKNOWN)
-    , mDeprecatedTextureHostFlags(DeprecatedTextureHostFlags::DEFAULT)
     , mTextureFlags(TextureFlags::NO_FLAGS)
   {}
 
   explicit TextureInfo(CompositableType aType,
                        TextureFlags aTextureFlags = TextureFlags::DEFAULT)
     : mCompositableType(aType)
-    , mDeprecatedTextureHostFlags(DeprecatedTextureHostFlags::DEFAULT)
     , mTextureFlags(aTextureFlags)
   {}
 
   bool operator==(const TextureInfo& aOther) const
   {
     return mCompositableType == aOther.mCompositableType &&
-           mDeprecatedTextureHostFlags == aOther.mDeprecatedTextureHostFlags &&
            mTextureFlags == aOther.mTextureFlags;
   }
 };

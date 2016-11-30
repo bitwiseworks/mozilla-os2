@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -8,7 +9,6 @@
 #include "nsIDocument.h"
 #include "nsContentUtils.h"
 #include "nsPresContext.h"
-#include "nsNetUtil.h"
 
 #include "nsCSSParser.h"
 #include "nsCSSProps.h"
@@ -293,7 +293,6 @@ ResponsiveImageSelector::SelectImage(bool aReselect)
   nsCOMPtr<nsIURI> baseURI = mOwnerNode ? mOwnerNode->GetBaseURI() : nullptr;
 
   if (!pctx || !doc || !baseURI) {
-    MOZ_ASSERT(false, "Unable to find document prescontext and base URI");
     return oldBest != -1;
   }
 
@@ -703,8 +702,8 @@ ResponsiveImageCandidate::Density(int32_t aMatchingWidth) const
   if (mType == eCandidateType_Density) {
     return mValue.mDensity;
   } else if (mType == eCandidateType_ComputedFromWidth) {
-    if (aMatchingWidth <= 0) {
-      MOZ_ASSERT(false, "0 or negative matching width is invalid per spec");
+    if (aMatchingWidth < 0) {
+      MOZ_ASSERT(false, "Don't expect to have a negative matching width at this point");
       return 1.0;
     }
     double density = double(mValue.mWidth) / double(aMatchingWidth);

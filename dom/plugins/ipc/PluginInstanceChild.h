@@ -12,7 +12,7 @@
 #include "mozilla/plugins/StreamNotifyChild.h"
 #include "mozilla/plugins/PPluginSurfaceChild.h"
 #include "mozilla/ipc/CrossProcessMutex.h"
-#include "nsClassHashtable.h"
+#include "nsRefPtrHashtable.h"
 #if defined(OS_WIN)
 #include "mozilla/gfx/SharedDIBWin.h"
 #elif defined(OS_OS2)
@@ -32,6 +32,7 @@
 #include "nsRect.h"
 #include "nsTHashtable.h"
 #include "mozilla/PaintTracker.h"
+#include "mozilla/gfx/Types.h"
 
 #include <map>
 
@@ -42,11 +43,6 @@
 class gfxASurface;
 
 namespace mozilla {
-
-namespace layers {
-struct RemoteImageData;
-}
-
 namespace plugins {
 
 class PBrowserStreamChild;
@@ -72,7 +68,14 @@ class PluginInstanceChild : public PPluginInstanceChild
 #endif
 
 protected:
-    virtual bool AnswerNPP_SetWindow(const NPRemoteWindow& window) override;
+    virtual bool
+    AnswerCreateChildPluginWindow(NativeWindowHandle* aChildPluginWindow) override;
+
+    virtual bool
+    RecvCreateChildPopupSurrogate(const NativeWindowHandle& aNetscapeWindow) override;
+
+    virtual bool
+    AnswerNPP_SetWindow(const NPRemoteWindow& window) override;
 
     virtual bool
     AnswerNPP_GetValue_NPPVpluginWantsAllNetworkStreams(bool* wantsAllStreams, NPError* rv) override;
@@ -86,6 +89,8 @@ protected:
                                                            NPError* aResult) override;
     virtual bool
     AnswerNPP_SetValue_NPNVprivateModeBool(const bool& value, NPError* result) override;
+    virtual bool
+    AnswerNPP_SetValue_NPNVmuteAudioBool(const bool& value, NPError* result) override;
 
     virtual bool
     AnswerNPP_HandleEvent(const NPRemoteEvent& event, int16_t* handled) override;
@@ -111,7 +116,7 @@ protected:
 
     virtual PPluginSurfaceChild*
     AllocPPluginSurfaceChild(const WindowsSharedMemoryHandle&,
-                             const gfxIntSize&, const bool&) override {
+                             const gfx::IntSize&, const bool&) override {
         return new PPluginSurfaceChild();
     }
 
@@ -252,10 +257,19 @@ public:
     void UnscheduleTimer(uint32_t id);
 
     void AsyncCall(PluginThreadCallback aFunc, void* aUserData);
+    // This function is a more general version of AsyncCall
+    void PostChildAsyncCall(ChildAsyncCall* aTask);
 
     int GetQuirks();
 
     void NPN_URLRedirectResponse(void* notifyData, NPBool allow);
+
+
+    NPError NPN_InitAsyncSurface(NPSize *size, NPImageFormat format,
+                                 void *initData, NPAsyncSurface *surface);
+    NPError NPN_FinalizeAsyncSurface(NPAsyncSurface *surface);
+
+    void NPN_SetCurrentAsyncSurface(NPAsyncSurface *surface, NPRect *changed);
 
     void DoAsyncRedraw();
 private:
@@ -265,7 +279,7 @@ private:
     InternalGetNPObjectForValue(NPNVariable aValue,
                                 NPObject** aObject);
 
-    bool IsAsyncDrawing();
+    bool IsUsingDirectDrawing();
 
     virtual bool RecvUpdateBackground(const SurfaceDescriptor& aBackground,
                                       const nsIntRect& aRect) override;
@@ -283,12 +297,12 @@ private:
     static bool RegisterWindowClass();
     bool CreatePluginWindow();
     void DestroyPluginWindow();
-    void ReparentPluginWindow(HWND hWndParent);
     void SizePluginWindow(int width, int height);
     int16_t WinlessHandleEvent(NPEvent& event);
     void CreateWinlessPopupSurrogate();
     void DestroyWinlessPopupSurrogate();
     void InitPopupMenuHook();
+    void InitSetCursorHook();
     void SetupFlashMsgThrottle();
     void UnhookWinlessFlashThrottle();
     void HookSetWindowLongPtr();
@@ -322,6 +336,7 @@ private:
                                                       UINT message,
                                                       WPARAM wParam,
                                                       LPARAM lParam);
+    static HCURSOR WINAPI SetCursorHookProc(HCURSOR hCursor);
 #ifdef _WIN64
     static LONG_PTR WINAPI SetWindowLongPtrAHook(HWND hWnd,
                                                  int nIndex,
@@ -393,10 +408,37 @@ private:
     InfallibleTArray<nsCString> mValues;
     NPP_t mData;
     NPWindow mWindow;
-#if defined(XP_MACOSX)
+#if defined(XP_DARWIN)
     double mContentsScaleFactor;
 #endif
     int16_t               mDrawingModel;
+
+    NPAsyncSurface* mCurrentDirectSurface;
+
+    // The surface hashtables below serve a few purposes. They let us verify
+    // and retain extra information about plugin surfaces, and they let us
+    // free shared memory that the plugin might forget to release.
+    struct DirectBitmap {
+        DirectBitmap(PluginInstanceChild* aOwner, const Shmem& shmem,
+                     const gfx::IntSize& size, uint32_t stride, SurfaceFormat format);
+
+      private:
+        ~DirectBitmap();
+
+      public:
+        NS_INLINE_DECL_THREADSAFE_REFCOUNTING(DirectBitmap);
+
+        PluginInstanceChild* mOwner;
+        Shmem mShmem;
+        gfx::SurfaceFormat mFormat;
+        gfx::IntSize mSize;
+        uint32_t mStride;
+    };
+    nsRefPtrHashtable<nsPtrHashKey<NPAsyncSurface>, DirectBitmap> mDirectBitmaps;
+
+#if defined(XP_WIN)
+    nsDataHashtable<nsPtrHashKey<NPAsyncSurface>, WindowsHandle> mDxgiSurfaces;
+#endif
 
     mozilla::Mutex mAsyncInvalidateMutex;
     CancelableTask *mAsyncInvalidateTask;
@@ -443,36 +485,6 @@ private:
      */
     nsAutoPtr< nsTHashtable<DeletingObjectEntry> > mDeletingHash;
 
-#if defined(OS_WIN)
-private:
-    // Shared dib rendering management for windowless plugins.
-    bool SharedSurfaceSetWindow(const NPRemoteWindow& aWindow);
-    int16_t SharedSurfacePaint(NPEvent& evcopy);
-    void SharedSurfaceRelease();
-    bool AlphaExtractCacheSetup();
-    void AlphaExtractCacheRelease();
-    void UpdatePaintClipRect(RECT* aRect);
-
-private:
-    enum {
-      RENDER_NATIVE,
-      RENDER_BACK_ONE,
-      RENDER_BACK_TWO 
-    };
-    gfx::SharedDIBWin mSharedSurfaceDib;
-    struct {
-      uint16_t        doublePass;
-      HDC             hdc;
-      HBITMAP         bmp;
-    } mAlphaExtract;
-#endif // defined(OS_WIN)
-
-#if defined(OS_OS2)
-    bool SharedSurfaceSetWindow(const NPRemoteWindow& aWindow);
-    void SharedSurfaceRelease();
-    gfx::SharedDIBOS2 mSharedSurfaceDib;
-#endif // defined(OS_OS2)
-
 #if defined(MOZ_WIDGET_COCOA)
 private:
 #if defined(__i386__)
@@ -480,7 +492,7 @@ private:
 #endif
     CGColorSpaceRef               mShColorSpace;
     CGContextRef                  mShContext;
-    mozilla::RefPtr<nsCARenderer> mCARenderer;
+    RefPtr<nsCARenderer> mCARenderer;
     void                         *mCGLayer;
 
     // Core Animation drawing model requires a refresh timer.
@@ -537,7 +549,7 @@ private:
     // Paint plugin content rectangle to surface with bg color filling
     void PaintRectToSurface(const nsIntRect& aRect,
                             gfxASurface* aSurface,
-                            const gfxRGBA& aColor);
+                            const gfx::Color& aColor);
 
     // Render plugin content to surface using
     // white/black image alpha extraction algorithm
@@ -587,11 +599,11 @@ private:
     bool mLayersRendering;
 
     // Current surface available for rendering
-    nsRefPtr<gfxASurface> mCurrentSurface;
+    RefPtr<gfxASurface> mCurrentSurface;
 
     // Back surface, just keeping reference to
     // surface which is on ParentProcess side
-    nsRefPtr<gfxASurface> mBackSurface;
+    RefPtr<gfxASurface> mBackSurface;
 
 #ifdef XP_MACOSX
     // Current IOSurface available for rendering
@@ -604,7 +616,7 @@ private:
     // |mIsTransparent|.  We ask the plugin render directly onto a
     // copy of the background pixels if available, and fall back on
     // alpha recovery otherwise.
-    nsRefPtr<gfxASurface> mBackground;
+    RefPtr<gfxASurface> mBackground;
 
 #if defined(XP_WIN) || defined(XP_OS2)
     // These actors mirror mCurrentSurface/mBackSurface
@@ -638,7 +650,7 @@ private:
     // alpha, or not support rendering to an image surface.
     // In those cases we need to draw to a temporary platform surface; we cache
     // that surface here.
-    nsRefPtr<gfxASurface> mHelperSurface;
+    RefPtr<gfxASurface> mHelperSurface;
 
     // true when plugin does not support painting to ARGB32
     // surface this is false if plugin supports

@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -75,7 +76,7 @@ class ErrorResult;
  * https://bugzilla.mozilla.org/show_bug.cgi?id=571734
  */
 class DOMSVGLength final : public nsIDOMSVGLength,
-                               public nsWrapperCache
+                           public nsWrapperCache
 {
   friend class AutoChangeLengthNotifier;
 
@@ -188,7 +189,7 @@ public:
     return static_cast<nsIDOMSVGElement*> (svgElement);
   }
 
-  JSObject* WrapObject(JSContext* aCx) override;
+  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
 private:
 
@@ -223,7 +224,14 @@ private:
   bool IndexIsValid();
 #endif
 
-  nsRefPtr<DOMSVGLengthList> mList;
+  /**
+   * Clears soon-to-be-invalid weak references in external objects that were
+   * set up during the creation of this object. This should be called during
+   * destruction and during cycle collection.
+   */
+  void CleanupWeakRefs();
+
+  RefPtr<DOMSVGLengthList> mList;
 
   // Bounds for the following are checked in the ctor, so be sure to update
   // that if you change the capacity of any of the following.
@@ -238,7 +246,7 @@ private:
 
   // The following members are only used when we have an nsSVGLength2
   nsSVGLength2* mVal; // kept alive because it belongs to mSVGElement
-  nsRefPtr<nsSVGElement> mSVGElement;
+  RefPtr<nsSVGElement> mSVGElement;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(DOMSVGLength, MOZILLA_DOMSVGLENGTH_IID)

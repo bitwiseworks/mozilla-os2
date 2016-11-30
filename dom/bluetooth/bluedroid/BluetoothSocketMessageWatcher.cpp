@@ -1,5 +1,5 @@
-/* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include "BluetoothInterface.h"
+#include "mozilla/Endian.h"
 #include "nsClassHashtable.h"
 
 BEGIN_BLUETOOTH_NAMESPACE
@@ -135,10 +136,10 @@ SocketMessageWatcher::GetSize() const
   return ReadInt16(OFF_SIZE);
 }
 
-nsString
+BluetoothAddress
 SocketMessageWatcher::GetBdAddress() const
 {
-  nsString bdAddress;
+  BluetoothAddress bdAddress;
   ReadBdAddress(OFF_BDADDRESS, bdAddress);
   return bdAddress;
 }
@@ -243,40 +244,26 @@ int16_t
 SocketMessageWatcher::ReadInt16(unsigned long aOffset) const
 {
   /* little-endian buffer */
-  return (static_cast<int16_t>(mBuf[aOffset + 1]) << 8) |
-          static_cast<int16_t>(mBuf[aOffset]);
+  return LittleEndian::readInt16(&mBuf[aOffset]);
 }
 
 int32_t
 SocketMessageWatcher::ReadInt32(unsigned long aOffset) const
 {
   /* little-endian buffer */
-  return (static_cast<int32_t>(mBuf[aOffset + 3]) << 24) |
-         (static_cast<int32_t>(mBuf[aOffset + 2]) << 16) |
-         (static_cast<int32_t>(mBuf[aOffset + 1]) << 8) |
-          static_cast<int32_t>(mBuf[aOffset]);
+  return LittleEndian::readInt32(&mBuf[aOffset]);
 }
 
 void
 SocketMessageWatcher::ReadBdAddress(unsigned long aOffset,
-                                    nsAString& aBdAddress) const
+                                    BluetoothAddress& aBdAddress) const
 {
-  char str[BLUETOOTH_ADDRESS_LENGTH + 1];
-
-  int res = snprintf(str, sizeof(str), "%02x:%02x:%02x:%02x:%02x:%02x",
-                     static_cast<int>(mBuf[aOffset + 0]),
-                     static_cast<int>(mBuf[aOffset + 1]),
-                     static_cast<int>(mBuf[aOffset + 2]),
-                     static_cast<int>(mBuf[aOffset + 3]),
-                     static_cast<int>(mBuf[aOffset + 4]),
-                     static_cast<int>(mBuf[aOffset + 5]));
-  if (res < 0) {
-    aBdAddress.AssignLiteral(BLUETOOTH_ADDRESS_NONE);
-  } else if ((size_t)res >= sizeof(str)) { /* string buffer too small */
-    aBdAddress.AssignLiteral(BLUETOOTH_ADDRESS_NONE);
-  } else {
-    aBdAddress = NS_ConvertUTF8toUTF16(str);
-  }
+  aBdAddress = BluetoothAddress(mBuf[aOffset + 0],
+                                mBuf[aOffset + 1],
+                                mBuf[aOffset + 2],
+                                mBuf[aOffset + 3],
+                                mBuf[aOffset + 4],
+                                mBuf[aOffset + 5]);
 }
 
 //

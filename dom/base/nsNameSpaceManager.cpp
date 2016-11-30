@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -140,7 +141,7 @@ NS_NewElement(Element** aResult,
               already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
               FromParser aFromParser)
 {
-  nsRefPtr<mozilla::dom::NodeInfo> ni = aNodeInfo;
+  RefPtr<mozilla::dom::NodeInfo> ni = aNodeInfo;
   int32_t ns = ni->NamespaceID();
   if (ns == kNameSpaceID_XHTML) {
     return NS_NewHTMLElement(aResult, ni.forget(), aFromParser);
@@ -188,7 +189,7 @@ nsresult nsNameSpaceManager::AddNameSpace(const nsAString& aURI,
                "BAD! AddNameSpace not called in right order!");
 
   nsString* uri = new nsString(aURI);
-  if (!uri || !mURIArray.AppendElement(uri)) {
+  if (!mURIArray.AppendElement(uri)) {
     delete uri;
     return NS_ERROR_OUT_OF_MEMORY;
   }

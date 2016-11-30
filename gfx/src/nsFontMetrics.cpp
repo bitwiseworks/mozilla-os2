@@ -66,7 +66,7 @@ private:
             case NS_STYLE_TEXT_ORIENTATION_UPRIGHT:
                 flags |= gfxTextRunFactory::TEXT_ORIENT_VERTICAL_UPRIGHT;
                 break;
-            case NS_STYLE_TEXT_ORIENTATION_SIDEWAYS_RIGHT:
+            case NS_STYLE_TEXT_ORIENTATION_SIDEWAYS:
                 flags |= gfxTextRunFactory::TEXT_ORIENT_VERTICAL_SIDEWAYS_RIGHT;
                 break;
             }
@@ -105,7 +105,7 @@ public:
     }
 };
 
-} // anon namespace
+} // namespace
 
 nsFontMetrics::nsFontMetrics()
     : mDeviceContext(nullptr), mP2A(0), mTextRunRTL(false)
@@ -150,9 +150,11 @@ nsFontMetrics::Init(const nsFont& aFont,
 
     aFont.AddFontFeaturesToStyle(&style);
 
+    gfxFloat devToCssSize = gfxFloat(mP2A) /
+        gfxFloat(mDeviceContext->AppUnitsPerCSSPixel());
     mFontGroup = gfxPlatform::GetPlatform()->
-        CreateFontGroup(aFont.fontlist, &style, aUserFontSet);
-    mFontGroup->SetTextPerfMetrics(aTextPerf);
+        CreateFontGroup(aFont.fontlist, &style, aTextPerf,
+                        aUserFontSet, devToCssSize);
     return NS_OK;
 }
 
@@ -216,8 +218,8 @@ static gfxFloat ComputeMaxDescent(const gfxFont::Metrics& aMetrics,
 {
     gfxFloat offset = floor(-aFontGroup->GetUnderlineOffset() + 0.5);
     gfxFloat size = NS_round(aMetrics.underlineSize);
-    gfxFloat minDescent = floor(offset + size + 0.5);
-    return std::max(minDescent, aMetrics.maxDescent);
+    gfxFloat minDescent = offset + size;
+    return floor(std::max(minDescent, aMetrics.maxDescent) + 0.5);
 }
 
 static gfxFloat ComputeMaxAscent(const gfxFont::Metrics& aMetrics)

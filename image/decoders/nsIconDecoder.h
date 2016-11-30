@@ -4,11 +4,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef nsIconDecoder_h
-#define nsIconDecoder_h
+#ifndef mozilla_image_decoders_nsIconDecoder_h
+#define mozilla_image_decoders_nsIconDecoder_h
 
 #include "Decoder.h"
-
+#include "StreamingLexer.h"
 #include "nsCOMPtr.h"
 
 namespace mozilla {
@@ -37,26 +37,35 @@ class RasterImage;
 class nsIconDecoder : public Decoder
 {
 public:
-
-  explicit nsIconDecoder(RasterImage* aImage);
   virtual ~nsIconDecoder();
 
   virtual void WriteInternal(const char* aBuffer, uint32_t aCount) override;
 
+private:
+  friend class DecoderFactory;
+
+  // Decoders should only be instantiated via DecoderFactory.
+  explicit nsIconDecoder(RasterImage* aImage);
+
+  enum class State {
+    HEADER,
+    ROW_OF_PIXELS,
+    FINISH
+  };
+
+  LexerTransition<State> ReadHeader(const char* aData);
+  LexerTransition<State> ReadRowOfPixels(const char* aData, size_t aLength);
+  LexerTransition<State> Finish();
+
+  StreamingLexer<State> mLexer;
   uint8_t mWidth;
   uint8_t mHeight;
-  uint32_t mPixBytesRead;
-  uint32_t mState;
-};
-
-enum {
-  iconStateStart      = 0,
-  iconStateHaveHeight = 1,
-  iconStateReadPixels = 2,
-  iconStateFinished   = 3
+  uint32_t mBytesPerRow;
+  uint32_t mBytesTotal;
+  uint32_t mCurrentRow;
 };
 
 } // namespace image
 } // namespace mozilla
 
-#endif // nsIconDecoder_h
+#endif // mozilla_image_decoders_nsIconDecoder_h

@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -21,10 +22,10 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DOMRectReadOnly)
 NS_INTERFACE_MAP_END
 
 JSObject*
-DOMRectReadOnly::WrapObject(JSContext* aCx)
+DOMRectReadOnly::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
   MOZ_ASSERT(mParent);
-  return DOMRectReadOnlyBinding::Wrap(aCx, this);
+  return DOMRectReadOnlyBinding::Wrap(aCx, this, aGivenProto);
 }
 
 // -----------------------------------------------------------------------------
@@ -47,16 +48,16 @@ FORWARD_GETTER(Width)
 FORWARD_GETTER(Height)
 
 JSObject*
-DOMRect::WrapObject(JSContext* aCx)
+DOMRect::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
   MOZ_ASSERT(mParent);
-  return DOMRectBinding::Wrap(aCx, this);
+  return DOMRectBinding::Wrap(aCx, this, aGivenProto);
 }
 
 already_AddRefed<DOMRect>
 DOMRect::Constructor(const GlobalObject& aGlobal, ErrorResult& aRV)
 {
-  nsRefPtr<DOMRect> obj =
+  RefPtr<DOMRect> obj =
     new DOMRect(aGlobal.GetAsSupports(), 0.0, 0.0, 0.0, 0.0);
   return obj.forget();
 }
@@ -65,7 +66,7 @@ already_AddRefed<DOMRect>
 DOMRect::Constructor(const GlobalObject& aGlobal, double aX, double aY,
                      double aWidth, double aHeight, ErrorResult& aRV)
 {
-  nsRefPtr<DOMRect> obj =
+  RefPtr<DOMRect> obj =
     new DOMRect(aGlobal.GetAsSupports(), aX, aY, aWidth, aHeight);
   return obj.forget();
 }
@@ -99,9 +100,9 @@ DOMRectList::Item(uint32_t aIndex, nsIDOMClientRect** aReturn)
 }
 
 JSObject*
-DOMRectList::WrapObject(JSContext *cx)
+DOMRectList::WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto)
 {
-  return mozilla::dom::DOMRectListBinding::Wrap(cx, this);
+  return mozilla::dom::DOMRectListBinding::Wrap(cx, this, aGivenProto);
 }
 
 static double

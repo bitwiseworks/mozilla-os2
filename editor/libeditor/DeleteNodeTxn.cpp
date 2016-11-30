@@ -72,7 +72,7 @@ DeleteNodeTxn::DoTransaction()
 
   ErrorResult error;
   mParent->RemoveChild(*mNode, error);
-  return error.ErrorCode();
+  return error.StealNSResult();
 }
 
 NS_IMETHODIMP
@@ -87,8 +87,9 @@ DeleteNodeTxn::UndoTransaction()
   }
 
   ErrorResult error;
-  mParent->InsertBefore(*mNode, mRefNode, error);
-  return error.ErrorCode();
+  nsCOMPtr<nsIContent> refNode = mRefNode;
+  mParent->InsertBefore(*mNode, refNode, error);
+  return error.StealNSResult();
 }
 
 NS_IMETHODIMP
@@ -108,7 +109,7 @@ DeleteNodeTxn::RedoTransaction()
 
   ErrorResult error;
   mParent->RemoveChild(*mNode, error);
-  return error.ErrorCode();
+  return error.StealNSResult();
 }
 
 NS_IMETHODIMP

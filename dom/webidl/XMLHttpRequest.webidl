@@ -54,7 +54,7 @@ dictionary MozXMLHttpRequestParameters
  //   c = new(window.ActiveXObject || XMLHttpRequest)("Microsoft.XMLHTTP")
  // To handle that, we need a constructor that takes a string.
  Constructor(DOMString ignored),
- Exposed=(Window,Worker)]
+ Exposed=(Window,DedicatedWorker,SharedWorker)]
 interface XMLHttpRequest : XMLHttpRequestEventTarget {
   // event handler
   attribute EventHandler onreadystatechange;
@@ -140,8 +140,11 @@ interface XMLHttpRequest : XMLHttpRequestEventTarget {
   [ChromeOnly, Exposed=Window]
   readonly attribute MozChannel? channel;
 
-  [Throws]
-  void sendAsBinary(DOMString body);
+  // A platform-specific identifer to represent the network interface 
+  // which the HTTP request would occur on.
+  [ChromeOnly, Exposed=Window]
+  attribute ByteString? networkInterfaceId;
+
   [Throws, ChromeOnly, Exposed=Window]
   any getInterface(IID iid);
 

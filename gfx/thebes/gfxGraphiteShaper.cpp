@@ -34,7 +34,6 @@ gfxGraphiteShaper::gfxGraphiteShaper(gfxFont *aFont)
       mGrFont(nullptr), mFallbackToSmallCaps(false)
 {
     mCallbackData.mFont = aFont;
-    mCallbackData.mShaper = this;
 }
 
 gfxGraphiteShaper::~gfxGraphiteShaper()
@@ -50,8 +49,7 @@ gfxGraphiteShaper::GrGetAdvance(const void* appFontHandle, uint16_t glyphid)
 {
     const CallbackData *cb =
         static_cast<const CallbackData*>(appFontHandle);
-    return FixedToFloat(cb->mFont->GetGlyphWidth(*cb->mContext->GetDrawTarget(),
-                                                 glyphid));
+    return FixedToFloat(cb->mFont->GetGlyphWidth(*cb->mDrawTarget, glyphid));
 }
 
 static inline uint32_t
@@ -72,7 +70,7 @@ struct GrFontFeatures {
     gr_feature_val *mFeatures;
 };
 
-static PLDHashOperator
+static void
 AddFeature(const uint32_t& aTag, uint32_t& aValue, void *aUserArg)
 {
     GrFontFeatures *f = static_cast<GrFontFeatures*>(aUserArg);
@@ -81,7 +79,6 @@ AddFeature(const uint32_t& aTag, uint32_t& aValue, void *aUserArg)
     if (fref) {
         gr_fref_set_feature_value(fref, aValue, f->mFeatures);
     }
-    return PL_DHASH_NEXT;
 }
 
 bool
@@ -98,7 +95,7 @@ gfxGraphiteShaper::ShapeText(gfxContext      *aContext,
         return false;
     }
 
-    mCallbackData.mContext = aContext;
+    mCallbackData.mDrawTarget = aContext->GetDrawTarget();
 
     const gfxFontStyle *style = mFont->GetStyle();
 
@@ -165,9 +162,10 @@ gfxGraphiteShaper::ShapeText(gfxContext      *aContext,
     size_t numChars = gr_count_unicode_characters(gr_utf16,
                                                   aText, aText + aLength,
                                                   nullptr);
+    gr_bidirtl grBidi = gr_bidirtl(aShapedText->IsRightToLeft()
+                                   ? (gr_rtl | gr_nobidi) : gr_nobidi);
     gr_segment *seg = gr_make_seg(mGrFont, mGrFace, 0, grFeatures,
-                                  gr_utf16, aText, numChars,
-                                  aShapedText->IsRightToLeft());
+                                  gr_utf16, aText, numChars, grBidi);
 
     gr_featureval_destroy(grFeatures);
 
@@ -213,10 +211,10 @@ gfxGraphiteShaper::SetGlyphsFromSegment(gfxContext      *aContext,
     AutoFallibleTArray<float,SMALL_GLYPH_RUN> xLocs;
     AutoFallibleTArray<float,SMALL_GLYPH_RUN> yLocs;
 
-    if (!clusters.SetLength(aLength) ||
-        !gids.SetLength(glyphCount) ||
-        !xLocs.SetLength(glyphCount) ||
-        !yLocs.SetLength(glyphCount))
+    if (!clusters.SetLength(aLength, fallible) ||
+        !gids.SetLength(glyphCount, fallible) ||
+        !xLocs.SetLength(glyphCount, fallible) ||
+        !yLocs.SetLength(glyphCount, fallible))
     {
         return NS_ERROR_OUT_OF_MEMORY;
     }

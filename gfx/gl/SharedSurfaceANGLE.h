@@ -23,7 +23,6 @@ class SharedSurface_ANGLEShareHandle
 {
 public:
     static UniquePtr<SharedSurface_ANGLEShareHandle> Create(GLContext* gl,
-                                                            EGLContext context,
                                                             EGLConfig config,
                                                             const gfx::IntSize& size,
                                                             bool hasAlpha);
@@ -36,9 +35,10 @@ public:
 
 protected:
     GLLibraryEGL* const mEGL;
-    const EGLContext mContext;
     const EGLSurface mPBuffer;
+public:
     const HANDLE mShareHandle;
+protected:
     RefPtr<IDXGIKeyedMutex> mKeyedMutex;
     RefPtr<IDXGIKeyedMutex> mConsumerKeyedMutex;
     RefPtr<ID3D11Texture2D> mConsumerTexture;
@@ -49,7 +49,6 @@ protected:
                                    GLLibraryEGL* egl,
                                    const gfx::IntSize& size,
                                    bool hasAlpha,
-                                   EGLContext context,
                                    EGLSurface pbuffer,
                                    HANDLE shareHandle,
                                    const RefPtr<IDXGIKeyedMutex>& keyedMutex,
@@ -66,6 +65,8 @@ public:
     virtual void Fence() override;
     virtual void ProducerAcquireImpl() override;
     virtual void ProducerReleaseImpl() override;
+    virtual void ProducerReadAcquireImpl() override;
+    virtual void ProducerReadReleaseImpl() override;
     virtual void ConsumerAcquireImpl() override;
     virtual void ConsumerReleaseImpl() override;
     virtual bool WaitSync() override;
@@ -75,14 +76,13 @@ public:
     virtual bool WaitSync_ContentThread_Impl() override;
     virtual bool PollSync_ContentThread_Impl() override;
 
-    // Implementation-specific functions below:
-    HANDLE GetShareHandle() {
-        return mShareHandle;
-    }
-
     const RefPtr<ID3D11Texture2D>& GetConsumerTexture() const {
         return mConsumerTexture;
     }
+
+    virtual bool ToSurfaceDescriptor(layers::SurfaceDescriptor* const out_descriptor) override;
+
+    virtual bool ReadbackBySharedHandle(gfx::DataSourceSurface* out_surface) override;
 };
 
 
@@ -93,24 +93,23 @@ class SurfaceFactory_ANGLEShareHandle
 protected:
     GLContext* const mProdGL;
     GLLibraryEGL* const mEGL;
-    EGLContext mContext;
-    EGLConfig mConfig;
+    const EGLConfig mConfig;
 
 public:
     static UniquePtr<SurfaceFactory_ANGLEShareHandle> Create(GLContext* gl,
-                                                             const SurfaceCaps& caps);
+                                                             const SurfaceCaps& caps,
+                                                             const RefPtr<layers::ISurfaceAllocator>& allocator,
+                                                             const layers::TextureFlags& flags);
 
 protected:
-    SurfaceFactory_ANGLEShareHandle(GLContext* gl,
-                                    GLLibraryEGL* egl,
-                                    const SurfaceCaps& caps,
-                                    bool* const out_success);
+    SurfaceFactory_ANGLEShareHandle(GLContext* gl, const SurfaceCaps& caps,
+                                    const RefPtr<layers::ISurfaceAllocator>& allocator,
+                                    const layers::TextureFlags& flags, GLLibraryEGL* egl,
+                                    EGLConfig config);
 
     virtual UniquePtr<SharedSurface> CreateShared(const gfx::IntSize& size) override {
         bool hasAlpha = mReadCaps.alpha;
-        return SharedSurface_ANGLEShareHandle::Create(mProdGL,
-                                                      mContext, mConfig,
-                                                      size, hasAlpha);
+        return SharedSurface_ANGLEShareHandle::Create(mProdGL, mConfig, size, hasAlpha);
     }
 };
 

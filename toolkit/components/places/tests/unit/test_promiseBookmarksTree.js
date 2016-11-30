@@ -57,7 +57,7 @@ function* compareToNode(aItem, aNode, aIsRootItem, aExcludedGuids = []) {
   let expectedAnnos = PlacesUtils.getAnnotationsForItem(aItem.id);
   if (expectedAnnos.length > 0) {
     let annosToString = annos => {
-      return [(a.name + ":" + a.value) for (a of annos)].sort().join(",");
+      return annos.map(a => a.name + ":" + a.value).sort().join(",");
     };
     do_check_true(Array.isArray(aItem.annos))
     do_check_eq(annosToString(aItem.annos), annosToString(expectedAnnos));
@@ -85,7 +85,7 @@ function* compareToNode(aItem, aNode, aIsRootItem, aExcludedGuids = []) {
       for (let i = 0; i < aNode.childCount; i++) {
         let childNode = aNode.getChild(i);
         if (childNode.itemId == PlacesUtils.tagsFolderId ||
-            aExcludedGuids.indexOf(childNode.bookmarkGuid) != -1) {
+            aExcludedGuids.includes(childNode.bookmarkGuid)) {
           continue;
         }
         expectedChildrenNodes.push(childNode);
@@ -147,9 +147,9 @@ function* compareToNode(aItem, aNode, aIsRootItem, aExcludedGuids = []) {
       let itemURI = uri(aNode.uri);
       compare_prop_to_value("charset",
                             yield PlacesUtils.getCharsetForURI(itemURI));
-      compare_prop_to_value("keyword",
-                            PlacesUtils.bookmarks
-                                       .getKeywordForBookmark(aNode.itemId));
+
+      let entry = yield PlacesUtils.keywords.fetch({ url: aNode.uri });
+      compare_prop_to_value("keyword", entry ? entry.keyword : null);
 
       if ("title" in aItem)
         compare_prop("title");
@@ -163,7 +163,7 @@ function* compareToNode(aItem, aNode, aIsRootItem, aExcludedGuids = []) {
   return nodesCount;
 }
 
-let itemsCount = 0;
+var itemsCount = 0;
 function* new_bookmark(aInfo) {
   let currentItem = ++itemsCount;
   if (!("url" in aInfo))
@@ -251,7 +251,3 @@ add_task(function* () {
   do_check_eq(guidsPassedToExcludeCallback.size, 4);
   do_check_eq(placesRootWithoutTheMenu.children.length, 2);
 });
-
-function run_test() {
-  run_next_test();
-}

@@ -21,7 +21,6 @@
     _(Internal)                                       \
     _(Interpreter)                                    \
     _(InlinedScripts)                                 \
-    _(Invalidation)                                   \
     _(IonCompilation)                                 \
     _(IonCompilationPaused)                           \
     _(IonLinking)                                     \
@@ -32,10 +31,12 @@
     _(ParserCompileFunction)                          \
     _(ParserCompileLazy)                              \
     _(ParserCompileScript)                            \
+    _(ParserCompileModule)                            \
     _(Scripts)                                        \
     _(VM)                                             \
                                                       \
     /* Specific passes during ion compilation */      \
+    _(PruneUnusedBranches)                            \
     _(FoldTests)                                      \
     _(SplitCriticalEdges)                             \
     _(RenumberBlocks)                                 \
@@ -44,13 +45,17 @@
     _(PhiAnalysis)                                    \
     _(MakeLoopsContiguous)                            \
     _(ApplyTypes)                                     \
+    _(EagerSimdUnbox)                                 \
     _(AliasAnalysis)                                  \
     _(GVN)                                            \
     _(LICM)                                           \
+    _(Sincos)                                         \
     _(RangeAnalysis)                                  \
     _(LoopUnrolling)                                  \
     _(EffectiveAddressAnalysis)                       \
+    _(AlignmentMaskAnalysis)                          \
     _(EliminateDeadCode)                              \
+    _(ReorderInstructions)                            \
     _(EdgeCaseAnalysis)                               \
     _(EliminateRedundantChecks)                       \
     _(AddKeepAliveInstructions)                       \
@@ -60,6 +65,7 @@
 
 #define TRACELOGGER_LOG_ITEMS(_)                      \
     _(Bailout)                                        \
+    _(Invalidation)                                   \
     _(Disable)                                        \
     _(Enable)                                         \
     _(Stop)
@@ -123,6 +129,9 @@ TLTextIdIsTreeEvent(uint32_t id)
     return (id > TraceLogger_Error && id < TraceLogger_LastTreeItem) ||
            id >= TraceLogger_Last;
 }
+
+// The maximum amount of ram memory a continuous space structure can take (in bytes).
+static const uint32_t CONTINUOUSSPACE_LIMIT = 200 * 1024 * 1024;
 
 template <class T>
 class ContinuousSpace {
@@ -188,10 +197,15 @@ class ContinuousSpace {
             return true;
 
         uint32_t nCapacity = capacity_ * 2;
-        if (size_ + count > nCapacity)
+        if (size_ + count > nCapacity || nCapacity * sizeof(T) > CONTINUOUSSPACE_LIMIT) {
             nCapacity = size_ + count;
-        T* entries = (T*) js_realloc(data_, nCapacity * sizeof(T));
 
+            // Limit the size of a continuous buffer.
+            if (nCapacity * sizeof(T) > CONTINUOUSSPACE_LIMIT)
+                return false;
+        }
+
+        T* entries = (T*) js_realloc(data_, nCapacity * sizeof(T));
         if (!entries)
             return false;
 

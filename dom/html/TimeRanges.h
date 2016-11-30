@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim:set ts=2 sw=2 sts=2 et cindent: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -19,19 +19,22 @@ namespace dom {
 
 class TimeRanges;
 
-}
+} // namespace dom
 
 namespace dom {
 
 // Implements media TimeRanges:
 // http://www.whatwg.org/specs/web-apps/current-work/multipage/video.html#timeranges
-class TimeRanges final : public nsIDOMTimeRanges
+class TimeRanges final : public nsIDOMTimeRanges,
+                         public nsWrapperCache
 {
 public:
-  NS_DECL_ISUPPORTS
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(TimeRanges)
   NS_DECL_NSIDOMTIMERANGES
 
   TimeRanges();
+  explicit TimeRanges(nsISupports* aParent);
 
   void Add(double aStart, double aEnd);
 
@@ -50,7 +53,9 @@ public:
   // Mutate this TimeRange to be the intersection of this and aOtherRanges.
   void Intersection(const TimeRanges* aOtherRanges);
 
-  bool WrapObject(JSContext* aCx, JS::MutableHandle<JSObject*> aReflector);
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+
+  nsISupports* GetParentObject() const;
 
   uint32_t Length() const
   {
@@ -89,6 +94,8 @@ private:
   };
 
   nsAutoTArray<TimeRange,4> mRanges;
+
+  nsCOMPtr<nsISupports> mParent;
 
 public:
   typedef nsTArray<TimeRange>::index_type index_type;

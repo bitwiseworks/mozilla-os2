@@ -46,19 +46,14 @@ class TooltoolMixin(object):
         if os.path.exists(fn):
             return fn
 
-    def tooltool_fetch(self, manifest, bootstrap_cmd=None,
+    def tooltool_fetch(self, manifest,
                        output_dir=None, privileged=False, cache=None):
         """docstring for tooltool_fetch"""
-        tooltool = self.query_exe('tooltool.py', return_type='list')
 
-        if self.config.get("developer_mode"):
-            tooltool = [bin for bin in tooltool if os.path.exists(bin)]
-            if tooltool:
-                cmd = [tooltool[0]]
-            else:
-                cmd = [self._fetch_tooltool_py()]
+        if self.config.get("download_tooltool"):
+            cmd = [sys.executable, self._fetch_tooltool_py()]
         else:
-            cmd = tooltool
+            cmd = self.query_exe('tooltool.py', return_type='list')
 
         # get the tooltool servers from configuration
         default_urls = self.config.get('tooltool_servers', TOOLTOOL_SERVERS)
@@ -96,19 +91,6 @@ class TooltoolMixin(object):
             error_message="Tooltool %s fetch failed!" % manifest,
             error_level=FATAL,
         )
-        if bootstrap_cmd is not None:
-            error_message = "Tooltool bootstrap %s failed!" % str(bootstrap_cmd)
-            self.retry(
-                self.run_command,
-                args=(bootstrap_cmd, ),
-                kwargs={'cwd': output_dir,
-                        'error_list': TooltoolErrorList,
-                        'privileged': privileged,
-                        },
-                good_statuses=(0, ),
-                error_message=error_message,
-                error_level=FATAL,
-            )
 
     def _fetch_tooltool_py(self):
         """ Retrieve tooltool.py

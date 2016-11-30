@@ -5,9 +5,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/BasePrincipal.h"
 #include "mozilla/net/PNeckoParent.h"
 #include "mozilla/net/NeckoCommon.h"
 #include "mozilla/net/OfflineObserver.h"
+#include "nsIAuthPrompt2.h"
+#include "nsINetworkPredictor.h"
+#include "nsNetUtil.h"
 
 #ifndef mozilla_net_NeckoParent_h
 #define mozilla_net_NeckoParent_h
@@ -35,8 +39,7 @@ public:
   static const char *
   GetValidatedAppInfo(const SerializedLoadContext& aSerialized,
                       PContentParent* aBrowser,
-                      uint32_t* aAppId,
-                      bool* aInBrowserElement);
+                      mozilla::DocShellOriginAttributes& aAttrs);
 
   /*
    * Creates LoadContext for parent-side of an e10s channel.
@@ -121,7 +124,8 @@ protected:
   virtual bool DeallocPFTPChannelParent(PFTPChannelParent*) override;
   virtual PWebSocketParent*
     AllocPWebSocketParent(const PBrowserOrId& browser,
-                          const SerializedLoadContext& aSerialized) override;
+                          const SerializedLoadContext& aSerialized,
+                          const uint32_t& aSerial) override;
   virtual bool DeallocPWebSocketParent(PWebSocketParent*) override;
   virtual PTCPSocketParent* AllocPTCPSocketParent(const nsString& host,
                                                   const uint16_t& port) override;
@@ -143,14 +147,17 @@ protected:
   virtual PTCPServerSocketParent*
     AllocPTCPServerSocketParent(const uint16_t& aLocalPort,
                                 const uint16_t& aBacklog,
-                                const nsString& aBinaryType) override;
+                                const bool& aUseArrayBuffers) override;
   virtual bool RecvPTCPServerSocketConstructor(PTCPServerSocketParent*,
                                                const uint16_t& aLocalPort,
                                                const uint16_t& aBacklog,
-                                               const nsString& aBinaryType) override;
+                                               const bool& aUseArrayBuffers) override;
   virtual bool DeallocPTCPServerSocketParent(PTCPServerSocketParent*) override;
-  virtual PUDPSocketParent* AllocPUDPSocketParent(const nsCString& aFilter) override;
-  virtual bool RecvPUDPSocketConstructor(PUDPSocketParent*, const nsCString& aFilter) override;
+  virtual PUDPSocketParent* AllocPUDPSocketParent(const Principal& aPrincipal,
+                                                  const nsCString& aFilter) override;
+  virtual bool RecvPUDPSocketConstructor(PUDPSocketParent*,
+                                         const Principal& aPrincipal,
+                                         const nsCString& aFilter) override;
   virtual bool DeallocPUDPSocketParent(PUDPSocketParent*) override;
   virtual PDNSRequestParent* AllocPDNSRequestParent(const nsCString& aHost,
                                                     const uint32_t& aFlags,
@@ -160,15 +167,27 @@ protected:
                                           const uint32_t& flags,
                                           const nsCString& aNetworkInterface) override;
   virtual bool DeallocPDNSRequestParent(PDNSRequestParent*) override;
+  virtual bool RecvSpeculativeConnect(const URIParams& aURI, const bool& aAnonymous) override;
   virtual bool RecvHTMLDNSPrefetch(const nsString& hostname,
                                    const uint16_t& flags) override;
   virtual bool RecvCancelHTMLDNSPrefetch(const nsString& hostname,
                                          const uint16_t& flags,
                                          const nsresult& reason) override;
+  virtual PWebSocketEventListenerParent*
+    AllocPWebSocketEventListenerParent(const uint64_t& aInnerWindowID) override;
+  virtual bool DeallocPWebSocketEventListenerParent(PWebSocketEventListenerParent*) override;
 
   virtual mozilla::ipc::IProtocol*
   CloneProtocol(Channel* aChannel,
                 mozilla::ipc::ProtocolCloneContext* aCtx) override;
+
+  virtual PDataChannelParent*
+    AllocPDataChannelParent(const uint32_t& channelId) override;
+  virtual bool DeallocPDataChannelParent(PDataChannelParent* parent) override;
+
+  virtual bool RecvPDataChannelConstructor(PDataChannelParent* aActor,
+                                           const uint32_t& channelId) override;
+
   virtual PRtspControllerParent* AllocPRtspControllerParent() override;
   virtual bool DeallocPRtspControllerParent(PRtspControllerParent*) override;
 
@@ -196,11 +215,31 @@ protected:
   virtual bool RecvOnAuthCancelled(const uint64_t& aCallbackId,
                                    const bool& aUserCancel) override;
 
+  /* Predictor Messages */
+  virtual bool RecvPredPredict(const ipc::OptionalURIParams& aTargetURI,
+                               const ipc::OptionalURIParams& aSourceURI,
+                               const PredictorPredictReason& aReason,
+                               const IPC::SerializedLoadContext& aLoadContext,
+                               const bool& hasVerifier) override;
+
+  virtual bool RecvPredLearn(const ipc::URIParams& aTargetURI,
+                             const ipc::OptionalURIParams& aSourceURI,
+                             const PredictorPredictReason& aReason,
+                             const IPC::SerializedLoadContext& aLoadContext) override;
+  virtual bool RecvPredReset() override;
+
+  virtual bool RecvRemoveSchedulingContext(const nsCString& scid) override;
+
 private:
   nsCString mCoreAppsBasePath;
   nsCString mWebAppsBasePath;
-  nsRefPtr<OfflineObserver> mObserver;
+  RefPtr<OfflineObserver> mObserver;
 };
+
+/**
+ * Reference to the PNecko Parent protocol.
+ */
+extern PNeckoParent *gNeckoParent;
 
 } // namespace net
 } // namespace mozilla

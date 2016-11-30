@@ -8,6 +8,9 @@
 const PHONE_NUMBER_CONTAINERS = "td,div";
 const DEFER_CLOSE_TRIGGER_MS = 125; // Grace period delay before deferred _closeSelection()
 
+// Gecko AccessibleCaret pref names.
+const PREF_GECKO_ACCESSIBLECARET_ENABLED = "layout.accessiblecaret.enabled";
+
 var SelectionHandler = {
 
   // Successful startSelection() or attachCaret().
@@ -21,9 +24,11 @@ var SelectionHandler = {
   START_ERROR_SELECT_ALL_PARAGRAPH_FAILED: "Select-All Paragraph failed.",
   START_ERROR_NO_SELECTION: "Selection performed, but nothing resulted.",
   START_ERROR_PROXIMITY: "Selection target and result seem unrelated.",
+  START_ERROR_SELECTIONCARETS_ENABLED: "Native selectionCarets requested while Gecko enabled.",
 
   // Error codes returned during attachCaret().
   ATTACH_ERROR_INCOMPATIBLE: "Element disabled, handled natively, or not editable.",
+  ATTACH_ERROR_TOUCHCARET_ENABLED: "Native touchCaret requested while Gecko enabled.",
 
   HANDLE_TYPE_ANCHOR: "ANCHOR",
   HANDLE_TYPE_CARET: "CARET",
@@ -36,6 +41,10 @@ var SelectionHandler = {
   SELECT_ALL: 0,
   SELECT_AT_POINT: 1,
 
+  // Gecko TouchCaret/SelectionCaret pref values.
+  _accessibleCaretEnabledValue: null,
+  _selectionCaretEnabledValue: null,
+
   // Keeps track of data about the dimensions of the selection. Coordinates
   // stored here are relative to the _contentWindow window.
   _cache: { anchorPt: {}, focusPt: {} },
@@ -44,6 +53,8 @@ var SelectionHandler = {
   _focusIsRTL: false,
 
   _activeType: 0, // TYPE_NONE
+  _selectionPrivate: null, // private selection reference
+  _selectionID: null, // Unique Selection ID
 
   _draggingHandles: false, // True while user drags text selection handles
   _dragStartAnchorOffset: null, // Editables need initial pos during HandleMove events
@@ -82,6 +93,27 @@ var SelectionHandler = {
                                                     getInterface(Ci.nsIDOMWindowUtils);
   },
 
+  // Provides UUID service for selection ID's.
+  get _idService() {
+    delete this._idService;
+    return this._idService = Cc["@mozilla.org/uuid-generator;1"].
+      getService(Ci.nsIUUIDGenerator);
+  },
+
+  // Are we supporting Accessible-core or native-Java carets?
+  get _accessibleCaretEnabled() {
+    if (this._accessibleCaretEnabledValue == null) {
+      try {
+        this._accessibleCaretEnabledValue = Services.prefs.getBoolPref(PREF_GECKO_ACCESSIBLECARET_ENABLED);
+      } catch (unused) { }
+      Services.prefs.addObserver(PREF_GECKO_ACCESSIBLECARET_ENABLED, function() {
+        SelectionHandler._accessibleCaretEnabledValue =
+          Services.prefs.getBoolPref(PREF_GECKO_ACCESSIBLECARET_ENABLED);
+      }, false);
+    }
+    return this._accessibleCaretEnabledValue;
+  },
+
   _addObservers: function sh_addObservers() {
     Services.obs.addObserver(this, "Gesture:SingleTap", false);
     Services.obs.addObserver(this, "Tab:Selected", false);
@@ -117,9 +149,12 @@ var SelectionHandler = {
     }
 
     switch (aTopic) {
-      // Update handle/caret position on page reflow (keyboard open/close,
-      // dynamic DOM changes, orientation updates, etc).
+      // Update selectionListener and handle/caret positions, on page reflow
+      // (keyboard open/close, dynamic DOM changes, orientation updates, etc).
       case "TextSelection:LayerReflow": {
+        if (this._activeType == this.TYPE_SELECTION) {
+          this._updateSelectionListener();
+        }
         if (this._activeType != this.TYPE_NONE) {
           this._positionHandlesOnChange();
         }
@@ -134,10 +169,19 @@ var SelectionHandler = {
         }
         break;
       }
+
       case "Tab:Selected":
-      case "TextSelection:End":
         this._closeSelection();
         break;
+
+      case "TextSelection:End":
+        let data = JSON.parse(aData);
+        // End the requested selection only.
+        if (this._selectionID === data.selectionID) {
+          this._closeSelection();
+        }
+        break;
+
       case "TextSelection:Action":
         for (let type in this.actions) {
           if (this.actions[type].id == aData) {
@@ -281,6 +325,41 @@ var SelectionHandler = {
   },
 
   /**
+   * Add a selection listener to monitor for external selection changes.
+   */
+  _addSelectionListener: function(selection) {
+    this._selectionPrivate = selection.QueryInterface(Ci.nsISelectionPrivate);
+    this._selectionPrivate.addSelectionListener(this);
+  },
+
+  /**
+   * The nsISelection object for an editable can change during DOM mutations,
+   * causing us to stop receiving selectionChange notifications.
+   *
+   * We can detect that after a layer-reflow event, and dynamically update the
+   * listener.
+   */
+  _updateSelectionListener: function() {
+    if (!(this._targetElement instanceof Ci.nsIDOMNSEditableElement)) {
+      return;
+    }
+
+    let selection = this._getSelection();
+    if (this._selectionPrivate != selection.QueryInterface(Ci.nsISelectionPrivate)) {
+      this._removeSelectionListener();
+      this._addSelectionListener(selection);
+    }
+  },
+
+  /**
+   * Remove the selection listener.
+   */
+  _removeSelectionListener: function() {
+    this._selectionPrivate.removeSelectionListener(this);
+    this._selectionPrivate = null;
+  },
+
+  /**
    * Observe and react to programmatic SelectionChange notifications.
    */
   notifySelectionChanged: function sh_notifySelectionChanged(aDocument, aSelection, aReason) {
@@ -322,11 +401,22 @@ var SelectionHandler = {
    *                   y    - The y-coordinate for SELECT_AT_POINT.
    */
   startSelection: function sh_startSelection(aElement, aOptions = { mode: SelectionHandler.SELECT_ALL }) {
+    // Disable Native touchCarets if Gecko AccessibleCaret enabled.
+    if (this._accessibleCaretEnabled) {
+      return this.START_ERROR_SELECTIONCARETS_ENABLED;
+    }
+
     // Clear out any existing active selection
     this._closeSelection();
 
     if (this._isNonTextInputElement(aElement)) {
       return this.START_ERROR_NONTEXT_INPUT;
+    }
+
+    const focus = Services.focus.focusedWindow;
+    if (focus) {
+      // Make sure any previous focus is cleared.
+      Services.focus.clearFocus(focus);
     }
 
     this._initTargetInfo(aElement, this.TYPE_SELECTION);
@@ -349,7 +439,7 @@ var SelectionHandler = {
     }
 
     // Add a listener to end the selection if it's removed programatically
-    selection.QueryInterface(Ci.nsISelectionPrivate).addSelectionListener(this);
+    this._addSelectionListener(selection);
     this._activeType = this.TYPE_SELECTION;
 
     // Figure out the distance between the selection and the click
@@ -365,6 +455,7 @@ var SelectionHandler = {
     // Determine position and show handles, open actionbar
     this._positionHandles(positions);
     Messaging.sendRequest({
+      selectionID: this._selectionID,
       type: "TextSelection:ShowHandles",
       handles: [this.HANDLE_TYPE_ANCHOR, this.HANDLE_TYPE_FOCUS]
     });
@@ -622,7 +713,8 @@ var SelectionHandler = {
       order: 4,
       selector: {
         matches: function(aElement) {
-          return SelectionHandler.isElementEditableText(aElement) ?
+          // Disallow cut for contentEditable elements (until Bug 1112276 is fixed).
+          return !aElement.isContentEditable && SelectionHandler.isElementEditableText(aElement) ?
             SelectionHandler.isSelectionActive() : false;
         }
       }
@@ -654,10 +746,10 @@ var SelectionHandler = {
       id: "paste_action",
       icon: "drawable://ab_paste",
       action: function(aElement) {
-        if (aElement && (aElement instanceof Ci.nsIDOMNSEditableElement)) {
-          let target = aElement.QueryInterface(Ci.nsIDOMNSEditableElement);
-          target.editor.paste(Ci.nsIClipboard.kGlobalClipboard);
-          target.focus();
+        if (aElement) {
+          let target = SelectionHandler._getEditor();
+          aElement.focus();
+          target.paste(Ci.nsIClipboard.kGlobalClipboard);
           SelectionHandler._closeSelection();
           UITelemetry.addEvent("action.1", "actionbar", null, "paste");
         }
@@ -691,6 +783,43 @@ var SelectionHandler = {
           return SelectionHandler.isSelectionActive();
         }
       }
+    },
+
+    SEARCH_ADD: {
+      id: "search_add_action",
+      label: Strings.browser.GetStringFromName("contextmenu.addSearchEngine2"),
+      icon: "drawable://ab_add_search_engine",
+
+      selector: {
+        matches: function(element) {
+          if(!(element instanceof HTMLInputElement)) {
+            return false;
+          }
+          let form = element.form;
+          if (!form || element.type == "password") {
+            return false;
+          }
+
+          // These are the following types of forms we can create keywords for:
+          //
+          // method    encoding type        can create keyword
+          // GET       *                                   YES
+          //           *                                   YES
+          // POST      *                                   YES
+          // POST      application/x-www-form-urlencoded   YES
+          // POST      text/plain                          NO ( a little tricky to do)
+          // POST      multipart/form-data                 NO
+          // POST      everything else                     YES
+          let method = form.method.toUpperCase();
+          return (method == "GET" || method == "") ||
+                 (form.enctype != "text/plain") && (form.enctype != "multipart/form-data");
+        },
+      },
+
+      action: function(element) {
+        UITelemetry.addEvent("action.1", "actionbar", null, "add_search_engine");
+        SearchEngines.addEngine(element);
+      },
     },
 
     SEARCH: {
@@ -736,6 +865,11 @@ var SelectionHandler = {
    * @param aX, aY tap location in client coordinates.
    */
   attachCaret: function sh_attachCaret(aElement) {
+    // Disable Native touchCarets if Gecko AccessibleCaret enabled.
+    if (this._accessibleCaretEnabled) {
+      return this.ATTACH_ERROR_TOUCHCARET_ENABLED;
+    }
+
     // Clear out any existing active selection
     this._closeSelection();
 
@@ -756,6 +890,7 @@ var SelectionHandler = {
     // Determine position and show caret, open actionbar
     this._positionHandles();
     Messaging.sendRequest({
+      selectionID: this._selectionID,
       type: "TextSelection:ShowHandles",
       handles: [this.HANDLE_TYPE_CARET]
     });
@@ -777,6 +912,7 @@ var SelectionHandler = {
       aElement.focus();
     }
 
+    this._selectionID = this._idService.generateUUID().toString();
     this._stopDraggingHandles();
     this._contentWindow = aElement.ownerDocument.defaultView;
     this._targetIsRTL = (this._contentWindow.getComputedStyle(aElement, "").direction == "rtl");
@@ -836,7 +972,8 @@ var SelectionHandler = {
 
   isElementEditableText: function (aElement) {
     return (((aElement instanceof HTMLInputElement && aElement.mozIsTextField(false)) ||
-            (aElement instanceof HTMLTextAreaElement)) && !aElement.readOnly);
+            (aElement instanceof HTMLTextAreaElement)) && !aElement.readOnly) ||
+            aElement.isContentEditable;
   },
 
   _isNonTextInputElement: function(aElement) {
@@ -904,7 +1041,7 @@ var SelectionHandler = {
   _moveCaret: function sh_moveCaret(aX, aY) {
     // Get rect of text inside element
     let range = document.createRange();
-    range.selectNodeContents(this._targetElement.QueryInterface(Ci.nsIDOMNSEditableElement).editor.rootElement);
+    range.selectNodeContents(this._getEditor().rootElement);
     let textBounds = range.getBoundingClientRect();
 
     // Get rect of editor
@@ -950,8 +1087,8 @@ var SelectionHandler = {
     let selectedText = this._getSelectedText();
     if (selectedText.length) {
       let clipboard = Cc["@mozilla.org/widget/clipboardhelper;1"].getService(Ci.nsIClipboardHelper);
-      clipboard.copyString(selectedText, this._contentWindow.document);
-      NativeWindow.toast.show(Strings.browser.GetStringFromName("selectionHelper.textCopied"), "short");
+      clipboard.copyString(selectedText);
+      NativeWindow.toast.show(Strings.browser.GetStringFromName("selectionHelper.textCopied"), "long");
     }
     this._closeSelection();
   },
@@ -1061,7 +1198,7 @@ var SelectionHandler = {
     let selection = this._getSelection();
     if (selection) {
       // Remove our listener before we clear the selection
-      selection.QueryInterface(Ci.nsISelectionPrivate).removeSelectionListener(this);
+      this._removeSelectionListener();
 
       // Remove the selection. For editables, we clear selection without losing
       // element focus. For non-editables, just clear all.

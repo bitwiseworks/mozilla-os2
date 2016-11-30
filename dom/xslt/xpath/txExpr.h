@@ -24,7 +24,6 @@
 */
 
 class nsIAtom;
-class txIParseContext;
 class txIMatchContext;
 class txIEvalContext;
 class txNodeSet;
@@ -680,7 +679,7 @@ public:
     TX_DECL_EXPR
 
 private:
-    nsRefPtr<txAExprResult> mValue;
+    RefPtr<txAExprResult> mValue;
 };
 
 /**

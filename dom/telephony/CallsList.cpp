@@ -42,15 +42,15 @@ CallsList::GetParentObject() const
 }
 
 JSObject*
-CallsList::WrapObject(JSContext* aCx)
+CallsList::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return CallsListBinding::Wrap(aCx, this);
+  return CallsListBinding::Wrap(aCx, this, aGivenProto);
 }
 
 already_AddRefed<TelephonyCall>
 CallsList::Item(uint32_t aIndex) const
 {
-  nsRefPtr<TelephonyCall> call;
+  RefPtr<TelephonyCall> call;
   call = mGroup ? mGroup->CallsArray().SafeElementAt(aIndex) :
                   mTelephony->CallsArray().SafeElementAt(aIndex);
 
@@ -67,7 +67,7 @@ CallsList::Length() const
 already_AddRefed<TelephonyCall>
 CallsList::IndexedGetter(uint32_t aIndex, bool& aFound) const
 {
-  nsRefPtr<TelephonyCall> call;
+  RefPtr<TelephonyCall> call;
   call = mGroup ? mGroup->CallsArray().SafeElementAt(aIndex) :
                   mTelephony->CallsArray().SafeElementAt(aIndex);
   aFound = call ? true : false;

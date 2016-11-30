@@ -14,7 +14,6 @@
 
 class gfxFontFaceBufferSource;
 class nsCSSFontFaceRule;
-class nsPresContext;
 
 namespace mozilla {
 struct CSSFontFaceDescriptors;
@@ -22,22 +21,18 @@ namespace dom {
 class FontFaceBufferSource;
 struct FontFaceDescriptors;
 class FontFaceSet;
-class FontFaceInitializer;
-class FontFaceStatusSetter;
 class Promise;
 class StringOrArrayBufferOrArrayBufferView;
-}
-}
+} // namespace dom
+} // namespace mozilla
 
 namespace mozilla {
 namespace dom {
 
 class FontFace final : public nsISupports,
-                           public nsWrapperCache
+                       public nsWrapperCache
 {
   friend class mozilla::dom::FontFaceBufferSource;
-  friend class mozilla::dom::FontFaceInitializer;
-  friend class mozilla::dom::FontFaceStatusSetter;
   friend class Entry;
 
 public:
@@ -49,15 +44,17 @@ public:
           const nsTArray<gfxFontFaceSrc>& aFontFaceSrcList,
           uint32_t aWeight,
           int32_t aStretch,
-          uint32_t aItalicStyle,
+          uint8_t aStyle,
           const nsTArray<gfxFontFeature>& aFeatureSettings,
           uint32_t aLanguageOverride,
           gfxSparseBitSet* aUnicodeRanges)
       : gfxUserFontEntry(aFontSet, aFontFaceSrcList, aWeight, aStretch,
-                         aItalicStyle, aFeatureSettings, aLanguageOverride,
+                         aStyle, aFeatureSettings, aLanguageOverride,
                          aUnicodeRanges) {}
 
     virtual void SetLoadState(UserFontLoadState aLoadState) override;
+    virtual void GetUserFontSets(nsTArray<gfxUserFontSet*>& aResult) override;
+    const nsAutoTArray<FontFace*,1>& GetFontFaces() { return mFontFaces; }
 
   protected:
     // The FontFace objects that use this user font entry.  We need to store
@@ -71,43 +68,27 @@ public:
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(FontFace)
 
   nsISupports* GetParentObject() const { return mParent; }
-  virtual JSObject* WrapObject(JSContext* aCx) override;
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   static already_AddRefed<FontFace>
-  CreateForRule(nsISupports* aGlobal, nsPresContext* aPresContext,
+  CreateForRule(nsISupports* aGlobal, FontFaceSet* aFontFaceSet,
                 nsCSSFontFaceRule* aRule);
 
   nsCSSFontFaceRule* GetRule() { return mRule; }
 
   void GetDesc(nsCSSFontDesc aDescID, nsCSSValue& aResult) const;
 
+  gfxUserFontEntry* CreateUserFontEntry();
   gfxUserFontEntry* GetUserFontEntry() const { return mUserFontEntry; }
   void SetUserFontEntry(gfxUserFontEntry* aEntry);
 
   /**
-   * Returns whether this object is in a FontFaceSet.
+   * Returns whether this object is in the specified FontFaceSet.
    */
-  bool IsInFontFaceSet() { return mInFontFaceSet; }
+  bool IsInFontFaceSet(FontFaceSet* aFontFaceSet) const;
 
-  /**
-   * Sets whether this object is in a FontFaceSet.  This is called by the
-   * FontFaceSet when Add, Remove, etc. are called.
-   */
-  void SetIsInFontFaceSet(bool aInFontFaceSet) {
-    MOZ_ASSERT(!(!aInFontFaceSet && HasRule()),
-               "use DisconnectFromRule instead");
-    mInFontFaceSet = aInFontFaceSet;
-  }
-
-  /**
-   * Returns whether this FontFace is initialized.  A rule backed
-   * FontFace is considered initialized at construction time.  For
-   * FontFace objects created using the FontFace JS constructor, it
-   * is once all the descriptors have been parsed.
-   */
-  bool IsInitialized() const { return mInitialized; }
-
-  FontFaceSet* GetFontFaceSet() const { return mFontFaceSet; }
+  void AddFontFaceSet(FontFaceSet* aFontFaceSet);
+  void RemoveFontFaceSet(FontFaceSet* aFontFaceSet);
 
   /**
    * Gets the family name of the FontFace as a raw string (such as 'Times', as
@@ -173,16 +154,10 @@ public:
   mozilla::dom::Promise* GetLoaded(mozilla::ErrorResult& aRv);
 
 private:
-  FontFace(nsISupports* aParent, nsPresContext* aPresContext);
+  FontFace(nsISupports* aParent, FontFaceSet* aFontFaceSet);
   ~FontFace();
 
-  /**
-   * Initializes the source and descriptors on this object based on values that
-   * were passed in to the JS constructor.  If the source was specified as
-   * an ArrayBuffer or ArrayBufferView, parsing of the font data in there
-   * will be started.
-   */
-  void Initialize(FontFaceInitializer* aInitializer);
+  void InitializeSource(const StringOrArrayBufferOrArrayBufferView& aSource);
 
   // Helper function for Load.
   void DoLoad();
@@ -207,12 +182,6 @@ private:
                       const FontFaceDescriptors& aDescriptors);
 
   /**
-   * Marks the FontFace as initialized and informs the FontFaceSet it is in,
-   * if any.
-   */
-  void OnInitialized();
-
-  /**
    * Sets the current loading status.
    */
   void SetStatus(mozilla::dom::FontFaceLoadStatus aStatus);
@@ -227,19 +196,18 @@ private:
   void TakeBuffer(uint8_t*& aBuffer, uint32_t& aLength);
 
   nsCOMPtr<nsISupports> mParent;
-  nsPresContext* mPresContext;
 
   // A Promise that is fulfilled once the font represented by this FontFace
   // is loaded, and is rejected if the load fails.
-  nsRefPtr<mozilla::dom::Promise> mLoaded;
+  RefPtr<mozilla::dom::Promise> mLoaded;
 
   // The @font-face rule this FontFace object is reflecting, if it is a
   // rule backed FontFace.
-  nsRefPtr<nsCSSFontFaceRule> mRule;
+  RefPtr<nsCSSFontFaceRule> mRule;
 
   // The FontFace object's user font entry.  This is initially null, but is set
   // during FontFaceSet::UpdateRules and when a FontFace is explicitly loaded.
-  nsRefPtr<Entry> mUserFontEntry;
+  RefPtr<Entry> mUserFontEntry;
 
   // The current load status of the font represented by this FontFace.
   // Note that we can't just reflect the value of the gfxUserFontEntry's
@@ -267,22 +235,16 @@ private:
   // the descriptors stored in mRule.
   nsAutoPtr<mozilla::CSSFontFaceDescriptors> mDescriptors;
 
-  // The FontFaceSet this FontFace is associated with, regardless of whether
-  // it is currently "in" the set.
-  nsRefPtr<FontFaceSet> mFontFaceSet;
+  // The primary FontFaceSet this FontFace is associated with,
+  // regardless of whether it is currently "in" the set.
+  RefPtr<FontFaceSet> mFontFaceSet;
 
-  // Whether this FontFace appears in the FontFaceSet.
+  // Other FontFaceSets (apart from mFontFaceSet) that this FontFace
+  // appears in.
+  nsTArray<RefPtr<FontFaceSet>> mOtherFontFaceSets;
+
+  // Whether this FontFace appears in mFontFaceSet.
   bool mInFontFaceSet;
-
-  // Whether the FontFace has been fully initialized.  This takes at least one
-  // run around the event loop, as the parsing of the src descriptor is done
-  // off an event queue task.
-  bool mInitialized;
-
-  // Records whether Load() was called on this FontFace before it was
-  // initialized.  When the FontFace eventually does become initialized,
-  // mLoadPending is checked and Load() is called if needed.
-  bool mLoadWhenInitialized;
 };
 
 } // namespace dom

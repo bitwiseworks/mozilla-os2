@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -89,34 +90,12 @@ SVGTransformableElement::IsEventAttributeName(nsIAtom* aName)
 // nsSVGElement overrides
 
 gfxMatrix
-SVGTransformableElement::PrependLocalTransformsTo(const gfxMatrix &aMatrix,
-                                                  TransformTypes aWhich) const
+SVGTransformableElement::PrependLocalTransformsTo(
+  const gfxMatrix &aMatrix,
+  SVGTransformTypes aWhich) const
 {
-  gfxMatrix result(aMatrix);
-
-  if (aWhich == eChildToUserSpace) {
-    // We don't have anything to prepend.
-    // eChildToUserSpace is not the common case, which is why we return
-    // 'result' to benefit from NRVO rather than returning aMatrix before
-    // creating 'result'.
-    return result;
-  }
-
-  MOZ_ASSERT(aWhich == eAllTransforms || aWhich == eUserSpaceToParent,
-             "Unknown TransformTypes");
-
-  // animateMotion's resulting transform is supposed to apply *on top of*
-  // any transformations from the |transform| attribute. So since we're
-  // PRE-multiplying, we need to apply the animateMotion transform *first*.
-  if (mAnimateMotionTransform) {
-    result.PreMultiply(ThebesMatrix(*mAnimateMotionTransform));
-  }
-
-  if (mTransforms) {
-    result.PreMultiply(mTransforms->GetAnimValue().GetConsolidationMatrix());
-  }
-
-  return result;
+  return SVGContentUtils::PrependLocalTransformsTo(
+    aMatrix, aWhich, mAnimateMotionTransform, mTransforms);
 }
 
 const gfx::Matrix*
@@ -197,27 +176,27 @@ SVGTransformableElement::GetBBox(const SVGBoundingBoxOptions& aOptions,
   if (!NS_SVGNewGetBBoxEnabled()) {
     return NS_NewSVGRect(this, ToRect(nsSVGUtils::GetBBox(frame)));
   } else {
-    uint32_t aFlags = 0;
+    uint32_t flags = 0;
     if (aOptions.mFill) {
-      aFlags |= nsSVGUtils::eBBoxIncludeFill;
+      flags |= nsSVGUtils::eBBoxIncludeFill;
     }
     if (aOptions.mStroke) {
-      aFlags |= nsSVGUtils::eBBoxIncludeStroke;
+      flags |= nsSVGUtils::eBBoxIncludeStroke;
     }
     if (aOptions.mMarkers) {
-      aFlags |= nsSVGUtils::eBBoxIncludeMarkers;
+      flags |= nsSVGUtils::eBBoxIncludeMarkers;
     }
     if (aOptions.mClipped) {
-      aFlags |= nsSVGUtils::eBBoxIncludeClipped;
+      flags |= nsSVGUtils::eBBoxIncludeClipped;
     }
-    if (aFlags == 0) {
+    if (flags == 0) {
       return NS_NewSVGRect(this,0,0,0,0);
     }
-    if (aFlags == nsSVGUtils::eBBoxIncludeMarkers || 
-        aFlags == nsSVGUtils::eBBoxIncludeClipped) {
-      aFlags |= nsSVGUtils::eBBoxIncludeFill;
+    if (flags == nsSVGUtils::eBBoxIncludeMarkers ||
+        flags == nsSVGUtils::eBBoxIncludeClipped) {
+      flags |= nsSVGUtils::eBBoxIncludeFill;
     }
-    return NS_NewSVGRect(this, ToRect(nsSVGUtils::GetBBox(frame, aFlags)));
+    return NS_NewSVGRect(this, ToRect(nsSVGUtils::GetBBox(frame, flags)));
   }
 }
 
@@ -230,7 +209,7 @@ SVGTransformableElement::GetCTM()
     currentDoc->FlushPendingNotifications(Flush_Layout);
   }
   gfx::Matrix m = SVGContentUtils::GetCTM(this, false);
-  nsRefPtr<SVGMatrix> mat = m.IsSingular() ? nullptr : new SVGMatrix(ThebesMatrix(m));
+  RefPtr<SVGMatrix> mat = m.IsSingular() ? nullptr : new SVGMatrix(ThebesMatrix(m));
   return mat.forget();
 }
 
@@ -243,7 +222,7 @@ SVGTransformableElement::GetScreenCTM()
     currentDoc->FlushPendingNotifications(Flush_Layout);
   }
   gfx::Matrix m = SVGContentUtils::GetCTM(this, true);
-  nsRefPtr<SVGMatrix> mat = m.IsSingular() ? nullptr : new SVGMatrix(ThebesMatrix(m));
+  RefPtr<SVGMatrix> mat = m.IsSingular() ? nullptr : new SVGMatrix(ThebesMatrix(m));
   return mat.forget();
 }
 
@@ -252,16 +231,16 @@ SVGTransformableElement::GetTransformToElement(SVGGraphicsElement& aElement,
                                                ErrorResult& rv)
 {
   // the easiest way to do this (if likely to increase rounding error):
-  nsRefPtr<SVGMatrix> ourScreenCTM = GetScreenCTM();
-  nsRefPtr<SVGMatrix> targetScreenCTM = aElement.GetScreenCTM();
+  RefPtr<SVGMatrix> ourScreenCTM = GetScreenCTM();
+  RefPtr<SVGMatrix> targetScreenCTM = aElement.GetScreenCTM();
   if (!ourScreenCTM || !targetScreenCTM) {
     rv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
     return nullptr;
   }
-  nsRefPtr<SVGMatrix> tmp = targetScreenCTM->Inverse(rv);
+  RefPtr<SVGMatrix> tmp = targetScreenCTM->Inverse(rv);
   if (rv.Failed()) return nullptr;
 
-  nsRefPtr<SVGMatrix> mat = tmp->Multiply(*ourScreenCTM);
+  RefPtr<SVGMatrix> mat = tmp->Multiply(*ourScreenCTM);
   return mat.forget();
 }
 

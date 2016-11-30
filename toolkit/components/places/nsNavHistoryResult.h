@@ -106,9 +106,9 @@ private:
   { 0x455d1d40, 0x1b9b, 0x40e6, { 0xa6, 0x41, 0x8b, 0xb7, 0xe8, 0x82, 0x23, 0x87 } }
 
 class nsNavHistoryResult final : public nsSupportsWeakReference,
-                                     public nsINavHistoryResult,
-                                     public nsINavBookmarkObserver,
-                                     public nsINavHistoryObserver
+                                 public nsINavHistoryResult,
+                                 public nsINavBookmarkObserver,
+                                 public nsINavHistoryObserver
 {
 public:
   static nsresult NewHistoryResult(nsINavHistoryQuery** aQueries,
@@ -140,7 +140,7 @@ public:
                 uint32_t aQueryCount,
                 nsNavHistoryQueryOptions *aOptions);
 
-  nsRefPtr<nsNavHistoryContainerResultNode> mRootNode;
+  RefPtr<nsNavHistoryContainerResultNode> mRootNode;
 
   nsCOMArray<nsINavHistoryQuery> mQueries;
   nsCOMPtr<nsNavHistoryQueryOptions> mOptions;
@@ -161,21 +161,21 @@ public:
   bool mIsBookmarkFolderObserver;
   bool mIsAllBookmarksObserver;
 
-  typedef nsTArray< nsRefPtr<nsNavHistoryQueryResultNode> > QueryObserverList;
+  typedef nsTArray< RefPtr<nsNavHistoryQueryResultNode> > QueryObserverList;
   QueryObserverList mHistoryObservers;
   QueryObserverList mAllBookmarksObservers;
 
-  typedef nsTArray< nsRefPtr<nsNavHistoryFolderResultNode> > FolderObserverList;
+  typedef nsTArray< RefPtr<nsNavHistoryFolderResultNode> > FolderObserverList;
   nsDataHashtable<nsTrimInt64HashKey, FolderObserverList*> mBookmarkFolderObservers;
   FolderObserverList* BookmarkFolderObserversForId(int64_t aFolderId, bool aCreate);
 
-  typedef nsTArray< nsRefPtr<nsNavHistoryContainerResultNode> > ContainerObserverList;
+  typedef nsTArray< RefPtr<nsNavHistoryContainerResultNode> > ContainerObserverList;
 
   void RecursiveExpandCollapse(nsNavHistoryContainerResultNode* aContainer,
                                bool aExpand);
 
   void InvalidateTree();
-  
+
   bool mBatchInProgress;
 
   nsMaybeWeakPtrArray<nsINavHistoryResultObserver> mObservers;
@@ -281,7 +281,8 @@ public:
                            uint16_t aItemType,
                            int64_t aParentId,
                            const nsACString& aGUID,
-                           const nsACString& aParentGUID);
+                           const nsACString& aParentGUID,
+                           const nsACString &aOldValue);
 
 protected:
   virtual ~nsNavHistoryResultNode() {}
@@ -347,7 +348,7 @@ public:
     return reinterpret_cast<nsNavHistoryQueryResultNode*>(this);
   }
 
-  nsRefPtr<nsNavHistoryContainerResultNode> mParent;
+  RefPtr<nsNavHistoryContainerResultNode> mParent;
   nsCString mURI; // not necessarily valid for containers, call GetUri
   nsCString mTitle;
   nsString mTags;
@@ -458,7 +459,7 @@ public:
   // their result pointer set so we can quickly get to the result without having
   // to walk the tree. Yet, this also saves us from storing a million pointers
   // for every leaf node to the result.
-  nsRefPtr<nsNavHistoryResult> mResult;
+  RefPtr<nsNavHistoryResult> mResult;
 
   // For example, RESULT_TYPE_QUERY. Query and Folder results override GetType
   // so this is not used, but is still kept in sync.
@@ -556,13 +557,6 @@ public:
                                                 void* closure);
 
   // finding children: THESE DO NOT ADDREF
-  nsNavHistoryResultNode* FindChildURI(nsIURI* aURI, uint32_t* aNodeIndex)
-  {
-    nsAutoCString spec;
-    if (NS_FAILED(aURI->GetSpec(spec)))
-      return nullptr;
-    return FindChildURI(spec, aNodeIndex);
-  }
   nsNavHistoryResultNode* FindChildURI(const nsACString& aSpec,
                                        uint32_t* aNodeIndex);
   // returns the index of the given node, -1 if not found
@@ -612,8 +606,8 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsNavHistoryContainerResultNode,
 //    bookmark notifications.
 
 class nsNavHistoryQueryResultNode final : public nsNavHistoryContainerResultNode,
-                                              public nsINavHistoryQueryResultNode,
-                                              public nsINavBookmarkObserver
+                                          public nsINavHistoryQueryResultNode,
+                                          public nsINavBookmarkObserver
 {
 public:
   nsNavHistoryQueryResultNode(const nsACString& aTitle,
@@ -674,7 +668,6 @@ public:
   virtual void RecursiveSort(const char* aData,
                              SortComparator aComparator) override;
 
-  nsCOMPtr<nsIURI> mRemovingURI;
   nsresult NotifyIfTagsChanged(nsIURI* aURI);
 
   uint32_t mBatchChanges;
@@ -693,9 +686,9 @@ protected:
 //    of the folder in sync with the bookmark service.
 
 class nsNavHistoryFolderResultNode final : public nsNavHistoryContainerResultNode,
-                                               public nsINavHistoryQueryResultNode,
-                                               public nsINavBookmarkObserver,
-                                               public mozilla::places::AsyncStatementCallback
+                                           public nsINavHistoryQueryResultNode,
+                                           public nsINavBookmarkObserver,
+                                           public mozilla::places::AsyncStatementCallback
 {
 public:
   nsNavHistoryFolderResultNode(const nsACString& aTitle,

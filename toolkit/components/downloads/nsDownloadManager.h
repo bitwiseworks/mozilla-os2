@@ -39,9 +39,9 @@ class nsDownload;
 #endif
 
 class nsDownloadManager final : public nsIDownloadManager,
-                                    public nsINavHistoryObserver,
-                                    public nsIObserver,
-                                    public nsSupportsWeakReference
+                                public nsINavHistoryObserver,
+                                public nsIObserver,
+                                public nsSupportsWeakReference
 {
 public:
   NS_DECL_ISUPPORTS
@@ -433,7 +433,7 @@ private:
   /**
    * Stores the SHA-256 hash associated with the downloaded file.
    */
-  nsAutoCString mHash;
+  nsCString mHash;
 
   /**
    * Stores the certificate chains in an nsIArray of nsIX509CertList of

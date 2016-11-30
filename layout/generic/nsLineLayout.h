@@ -17,12 +17,12 @@
 #ifndef nsLineLayout_h___
 #define nsLineLayout_h___
 
-#include "nsLineBox.h"
-#include "nsBlockReflowState.h"
-#include "plarena.h"
 #include "gfxTypes.h"
-#include "WritingModes.h"
 #include "JustificationUtils.h"
+#include "mozilla/WritingModes.h"
+#include "nsBlockReflowState.h"
+#include "nsLineBox.h"
+#include "plarena.h"
 
 class nsFloatManager;
 struct nsStyleText;
@@ -303,6 +303,11 @@ public:
   {
     return mLastOptionalBreakFrame != nullptr;
   }
+  // Get the priority of the last optional break position recorded.
+  gfxBreakPriority LastOptionalBreakPriority() const
+  {
+    return mLastOptionalBreakPriority;
+  }
   
   /**
    * Check whether frames overflowed the available width and CanPlaceFrame
@@ -399,12 +404,12 @@ protected:
   // XXX remove this when landing bug 154892 (splitting absolute positioned frames)
   friend class nsInlineFrame;
 
-  nsBlockReflowState* mBlockRS;/* XXX hack! */
-
   // XXX Take care that nsRubyBaseContainer would give nullptr to this
   //     member. It should not be a problem currently, since the only
   //     code use it is handling float, which does not affect ruby.
   //     See comment in nsLineLayout::AddFloat
+  nsBlockReflowState* mBlockRS;/* XXX hack! */
+
   nsLineList::iterator mLineBox;
 
   // Per-frame data recorded by the line-layout reflow logic. This
@@ -539,14 +544,15 @@ protected:
   PerSpanData* mRootSpan;
   PerSpanData* mCurrentSpan;
 
-  // The container width to use when converting between logical and
+  // The container size to use when converting between logical and
   // physical coordinates for frames in this span. For the root span
-  // this is the width of the block cached in mContainerSize.width; for
-  // child spans it's the width of the root span
-  nscoord ContainerWidthForSpan(PerSpanData* aPSD) {
+  // this is the size of the block cached in mContainerSize; for
+  // child spans it's the size of the root span.
+  nsSize ContainerSizeForSpan(PerSpanData* aPSD) {
     return (aPSD == mRootSpan)
-      ? ContainerWidth()
-      : aPSD->mFrame->mBounds.Width(mRootSpan->mWritingMode);
+      ? mContainerSize
+      : aPSD->mFrame->mBounds.Size(mRootSpan->mWritingMode).
+        GetPhysicalSize(mRootSpan->mWritingMode);
   }
 
   gfxBreakPriority mLastOptionalBreakPriority;
@@ -582,8 +588,7 @@ protected:
 
   // Physical size. Use only for physical <-> logical coordinate conversion.
   nsSize mContainerSize;
-  nscoord ContainerWidth() const { return mContainerSize.width; }
-  nscoord ContainerHeight() const { return mContainerSize.height; }
+  const nsSize& ContainerSize() const { return mContainerSize; }
 
   bool mFirstLetterStyleOK      : 1;
   bool mIsTopOfPage             : 1;
@@ -657,6 +662,10 @@ protected:
   void PlaceFrame(PerFrameData* pfd,
                   nsHTMLReflowMetrics& aMetrics);
 
+  void AdjustLeadings(nsIFrame* spanFrame, PerSpanData* psd,
+                      const nsStyleText* aStyleText, float aInflation,
+                      bool* aZeroEffectiveSpanBox);
+
   void VerticalAlignFrames(PerSpanData* psd);
 
   void PlaceTopBottomFrames(PerSpanData* psd,
@@ -681,12 +690,11 @@ protected:
                                     JustificationComputationState& aState);
 
   void AdvanceAnnotationInlineBounds(PerFrameData* aPFD,
-                                     nscoord aContainerWidth,
+                                     const nsSize& aContainerSize,
                                      nscoord aDeltaICoord,
                                      nscoord aDeltaISize);
 
   void ApplyLineJustificationToAnnotations(PerFrameData* aPFD,
-                                           PerSpanData* aContainingSpan,
                                            nscoord aDeltaICoord,
                                            nscoord aDeltaISize);
 
@@ -696,10 +704,10 @@ protected:
       PerSpanData* aPSD, mozilla::JustificationApplicationState& aState);
 
   void ExpandRubyBox(PerFrameData* aFrame, nscoord aReservedISize,
-                     nscoord aContainerWidth);
+                     const nsSize& aContainerSize);
 
   void ExpandRubyBoxWithAnnotations(PerFrameData* aFrame,
-                                    nscoord aContainerWidth);
+                                    const nsSize& aContainerSize);
 
   void ExpandInlineRubyBoxes(PerSpanData* aSpan);
 

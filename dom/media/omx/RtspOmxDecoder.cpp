@@ -11,28 +11,30 @@
 
 namespace mozilla {
 
-MediaDecoder* RtspOmxDecoder::Clone()
+MediaDecoder* RtspOmxDecoder::Clone(MediaDecoderOwner* aOwner)
 {
-  return new RtspOmxDecoder();
+  return new RtspOmxDecoder(aOwner);
 }
 
-MediaDecoderStateMachine* RtspOmxDecoder::CreateStateMachine()
+MediaDecoderStateMachine*
+RtspOmxDecoder::CreateStateMachine()
 {
   return new MediaDecoderStateMachine(this,
                                       new RtspOmxReader(this),
                                       mResource->IsRealTime());
 }
 
-void RtspOmxDecoder::ApplyStateToStateMachine(PlayState aState)
+void
+RtspOmxDecoder::ChangeState(PlayState aState)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  MediaDecoder::ApplyStateToStateMachine(aState);
+  MediaDecoder::ChangeState(aState);
 
   // Notify RTSP controller if the play state is ended.
   // This is necessary for RTSP controller to transit its own state.
-  if (aState == PLAY_STATE_ENDED) {
-    nsRefPtr<RtspMediaResource> resource = mResource->GetRtspPointer();
+  if (mPlayState == PLAY_STATE_ENDED) {
+    RefPtr<RtspMediaResource> resource = mResource->GetRtspPointer();
     if (resource) {
       nsIStreamingProtocolController* controller =
         resource->GetMediaStreamController();

@@ -1,5 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set sw=2 ts=8 et tw=80 : */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -18,15 +18,15 @@
 
 namespace mozilla {
 namespace dom {
-class File;
+class Blob;
 }
 
 class DataChannel;
 };
 
-class nsDOMDataChannel : public mozilla::DOMEventTargetHelper,
-                         public nsIDOMDataChannel,
-                         public mozilla::DataChannelListener
+class nsDOMDataChannel final : public mozilla::DOMEventTargetHelper,
+                               public nsIDOMDataChannel,
+                               public mozilla::DataChannelListener
 {
 public:
   nsDOMDataChannel(already_AddRefed<mozilla::DataChannel>& aDataChannel,
@@ -42,7 +42,7 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(nsDOMDataChannel,
                                            mozilla::DOMEventTargetHelper)
 
-  virtual JSObject* WrapObject(JSContext* aCx)
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
     override;
   nsPIDOMWindow* GetParentObject() const
   {
@@ -54,11 +54,14 @@ public:
   bool Reliable() const;
   mozilla::dom::RTCDataChannelState ReadyState() const;
   uint32_t BufferedAmount() const;
+  uint32_t BufferedAmountLowThreshold() const;
+  void SetBufferedAmountLowThreshold(uint32_t aThreshold);
   IMPL_EVENT_HANDLER(open)
   IMPL_EVENT_HANDLER(error)
   IMPL_EVENT_HANDLER(close)
   // Uses XPIDL Close.
   IMPL_EVENT_HANDLER(message)
+  IMPL_EVENT_HANDLER(bufferedamountlow)
   mozilla::dom::RTCDataChannelType BinaryType() const
   {
     return static_cast<mozilla::dom::RTCDataChannelType>(
@@ -70,7 +73,7 @@ public:
       static_cast<int>(aType));
   }
   void Send(const nsAString& aData, mozilla::ErrorResult& aRv);
-  void Send(mozilla::dom::File& aData, mozilla::ErrorResult& aRv);
+  void Send(mozilla::dom::Blob& aData, mozilla::ErrorResult& aRv);
   void Send(const mozilla::dom::ArrayBuffer& aData, mozilla::ErrorResult& aRv);
   void Send(const mozilla::dom::ArrayBufferView& aData,
             mozilla::ErrorResult& aRv);
@@ -97,6 +100,9 @@ public:
   virtual nsresult
   OnChannelClosed(nsISupports* aContext) override;
 
+  virtual nsresult
+  OnBufferLow(nsISupports* aContext) override;
+
   virtual void
   AppReady();
 
@@ -108,7 +114,7 @@ private:
             uint32_t aMsgLength, bool aIsBinary, mozilla::ErrorResult& aRv);
 
   // Owning reference
-  nsRefPtr<mozilla::DataChannel> mDataChannel;
+  RefPtr<mozilla::DataChannel> mDataChannel;
   nsString  mOrigin;
   enum DataChannelBinaryType {
     DC_BINARY_TYPE_ARRAYBUFFER,

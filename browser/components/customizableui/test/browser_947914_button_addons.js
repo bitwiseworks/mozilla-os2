@@ -4,8 +4,8 @@
 
 "use strict";
 
-let initialLocation = gBrowser.currentURI.spec;
-let newTab = null;
+var initialLocation = gBrowser.currentURI.spec;
+var newTab = null;
 
 add_task(function() {
   info("Check addons button existence and functionality");
@@ -18,8 +18,8 @@ add_task(function() {
   addonsButton.click();
 
   newTab = gBrowser.selectedTab;
-  yield waitForCondition(function() gBrowser.currentURI &&
-                                    gBrowser.currentURI.spec == "about:addons");
+  yield waitForCondition(() => gBrowser.currentURI &&
+                               gBrowser.currentURI.spec == "about:addons");
 
   let addonsPage = gBrowser.selectedBrowser.contentWindow.document.
                             getElementById("addons-page");

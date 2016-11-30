@@ -15,16 +15,18 @@
 #include "nsCSSProps.h"
 #include "nsCSSPropertySet.h"
 #include "nsCSSValue.h"
+#include "nsStyleStruct.h"
 #include "imgRequestProxy.h"
 
 struct nsRuleData;
 class nsCSSExpandedDataBlock;
+class nsIDocument;
 
 namespace mozilla {
 namespace css {
 class Declaration;
-}
-}
+} // namespace css
+} // namespace mozilla
 
 /**
  * An |nsCSSCompressedDataBlock| holds a usually-immutable chunk of
@@ -90,6 +92,11 @@ public:
     bool HasDefaultBorderImageWidth() const;
     bool HasDefaultBorderImageOutset() const;
     bool HasDefaultBorderImageRepeat() const;
+
+    bool HasInheritedStyleData() const
+    {
+      return mStyleBits & NS_STYLE_INHERITED_STRUCT_MASK;
+    }
 
 private:
     void* operator new(size_t aBaseSize, uint32_t aNumProps) {
@@ -249,6 +256,8 @@ public:
      * Returns true if something changed, false otherwise.  Calls
      * |ValueAppended| on |aDeclaration| if the property was not
      * previously set, or in any case if |aMustCallValueAppended| is true.
+     * Calls |SetDocumentAndPageUseCounter| on |aSheetDocument| if it is
+     * non-null and |aPropID| has a use counter.
      */
     bool TransferFromBlock(nsCSSExpandedDataBlock& aFromBlock,
                            nsCSSProperty aPropID,
@@ -256,7 +265,8 @@ public:
                            bool aIsImportant,
                            bool aOverrideImportant,
                            bool aMustCallValueAppended,
-                           mozilla::css::Declaration* aDeclaration);
+                           mozilla::css::Declaration* aDeclaration,
+                           nsIDocument* aSheetDocument);
 
     /**
      * Copies the values for aPropID into the specified aRuleData object.
@@ -290,7 +300,8 @@ private:
                                bool aIsImportant,
                                bool aOverrideImportant,
                                bool aMustCallValueAppended,
-                               mozilla::css::Declaration* aDeclaration);
+                               mozilla::css::Declaration* aDeclaration,
+                               nsIDocument* aSheetDocument);
 
 #ifdef DEBUG
     void DoAssertInitialState();

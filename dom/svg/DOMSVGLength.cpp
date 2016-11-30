@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -32,10 +33,8 @@ static nsSVGAttrTearoffTable<nsSVGLength2, DOMSVGLength>
 NS_IMPL_CYCLE_COLLECTION_CLASS(DOMSVGLength)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(DOMSVGLength)
-  // We may not belong to a list, so we must null check tmp->mList.
-  if (tmp->mList) {
-    tmp->mList->mItems[tmp->mListIndex] = nullptr;
-  }
+  tmp->CleanupWeakRefs();
+  tmp->mVal = nullptr; // (owned by mSVGElement, which we drop our ref to here)
 NS_IMPL_CYCLE_COLLECTION_UNLINK(mList)
 NS_IMPL_CYCLE_COLLECTION_UNLINK(mSVGElement)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
@@ -65,7 +64,7 @@ NS_INTERFACE_MAP_END
 // Helper class: AutoChangeLengthNotifier
 // Stack-based helper class to pair calls to WillChangeLengthList and
 // DidChangeLengthList.
-class MOZ_STACK_CLASS AutoChangeLengthNotifier
+class MOZ_RAII AutoChangeLengthNotifier
 {
 public:
   explicit AutoChangeLengthNotifier(DOMSVGLength* aLength MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
@@ -139,19 +138,30 @@ DOMSVGLength::DOMSVGLength(nsSVGLength2* aVal, nsSVGElement* aSVGElement,
 {
 }
 
-DOMSVGLength::~DOMSVGLength()
+void
+DOMSVGLength::CleanupWeakRefs()
 {
-  // Our mList's weak ref to us must be nulled out when we die. If GC has
-  // unlinked us using the cycle collector code, then that has already
-  // happened, and mList is null.
+  // Our mList's weak ref to us must be nulled out when we die (or when we're
+  // cycle collected), so we that don't leave behind a pointer to
+  // free / soon-to-be-free memory.
   if (mList) {
+    MOZ_ASSERT(mList->mItems[mListIndex] == this,
+               "Clearing out the wrong list index...?");
     mList->mItems[mListIndex] = nullptr;
   }
 
+  // Similarly, we must update the tearoff table to remove its (non-owning)
+  // pointer to mVal.
   if (mVal) {
-    auto& table = mIsAnimValItem ? sAnimSVGLengthTearOffTable : sBaseSVGLengthTearOffTable;
+    auto& table = mIsAnimValItem ?
+      sAnimSVGLengthTearOffTable : sBaseSVGLengthTearOffTable;
     table.RemoveTearoff(mVal);
   }
+}
+
+DOMSVGLength::~DOMSVGLength()
+{
+  CleanupWeakRefs();
 }
 
 already_AddRefed<DOMSVGLength>
@@ -159,7 +169,7 @@ DOMSVGLength::GetTearOff(nsSVGLength2* aVal, nsSVGElement* aSVGElement,
                          bool aAnimVal)
 {
   auto& table = aAnimVal ? sAnimSVGLengthTearOffTable : sBaseSVGLengthTearOffTable;
-  nsRefPtr<DOMSVGLength> domLength = table.GetTearoff(aVal);
+  RefPtr<DOMSVGLength> domLength = table.GetTearoff(aVal);
   if (!domLength) {
     domLength = new DOMSVGLength(aVal, aSVGElement, aAnimVal);
     table.AddTearoff(aVal, domLength);
@@ -245,7 +255,7 @@ DOMSVGLength::GetValue(float* aValue)
 {
   ErrorResult rv;
   *aValue = GetValue(rv);
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -299,7 +309,7 @@ DOMSVGLength::SetValue(float aUserUnitValue)
 
   ErrorResult rv;
   SetValue(aUserUnitValue, rv);
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 float
@@ -359,7 +369,7 @@ DOMSVGLength::SetValueInSpecifiedUnits(float aValue)
 
   ErrorResult rv;
   SetValueInSpecifiedUnits(aValue, rv);
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -371,7 +381,7 @@ DOMSVGLength::SetValueAsString(const nsAString& aValue, ErrorResult& aRv)
   }
 
   if (mVal) {
-    mVal->SetBaseValueString(aValue, mSVGElement, true);
+    aRv = mVal->SetBaseValueString(aValue, mSVGElement, true);
     return;
   }
 
@@ -397,7 +407,7 @@ DOMSVGLength::SetValueAsString(const nsAString& aValue)
 {
   ErrorResult rv;
   SetValueAsString(aValue, rv);
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 NS_IMETHODIMP
@@ -464,7 +474,7 @@ DOMSVGLength::NewValueSpecifiedUnits(uint16_t aUnit, float aValue)
 
   ErrorResult rv;
   NewValueSpecifiedUnits(aUnit, aValue, rv);
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -514,13 +524,13 @@ DOMSVGLength::ConvertToSpecifiedUnits(uint16_t aUnit)
 {
   ErrorResult rv;
   ConvertToSpecifiedUnits(aUnit, rv);
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 JSObject*
-DOMSVGLength::WrapObject(JSContext* aCx)
+DOMSVGLength::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return dom::SVGLengthBinding::Wrap(aCx, this);
+  return dom::SVGLengthBinding::Wrap(aCx, this, aGivenProto);
 }
 
 void

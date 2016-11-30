@@ -12,13 +12,13 @@
 namespace mozilla {
 namespace dom {
 
-class MediaElementAudioSourceNode : public MediaStreamAudioSourceNode
+class MediaElementAudioSourceNode final : public MediaStreamAudioSourceNode
 {
 public:
   static already_AddRefed<MediaElementAudioSourceNode>
   Create(AudioContext* aContext, DOMMediaStream* aStream, ErrorResult& aRv);
 
-  virtual JSObject* WrapObject(JSContext* aCx) override;
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   virtual const char* NodeType() const override
   {
@@ -33,7 +33,7 @@ private:
   explicit MediaElementAudioSourceNode(AudioContext* aContext);
 };
 
-}
-}
+} // namespace dom
+} // namespace mozilla
 
 #endif

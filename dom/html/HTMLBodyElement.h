@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -27,6 +28,7 @@ public:
 
   // nsIStyleRule interface
   virtual void MapRuleInfoInto(nsRuleData* aRuleData) override;
+  virtual bool MightMapInheritedStyleData() override;
 #ifdef DEBUG
   virtual void List(FILE* out = stdout, int32_t aIndent = 0) const override;
 #endif
@@ -35,7 +37,7 @@ public:
 };
 
 class HTMLBodyElement final : public nsGenericHTMLElement,
-                                  public nsIDOMHTMLBodyElement
+                              public nsIDOMHTMLBodyElement
 {
 public:
   using Element::GetText;
@@ -134,9 +136,9 @@ public:
 protected:
   virtual ~HTMLBodyElement();
 
-  virtual JSObject* WrapNode(JSContext *aCx) override;
+  virtual JSObject* WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto) override;
 
-  nsRefPtr<BodyRule> mContentStyleRule;
+  RefPtr<BodyRule> mContentStyleRule;
 
 private:
   static void MapAttributesIntoRule(const nsMappedAttributes* aAttributes,

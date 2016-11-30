@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -99,7 +100,7 @@ private:
   static void* operator new(size_t) CPP_THROW_NEW { return 0; }
   static void operator delete(void*, size_t) {}
   /** The select element which option list is being mutated. */
-  nsRefPtr<HTMLSelectElement> mSelect;
+  RefPtr<HTMLSelectElement> mSelect;
   /** true if the current mutation is the first one in the stack. */
   bool                       mTopLevelMutation;
   /** true if it is known that the option list must be recreated. */
@@ -113,8 +114,8 @@ private:
  * Implementation of &lt;select&gt;
  */
 class HTMLSelectElement final : public nsGenericHTMLFormElementWithState,
-                                    public nsIDOMHTMLSelectElement,
-                                    public nsIConstraintValidation
+                                public nsIDOMHTMLSelectElement,
+                                public nsIConstraintValidation
 {
 public:
   /**
@@ -272,7 +273,7 @@ public:
 
 
   // nsINode
-  virtual JSObject* WrapNode(JSContext* aCx) override;
+  virtual JSObject* WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   // nsIContent
   virtual nsresult PreHandleEvent(EventChainPreVisitor& aVisitor) override;
@@ -290,7 +291,7 @@ public:
   NS_IMETHOD SubmitNamesValues(nsFormSubmission* aFormSubmission) override;
   NS_IMETHOD SaveState() override;
   virtual bool RestoreState(nsPresState* aState) override;
-  virtual bool IsDisabledForEvents(uint32_t aMessage) override;
+  virtual bool IsDisabledForEvents(EventMessage aMessage) override;
 
   virtual void FieldSetDisabledChanged(bool aNotify) override;
 
@@ -371,7 +372,7 @@ public:
                                bool aCompileEventHandlers) override;
   virtual void UnbindFromTree(bool aDeep, bool aNullParent) override;
   virtual nsresult BeforeSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
-                                 const nsAttrValueOrString* aValue,
+                                 nsAttrValueOrString* aValue,
                                  bool aNotify) override;
   virtual nsresult AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
                                 const nsAttrValue* aValue, bool aNotify) override;
@@ -501,37 +502,11 @@ protected:
                                  int32_t aListIndex,
                                  int32_t aDepth,
                                  bool aNotify);
-  /**
-   * Insert option(s) into the options[] array (called by InsertOptionsIntoList)
-   * @param aOptions the option or optgroup being added
-   * @param aInsertIndex the index to start adding options into the list at
-   * @param aDepth the depth of aOptions (1=direct child of select ...)
-   */
-  void InsertOptionsIntoListRecurse(nsIContent* aOptions,
-                                    int32_t* aInsertIndex,
-                                    int32_t aDepth);
-  /**
-   * Remove option(s) from the options[] array (called by RemoveOptionsFromList)
-   * @param aOptions the option or optgroup being added
-   * @param aListIndex the index to start removing options from the list at
-   * @param aNumRemoved the number removed so far [OUT]
-   * @param aDepth the depth of aOptions (1=direct child of select ...)
-   */
-  nsresult RemoveOptionsFromListRecurse(nsIContent* aOptions,
-                                        int32_t aRemoveIndex,
-                                        int32_t* aNumRemoved,
-                                        int32_t aDepth);
 
   // nsIConstraintValidation
   void UpdateBarredFromConstraintValidation();
   bool IsValueMissing();
 
-  /**
-   * Find out how deep this content is from the select (1=direct child)
-   * @param aContent the content to check
-   * @return the depth
-   */
-  int32_t GetContentDepth(nsIContent* aContent);
   /**
    * Get the index of the first option at, under or following the content in
    * the select, or length of options[] if none are found
@@ -617,7 +592,7 @@ protected:
   }
 
   /** The options[] array */
-  nsRefPtr<HTMLOptionsCollection> mOptions;
+  RefPtr<HTMLOptionsCollection> mOptions;
   nsContentUtils::AutocompleteAttrState mAutocompleteAttrState;
   /** false if the parser is in the middle of adding children. */
   bool            mIsDoneAddingChildren;
@@ -666,7 +641,7 @@ protected:
   /**
    * The live list of selected options.
   */
-  nsRefPtr<nsContentList> mSelectedOptions;
+  RefPtr<nsContentList> mSelectedOptions;
 
 private:
   static void MapAttributesIntoRule(const nsMappedAttributes* aAttributes,

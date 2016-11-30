@@ -6,12 +6,15 @@
 
 #include "Logging.h"
 #include "SourceSurfaceSkia.h"
-#include "skia/SkBitmap.h"
-#include "skia/SkDevice.h"
+#include "skia/include/core/SkBitmap.h"
+#include "skia/include/core/SkDevice.h"
 #include "HelpersSkia.h"
 #include "DrawTargetSkia.h"
 #include "DataSurfaceHelpers.h"
-#include "skia/SkGrPixelRef.h"
+
+#ifdef USE_SKIA_GPU
+#include "skia/include/gpu/SkGrPixelRef.h"
+#endif
 
 namespace mozilla {
 namespace gfx {
@@ -98,11 +101,12 @@ SourceSurfaceSkia::InitFromTexture(DrawTargetSkia* aOwner,
                                    SurfaceFormat aFormat)
 {
   MOZ_ASSERT(aOwner, "null GrContext");
+#ifdef USE_SKIA_GPU
   GrBackendTextureDesc skiaTexGlue;
   mSize.width = skiaTexGlue.fWidth = aSize.width;
   mSize.height = skiaTexGlue.fHeight = aSize.height;
   skiaTexGlue.fFlags = kNone_GrBackendTextureFlag;
-  skiaTexGlue.fOrigin = kBottomLeft_GrSurfaceOrigin;
+  skiaTexGlue.fOrigin = kTopLeft_GrSurfaceOrigin;
   skiaTexGlue.fConfig = GfxFormatToGrConfig(aFormat);
   skiaTexGlue.fSampleCnt = 0;
   skiaTexGlue.fTextureHandle = aTexture;
@@ -114,6 +118,7 @@ SourceSurfaceSkia::InitFromTexture(DrawTargetSkia* aOwner,
   mBitmap.setPixelRef(texRef);
   mFormat = aFormat;
   mStride = mBitmap.rowBytes();
+#endif
 
   mDrawTarget = aOwner;
   return true;
@@ -153,5 +158,5 @@ SourceSurfaceSkia::MaybeUnlock()
   }
 }
 
-}
-}
+} // namespace gfx
+} // namespace mozilla

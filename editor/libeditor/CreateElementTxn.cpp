@@ -73,7 +73,7 @@ CreateElementTxn::DoTransaction()
   ErrorResult rv;
   if (mOffsetInParent == -1) {
     mParent->AppendChild(*mNewNode, rv);
-    return rv.ErrorCode();
+    return rv.StealNSResult();
   }
 
   mOffsetInParent = std::min(mOffsetInParent,
@@ -82,8 +82,9 @@ CreateElementTxn::DoTransaction()
   // Note, it's ok for mRefNode to be null. That means append
   mRefNode = mParent->GetChildAt(mOffsetInParent);
 
-  mParent->InsertBefore(*mNewNode, mRefNode, rv);
-  NS_ENSURE_SUCCESS(rv.ErrorCode(), rv.ErrorCode());
+  nsCOMPtr<nsIContent> refNode = mRefNode;
+  mParent->InsertBefore(*mNewNode, refNode, rv);
+  NS_ENSURE_TRUE(!rv.Failed(), rv.StealNSResult());
 
   // Only set selection to insertion point if editor gives permission
   if (!mEditor->GetShouldTxnSetSelection()) {
@@ -91,7 +92,7 @@ CreateElementTxn::DoTransaction()
     return NS_OK;
   }
 
-  nsRefPtr<Selection> selection = mEditor->GetSelection();
+  RefPtr<Selection> selection = mEditor->GetSelection();
   NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
 
   rv = selection->CollapseNative(mParent, mParent->IndexOf(mNewNode) + 1);
@@ -108,7 +109,7 @@ CreateElementTxn::UndoTransaction()
   ErrorResult rv;
   mParent->RemoveChild(*mNewNode, rv);
 
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 NS_IMETHODIMP
@@ -122,8 +123,9 @@ CreateElementTxn::RedoTransaction()
 
   // Now, reinsert mNewNode
   ErrorResult rv;
-  mParent->InsertBefore(*mNewNode, mRefNode, rv);
-  return rv.ErrorCode();
+  nsCOMPtr<nsIContent> refNode = mRefNode;
+  mParent->InsertBefore(*mNewNode, refNode, rv);
+  return rv.StealNSResult();
 }
 
 NS_IMETHODIMP

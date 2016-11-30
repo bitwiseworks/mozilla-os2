@@ -9,12 +9,11 @@
 
 #include "SerializedLoadContext.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/BasePrincipal.h"
 #include "nsIWeakReferenceUtils.h"
 #include "mozilla/dom/Element.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsILoadContext.h"
-
-class mozIApplication;
 
 namespace mozilla {
 
@@ -44,67 +43,66 @@ public:
   // by child process.
   LoadContext(const IPC::SerializedLoadContext& aToCopy,
               dom::Element* aTopFrameElement,
-              uint32_t aAppId, bool aInBrowser)
+              DocShellOriginAttributes& aAttrs)
     : mTopFrameElement(do_GetWeakReference(aTopFrameElement))
     , mNestedFrameId(0)
-    , mAppId(aAppId)
     , mIsContent(aToCopy.mIsContent)
     , mUsePrivateBrowsing(aToCopy.mUsePrivateBrowsing)
     , mUseRemoteTabs(aToCopy.mUseRemoteTabs)
-    , mIsInBrowserElement(aInBrowser)
+    , mOriginAttributes(aAttrs)
 #ifdef DEBUG
     , mIsNotNull(aToCopy.mIsNotNull)
 #endif
-  {}
+  {
+  }
 
   // AppId/inBrowser arguments override those in SerializedLoadContext provided
   // by child process.
   LoadContext(const IPC::SerializedLoadContext& aToCopy,
               uint64_t aNestedFrameId,
-              uint32_t aAppId, bool aInBrowser)
+              DocShellOriginAttributes& aAttrs)
     : mTopFrameElement(nullptr)
     , mNestedFrameId(aNestedFrameId)
-    , mAppId(aAppId)
     , mIsContent(aToCopy.mIsContent)
     , mUsePrivateBrowsing(aToCopy.mUsePrivateBrowsing)
     , mUseRemoteTabs(aToCopy.mUseRemoteTabs)
-    , mIsInBrowserElement(aInBrowser)
+    , mOriginAttributes(aAttrs)
 #ifdef DEBUG
     , mIsNotNull(aToCopy.mIsNotNull)
 #endif
-  {}
+  {
+  }
 
   LoadContext(dom::Element* aTopFrameElement,
-              uint32_t aAppId,
               bool aIsContent,
               bool aUsePrivateBrowsing,
               bool aUseRemoteTabs,
-              bool aIsInBrowserElement)
+              const DocShellOriginAttributes& aAttrs)
     : mTopFrameElement(do_GetWeakReference(aTopFrameElement))
     , mNestedFrameId(0)
-    , mAppId(aAppId)
     , mIsContent(aIsContent)
     , mUsePrivateBrowsing(aUsePrivateBrowsing)
     , mUseRemoteTabs(aUseRemoteTabs)
-    , mIsInBrowserElement(aIsInBrowserElement)
+    , mOriginAttributes(aAttrs)
 #ifdef DEBUG
     , mIsNotNull(true)
 #endif
-  {}
+  {
+  }
 
   // Constructor taking reserved appId for the safebrowsing cookie.
   explicit LoadContext(uint32_t aAppId)
     : mTopFrameElement(nullptr)
     , mNestedFrameId(0)
-    , mAppId(aAppId)
     , mIsContent(false)
     , mUsePrivateBrowsing(false)
     , mUseRemoteTabs(false)
-    , mIsInBrowserElement(false)
+    , mOriginAttributes(aAppId, false)
 #ifdef DEBUG
     , mIsNotNull(true)
 #endif
-  {}
+  {
+  }
 
   // Constructor for creating a LoadContext with a given principal's appId and
   // browser flag.
@@ -116,11 +114,10 @@ private:
 
   nsWeakPtr mTopFrameElement;
   uint64_t mNestedFrameId;
-  uint32_t mAppId;
   bool mIsContent;
   bool mUsePrivateBrowsing;
   bool mUseRemoteTabs;
-  bool mIsInBrowserElement;
+  DocShellOriginAttributes mOriginAttributes;
 #ifdef DEBUG
   bool mIsNotNull;
 #endif
@@ -129,4 +126,3 @@ private:
 } // namespace mozilla
 
 #endif // LoadContext_h
-

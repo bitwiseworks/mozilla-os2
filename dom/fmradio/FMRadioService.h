@@ -1,5 +1,5 @@
-/* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -148,9 +148,9 @@ enum FMRadioState
 };
 
 class FMRadioService final : public IFMRadioService
-                               , public hal::FMRadioObserver
-                               , public hal::FMRadioRDSObserver
-                               , public nsIObserver
+                           , public hal::FMRadioObserver
+                           , public hal::FMRadioRDSObserver
+                           , public nsIObserver
 {
   friend class ReadAirplaneModeSettingTask;
   friend class EnableRunnable;
@@ -159,7 +159,6 @@ class FMRadioService final : public IFMRadioService
 
 public:
   static FMRadioService* Singleton();
-  virtual ~FMRadioService();
 
   NS_DECL_ISUPPORTS
 
@@ -197,10 +196,15 @@ public:
   /* FMRadioRDSObserver */
   void Notify(const hal::FMRadioRDSGroup& aRDSGroup) override;
 
+  void EnableFMRadio();
+  void DisableFMRadio();
+  void DispatchFMRadioEventToMainThread(enum FMRadioEventType aType);
+
   NS_DECL_NSIOBSERVER
 
 protected:
   FMRadioService();
+  virtual ~FMRadioService();
 
 private:
   int32_t RoundFrequency(double aFrequencyInMHz);
@@ -229,7 +233,7 @@ private:
   uint32_t mPreemphasis;
 
   nsCOMPtr<nsIThread> mTuneThread;
-  nsRefPtr<FMRadioReplyRunnable> mPendingRequest;
+  RefPtr<FMRadioReplyRunnable> mPendingRequest;
 
   FMRadioEventObserverList mObserverList;
 

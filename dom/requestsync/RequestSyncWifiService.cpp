@@ -1,5 +1,5 @@
-/* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -21,12 +21,12 @@ namespace {
 
 StaticRefPtr<RequestSyncWifiService> sService;
 
-} // anonymous namespace
+} // namespace
 
 /* static */ void
 RequestSyncWifiService::Init()
 {
-  nsRefPtr<RequestSyncWifiService> service = GetInstance();
+  RefPtr<RequestSyncWifiService> service = GetInstance();
   if (!service) {
     NS_WARNING("Failed to initialize RequestSyncWifiService.");
   }
@@ -41,7 +41,7 @@ RequestSyncWifiService::GetInstance()
     ClearOnShutdown(&sService);
   }
 
-  nsRefPtr<RequestSyncWifiService> service = sService.get();
+  RefPtr<RequestSyncWifiService> service = sService.get();
   return service.forget();
 }
 
@@ -63,5 +63,5 @@ RequestSyncWifiService::Notify(const hal::NetworkInformation& aNetworkInfo)
   }
 }
 
-} // dom namespace
-} // mozilla namespace
+} // namespace dom
+} // namespace mozilla

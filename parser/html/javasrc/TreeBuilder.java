@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2007 Henri Sivonen
- * Copyright (c) 2007-2011 Mozilla Foundation
+ * Copyright (c) 2007-2015 Mozilla Foundation
  * Portions of comments Copyright 2004-2008 Apple Computer, Inc., Mozilla
  * Foundation, and Opera Software ASA.
  *
@@ -39,6 +39,11 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
+import org.xml.sax.ErrorHandler;
+import org.xml.sax.Locator;
+import org.xml.sax.SAXException;
+import org.xml.sax.SAXParseException;
+
 import nu.validator.htmlparser.annotation.Auto;
 import nu.validator.htmlparser.annotation.Const;
 import nu.validator.htmlparser.annotation.IdType;
@@ -53,11 +58,6 @@ import nu.validator.htmlparser.common.DocumentModeHandler;
 import nu.validator.htmlparser.common.Interner;
 import nu.validator.htmlparser.common.TokenHandler;
 import nu.validator.htmlparser.common.XmlViolationPolicy;
-
-import org.xml.sax.ErrorHandler;
-import org.xml.sax.Locator;
-import org.xml.sax.SAXException;
-import org.xml.sax.SAXParseException;
 
 public abstract class TreeBuilder<T> implements TokenHandler,
         TreeBuilderState<T> {
@@ -602,7 +602,7 @@ public abstract class TreeBuilder<T> implements TokenHandler,
         // ]NOCPP]
         start(fragment);
         charBufferLen = 0;
-        charBuffer = new char[1024];
+        charBuffer = null;
         framesetOk = true;
         if (fragment) {
             T elt;
@@ -1924,7 +1924,6 @@ public abstract class TreeBuilder<T> implements TokenHandler,
                                     break starttagloop;
                                 }
                                 generateImpliedEndTags();
-                                // XXX is the next if dead code?
                                 if (errorHandler != null && !isCurrent("table")) {
                                     errNoCheckUnclosedElementsOnStack();
                                 }
@@ -2183,11 +2182,11 @@ public abstract class TreeBuilder<T> implements TokenHandler,
                                             pop();
                                         }
                                         break;
-                                    } else if (node.isSpecial()
+                                    } else if (eltPos == 0 || (node.isSpecial()
                                             && (node.ns != "http://www.w3.org/1999/xhtml"
-                                                || (node.name != "p"
-                                                    && node.name != "address"
-                                                    && node.name != "div"))) {
+                                                    || (node.name != "p"
+                                                            && node.name != "address"
+                                                            && node.name != "div")))) {
                                         break;
                                     }
                                     eltPos--;
@@ -3184,7 +3183,9 @@ public abstract class TreeBuilder<T> implements TokenHandler,
      * @throws SAXException
      * @throws StopSniffingException
      */
-    public static String extractCharsetFromContent(String attributeValue) {
+    public static String extractCharsetFromContent(String attributeValue
+        // CPPONLY: , TreeBuilder tb
+    ) {
         // This is a bit ugly. Converting the string to char array in order to
         // make the portability layer smaller.
         int charsetState = CHARSET_INITIAL;
@@ -3336,7 +3337,9 @@ public abstract class TreeBuilder<T> implements TokenHandler,
                 end = buffer.length;
             }
             charset = Portability.newStringFromBuffer(buffer, start, end
-                    - start);
+                    - start
+                // CPPONLY: , tb
+            );
         }
         return charset;
     }
@@ -3358,7 +3361,9 @@ public abstract class TreeBuilder<T> implements TokenHandler,
         }
         String content = attributes.getValue(AttributeName.CONTENT);
         if (content != null) {
-            String extract = TreeBuilder.extractCharsetFromContent(content);
+            String extract = TreeBuilder.extractCharsetFromContent(content
+                // CPPONLY: , this
+            );
             // remember not to return early without releasing the string
             if (extract != null) {
                 if (tokenizer.internalEncodingDeclaration(extract)) {
@@ -3878,7 +3883,7 @@ public abstract class TreeBuilder<T> implements TokenHandler,
                                         pop();
                                     }
                                     break endtagloop;
-                                } else if (node.isSpecial()) {
+                                } else if (eltPos == 0 || node.isSpecial()) {
                                     errStrayEndTag(name);
                                     break endtagloop;
                                 }
@@ -4745,6 +4750,7 @@ public abstract class TreeBuilder<T> implements TokenHandler,
             int furthestBlockPos = formattingEltStackPos + 1;
             while (furthestBlockPos <= currentPtr) {
                 StackNode<T> node = stack[furthestBlockPos]; // weak ref
+                assert furthestBlockPos > 0: "How is formattingEltStackPos + 1 not > 0?";
                 if (node.isSpecial()) {
                     break;
                 }
@@ -5594,14 +5600,30 @@ public abstract class TreeBuilder<T> implements TokenHandler,
 
     private final void accumulateCharactersForced(@Const @NoLength char[] buf,
             int start, int length) throws SAXException {
-        int newLen = charBufferLen + length;
-        if (newLen > charBuffer.length) {
-            char[] newBuf = new char[newLen];
+        System.arraycopy(buf, start, charBuffer, charBufferLen, length);
+        charBufferLen += length;
+    }
+
+    @Override public void ensureBufferSpace(int inputLength)
+            throws SAXException {
+        // TODO: Unify Tokenizer.strBuf and TreeBuilder.charBuffer so that
+        // this method becomes unnecessary.
+        int worstCase = charBufferLen + inputLength;
+        if (charBuffer == null) {
+            // Add an arbitrary small value to avoid immediate reallocation
+            // once there are a few characters in the buffer.
+            charBuffer = new char[worstCase + 128];
+        } else if (worstCase > charBuffer.length) {
+            // HotSpot reportedly allocates memory with 8-byte accuracy, so
+            // there's no point in trying to do math here to avoid slop.
+            // Maybe we should add some small constant to worstCase here
+            // but not doing that without profiling. In C++ with jemalloc,
+            // the corresponding method should do math to round up here
+            // to avoid slop.
+            char[] newBuf = new char[worstCase];
             System.arraycopy(charBuffer, 0, newBuf, 0, charBufferLen);
             charBuffer = newBuf;
         }
-        System.arraycopy(buf, start, charBuffer, charBufferLen, length);
-        charBufferLen = newLen;
     }
 
     // ]NOCPP]

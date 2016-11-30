@@ -15,7 +15,7 @@
  * aKeyNameIndex is the widget::KeyNameIndex value.
  */
 
-// Windows (both Desktop and Metro)
+// Windows
 #define KEY_MAP_WIN(aCPPKeyName, aNativeKey)
 #define KEY_MAP_WIN_JPN(aCPPKeyName, aNativeKey)
 #define KEY_MAP_WIN_KOR(aCPPKeyName, aNativeKey)
@@ -1304,6 +1304,15 @@ KEY_MAP_ANDROID (HomeScreen, AKEYCODE_HOME)
 // Focus
 KEY_MAP_QT      (CameraFocusAdjust, Qt::Key_CameraFocus)
 KEY_MAP_ANDROID (CameraFocusAdjust, AKEYCODE_FOCUS)
+
+// PhoneCall
+KEY_MAP_ANDROID (PhoneCall, AKEYCODE_CALL)
+
+// SoftLeft
+KEY_MAP_ANDROID (SoftLeft, AKEYCODE_SOFT_LEFT)
+
+// SoftRight
+KEY_MAP_ANDROID (SoftRight, AKEYCODE_SOFT_RIGHT)
 
 #undef KEY_MAP_WIN
 #undef KEY_MAP_WIN_JPN

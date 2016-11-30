@@ -21,7 +21,6 @@ NS_IMPL_CYCLE_COLLECTION_INHERITED(DynamicsCompressorNode, AudioNode,
                                    mThreshold,
                                    mKnee,
                                    mRatio,
-                                   mReduction,
                                    mAttack,
                                    mRelease)
 
@@ -31,14 +30,13 @@ NS_INTERFACE_MAP_END_INHERITING(AudioNode)
 NS_IMPL_ADDREF_INHERITED(DynamicsCompressorNode, AudioNode)
 NS_IMPL_RELEASE_INHERITED(DynamicsCompressorNode, AudioNode)
 
-class DynamicsCompressorNodeEngine : public AudioNodeEngine
+class DynamicsCompressorNodeEngine final : public AudioNodeEngine
 {
 public:
   explicit DynamicsCompressorNodeEngine(AudioNode* aNode,
                                         AudioDestinationNode* aDestination)
     : AudioNodeEngine(aNode)
-    , mSource(nullptr)
-    , mDestination(static_cast<AudioNodeStream*> (aDestination->Stream()))
+    , mDestination(aDestination->Stream())
     // Keep the default value in sync with the default value in
     // DynamicsCompressorNode::DynamicsCompressorNode.
     , mThreshold(-24.f)
@@ -50,11 +48,6 @@ public:
   {
   }
 
-  void SetSourceStream(AudioNodeStream* aSource)
-  {
-    mSource = aSource;
-  }
-
   enum Parameters {
     THRESHOLD,
     KNEE,
@@ -62,31 +55,29 @@ public:
     ATTACK,
     RELEASE
   };
-  void SetTimelineParameter(uint32_t aIndex,
-                            const AudioParamTimeline& aValue,
-                            TrackRate aSampleRate) override
+  void RecvTimelineEvent(uint32_t aIndex,
+                         AudioTimelineEvent& aEvent) override
   {
-    MOZ_ASSERT(mSource && mDestination);
+    MOZ_ASSERT(mDestination);
+
+    WebAudioUtils::ConvertAudioTimelineEventToTicks(aEvent,
+                                                    mDestination);
+
     switch (aIndex) {
     case THRESHOLD:
-      mThreshold = aValue;
-      WebAudioUtils::ConvertAudioParamToTicks(mThreshold, mSource, mDestination);
+      mThreshold.InsertEvent<int64_t>(aEvent);
       break;
     case KNEE:
-      mKnee = aValue;
-      WebAudioUtils::ConvertAudioParamToTicks(mKnee, mSource, mDestination);
+      mKnee.InsertEvent<int64_t>(aEvent);
       break;
     case RATIO:
-      mRatio = aValue;
-      WebAudioUtils::ConvertAudioParamToTicks(mRatio, mSource, mDestination);
+      mRatio.InsertEvent<int64_t>(aEvent);
       break;
     case ATTACK:
-      mAttack = aValue;
-      WebAudioUtils::ConvertAudioParamToTicks(mAttack, mSource, mDestination);
+      mAttack.InsertEvent<int64_t>(aEvent);
       break;
     case RELEASE:
-      mRelease = aValue;
-      WebAudioUtils::ConvertAudioParamToTicks(mRelease, mSource, mDestination);
+      mRelease.InsertEvent<int64_t>(aEvent);
       break;
     default:
       NS_ERROR("Bad DynamicsCompresssorNodeEngine TimelineParameter");
@@ -94,8 +85,9 @@ public:
   }
 
   virtual void ProcessBlock(AudioNodeStream* aStream,
-                            const AudioChunk& aInput,
-                            AudioChunk* aOutput,
+                            GraphTime aFrom,
+                            const AudioBlock& aInput,
+                            AudioBlock* aOutput,
                             bool* aFinished) override
   {
     if (aInput.IsNull()) {
@@ -104,14 +96,14 @@ public:
       return;
     }
 
-    const uint32_t channelCount = aInput.mChannelData.Length();
+    const uint32_t channelCount = aInput.ChannelCount();
     if (mCompressor->numberOfChannels() != channelCount) {
       // Create a new compressor object with a new channel count
       mCompressor = new WebCore::DynamicsCompressor(aStream->SampleRate(),
-                                                    aInput.mChannelData.Length());
+                                                    aInput.ChannelCount());
     }
 
-    StreamTime pos = aStream->GetCurrentPosition();
+    StreamTime pos = mDestination->GraphTimeToStreamTime(aFrom);
     mCompressor->setParameterValue(DynamicsCompressor::ParamThreshold,
                                    mThreshold.GetValueAtTime(pos));
     mCompressor->setParameterValue(DynamicsCompressor::ParamKnee,
@@ -123,7 +115,7 @@ public:
     mCompressor->setParameterValue(DynamicsCompressor::ParamRelease,
                                    mRelease.GetValueAtTime(pos));
 
-    AllocateAudioBlock(channelCount, aOutput);
+    aOutput->AllocateChannels(channelCount);
     mCompressor->process(&aInput, aOutput, aInput.GetDuration());
 
     SendReductionParamToMainThread(aStream,
@@ -133,7 +125,6 @@ public:
   virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override
   {
     // Not owned:
-    // - mSource (probably)
     // - mDestination (probably)
     // - Don't count the AudioParamTimelines, their inner refs are owned by the
     // AudioNode.
@@ -152,7 +143,7 @@ private:
   {
     MOZ_ASSERT(!NS_IsMainThread());
 
-    class Command : public nsRunnable
+    class Command final : public nsRunnable
     {
     public:
       Command(AudioNodeStream* aStream, float aReduction)
@@ -161,27 +152,19 @@ private:
       {
       }
 
-      NS_IMETHODIMP Run()
+      NS_IMETHOD Run() override
       {
-        nsRefPtr<DynamicsCompressorNode> node;
-        {
-          // No need to keep holding the lock for the whole duration of this
-          // function, since we're holding a strong reference to it, so if
-          // we can obtain the reference, we will hold the node alive in
-          // this function.
-          MutexAutoLock lock(mStream->Engine()->NodeMutex());
-          node = static_cast<DynamicsCompressorNode*>(mStream->Engine()->Node());
-        }
+        RefPtr<DynamicsCompressorNode> node =
+          static_cast<DynamicsCompressorNode*>
+            (mStream->Engine()->NodeMainThread());
         if (node) {
-          AudioParam* reduction = node->Reduction();
-          reduction->CancelAllEvents();
-          reduction->SetValue(mReduction);
+          node->SetReduction(mReduction);
         }
         return NS_OK;
       }
 
     private:
-      nsRefPtr<AudioNodeStream> mStream;
+      RefPtr<AudioNodeStream> mStream;
       float mReduction;
     };
 
@@ -189,7 +172,6 @@ private:
   }
 
 private:
-  AudioNodeStream* mSource;
   AudioNodeStream* mDestination;
   AudioParamTimeline mThreshold;
   AudioParamTimeline mKnee;
@@ -204,16 +186,21 @@ DynamicsCompressorNode::DynamicsCompressorNode(AudioContext* aContext)
               2,
               ChannelCountMode::Explicit,
               ChannelInterpretation::Speakers)
-  , mThreshold(new AudioParam(this, SendThresholdToStream, -24.f))
-  , mKnee(new AudioParam(this, SendKneeToStream, 30.f))
-  , mRatio(new AudioParam(this, SendRatioToStream, 12.f))
-  , mReduction(new AudioParam(this, Callback, 0.f))
-  , mAttack(new AudioParam(this, SendAttackToStream, 0.003f))
-  , mRelease(new AudioParam(this, SendReleaseToStream, 0.25f))
+  , mThreshold(new AudioParam(this, DynamicsCompressorNodeEngine::THRESHOLD,
+                              -24.f, "threshold"))
+  , mKnee(new AudioParam(this, DynamicsCompressorNodeEngine::KNEE,
+                         30.f, "knee"))
+  , mRatio(new AudioParam(this, DynamicsCompressorNodeEngine::RATIO,
+                          12.f, "ratio"))
+  , mReduction(0)
+  , mAttack(new AudioParam(this, DynamicsCompressorNodeEngine::ATTACK,
+                           0.003f, "attack"))
+  , mRelease(new AudioParam(this, DynamicsCompressorNodeEngine::RELEASE,
+                            0.25f, "release"))
 {
   DynamicsCompressorNodeEngine* engine = new DynamicsCompressorNodeEngine(this, aContext->Destination());
-  mStream = aContext->Graph()->CreateAudioNodeStream(engine, MediaStreamGraph::INTERNAL_STREAM);
-  engine->SetSourceStream(static_cast<AudioNodeStream*> (mStream.get()));
+  mStream = AudioNodeStream::Create(aContext, engine,
+                                    AudioNodeStream::NO_STREAM_FLAGS);
 }
 
 DynamicsCompressorNode::~DynamicsCompressorNode()
@@ -239,45 +226,10 @@ DynamicsCompressorNode::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 }
 
 JSObject*
-DynamicsCompressorNode::WrapObject(JSContext* aCx)
+DynamicsCompressorNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return DynamicsCompressorNodeBinding::Wrap(aCx, this);
+  return DynamicsCompressorNodeBinding::Wrap(aCx, this, aGivenProto);
 }
 
-void
-DynamicsCompressorNode::SendThresholdToStream(AudioNode* aNode)
-{
-  DynamicsCompressorNode* This = static_cast<DynamicsCompressorNode*>(aNode);
-  SendTimelineParameterToStream(This, DynamicsCompressorNodeEngine::THRESHOLD, *This->mThreshold);
-}
-
-void
-DynamicsCompressorNode::SendKneeToStream(AudioNode* aNode)
-{
-  DynamicsCompressorNode* This = static_cast<DynamicsCompressorNode*>(aNode);
-  SendTimelineParameterToStream(This, DynamicsCompressorNodeEngine::KNEE, *This->mKnee);
-}
-
-void
-DynamicsCompressorNode::SendRatioToStream(AudioNode* aNode)
-{
-  DynamicsCompressorNode* This = static_cast<DynamicsCompressorNode*>(aNode);
-  SendTimelineParameterToStream(This, DynamicsCompressorNodeEngine::RATIO, *This->mRatio);
-}
-
-void
-DynamicsCompressorNode::SendAttackToStream(AudioNode* aNode)
-{
-  DynamicsCompressorNode* This = static_cast<DynamicsCompressorNode*>(aNode);
-  SendTimelineParameterToStream(This, DynamicsCompressorNodeEngine::ATTACK, *This->mAttack);
-}
-
-void
-DynamicsCompressorNode::SendReleaseToStream(AudioNode* aNode)
-{
-  DynamicsCompressorNode* This = static_cast<DynamicsCompressorNode*>(aNode);
-  SendTimelineParameterToStream(This, DynamicsCompressorNodeEngine::RELEASE, *This->mRelease);
-}
-
-}
-}
+} // namespace dom
+} // namespace mozilla

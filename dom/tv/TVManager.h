@@ -27,9 +27,9 @@ public:
 
   // WebIDL (internal functions)
 
-  virtual JSObject* WrapObject(JSContext *aCx) override;
+  virtual JSObject* WrapObject(JSContext *aCx, JS::Handle<JSObject*> aGivenProto) override;
 
-  nsresult SetTuners(const nsTArray<nsRefPtr<TVTuner>>& aTuners);
+  nsresult SetTuners(const nsTArray<RefPtr<TVTuner>>& aTuners);
 
   void RejectPendingGetTunersPromises(nsresult aRv);
 
@@ -47,9 +47,9 @@ private:
   bool Init();
 
   nsCOMPtr<nsITVService> mTVService;
-  nsTArray<nsRefPtr<TVTuner>> mTuners;
+  nsTArray<RefPtr<TVTuner>> mTuners;
   bool mIsReady;
-  nsTArray<nsRefPtr<Promise>> mPendingGetTunersPromises;
+  nsTArray<RefPtr<Promise>> mPendingGetTunersPromises;
 };
 
 } // namespace dom

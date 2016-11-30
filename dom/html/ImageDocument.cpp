@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -98,7 +99,7 @@ ImageListener::OnStartRequest(nsIRequest* request, nsISupports *ctxt)
   }
 
   int16_t decision = nsIContentPolicy::ACCEPT;
-  nsresult rv = NS_CheckContentProcessPolicy(nsIContentPolicy::TYPE_IMAGE,
+  nsresult rv = NS_CheckContentProcessPolicy(nsIContentPolicy::TYPE_INTERNAL_IMAGE,
                                              channelURI,
                                              channelPrincipal,
                                              domWindow->GetFrameElementInternal(),
@@ -175,9 +176,9 @@ ImageDocument::Init()
 }
 
 JSObject*
-ImageDocument::WrapNode(JSContext* aCx)
+ImageDocument::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return ImageDocumentBinding::Wrap(aCx, this);
+  return ImageDocumentBinding::Wrap(aCx, this, aGivenProto);
 }
 
 nsresult
@@ -284,6 +285,9 @@ ImageDocument::OnPageShow(bool aPersisted,
     mOriginalZoomLevel =
       Preferences::GetBool(SITE_SPECIFIC_ZOOM, false) ? 1.0 : GetZoomLevel();
   }
+  RefPtr<ImageDocument> kungFuDeathGrip(this);
+  UpdateSizeFromLayout();
+
   MediaDocument::OnPageShow(aPersisted, aDispatchStartTarget);
 }
 
@@ -325,7 +329,7 @@ ImageDocument::GetImageRequest(imgIRequest** aImageRequest)
 {
   ErrorResult rv;
   *aImageRequest = GetImageRequest(rv).take();
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 void
@@ -341,7 +345,7 @@ ImageDocument::ShrinkToFit()
 
   // Keep image content alive while changing the attributes.
   nsCOMPtr<nsIContent> imageContent = mImageContent;
-  nsCOMPtr<nsIDOMHTMLImageElement> image = do_QueryInterface(mImageContent);
+  nsCOMPtr<nsIDOMHTMLImageElement> image = do_QueryInterface(imageContent);
   image->SetWidth(std::max(1, NSToCoordFloor(GetRatio() * mImageWidth)));
   image->SetHeight(std::max(1, NSToCoordFloor(GetRatio() * mImageHeight)));
   
@@ -633,7 +637,7 @@ ImageDocument::CreateSyntheticDocument()
     return NS_ERROR_FAILURE;
   }
 
-  nsRefPtr<NodeInfo> nodeInfo;
+  RefPtr<mozilla::dom::NodeInfo> nodeInfo;
   nodeInfo = mNodeInfoManager->GetNodeInfo(nsGkAtoms::img, nullptr,
                                            kNameSpaceID_XHTML,
                                            nsIDOMNode::ELEMENT_NODE);

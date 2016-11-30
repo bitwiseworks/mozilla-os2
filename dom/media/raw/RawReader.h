@@ -20,42 +20,28 @@ protected:
   ~RawReader();
 
 public:
-  virtual nsresult Init(MediaDecoderReader* aCloneDonor) override;
   virtual nsresult ResetDecode() override;
   virtual bool DecodeAudioData() override;
 
   virtual bool DecodeVideoFrame(bool &aKeyframeSkip,
                                   int64_t aTimeThreshold) override;
 
-  virtual bool HasAudio() override
-  {
-    return false;
-  }
-
-  virtual bool HasVideo() override
-  {
-    return true;
-  }
-
   virtual nsresult ReadMetadata(MediaInfo* aInfo,
                                 MetadataTags** aTags) override;
-  virtual nsRefPtr<SeekPromise>
+  virtual RefPtr<SeekPromise>
   Seek(int64_t aTime, int64_t aEndTime) override;
 
-  virtual nsresult GetBuffered(dom::TimeRanges* aBuffered) override;
-
-  virtual bool IsMediaSeekable() override;
+  virtual media::TimeIntervals GetBuffered() override;
 
 private:
-  bool ReadFromResource(MediaResource *aResource, uint8_t *aBuf, uint32_t aLength);
-
-  nsresult SeekInternal(int64_t aTime);
+  bool ReadFromResource(uint8_t *aBuf, uint32_t aLength);
 
   RawVideoHeader mMetadata;
   uint32_t mCurrentFrame;
   double mFrameRate;
   uint32_t mFrameSize;
   nsIntRect mPicture;
+  MediaResourceIndex mResource;
 };
 
 } // namespace mozilla

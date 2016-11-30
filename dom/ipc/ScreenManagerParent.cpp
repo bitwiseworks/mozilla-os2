@@ -1,9 +1,10 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set sw=4 ts=8 et tw=80 : */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/TabParent.h"
 #include "mozilla/unused.h"
 #include "nsIWidget.h"
@@ -25,7 +26,7 @@ ScreenManagerParent::ScreenManagerParent(uint32_t* aNumberOfScreens,
     MOZ_CRASH("Couldn't get nsIScreenManager from ScreenManagerParent.");
   }
 
-  unused << RecvRefresh(aNumberOfScreens, aSystemDefaultScale, aSuccess);
+  Unused << RecvRefresh(aNumberOfScreens, aSystemDefaultScale, aSuccess);
 }
 
 bool
@@ -63,7 +64,7 @@ ScreenManagerParent::RecvScreenRefresh(const uint32_t& aId,
   }
 
   ScreenDetails details;
-  unused << ExtractScreenDetails(screen, details);
+  Unused << ExtractScreenDetails(screen, details);
 
   *aRetVal = details;
   *aSuccess = true;
@@ -132,7 +133,7 @@ ScreenManagerParent::RecvScreenForBrowser(const TabId& aTabId,
   // the nsIScreen it's on.
   ContentParent* cp = static_cast<ContentParent*>(this->Manager());
   ContentProcessManager* cpm = ContentProcessManager::GetSingleton();
-  nsRefPtr<TabParent> tabParent =
+  RefPtr<TabParent> tabParent =
     cpm->GetTopLevelTabParentByProcessAndTabId(cp->ChildID(), aTabId);
   if(!tabParent){
     return false;
@@ -141,11 +142,9 @@ ScreenManagerParent::RecvScreenForBrowser(const TabId& aTabId,
   nsCOMPtr<nsIWidget> widget = tabParent->GetWidget();
 
   nsCOMPtr<nsIScreen> screen;
-  if (widget) {
-    if (widget->GetNativeData(NS_NATIVE_WINDOW)) {
-      mScreenMgr->ScreenForNativeWidget(widget->GetNativeData(NS_NATIVE_WINDOW),
-                                        getter_AddRefs(screen));
-    }
+  if (widget && widget->GetNativeData(NS_NATIVE_WINDOW)) {
+    mScreenMgr->ScreenForNativeWidget(widget->GetNativeData(NS_NATIVE_WINDOW),
+                                      getter_AddRefs(screen));
   } else {
     nsresult rv = mScreenMgr->GetPrimaryScreen(getter_AddRefs(screen));
     if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -168,6 +167,10 @@ ScreenManagerParent::RecvScreenForBrowser(const TabId& aTabId,
 bool
 ScreenManagerParent::ExtractScreenDetails(nsIScreen* aScreen, ScreenDetails &aDetails)
 {
+  if (!aScreen) {
+    return false;
+  }
+
   uint32_t id;
   nsresult rv = aScreen->GetId(&id);
   NS_ENSURE_SUCCESS(rv, false);

@@ -22,7 +22,6 @@ class JSObject;
 
 namespace mozilla {
 
-class ErrorResult;
 template <typename T> class AsyncEventRunner;
 
 namespace dom {
@@ -46,7 +45,7 @@ public:
 
   MediaSource* GetParentObject() const;
 
-  JSObject* WrapObject(JSContext* aCx) override;
+  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   // Append a SourceBuffer and fire "addsourcebuffer" at the list.
   void Append(SourceBuffer* aSourceBuffer);
@@ -85,10 +84,6 @@ public:
   //  No event is fired and no action is performed on the sourcebuffers.
   void ClearSimple();
 
-#if defined(DEBUG)
-  void Dump(const char* aPath);
-#endif
-
 private:
   ~SourceBufferList();
 
@@ -96,11 +91,12 @@ private:
   void DispatchSimpleEvent(const char* aName);
   void QueueAsyncSimpleEvent(const char* aName);
 
-  nsRefPtr<MediaSource> mMediaSource;
-  nsTArray<nsRefPtr<SourceBuffer> > mSourceBuffers;
+  RefPtr<MediaSource> mMediaSource;
+  nsTArray<RefPtr<SourceBuffer> > mSourceBuffers;
 };
 
 } // namespace dom
 
 } // namespace mozilla
+
 #endif /* mozilla_dom_SourceBufferList_h_ */

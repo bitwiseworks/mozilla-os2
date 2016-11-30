@@ -8,6 +8,7 @@ const ADDONS_URL = "chrome://mozapps/content/extensions/extensions.xul";
 const PREF_LOGGING_ENABLED = "extensions.logging.enabled";
 const PREF_INSTALL_REQUIREBUILTINCERTS = "extensions.install.requireBuiltInCerts";
 const PREF_INSTALL_REQUIRESECUREORIGIN = "extensions.install.requireSecureOrigin";
+const PREF_CUSTOM_CONFIRMATION_UI = "xpinstall.customConfirmationUI";
 const CHROME_NAME = "mochikit";
 
 function getChromeRoot(path) {
@@ -26,6 +27,11 @@ function extractChromeRoot(path) {
   }
   return chromeRootPath;
 }
+
+Services.prefs.setBoolPref(PREF_CUSTOM_CONFIRMATION_UI, false);
+registerCleanupFunction(() => {
+  Services.prefs.clearUserPref(PREF_CUSTOM_CONFIRMATION_UI);
+});
 
 /**
  * This is a test harness designed to handle responding to UI during the process
@@ -168,7 +174,7 @@ var Harness = {
     this.runningInstalls = null;
 
     if (callback)
-      callback(count);
+      executeSoon(() => callback(count));
   },
 
   // Window open handling
@@ -238,6 +244,8 @@ var Harness = {
     ok(!!this.installDisabledCallback, "Installation shouldn't have been disabled");
     if (this.installDisabledCallback)
       this.installDisabledCallback(installInfo);
+    this.expectingCancelled = true;
+    this.expectingCancelled = false;
     this.endTest();
   },
 
@@ -299,15 +307,17 @@ var Harness = {
     if (this.finalContentEvent && !this.waitingForEvent) {
       this.waitingForEvent = true;
       info("Waiting for " + this.finalContentEvent);
+      let mm = gBrowser.selectedBrowser.messageManager;
+      mm.loadFrameScript(`data:,content.addEventListener("${this.finalContentEvent}", () => { sendAsyncMessage("Test:GotNewInstallEvent"); });`, false);
       let win = gBrowser.contentWindow;
       let listener = () => {
         info("Saw " + this.finalContentEvent);
-        win.removeEventListener(this.finalContentEvent, listener, false);
+        mm.removeMessageListener("Test:GotNewInstallEvent", listener);
         this.waitingForEvent = false;
         if (this.pendingCount == 0)
           this.endTest();
       }
-      win.addEventListener(this.finalContentEvent, listener, false);
+      mm.addMessageListener("Test:GotNewInstallEvent", listener);
     }
   },
 

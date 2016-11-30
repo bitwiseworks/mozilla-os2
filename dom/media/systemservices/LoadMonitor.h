@@ -16,7 +16,6 @@
 #include "nsIObserver.h"
 
 namespace mozilla {
-class LoadInfoUpdateRunner;
 class LoadInfoCollectRunner;
 
 class LoadNotificationCallback
@@ -33,7 +32,7 @@ public:
 
     explicit LoadMonitor(int aLoadUpdateInterval);
 
-    nsresult Init(nsRefPtr<LoadMonitor> &self);
+    nsresult Init(RefPtr<LoadMonitor> &self);
     void SetLoadChangeCallback(LoadNotificationCallback* aCallback);
     void Shutdown();
     float GetSystemLoad();

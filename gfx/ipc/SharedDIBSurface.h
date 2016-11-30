@@ -60,8 +60,8 @@ public:
   HDC GetHDC() { return mSharedDIB.GetHDC(); }
 #endif
 
-  nsresult ShareToProcess(base::ProcessHandle aChildProcess, Handle* aChildHandle) {
-    return mSharedDIB.ShareToProcess(aChildProcess, aChildHandle);
+  nsresult ShareToProcess(base::ProcessId aTargetPid, Handle* aNewHandle) {
+    return mSharedDIB.ShareToProcess(aTargetPid, aNewHandle);
   }
 
   static bool IsSharedDIBSurface(gfxASurface* aSurface);

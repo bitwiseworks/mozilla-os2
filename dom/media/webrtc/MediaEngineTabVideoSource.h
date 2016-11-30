@@ -18,22 +18,28 @@ class MediaEngineTabVideoSource : public MediaEngineVideoSource, nsIDOMEventList
     NS_DECL_NSITIMERCALLBACK
     MediaEngineTabVideoSource();
 
+    virtual void Shutdown() override {};
     virtual void GetName(nsAString_internal&) override;
-    virtual void GetUUID(nsAString_internal&) override;
+    virtual void GetUUID(nsACString_internal&) override;
     virtual nsresult Allocate(const dom::MediaTrackConstraints &,
-                              const mozilla::MediaEnginePrefs&) override;
+                              const mozilla::MediaEnginePrefs&,
+                              const nsString& aDeviceId) override;
     virtual nsresult Deallocate() override;
     virtual nsresult Start(mozilla::SourceMediaStream*, mozilla::TrackID) override;
     virtual void SetDirectListeners(bool aHasDirectListeners) override {};
     virtual void NotifyPull(mozilla::MediaStreamGraph*, mozilla::SourceMediaStream*, mozilla::TrackID, mozilla::StreamTime) override;
     virtual nsresult Stop(mozilla::SourceMediaStream*, mozilla::TrackID) override;
+    virtual nsresult Restart(const dom::MediaTrackConstraints& aConstraints,
+                             const mozilla::MediaEnginePrefs& aPrefs,
+                             const nsString& aDeviceId) override;
     virtual nsresult Config(bool, uint32_t, bool, uint32_t, bool, uint32_t, int32_t) override;
     virtual bool IsFake() override;
     virtual const dom::MediaSourceEnum GetMediaSource() override {
       return dom::MediaSourceEnum::Browser;
     }
     virtual uint32_t GetBestFitnessDistance(
-      const nsTArray<const dom::MediaTrackConstraintSet*>& aConstraintSets) override
+      const nsTArray<const dom::MediaTrackConstraintSet*>& aConstraintSets,
+      const nsString& aDeviceId) override
     {
       return 0;
     }
@@ -49,36 +55,40 @@ class MediaEngineTabVideoSource : public MediaEngineVideoSource, nsIDOMEventList
     public:
       explicit StartRunnable(MediaEngineTabVideoSource *videoSource) : mVideoSource(videoSource) {}
       NS_IMETHOD Run();
-      nsRefPtr<MediaEngineTabVideoSource> mVideoSource;
+      RefPtr<MediaEngineTabVideoSource> mVideoSource;
     };
 
     class StopRunnable : public nsRunnable {
     public:
       explicit StopRunnable(MediaEngineTabVideoSource *videoSource) : mVideoSource(videoSource) {}
       NS_IMETHOD Run();
-      nsRefPtr<MediaEngineTabVideoSource> mVideoSource;
+      RefPtr<MediaEngineTabVideoSource> mVideoSource;
     };
 
     class InitRunnable : public nsRunnable {
     public:
       explicit InitRunnable(MediaEngineTabVideoSource *videoSource) : mVideoSource(videoSource) {}
       NS_IMETHOD Run();
-      nsRefPtr<MediaEngineTabVideoSource> mVideoSource;
+      RefPtr<MediaEngineTabVideoSource> mVideoSource;
     };
 
 protected:
     ~MediaEngineTabVideoSource() {}
 
 private:
-    int mBufWidthMax;
-    int mBufHeightMax;
+    int32_t mBufWidthMax;
+    int32_t mBufHeightMax;
     int64_t mWindowId;
     bool mScrollWithPage;
-    int mTimePerFrame;
+    int32_t mViewportOffsetX;
+    int32_t mViewportOffsetY;
+    int32_t mViewportWidth;
+    int32_t mViewportHeight;
+    int32_t mTimePerFrame;
     ScopedFreePtr<unsigned char> mData;
     size_t mDataSize;
     nsCOMPtr<nsIDOMWindow> mWindow;
-    nsRefPtr<layers::CairoImage> mImage;
+    RefPtr<layers::CairoImage> mImage;
     nsCOMPtr<nsITimer> mTimer;
     Monitor mMonitor;
     nsCOMPtr<nsITabSource> mTabSource;

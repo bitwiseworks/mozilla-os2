@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -49,8 +50,6 @@ nsXBLProtoImplMethod::AppendBodyText(const nsAString& aText)
   nsXBLUncompiledMethod* uncompiledMethod = GetUncompiledMethod();
   if (!uncompiledMethod) {
     uncompiledMethod = new nsXBLUncompiledMethod();
-    if (!uncompiledMethod)
-      return;
     SetUncompiledMethod(uncompiledMethod);
   }
 
@@ -71,8 +70,6 @@ nsXBLProtoImplMethod::AddParameter(const nsAString& aText)
   nsXBLUncompiledMethod* uncompiledMethod = GetUncompiledMethod();
   if (!uncompiledMethod) {
     uncompiledMethod = new nsXBLUncompiledMethod();
-    if (!uncompiledMethod)
-      return;
     SetUncompiledMethod(uncompiledMethod);
   }
 
@@ -88,8 +85,6 @@ nsXBLProtoImplMethod::SetLineNumber(uint32_t aLineNumber)
   nsXBLUncompiledMethod* uncompiledMethod = GetUncompiledMethod();
   if (!uncompiledMethod) {
     uncompiledMethod = new nsXBLUncompiledMethod();
-    if (!uncompiledMethod)
-      return;
     SetUncompiledMethod(uncompiledMethod);
   }
 
@@ -132,7 +127,7 @@ nsXBLProtoImplMethod::InstallMember(JSContext* aCx,
 }
 
 nsresult
-nsXBLProtoImplMethod::CompileMember(AutoJSAPI& jsapi, const nsCString& aClassStr,
+nsXBLProtoImplMethod::CompileMember(AutoJSAPI& jsapi, const nsString& aClassStr,
                                     JS::Handle<JSObject*> aClassObject)
 {
   AssertInCompilationScope();
@@ -167,8 +162,6 @@ nsXBLProtoImplMethod::CompileMember(AutoJSAPI& jsapi, const nsCString& aClassStr
   char** args = nullptr;
   if (paramCount > 0) {
     args = new char*[paramCount];
-    if (!args)
-      return NS_ERROR_OUT_OF_MEMORY;
 
     // Add our parameters to our args array.
     int32_t argPos = 0;
@@ -189,7 +182,7 @@ nsXBLProtoImplMethod::CompileMember(AutoJSAPI& jsapi, const nsCString& aClassStr
   // Now that we have a body and args, compile the function
   // and then define it.
   NS_ConvertUTF16toUTF8 cname(mName);
-  nsAutoCString functionUri(aClassStr);
+  NS_ConvertUTF16toUTF8 functionUri(aClassStr);
   int32_t hash = functionUri.RFindChar('#');
   if (hash != kNotFound) {
     functionUri.Truncate(hash);
@@ -296,7 +289,7 @@ nsXBLProtoImplAnonymousMethod::Execute(nsIContent* aBoundElement, JSAddonId* aAd
 
   // We are going to run script via JS::Call, so we need a script entry point,
   // but as this is XBL related it does not appear in the HTML spec.
-  dom::AutoEntryScript aes(global);
+  dom::AutoEntryScript aes(global, "XBL <constructor>/<destructor> invocation");
   aes.TakeOwnershipOfErrorReporting();
   JSContext* cx = aes.cx();
 

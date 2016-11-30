@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -11,7 +12,7 @@
 #include "nsIIPCBackgroundChildCreateCallback.h"
 #include "nsIObserver.h"
 #include "nsTArray.h"
-#include "nsRefPtr.h"
+#include "mozilla/RefPtr.h"
 
 class nsPIDOMWindow;
 
@@ -19,13 +20,13 @@ namespace mozilla {
 
 namespace ipc {
 class PrincipalInfo;
-}
+} // namespace ipc
 
 namespace dom {
 
 namespace workers {
 class WorkerFeature;
-}
+} // namespace workers
 
 class BroadcastChannelChild;
 class BroadcastChannelMessage;
@@ -35,6 +36,8 @@ class BroadcastChannel final
   , public nsIIPCBackgroundChildCreateCallback
   , public nsIObserver
 {
+  friend class BroadcastChannelChild;
+
   NS_DECL_NSIIPCBACKGROUNDCHILDCREATECALLBACK
   NS_DECL_NSIOBSERVER
 
@@ -46,10 +49,8 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(BroadcastChannel,
                                            DOMEventTargetHelper)
 
-  static bool IsEnabled(JSContext* aCx, JSObject* aGlobal);
-
   virtual JSObject*
-  WrapObject(JSContext* aCx) override;
+  WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   static already_AddRefed<BroadcastChannel>
   Constructor(const GlobalObject& aGlobal, const nsAString& aChannel,
@@ -73,25 +74,20 @@ public:
 
   virtual void AddEventListener(const nsAString& aType,
                                 EventListener* aCallback,
-                                bool aCapture,
+                                const AddEventListenerOptionsOrBoolean& aOptions,
                                 const Nullable<bool>& aWantsUntrusted,
                                 ErrorResult& aRv) override;
   virtual void RemoveEventListener(const nsAString& aType,
                                    EventListener* aCallback,
-                                   bool aCapture,
+                                   const EventListenerOptionsOrBoolean& aOptions,
                                    ErrorResult& aRv) override;
 
   void Shutdown();
 
-  bool IsClosed() const
-  {
-    return mState != StateActive;
-  }
-
 private:
   BroadcastChannel(nsPIDOMWindow* aWindow,
                    const PrincipalInfo& aPrincipalInfo,
-                   const nsAString& aOrigin,
+                   const nsACString& aOrigin,
                    const nsAString& aChannel,
                    bool aPrivateBrowsing);
 
@@ -104,14 +100,26 @@ private:
 
   void UpdateMustKeepAlive();
 
-  nsRefPtr<BroadcastChannelChild> mActor;
-  nsTArray<nsRefPtr<BroadcastChannelMessage>> mPendingMessages;
+  bool IsCertainlyAliveForCC() const override
+  {
+    return mIsKeptAlive;
+  }
+
+  bool IsClosed() const
+  {
+    return mState != StateActive;
+  }
+
+  void RemoveDocFromBFCache();
+
+  RefPtr<BroadcastChannelChild> mActor;
+  nsTArray<RefPtr<BroadcastChannelMessage>> mPendingMessages;
 
   nsAutoPtr<workers::WorkerFeature> mWorkerFeature;
 
   nsAutoPtr<PrincipalInfo> mPrincipalInfo;
 
-  nsString mOrigin;
+  nsCString mOrigin;
   nsString mChannel;
   bool mPrivateBrowsing;
 

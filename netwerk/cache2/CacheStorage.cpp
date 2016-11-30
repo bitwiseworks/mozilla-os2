@@ -25,10 +25,14 @@ NS_IMPL_ISUPPORTS(CacheStorage, nsICacheStorage)
 
 CacheStorage::CacheStorage(nsILoadContextInfo* aInfo,
                            bool aAllowDisk,
-                           bool aLookupAppCache)
+                           bool aLookupAppCache,
+                           bool aSkipSizeCheck,
+                           bool aPinning)
 : mLoadContextInfo(GetLoadContextInfo(aInfo))
 , mWriteToDisk(aAllowDisk)
 , mLookupAppCache(aLookupAppCache)
+, mSkipSizeCheck(aSkipSizeCheck)
+, mPinning(aPinning)
 {
 }
 
@@ -44,12 +48,14 @@ NS_IMETHODIMP CacheStorage::AsyncOpenURI(nsIURI *aURI,
   if (!CacheStorageService::Self())
     return NS_ERROR_NOT_INITIALIZED;
 
-  if (MOZ_UNLIKELY(!CacheObserver::UseDiskCache()) && mWriteToDisk) {
+  if (MOZ_UNLIKELY(!CacheObserver::UseDiskCache()) && mWriteToDisk &&
+                   !(aFlags & OPEN_INTERCEPTED)) {
     aCallback->OnCacheEntryAvailable(nullptr, false, nullptr, NS_ERROR_NOT_AVAILABLE);
     return NS_OK;
   }
 
-  if (MOZ_UNLIKELY(!CacheObserver::UseMemoryCache()) && !mWriteToDisk) {
+  if (MOZ_UNLIKELY(!CacheObserver::UseMemoryCache()) && !mWriteToDisk &&
+                   !(aFlags & OPEN_INTERCEPTED)) {
     aCallback->OnCacheEntryAvailable(nullptr, false, nullptr, NS_ERROR_NOT_AVAILABLE);
     return NS_OK;
   }
@@ -85,7 +91,7 @@ NS_IMETHODIMP CacheStorage::AsyncOpenURI(nsIURI *aURI,
     rv = noRefURI->GetScheme(scheme);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    nsRefPtr<_OldCacheLoad> appCacheLoad =
+    RefPtr<_OldCacheLoad> appCacheLoad =
       new _OldCacheLoad(scheme, cacheKey, aCallback, appCache,
                         LoadInfo(), WriteToDisk(), aFlags);
     rv = appCacheLoad->Start();
@@ -95,7 +101,7 @@ NS_IMETHODIMP CacheStorage::AsyncOpenURI(nsIURI *aURI,
     return NS_OK;
   }
 
-  nsRefPtr<CacheEntryHandle> entry;
+  RefPtr<CacheEntryHandle> entry;
   rv = CacheStorageService::Self()->AddStorageEntry(
     this, noRefURI, aIdExtension,
     true, // create always
@@ -122,7 +128,7 @@ NS_IMETHODIMP CacheStorage::OpenTruncate(nsIURI *aURI, const nsACString & aIdExt
   rv = aURI->CloneIgnoringRef(getter_AddRefs(noRefURI));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsRefPtr<CacheEntryHandle> entry;
+  RefPtr<CacheEntryHandle> entry;
   rv = CacheStorageService::Self()->AddStorageEntry(
     this, noRefURI, aIdExtension,
     true, // create always
@@ -216,5 +222,5 @@ nsresult CacheStorage::ChooseApplicationCache(nsIURI* aURI,
   return NS_OK;
 }
 
-} // net
-} // mozilla
+} // namespace net
+} // namespace mozilla

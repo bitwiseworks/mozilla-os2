@@ -12,7 +12,7 @@
 #include "nsTArray.h"
 
 class nsDOMCSSValueList final : public mozilla::dom::CSSValue,
-  public nsIDOMCSSValueList
+                                public nsIDOMCSSValueList
 {
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -56,7 +56,7 @@ public:
     return nullptr;
   }
 
-  virtual JSObject *WrapObject(JSContext *cx) override;
+  virtual JSObject *WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto) override;
 
 private:
   ~nsDOMCSSValueList();
@@ -67,7 +67,7 @@ private:
 
   bool                        mReadonly;    // Are we read-only?
 
-  InfallibleTArray<nsRefPtr<CSSValue> > mCSSValues;
+  InfallibleTArray<RefPtr<CSSValue> > mCSSValues;
 };
 
 #endif /* nsDOMCSSValueList_h___ */

@@ -4,6 +4,7 @@
  * This program is made available under an ISC-style license.  See the
  * accompanying file LICENSE for details.
  */
+#include <math.h>
 #include <poll.h>
 #include <pthread.h>
 #include <sndio.h>
@@ -49,9 +50,16 @@ float_to_s16(void *ptr, long nsamp)
 {
   int16_t *dst = ptr;
   float *src = ptr;
+  int s;
 
-  while (nsamp-- > 0)
-    *(dst++) = *(src++) * 32767;
+  while (nsamp-- > 0) {
+    s = lrintf(*(src++) * 32768);
+    if (s < -32768)
+      s = -32768;
+    else if (s > 32767)
+      s = 32767;
+    *(dst++) = s;
+  }
 }
 
 static void
@@ -348,6 +356,7 @@ static struct cubeb_ops const sndio_ops = {
   .get_max_channel_count = sndio_get_max_channel_count,
   .get_min_latency = sndio_get_min_latency,
   .get_preferred_sample_rate = sndio_get_preferred_sample_rate,
+  .enumerate_devices = NULL,
   .destroy = sndio_destroy,
   .stream_init = sndio_stream_init,
   .stream_destroy = sndio_stream_destroy,

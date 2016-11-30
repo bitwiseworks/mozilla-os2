@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -89,6 +90,42 @@ TestCJKWithFlowedDelSp()
   }
 
   passed("HTML to CJK text serialization with format=flowed; delsp=yes");
+
+  return NS_OK;
+}
+
+// Test for CJK with DisallowLineBreaking
+nsresult
+TestCJKWithDisallowLineBreaking()
+{
+  nsString test;
+  nsString result;
+
+  test.AssignLiteral("<html><body>");
+  for (uint32_t i = 0; i < 400; i++) {
+    // Insert Kanji (U+5341)
+    test.Append(0x5341);
+  }
+  test.AppendLiteral("</body></html>");
+
+  ConvertBufToPlainText(test, nsIDocumentEncoder::OutputFormatted |
+                              nsIDocumentEncoder::OutputCRLineBreak |
+                              nsIDocumentEncoder::OutputLFLineBreak |
+                              nsIDocumentEncoder::OutputFormatFlowed |
+                              nsIDocumentEncoder::OutputDisallowLineBreaking);
+
+  // create result case
+  for (uint32_t i = 0; i < 400; i++) {
+    result.Append(0x5341);
+  }
+  result.AppendLiteral("\r\n");
+
+  if (!test.Equals(result)) {
+    fail("Wrong HTML to CJK text serialization with OutputDisallowLineBreaking");
+    return NS_ERROR_FAILURE;
+  }
+
+  passed("HTML to CJK text serialization with OutputDisallowLineBreaking");
 
   return NS_OK;
 }
@@ -225,6 +262,9 @@ TestPlainTextSerializer()
   NS_ENSURE_SUCCESS(rv, rv);
 
   rv = TestPreWrapElementForThunderbird();
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  rv = TestCJKWithDisallowLineBreaking();
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Add new tests here...

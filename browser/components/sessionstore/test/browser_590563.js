@@ -2,7 +2,7 @@
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
 function test() {
-  let oldState = {
+  let sessionData = {
     windows: [{
       tabs: [
         { entries: [{ url: "about:mozilla" }], hidden: true },
@@ -10,16 +10,14 @@ function test() {
       ]
     }]
   };
-  let pageData = {
-    url: "about:sessionrestore",
-    formdata: { id: { "sessionData": oldState } }
-  };
-  let state = { windows: [{ tabs: [{ entries: [pageData] }] }] };
+  let url = "about:sessionrestore";
+  let formdata = {id: {sessionData}, url};
+  let state = { windows: [{ tabs: [{ entries: [{url}], formdata }] }] };
 
   waitForExplicitFinish();
 
   newWindowWithState(state, function (win) {
-    registerCleanupFunction(function () win.close());
+    registerCleanupFunction(() => BrowserTestUtils.closeWindow(win));
 
     is(gBrowser.tabs.length, 1, "The total number of tabs should be 1");
     is(gBrowser.visibleTabs.length, 1, "The total number of visible tabs should be 1");

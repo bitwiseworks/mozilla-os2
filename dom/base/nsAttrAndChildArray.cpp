@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -105,7 +106,7 @@ nsAttrAndChildArray::~nsAttrAndChildArray()
 
   Clear();
 
-  moz_free(mImpl);
+  free(mImpl);
 }
 
 nsIContent*
@@ -389,14 +390,12 @@ nsAttrAndChildArray::AttrAt(uint32_t aPos) const
 }
 
 nsresult
-nsAttrAndChildArray::SetAndTakeAttr(nsIAtom* aLocalName, nsAttrValue& aValue)
+nsAttrAndChildArray::SetAndSwapAttr(nsIAtom* aLocalName, nsAttrValue& aValue)
 {
   uint32_t i, slotCount = AttrSlotCount();
   for (i = 0; i < slotCount && AttrSlotIsTaken(i); ++i) {
     if (ATTRS(mImpl)[i].mName.Equals(aLocalName)) {
-      ATTRS(mImpl)[i].mValue.Reset();
       ATTRS(mImpl)[i].mValue.SwapValueWith(aValue);
-
       return NS_OK;
     }
   }
@@ -416,12 +415,12 @@ nsAttrAndChildArray::SetAndTakeAttr(nsIAtom* aLocalName, nsAttrValue& aValue)
 }
 
 nsresult
-nsAttrAndChildArray::SetAndTakeAttr(mozilla::dom::NodeInfo* aName, nsAttrValue& aValue)
+nsAttrAndChildArray::SetAndSwapAttr(mozilla::dom::NodeInfo* aName, nsAttrValue& aValue)
 {
   int32_t namespaceID = aName->NamespaceID();
   nsIAtom* localName = aName->NameAtom();
   if (namespaceID == kNameSpaceID_None) {
-    return SetAndTakeAttr(localName, aValue);
+    return SetAndSwapAttr(localName, aValue);
   }
 
   uint32_t i, slotCount = AttrSlotCount();
@@ -466,7 +465,7 @@ nsAttrAndChildArray::RemoveAttrAt(uint32_t aPos, nsAttrValue& aValue)
       return NS_OK;
     }
 
-    nsRefPtr<nsMappedAttributes> mapped =
+    RefPtr<nsMappedAttributes> mapped =
       GetModifiableMapped(nullptr, nullptr, false);
 
     mapped->RemoveAttrAt(aPos, aValue);
@@ -583,7 +582,7 @@ nsAttrAndChildArray::SetAndTakeMappedAttr(nsIAtom* aLocalName,
     willAdd = !mImpl->mMappedAttrs->GetAttr(aLocalName);
   }
 
-  nsRefPtr<nsMappedAttributes> mapped =
+  RefPtr<nsMappedAttributes> mapped =
     GetModifiableMapped(aContent, aSheet, willAdd);
 
   mapped->SetAndTakeAttr(aLocalName, aValue);
@@ -600,7 +599,7 @@ nsAttrAndChildArray::DoSetMappedAttrStyleSheet(nsHTMLStyleSheet* aSheet)
     return NS_OK;
   }
 
-  nsRefPtr<nsMappedAttributes> mapped =
+  RefPtr<nsMappedAttributes> mapped =
     GetModifiableMapped(nullptr, nullptr, false);
 
   mapped->SetStyleSheet(aSheet);
@@ -638,11 +637,11 @@ nsAttrAndChildArray::Compact()
   // Then resize or free buffer
   uint32_t newSize = attrCount * ATTRSIZE + childCount;
   if (!newSize && !mImpl->mMappedAttrs) {
-    moz_free(mImpl);
+    free(mImpl);
     mImpl = nullptr;
   }
   else if (newSize < mImpl->mBufferSize) {
-    mImpl = static_cast<Impl*>(moz_realloc(mImpl, (newSize + NS_IMPL_EXTRA_SIZE) * sizeof(nsIContent*)));
+    mImpl = static_cast<Impl*>(realloc(mImpl, (newSize + NS_IMPL_EXTRA_SIZE) * sizeof(nsIContent*)));
     NS_ASSERTION(mImpl, "failed to reallocate to smaller buffer");
 
     mImpl->mBufferSize = newSize;
@@ -739,13 +738,13 @@ nsAttrAndChildArray::MakeMappedUnique(nsMappedAttributes* aAttributes)
   if (!aAttributes->GetStyleSheet()) {
     // This doesn't currently happen, but it could if we do loading right
 
-    nsRefPtr<nsMappedAttributes> mapped(aAttributes);
+    RefPtr<nsMappedAttributes> mapped(aAttributes);
     mapped.swap(mImpl->mMappedAttrs);
 
     return NS_OK;
   }
 
-  nsRefPtr<nsMappedAttributes> mapped =
+  RefPtr<nsMappedAttributes> mapped =
     aAttributes->GetStyleSheet()->UniqueMappedAttributes(aAttributes);
   NS_ENSURE_TRUE(mapped, NS_ERROR_OUT_OF_MEMORY);
 
@@ -800,7 +799,7 @@ nsAttrAndChildArray::GrowBy(uint32_t aGrowSize)
     return false;
   }
 
-  Impl* newImpl = static_cast<Impl*>(moz_realloc(mImpl, neededSize.value()));
+  Impl* newImpl = static_cast<Impl*>(realloc(mImpl, neededSize.value()));
   NS_ENSURE_TRUE(newImpl, false);
 
   mImpl = newImpl;

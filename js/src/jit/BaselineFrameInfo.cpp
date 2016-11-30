@@ -16,8 +16,7 @@ using namespace js::jit;
 bool
 FrameInfo::init(TempAllocator& alloc)
 {
-    // One slot is always needed for this/arguments type checks.
-    size_t nstack = Max(script->nslots() - script->nfixed(), size_t(1));
+    size_t nstack = Max(script->nslots() - script->nfixed(), size_t(MinJITStackSize));
     if (!stack.init(alloc, nstack))
         return false;
 
@@ -38,6 +37,10 @@ FrameInfo::sync(StackValue* val)
         break;
       case StackValue::ThisSlot:
         masm.pushValue(addressOfThis());
+        break;
+      case StackValue::EvalNewTargetSlot:
+        MOZ_ASSERT(script->isForEval());
+        masm.pushValue(addressOfEvalNewTarget());
         break;
       case StackValue::Register:
         masm.pushValue(val->reg());
@@ -94,6 +97,9 @@ FrameInfo::popValue(ValueOperand dest)
         break;
       case StackValue::ThisSlot:
         masm.loadValue(addressOfThis(), dest);
+        break;
+      case StackValue::EvalNewTargetSlot:
+        masm.loadValue(addressOfEvalNewTarget(), dest);
         break;
       case StackValue::Stack:
         masm.popValue(dest);

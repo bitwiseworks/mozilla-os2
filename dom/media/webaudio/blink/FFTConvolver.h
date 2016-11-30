@@ -35,28 +35,33 @@
 
 namespace WebCore {
 
-typedef nsTArray<float> AudioFloatArray;
+typedef AlignedTArray<float> AlignedAudioFloatArray;
 using mozilla::FFTBlock;
 
 class FFTConvolver {
 public:
-    // fftSize must be a power of two
-    explicit FFTConvolver(size_t fftSize);
+    // |fftSize| must be a power of two.
+    //
+    // |renderPhase| is the initial offset in the initially zero input buffer.
+    // It is coordinated with the other stages, so they don't all do their
+    // FFTs at the same time.
+    explicit FFTConvolver(size_t fftSize, size_t renderPhase = 0);
 
+    // Process WEBAUDIO_BLOCK_SIZE elements of array |sourceP| and return a
+    // pointer to an output array of the same size.
+    //
     // |fftKernel| must be pre-scaled for FFTBlock::GetInverseWithoutScaling().
     //
-    // For now, with multiple calls to Process(), framesToProcess MUST add up EXACTLY to fftSize / 2
-    //
     // FIXME: Later, we can do more sophisticated buffering to relax this requirement...
-    //
-    // The input to output latency is equal to fftSize / 2
-    //
-    // Processing in-place is allowed...
-    void process(FFTBlock* fftKernel, const float* sourceP, float* destP, size_t framesToProcess);
+    const float* process(FFTBlock* fftKernel, const float* sourceP);
 
     void reset();
 
     size_t fftSize() const { return m_frame.FFTSize(); }
+
+    // The input to output latency is up to fftSize / 2, but alignment of the
+    // FFTs with the blocks reduces this by one block.
+    size_t latencyFrames() const;
 
     size_t sizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
     size_t sizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
@@ -66,13 +71,13 @@ private:
 
     // Buffer input until we get fftSize / 2 samples then do an FFT
     size_t m_readWriteIndex;
-    AudioFloatArray m_inputBuffer;
+    AlignedAudioFloatArray m_inputBuffer;
 
     // Stores output which we read a little at a time
-    AudioFloatArray m_outputBuffer;
+    AlignedAudioFloatArray m_outputBuffer;
 
     // Saves the 2nd half of the FFT buffer, so we can do an overlap-add with the 1st half of the next one
-    AudioFloatArray m_lastOverlapBuffer;
+    AlignedAudioFloatArray m_lastOverlapBuffer;
 };
 
 } // namespace WebCore

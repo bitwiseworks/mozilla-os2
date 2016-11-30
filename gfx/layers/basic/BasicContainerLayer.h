@@ -12,7 +12,7 @@
 #include "nsDebug.h"                    // for NS_ASSERTION
 #include "nsISupportsImpl.h"            // for MOZ_COUNT_CTOR
 #include "nsISupportsUtils.h"           // for NS_ADDREF, NS_RELEASE
-struct nsIntRect;
+#include "mozilla/gfx/Rect.h"
 
 namespace mozilla {
 namespace layers {
@@ -29,7 +29,7 @@ protected:
   virtual ~BasicContainerLayer();
 
 public:
-  virtual void SetVisibleRegion(const nsIntRegion& aRegion) override
+  virtual void SetVisibleRegion(const LayerIntRegion& aRegion) override
   {
     NS_ASSERTION(BasicManager()->InConstruction(),
                  "Can only set properties in construction phase");
@@ -77,7 +77,7 @@ public:
    * This method can be conservative; it's OK to return false under any
    * circumstances.
    */
-  bool ChildrenPartitionVisibleRegion(const nsIntRect& aInRect);
+  bool ChildrenPartitionVisibleRegion(const gfx::IntRect& aInRect);
 
   void ForceIntermediateSurface() { mUseIntermediateSurface = true; }
 
@@ -99,7 +99,8 @@ protected:
     return static_cast<BasicLayerManager*>(mManager);
   }
 };
-}
-}
+
+} // namespace layers
+} // namespace mozilla
 
 #endif

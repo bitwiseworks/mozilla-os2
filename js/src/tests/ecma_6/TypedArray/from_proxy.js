@@ -7,8 +7,17 @@ const constructors = [
     Int32Array,
     Uint32Array,
     Float32Array,
-    Float64Array
-];
+    Float64Array ];
+
+if (typeof SharedArrayBuffer != "undefined")
+    constructors.push(sharedConstructor(Int8Array),
+		      sharedConstructor(Uint8Array),
+		      sharedConstructor(Int16Array),
+		      sharedConstructor(Uint16Array),
+		      sharedConstructor(Int32Array),
+		      sharedConstructor(Uint32Array),
+		      sharedConstructor(Float32Array),
+		      sharedConstructor(Float64Array));
 
 for (var constructor of constructors) {
     // Two tests involving %TypedArray%.from and a Proxy.
@@ -18,7 +27,7 @@ for (var constructor of constructors) {
         var h = {
             defineProperty: function (t, id) {
                 log.push("define", id);
-                return undefined;
+                return true;
             },
             has: function (t, id) {
                 log.push("has", id);
@@ -31,6 +40,7 @@ for (var constructor of constructors) {
             set: function (t, id, v) {
                 log.push("set", id);
                 t[id] = v;
+                return true;
             }
         };
         return new Proxy(Object(target), h);

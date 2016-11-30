@@ -7,25 +7,18 @@
 #include "builtin/SymbolObject.h"
 
 #include "vm/StringBuffer.h"
+#include "vm/Symbol.h"
 
 #include "jsobjinlines.h"
 
 #include "vm/NativeObject-inl.h"
-#include "vm/Symbol-inl.h"
 
 using JS::Symbol;
 using namespace js;
 
 const Class SymbolObject::class_ = {
     "Symbol",
-    JSCLASS_HAS_RESERVED_SLOTS(RESERVED_SLOTS) | JSCLASS_HAS_CACHED_PROTO(JSProto_Symbol),
-    nullptr, /* addProperty */
-    nullptr, /* delProperty */
-    nullptr, /* getProperty */
-    nullptr, /* setProperty */
-    nullptr, /* enumerate */
-    nullptr, /* resolve */
-    convert
+    JSCLASS_HAS_RESERVED_SLOTS(RESERVED_SLOTS) | JSCLASS_HAS_CACHED_PROTO(JSProto_Symbol)
 };
 
 SymbolObject*
@@ -46,6 +39,7 @@ const JSPropertySpec SymbolObject::properties[] = {
 const JSFunctionSpec SymbolObject::methods[] = {
     JS_FN(js_toString_str, toString, 0, 0),
     JS_FN(js_valueOf_str, valueOf, 0, 0),
+    JS_SYM_FN(toPrimitive, toPrimitive, 1, JSPROP_READONLY),
     JS_FS_END
 };
 
@@ -68,7 +62,7 @@ SymbolObject::initClass(JSContext* cx, HandleObject obj)
         return nullptr;
 
     RootedFunction ctor(cx, global->createConstructor(cx, construct,
-                                                      ClassName(JSProto_Symbol, cx), 1));
+                                                      ClassName(JSProto_Symbol, cx), 0));
     if (!ctor)
         return nullptr;
 
@@ -103,7 +97,7 @@ SymbolObject::construct(JSContext* cx, unsigned argc, Value* vp)
     // yet, so just throw a TypeError.
     CallArgs args = CallArgsFromVp(argc, vp);
     if (args.isConstructing()) {
-        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_NOT_CONSTRUCTOR, "Symbol");
+        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_NOT_CONSTRUCTOR, "Symbol");
         return false;
     }
 
@@ -120,14 +114,6 @@ SymbolObject::construct(JSContext* cx, unsigned argc, Value* vp)
     if (!symbol)
         return false;
     args.rval().setSymbol(symbol);
-    return true;
-}
-
-// Stand-in for Symbol.prototype[@@toPrimitive], ES6 rev 26 (2014 Jul 18) 19.4.3.4
-bool
-SymbolObject::convert(JSContext* cx, HandleObject obj, JSType hint, MutableHandleValue vp)
-{
-    vp.setSymbol(obj->as<SymbolObject>().unbox());
     return true;
 }
 
@@ -159,8 +145,8 @@ SymbolObject::keyFor(JSContext* cx, unsigned argc, Value* vp)
     // step 1
     HandleValue arg = args.get(0);
     if (!arg.isSymbol()) {
-        js_ReportValueErrorFlags(cx, JSREPORT_ERROR, JSMSG_UNEXPECTED_TYPE, JSDVG_SEARCH_STACK,
-                                 arg, js::NullPtr(), "not a symbol", nullptr);
+        ReportValueErrorFlags(cx, JSREPORT_ERROR, JSMSG_UNEXPECTED_TYPE, JSDVG_SEARCH_STACK,
+                              arg, nullptr, "not a symbol", nullptr);
         return false;
     }
 
@@ -188,7 +174,7 @@ IsSymbol(HandleValue v)
 
 // ES6 rev 27 (2014 Aug 24) 19.4.3.2
 bool
-SymbolObject::toString_impl(JSContext* cx, CallArgs args)
+SymbolObject::toString_impl(JSContext* cx, const CallArgs& args)
 {
     // steps 1-3
     HandleValue thisv = args.thisv();
@@ -210,7 +196,7 @@ SymbolObject::toString(JSContext* cx, unsigned argc, Value* vp)
 
 //ES6 rev 24 (2014 Apr 27) 19.4.3.3
 bool
-SymbolObject::valueOf_impl(JSContext* cx, CallArgs args)
+SymbolObject::valueOf_impl(JSContext* cx, const CallArgs& args)
 {
     // Step 3, the error case, is handled by CallNonGenericMethod.
     HandleValue thisv = args.thisv();
@@ -229,8 +215,19 @@ SymbolObject::valueOf(JSContext* cx, unsigned argc, Value* vp)
     return CallNonGenericMethod<IsSymbol, valueOf_impl>(cx, args);
 }
 
+// ES6 19.4.3.4
+bool
+SymbolObject::toPrimitive(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    // The specification gives exactly the same algorithm for @@toPrimitive as
+    // for valueOf, so reuse the valueOf implementation.
+    return CallNonGenericMethod<IsSymbol, valueOf_impl>(cx, args);
+}
+
 JSObject*
-js_InitSymbolClass(JSContext* cx, HandleObject obj)
+js::InitSymbolClass(JSContext* cx, HandleObject obj)
 {
     return SymbolObject::initClass(cx, obj);
 }

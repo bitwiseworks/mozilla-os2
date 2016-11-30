@@ -37,9 +37,9 @@ SpeechRecognitionResultList::GetParentObject() const
 }
 
 JSObject*
-SpeechRecognitionResultList::WrapObject(JSContext* aCx)
+SpeechRecognitionResultList::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SpeechRecognitionResultListBinding::Wrap(aCx, this);
+  return SpeechRecognitionResultListBinding::Wrap(aCx, this, aGivenProto);
 }
 
 already_AddRefed<SpeechRecognitionResult>
@@ -63,8 +63,9 @@ SpeechRecognitionResultList::Length() const
 already_AddRefed<SpeechRecognitionResult>
 SpeechRecognitionResultList::Item(uint32_t aIndex)
 {
-  nsRefPtr<SpeechRecognitionResult> result = mItems.ElementAt(aIndex);
+  RefPtr<SpeechRecognitionResult> result = mItems.ElementAt(aIndex);
   return result.forget();
 }
+
 } // namespace dom
 } // namespace mozilla

@@ -29,8 +29,6 @@
 #undef KeyPress
 #endif
 
-class nsIDOMHTMLSelectElement;
-class nsIDOMHTMLOptionsCollection;
 class nsIComboboxControlFrame;
 class nsPresContext;
 class nsListEventListener;
@@ -47,9 +45,9 @@ class HTMLOptionsCollection;
  */
 
 class nsListControlFrame final : public nsHTMLScrollFrame,
-                                     public nsIFormControlFrame,
-                                     public nsIListControlFrame,
-                                     public nsISelectControlFrame
+                                 public nsIFormControlFrame,
+                                 public nsIListControlFrame,
+                                 public nsISelectControlFrame
 {
 public:
   friend nsContainerFrame* NS_NewListControlFrame(nsIPresShell* aPresShell,
@@ -111,7 +109,7 @@ public:
   virtual void SetFocus(bool aOn = true, bool aRepaint = false) override;
 
   virtual mozilla::ScrollbarStyles GetScrollbarStyles() const override;
-  virtual bool ShouldPropagateComputedHeightToScrolledContent() const override;
+  virtual bool ShouldPropagateComputedBSizeToScrolledContent() const override;
 
     // for accessibility purposes
 #ifdef ACCESSIBILITY
@@ -131,7 +129,7 @@ public:
   virtual void GetOptionText(uint32_t aIndex, nsAString& aStr) override;
 
   virtual void CaptureMouseEvents(bool aGrabMouseEvents) override;
-  virtual nscoord GetHeightOfARow() override;
+  virtual nscoord GetBSizeOfARow() override;
   virtual uint32_t GetNumberOfOptions() override;
   virtual void AboutToDropDown() override;
 
@@ -195,7 +193,8 @@ public:
    * @param aPt the offset of this frame, relative to the rendering reference
    * frame
    */
-  void PaintFocus(nsRenderingContext& aRC, nsPoint aPt);
+  void PaintFocus(mozilla::gfx::DrawTarget* aDrawTarget, nsPoint aPt);
+
   /**
    * If this frame IsFocused(), invalidates an area that includes anything
    * that PaintFocus will or could have painted --- basically the whole
@@ -205,10 +204,11 @@ public:
   void InvalidateFocus();
 
   /**
-   * Function to calculate the height a row, for use with the "size" attribute.
+   * Function to calculate the block size of a row, for use with the
+   * "size" attribute.
    * Can't be const because GetNumberOfOptions() isn't const.
    */
-  nscoord CalcHeightOfARow();
+  nscoord CalcBSizeOfARow();
 
   /**
    * Function to ask whether we're currently in what might be the
@@ -329,12 +329,13 @@ protected:
   bool     CheckIfAllFramesHere();
   bool     IsLeftButton(nsIDOMEvent* aMouseEvent);
 
-  // guess at a row height based on our own style.
-  nscoord  CalcFallbackRowHeight(float aFontSizeInflation);
+  // guess at a row block size based on our own style.
+  nscoord  CalcFallbackRowBSize(float aFontSizeInflation);
 
-  // CalcIntrinsicBSize computes our intrinsic height (taking the "size"
-  // attribute into account).  This should only be called in non-dropdown mode.
-  nscoord CalcIntrinsicBSize(nscoord aHeightOfARow, int32_t aNumberOfOptions);
+  // CalcIntrinsicBSize computes our intrinsic block size (taking the
+  // "size" attribute into account).  This should only be called in
+  // non-dropdown mode.
+  nscoord CalcIntrinsicBSize(nscoord aBSizeOfARow, int32_t aNumberOfOptions);
 
   // Dropped down stuff
   void     SetComboboxItem(int32_t aIndex);
@@ -380,8 +381,8 @@ public:
   }
 
 protected:
-  nscoord HeightOfARow() {
-    return GetOptionsContainer()->HeightOfARow();
+  nscoord BSizeOfARow() {
+    return GetOptionsContainer()->BSizeOfARow();
   }
 
   /**
@@ -427,16 +428,17 @@ protected:
   // True if the selection can be set to nothing or disabled options.
   bool mForceSelection:1;
   
-  // The last computed height we reflowed at if we're a combobox dropdown.
+  // The last computed block size we reflowed at if we're a combobox
+  // dropdown.
   // XXXbz should we be using a subclass here?  Or just not worry
   // about the extra member on listboxes?
-  nscoord mLastDropdownComputedHeight;
+  nscoord mLastDropdownComputedBSize;
 
   // At the time of our last dropdown, the backstop color to draw in case we
   // are translucent.
   nscolor mLastDropdownBackstopColor;
   
-  nsRefPtr<nsListEventListener> mEventListener;
+  RefPtr<nsListEventListener> mEventListener;
 
   static nsListControlFrame * mFocused;
   static nsString * sIncrementalString;

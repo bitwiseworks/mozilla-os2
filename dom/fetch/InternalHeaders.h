@@ -14,8 +14,6 @@
 #include "nsClassHashtable.h"
 #include "nsWrapperCache.h"
 
-class nsPIDOMWindow;
-
 namespace mozilla {
 
 class ErrorResult;
@@ -23,7 +21,6 @@ class ErrorResult;
 namespace dom {
 
 template<typename T> class MozMap;
-class HeadersOrByteStringSequenceSequenceOrByteStringMozMap;
 
 class InternalHeaders final
 {
@@ -54,12 +51,18 @@ public:
   }
 
   explicit InternalHeaders(const InternalHeaders& aOther)
-    : mGuard(aOther.mGuard)
+    : mGuard(HeadersGuardEnum::None)
   {
     ErrorResult result;
     Fill(aOther, result);
     MOZ_ASSERT(!result.Failed());
+    // Note that it's important to set the guard after Fill(), to make sure
+    // that Fill() doesn't fail if aOther is immutable.
+    mGuard = aOther.mGuard;
   }
+
+  explicit InternalHeaders(const nsTArray<Entry>&& aHeaders,
+                           HeadersGuardEnum aGuard = HeadersGuardEnum::None);
 
   void Append(const nsACString& aName, const nsACString& aValue,
               ErrorResult& aRv);
@@ -69,6 +72,21 @@ public:
               ErrorResult& aRv) const;
   bool Has(const nsACString& aName, ErrorResult& aRv) const;
   void Set(const nsACString& aName, const nsACString& aValue, ErrorResult& aRv);
+
+  uint32_t GetIterableLength() const
+  {
+    return mList.Length();
+  }
+  const NS_ConvertASCIItoUTF16 GetKeyAtIndex(unsigned aIndex) const
+  {
+    MOZ_ASSERT(aIndex < mList.Length());
+    return NS_ConvertASCIItoUTF16(mList[aIndex].mName);
+  }
+  const NS_ConvertASCIItoUTF16 GetValueAtIndex(unsigned aIndex) const
+  {
+    MOZ_ASSERT(aIndex < mList.Length());
+    return NS_ConvertASCIItoUTF16(mList[aIndex].mValue);
+  }
 
   void Clear();
 

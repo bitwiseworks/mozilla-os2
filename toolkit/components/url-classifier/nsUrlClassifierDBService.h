@@ -45,14 +45,14 @@ namespace safebrowsing {
 class Classifier;
 class ProtocolParser;
 class TableUpdate;
-}
-}
+} // namespace safebrowsing
+} // namespace mozilla
 
 // This is a proxy class that just creates a background thread and delagates
 // calls to the background thread.
 class nsUrlClassifierDBService final : public nsIUrlClassifierDBService,
-                                           public nsIURIClassifier,
-                                           public nsIObserver
+                                       public nsIURIClassifier,
+                                       public nsIObserver
 {
 public:
   // This is thread safe. It throws an exception if the thread is busy.
@@ -101,8 +101,8 @@ private:
   // Build a comma-separated list of tables to check
   void BuildTables(bool trackingProtectionEnabled, nsCString& tables);
 
-  nsRefPtr<nsUrlClassifierDBServiceWorker> mWorker;
-  nsRefPtr<UrlClassifierDBServiceWorkerProxy> mWorkerProxy;
+  RefPtr<nsUrlClassifierDBServiceWorker> mWorker;
+  RefPtr<UrlClassifierDBServiceWorkerProxy> mWorkerProxy;
 
   nsInterfaceHashtable<nsCStringHashKey, nsIUrlClassifierHashCompleter> mCompleters;
 
@@ -117,6 +117,10 @@ private:
   // TRUE if the nsURIClassifier implementation should check for tracking
   // uris on document loads.
   bool mCheckTracking;
+
+  // TRUE if the nsURIClassifier implementation should check for forbidden
+  // uris on document loads.
+  bool mCheckForbiddenURIs;
 
   // TRUE if a BeginUpdate() has been called without an accompanying
   // CancelUpdate()/FinishUpdate().  This is used to prevent competing

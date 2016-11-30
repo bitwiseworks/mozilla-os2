@@ -113,10 +113,19 @@ protected:
     eStreamTypeSet      // The stream is fully initialized
   };
 
+  enum StreamStopMode
+  {
+    eNormalStop = 0,
+    eDoDeferredStop,
+    eStopPending
+  };
+
   virtual ~nsNPAPIPluginStreamListener();
+  bool MaybeRunStopBinding();
+
   char* mStreamBuffer;
   char* mNotifyURL;
-  nsRefPtr<nsNPAPIPluginInstance> mInst;
+  RefPtr<nsNPAPIPluginInstance> mInst;
   nsNPAPIStreamWrapper *mNPStreamWrapper;
   uint32_t mStreamBufferSize;
   int32_t mStreamBufferByteCount;
@@ -131,9 +140,11 @@ protected:
   char* mResponseHeaderBuf;
   nsCOMPtr<nsITimer> mDataPumpTimer;
   nsCOMPtr<nsIAsyncVerifyRedirectCallback> mHTTPRedirectCallback;
+  StreamStopMode mStreamStopMode;
+  nsresult mPendingStopBindingStatus;
 
 public:
-  nsRefPtr<nsPluginStreamListenerPeer> mStreamListenerPeer;
+  RefPtr<nsPluginStreamListenerPeer> mStreamListenerPeer;
 };
 
 #endif // nsNPAPIPluginStreamListener_h_

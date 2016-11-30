@@ -55,7 +55,7 @@ function run_test()
   run_next_test();
 }
 
-add_task(function test_execute()
+add_task(function* test_execute()
 {
   var testURI = uri("http://mozilla.com/");
   var testItemId = bmsvc.insertBookmark(bmsvc.bookmarksMenuFolder, testURI, -1, "");
@@ -271,9 +271,9 @@ add_task(function test_execute()
   bmsvc.setItemLastModified(testItemId, --lastModified3);
   annosvc.removeItemAnnotation(testItemId, int32Key);
   var lastModified4 = bmsvc.getItemLastModified(testItemId);
-  LOG("verify that removing an annotation updates the last modified date");
-  LOG("lastModified3 = " + lastModified3);
-  LOG("lastModified4 = " + lastModified4);
+  do_print("verify that removing an annotation updates the last modified date");
+  do_print("lastModified3 = " + lastModified3);
+  do_print("lastModified4 = " + lastModified4);
   do_check_true(lastModified4 > lastModified3);
 
   do_check_eq(annoObserver.PAGE_lastRemoved_URI, testURI.spec);
@@ -288,7 +288,7 @@ add_task(function test_execute()
 
   // Setting item annotations on invalid item ids should throw
   var invalidIds = [-1, 0, 37643];
-  for each (var id in invalidIds) {
+  for (var id of invalidIds) {
     try {
       annosvc.setItemAnnotation(id, "foo", "bar", 0, 0);
       do_throw("setItemAnnotation* should throw for invalid item id: " + id)

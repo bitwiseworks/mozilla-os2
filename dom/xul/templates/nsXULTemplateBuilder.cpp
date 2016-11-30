@@ -55,9 +55,9 @@
 #include "nsGkAtoms.h"
 #include "nsXULElement.h"
 #include "jsapi.h"
-#include "prlog.h"
+#include "mozilla/Logging.h"
 #include "rdf.h"
-#include "pldhash.h"
+#include "PLDHashTable.h"
 #include "plhash.h"
 #include "nsDOMClassInfoID.h"
 #include "nsPIDOMWindow.h"
@@ -86,9 +86,7 @@ nsIScriptSecurityManager* nsXULTemplateBuilder::gScriptSecurityManager;
 nsIPrincipal*             nsXULTemplateBuilder::gSystemPrincipal;
 nsIObserverService*       nsXULTemplateBuilder::gObserverService;
 
-#ifdef PR_LOGGING
-PRLogModuleInfo* gXULTemplateLog;
-#endif
+LazyLogModule gXULTemplateLog("nsXULTemplateBuilder");
 
 #define NS_QUERY_PROCESSOR_CONTRACTID_PREFIX "@mozilla.org/xul/xul-query-processor;1?name="
 
@@ -167,11 +165,6 @@ nsXULTemplateBuilder::InitGlobals()
             return rv;
     }
 
-#ifdef PR_LOGGING
-    if (! gXULTemplateLog)
-        gXULTemplateLog = PR_NewLogModule("nsXULTemplateBuilder");
-#endif
-
     return NS_OK;
 }
 
@@ -229,23 +222,6 @@ nsXULTemplateBuilder::Uninit(bool aIsFinal)
     mQueriesCompiled = false;
 }
 
-static PLDHashOperator
-TraverseMatchList(nsISupports* aKey, nsTemplateMatch* aMatch, void* aContext)
-{
-    nsCycleCollectionTraversalCallback *cb =
-        static_cast<nsCycleCollectionTraversalCallback*>(aContext);
-
-    cb->NoteXPCOMChild(aKey);
-    nsTemplateMatch* match = aMatch;
-    while (match) {
-        cb->NoteXPCOMChild(match->GetContainer());
-        cb->NoteXPCOMChild(match->mResult);
-        match = match->mNext;
-    }
-
-    return PL_DHASH_NEXT;
-}
-
 NS_IMPL_CYCLE_COLLECTION_CLASS(nsXULTemplateBuilder)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsXULTemplateBuilder)
@@ -276,7 +252,17 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsXULTemplateBuilder)
     NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRootResult)
     NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mListeners)
     NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mQueryProcessor)
-    tmp->mMatchMap.EnumerateRead(TraverseMatchList, &cb);
+
+    for (auto iter = tmp->mMatchMap.Iter(); !iter.Done(); iter.Next()) {
+        cb.NoteXPCOMChild(iter.Key());
+        nsTemplateMatch* match = iter.UserData();
+        while (match) {
+            cb.NoteXPCOMChild(match->GetContainer());
+            cb.NoteXPCOMChild(match->mResult);
+            match = match->mNext;
+        }
+    }
+
     {
       uint32_t i, count = tmp->mQuerySets.Length();
       for (i = 0; i < count; ++i) {
@@ -506,7 +492,7 @@ nsXULTemplateBuilder::UpdateResult(nsIXULTemplateResult* aOldResult,
                                    nsIXULTemplateResult* aNewResult,
                                    nsIDOMNode* aQueryNode)
 {
-    PR_LOG(gXULTemplateLog, PR_LOG_ALWAYS,
+    MOZ_LOG(gXULTemplateLog, LogLevel::Info,
            ("nsXULTemplateBuilder::UpdateResult %p %p %p",
            aOldResult, aNewResult, aQueryNode));
 
@@ -773,7 +759,8 @@ nsXULTemplateBuilder::UpdateResultInContainer(nsIXULTemplateResult* aOldResult,
     if (aNewResult) {
         // only allow a result to be inserted into containers with a matching tag
         nsIAtom* tag = aQuerySet->GetTag();
-        if (aInsertionPoint && tag && tag != aInsertionPoint->Tag())
+        if (aInsertionPoint && tag &&
+            tag != aInsertionPoint->NodeInfo()->NameAtom())
             return NS_OK;
 
         int32_t findpriority = aQuerySet->Priority();
@@ -1096,7 +1083,8 @@ nsXULTemplateBuilder::AttributeChanged(nsIDocument* aDocument,
                                        Element*     aElement,
                                        int32_t      aNameSpaceID,
                                        nsIAtom*     aAttribute,
-                                       int32_t      aModType)
+                                       int32_t      aModType,
+                                       const nsAttrValue* aOldValue)
 {
     if (aElement == mRoot && aNameSpaceID == kNameSpaceID_None) {
         // Check for a change to the 'ref' attribute on an atom, in which
@@ -1123,7 +1111,7 @@ nsXULTemplateBuilder::ContentRemoved(nsIDocument* aDocument,
                                      nsIContent* aPreviousSibling)
 {
     if (mRoot && nsContentUtils::ContentIsDescendantOf(mRoot, aChild)) {
-        nsRefPtr<nsXULTemplateBuilder> kungFuDeathGrip(this);
+        RefPtr<nsXULTemplateBuilder> kungFuDeathGrip(this);
 
         if (mQueryProcessor)
             mQueryProcessor->Done();
@@ -1158,7 +1146,7 @@ nsXULTemplateBuilder::NodeWillBeDestroyed(const nsINode* aNode)
 {
     // The call to RemoveObserver could release the last reference to
     // |this|, so hold another reference.
-    nsRefPtr<nsXULTemplateBuilder> kungFuDeathGrip(this);
+    RefPtr<nsXULTemplateBuilder> kungFuDeathGrip(this);
 
     // Break circular references
     if (mQueryProcessor)
@@ -1212,15 +1200,12 @@ nsXULTemplateBuilder::LoadDataSources(nsIDocument* aDocument,
     if (querytype.EqualsLiteral("rdf")) {
         isRDFQuery = true;
         mQueryProcessor = new nsXULTemplateQueryProcessorRDF();
-        NS_ENSURE_TRUE(mQueryProcessor, NS_ERROR_OUT_OF_MEMORY);
     }
     else if (querytype.EqualsLiteral("xml")) {
         mQueryProcessor = new nsXULTemplateQueryProcessorXML();
-        NS_ENSURE_TRUE(mQueryProcessor, NS_ERROR_OUT_OF_MEMORY);
     }
     else if (querytype.EqualsLiteral("storage")) {
         mQueryProcessor = new nsXULTemplateQueryProcessorStorage();
-        NS_ENSURE_TRUE(mQueryProcessor, NS_ERROR_OUT_OF_MEMORY);
     }
     else {
         nsAutoCString cid(NS_QUERY_PROCESSOR_CONTRACTID_PREFIX);
@@ -1243,7 +1228,7 @@ nsXULTemplateBuilder::LoadDataSources(nsIDocument* aDocument,
     if (xuldoc)
         xuldoc->SetTemplateBuilderFor(mRoot, this);
 
-    if (!mRoot->IsXUL()) {
+    if (!mRoot->IsXULElement()) {
         // Hmm. This must be an HTML element. Try to set it as a
         // JS property "by hand".
         InitHTMLTemplateRoot();
@@ -1384,7 +1369,7 @@ nsXULTemplateBuilder::InitHTMLTemplateRoot()
 
     // We are going to run script via JS_SetProperty, so we need a script entry
     // point, but as this is XUL related it does not appear in the HTML spec.
-    AutoEntryScript entryScript(innerWin, true);
+    AutoEntryScript entryScript(innerWin, "nsXULTemplateBuilder creation", true);
     JSContext* jscontext = entryScript.cx();
 
     JS::Rooted<JS::Value> v(jscontext);
@@ -1438,7 +1423,8 @@ nsXULTemplateBuilder::DetermineMatchedRule(nsIContent *aContainer,
         // If a tag was specified, it must match the tag of the container
         // where content is being inserted.
         nsIAtom* tag = rule->GetTag();
-        if ((!aContainer || !tag || tag == aContainer->Tag()) &&
+        if ((!aContainer || !tag ||
+             tag == aContainer->NodeInfo()->NameAtom()) &&
             rule->CheckMatch(aResult)) {
             *aMatchedRule = rule;
             *aRuleIndex = r;
@@ -1712,11 +1698,9 @@ nsXULTemplateBuilder::CompileQueries()
         mFlags |= eLoggingEnabled;
     }
 
-#ifdef PR_LOGGING
     // always enable logging if the debug setting is used
-    if (PR_LOG_TEST(gXULTemplateLog, PR_LOG_DEBUG))
+    if (MOZ_LOG_TEST(gXULTemplateLog, LogLevel::Debug))
         mFlags |= eLoggingEnabled;
-#endif
 
     nsCOMPtr<nsIDOMNode> rootnode = do_QueryInterface(mRoot);
     nsresult rv =
@@ -1752,9 +1736,6 @@ nsXULTemplateBuilder::CompileQueries()
         mMemberVariable = do_GetAtom(membervar);
 
     nsTemplateQuerySet* queryset = new nsTemplateQuerySet(0);
-    if (!queryset)
-        return NS_ERROR_OUT_OF_MEMORY;
-
     if (!mQuerySets.AppendElement(queryset)) {
         delete queryset;
         return NS_ERROR_OUT_OF_MEMORY;
@@ -1815,8 +1796,6 @@ nsXULTemplateBuilder::CompileTemplate(nsIContent* aTemplate,
             // first one is always created by CompileQueries
             if (hasQuerySet) {
                 aQuerySet = new nsTemplateQuerySet(++*aPriority);
-                if (!aQuerySet)
-                    return NS_ERROR_OUT_OF_MEMORY;
 
                 // once the queryset is appended to the mQuerySets list, it
                 // will be removed by CompileQueries if an error occurs
@@ -1895,9 +1874,6 @@ nsXULTemplateBuilder::CompileTemplate(nsIContent* aTemplate,
                         // create a new queryset if one hasn't been created already
                         if (hasQuerySet) {
                             aQuerySet = new nsTemplateQuerySet(++*aPriority);
-                            if (! aQuerySet)
-                                return NS_ERROR_OUT_OF_MEMORY;
-
                             if (!mQuerySets.AppendElement(aQuerySet)) {
                                 delete aQuerySet;
                                 return NS_ERROR_OUT_OF_MEMORY;
@@ -1939,9 +1915,6 @@ nsXULTemplateBuilder::CompileTemplate(nsIContent* aTemplate,
                 // a new queryset must always be created in this case
                 if (hasQuerySet) {
                     aQuerySet = new nsTemplateQuerySet(++*aPriority);
-                    if (! aQuerySet)
-                        return NS_ERROR_OUT_OF_MEMORY;
-
                     if (!mQuerySets.AppendElement(aQuerySet)) {
                         delete aQuerySet;
                         return NS_ERROR_OUT_OF_MEMORY;
@@ -2278,9 +2251,6 @@ nsXULTemplateBuilder::CompileWhereCondition(nsTemplateRule* aRule,
         nsXULContentUtils::LogTemplateError(ERROR_TEMPLATE_WHERE_NO_VAR);
         return NS_OK;
     }
-
-    if (! condition)
-        return NS_ERROR_OUT_OF_MEMORY;
 
     if (*aCurrentCondition) {
         (*aCurrentCondition)->SetNext(condition);

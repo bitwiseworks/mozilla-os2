@@ -5,86 +5,58 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "MP4Decoder.h"
-#include "MP4Reader.h"
 #include "MediaDecoderStateMachine.h"
+#include "MediaFormatReader.h"
+#include "MP4Demuxer.h"
 #include "mozilla/Preferences.h"
 #include "nsCharSeparatedTokenizer.h"
 #ifdef MOZ_EME
 #include "mozilla/CDMProxy.h"
 #endif
-#include "prlog.h"
+#include "mozilla/Logging.h"
+#include "nsMimeTypes.h"
+#include "nsContentTypeParser.h"
+#include "VideoUtils.h"
 
 #ifdef XP_WIN
 #include "mozilla/WindowsVersion.h"
-#include "WMFDecoderModule.h"
-#endif
-#ifdef MOZ_FFMPEG
-#include "FFmpegRuntimeLinker.h"
-#endif
-#ifdef MOZ_APPLEMEDIA
-#include "apple/AppleDecoderModule.h"
 #endif
 #ifdef MOZ_WIDGET_ANDROID
 #include "nsIGfxInfo.h"
 #include "AndroidBridge.h"
 #endif
+#include "mozilla/layers/LayersTypes.h"
+
+#include "PDMFactory.h"
 
 namespace mozilla {
 
+#if defined(MOZ_GONK_MEDIACODEC) || defined(XP_WIN) || defined(MOZ_APPLEMEDIA) || defined(MOZ_FFMPEG)
+#define MP4_READER_DORMANT_HEURISTIC
+#else
+#undef MP4_READER_DORMANT_HEURISTIC
+#endif
+
+MP4Decoder::MP4Decoder(MediaDecoderOwner* aOwner)
+  : MediaDecoder(aOwner)
+{
+#if defined(MP4_READER_DORMANT_HEURISTIC)
+  mDormantSupported = Preferences::GetBool("media.decoder.heuristic.dormant.enabled", false);
+#endif
+}
+
 MediaDecoderStateMachine* MP4Decoder::CreateStateMachine()
 {
-  return new MediaDecoderStateMachine(this, new MP4Reader(this));
-}
+  MediaDecoderReader* reader =
+    new MediaFormatReader(this,
+                          new MP4Demuxer(GetResource()),
+                          GetVideoFrameContainer());
 
-#ifdef MOZ_EME
-nsresult
-MP4Decoder::SetCDMProxy(CDMProxy* aProxy)
-{
-  nsresult rv = MediaDecoder::SetCDMProxy(aProxy);
-  NS_ENSURE_SUCCESS(rv, rv);
-  if (aProxy) {
-    // The MP4Reader can't decrypt EME content until it has a CDMProxy,
-    // and the CDMProxy knows the capabilities of the CDM. The MP4Reader
-    // remains in "waiting for resources" state until then.
-    CDMCaps::AutoLock caps(aProxy->Capabilites());
-    nsRefPtr<nsIRunnable> task(
-      NS_NewRunnableMethod(this, &MediaDecoder::NotifyWaitingForResourcesStatusChanged));
-    caps.CallOnMainThreadWhenCapsAvailable(task);
-  }
-  return NS_OK;
-}
-#endif
-
-static bool
-IsSupportedAudioCodec(const nsAString& aCodec,
-                      bool& aOutContainsAAC,
-                      bool& aOutContainsMP3)
-{
-  // AAC-LC or HE-AAC in M4A.
-  aOutContainsAAC = aCodec.EqualsASCII("mp4a.40.2") ||
-                    aCodec.EqualsASCII("mp4a.40.5");
-  if (aOutContainsAAC) {
-#ifdef XP_WIN
-    if (!Preferences::GetBool("media.fragmented-mp4.use-blank-decoder") &&
-        !WMFDecoderModule::HasAAC()) {
-      return false;
-    }
-#endif
-    return true;
-  }
-#ifndef MOZ_GONK_MEDIACODEC // B2G doesn't support MP3 in MP4 yet.
-  aOutContainsMP3 = aCodec.EqualsASCII("mp3");
-  if (aOutContainsMP3) {
-    return true;
-  }
-#else
-  aOutContainsMP3 = false;
-#endif
-  return false;
+  return new MediaDecoderStateMachine(this, reader);
 }
 
 static bool
-IsSupportedH264Codec(const nsAString& aCodec)
+IsWhitelistedH264Codec(const nsAString& aCodec)
 {
   int16_t profile = 0, level = 0;
 
@@ -93,11 +65,6 @@ IsSupportedH264Codec(const nsAString& aCodec)
   }
 
 #ifdef XP_WIN
-  if (!Preferences::GetBool("media.fragmented-mp4.use-blank-decoder") &&
-      !WMFDecoderModule::HasH264()) {
-    return false;
-  }
-
   // Disable 4k video on windows vista since it performs poorly.
   if (!IsWin7OrLater() &&
       level >= H264_LEVEL_5) {
@@ -123,131 +90,142 @@ IsSupportedH264Codec(const nsAString& aCodec)
 
 /* static */
 bool
-MP4Decoder::CanHandleMediaType(const nsACString& aType,
-                               const nsAString& aCodecs,
-                               bool& aOutContainsAAC,
-                               bool& aOutContainsH264,
-                               bool& aOutContainsMP3)
+MP4Decoder::CanHandleMediaType(const nsACString& aMIMETypeExcludingCodecs,
+                               const nsAString& aCodecs)
 {
   if (!IsEnabled()) {
     return false;
   }
 
-  if (aType.EqualsASCII("audio/mp4") || aType.EqualsASCII("audio/x-m4a")) {
-    return aCodecs.IsEmpty() ||
-           IsSupportedAudioCodec(aCodecs,
-                                 aOutContainsAAC,
-                                 aOutContainsMP3);
-  }
-
-  if (!aType.EqualsASCII("video/mp4")) {
+  // Whitelist MP4 types, so they explicitly match what we encounter on
+  // the web, as opposed to what we use internally (i.e. what our demuxers
+  // etc output).
+  const bool isMP4Audio = aMIMETypeExcludingCodecs.EqualsASCII("audio/mp4") ||
+                          aMIMETypeExcludingCodecs.EqualsASCII("audio/x-m4a");
+  const bool isMP4Video =
+  // On B2G, treat 3GPP as MP4 when Gonk PDM is available.
+#ifdef MOZ_GONK_MEDIACODEC
+    aMIMETypeExcludingCodecs.EqualsASCII(VIDEO_3GPP) ||
+#endif
+    aMIMETypeExcludingCodecs.EqualsASCII("video/mp4") ||
+    aMIMETypeExcludingCodecs.EqualsASCII("video/quicktime") ||
+    aMIMETypeExcludingCodecs.EqualsASCII("video/x-m4v");
+  if (!isMP4Audio && !isMP4Video) {
     return false;
   }
 
-  // Verify that all the codecs specifed are ones that we expect that
-  // we can play.
-  nsCharSeparatedTokenizer tokenizer(aCodecs, ',');
-  bool expectMoreTokens = false;
-  while (tokenizer.hasMoreTokens()) {
-    const nsSubstring& token = tokenizer.nextToken();
-    expectMoreTokens = tokenizer.separatorAfterCurrentToken();
-    if (IsSupportedAudioCodec(token,
-                              aOutContainsAAC,
-                              aOutContainsMP3)) {
-      continue;
+  nsTArray<nsCString> codecMimes;
+  if (aCodecs.IsEmpty()) {
+    // No codecs specified. Assume AAC/H.264
+    if (isMP4Audio) {
+      codecMimes.AppendElement(NS_LITERAL_CSTRING("audio/mp4a-latm"));
+    } else {
+      MOZ_ASSERT(isMP4Video);
+      codecMimes.AppendElement(NS_LITERAL_CSTRING("video/avc"));
     }
-    if (IsSupportedH264Codec(token)) {
-      aOutContainsH264 = true;
-      continue;
+  } else {
+    // Verify that all the codecs specified are ones that we expect that
+    // we can play.
+    nsTArray<nsString> codecs;
+    if (!ParseCodecsString(aCodecs, codecs)) {
+      return false;
     }
-    return false;
+    for (const nsString& codec : codecs) {
+      if (IsAACCodecString(codec)) {
+        codecMimes.AppendElement(NS_LITERAL_CSTRING("audio/mp4a-latm"));
+        continue;
+      }
+      if (codec.EqualsLiteral("mp3")) {
+        codecMimes.AppendElement(NS_LITERAL_CSTRING("audio/mpeg"));
+        continue;
+      }
+      // Note: Only accept H.264 in a video content type, not in an audio
+      // content type.
+      if (IsWhitelistedH264Codec(codec) && isMP4Video) {
+        codecMimes.AppendElement(NS_LITERAL_CSTRING("video/avc"));
+        continue;
+      }
+      // Some unsupported codec.
+      return false;
+    }
   }
-  if (expectMoreTokens) {
-    // Last codec name was empty
-    return false;
+
+  // Verify that we have a PDM that supports the whitelisted types.
+  PDMFactory::Init();
+  RefPtr<PDMFactory> platform = new PDMFactory();
+  for (const nsCString& codecMime : codecMimes) {
+    if (!platform->SupportsMimeType(codecMime)) {
+      return false;
+    }
   }
 
   return true;
 }
 
-static bool
-IsFFmpegAvailable()
+/* static */ bool
+MP4Decoder::CanHandleMediaType(const nsAString& aContentType)
 {
-#ifndef MOZ_FFMPEG
-  return false;
-#else
-  if (!Preferences::GetBool("media.fragmented-mp4.ffmpeg.enabled", false)) {
+  nsContentTypeParser parser(aContentType);
+  nsAutoString mimeType;
+  nsresult rv = parser.GetType(mimeType);
+  if (NS_FAILED(rv)) {
     return false;
   }
+  nsString codecs;
+  parser.GetParameter("codecs", codecs);
 
-  // If we can link to FFmpeg, then we can almost certainly play H264 and AAC
-  // with it.
-  return FFmpegRuntimeLinker::Link();
-#endif
-}
-
-static bool
-IsAppleAvailable()
-{
-#ifndef MOZ_APPLEMEDIA
-  // Not the right platform.
-  return false;
-#else
-  if (!Preferences::GetBool("media.apple.mp4.enabled", false)) {
-    // Disabled by preference.
-    return false;
-  }
-  return NS_SUCCEEDED(AppleDecoderModule::CanDecode());
-#endif
-}
-
-static bool
-IsAndroidAvailable()
-{
-#ifndef MOZ_WIDGET_ANDROID
-  return false;
-#else
-  // We need android.media.MediaCodec which exists in API level 16 and higher.
-  return AndroidBridge::Bridge()->GetAPIVersion() >= 16;
-#endif
-}
-
-static bool
-IsGonkMP4DecoderAvailable()
-{
-  return Preferences::GetBool("media.fragmented-mp4.gonk.enabled", false);
-}
-
-static bool
-IsGMPDecoderAvailable()
-{
-  return Preferences::GetBool("media.fragmented-mp4.gmp.enabled", false);
-}
-
-static bool
-HavePlatformMPEGDecoders()
-{
-  return Preferences::GetBool("media.fragmented-mp4.use-blank-decoder") ||
-#ifdef XP_WIN
-         // We have H.264/AAC platform decoders on Windows Vista and up.
-         IsVistaOrLater() ||
-#endif
-         IsAndroidAvailable() ||
-         IsFFmpegAvailable() ||
-         IsAppleAvailable() ||
-         IsGonkMP4DecoderAvailable() ||
-         IsGMPDecoderAvailable() ||
-         // TODO: Other platforms...
-         false;
+  return CanHandleMediaType(NS_ConvertUTF16toUTF8(mimeType), codecs);
 }
 
 /* static */
 bool
 MP4Decoder::IsEnabled()
 {
-  return Preferences::GetBool("media.fragmented-mp4.enabled") &&
-         HavePlatformMPEGDecoders();
+  return Preferences::GetBool("media.mp4.enabled");
+}
+
+static const uint8_t sTestH264ExtraData[] = {
+  0x01, 0x64, 0x00, 0x0a, 0xff, 0xe1, 0x00, 0x17, 0x67, 0x64,
+  0x00, 0x0a, 0xac, 0xd9, 0x44, 0x26, 0x84, 0x00, 0x00, 0x03,
+  0x00, 0x04, 0x00, 0x00, 0x03, 0x00, 0xc8, 0x3c, 0x48, 0x96,
+  0x58, 0x01, 0x00, 0x06, 0x68, 0xeb, 0xe3, 0xcb, 0x22, 0xc0
+};
+
+static already_AddRefed<MediaDataDecoder>
+CreateTestH264Decoder(layers::LayersBackend aBackend,
+                      VideoInfo& aConfig)
+{
+  aConfig.mMimeType = "video/avc";
+  aConfig.mId = 1;
+  aConfig.mDuration = 40000;
+  aConfig.mMediaTime = 0;
+  aConfig.mDisplay = nsIntSize(64, 64);
+  aConfig.mImage = nsIntRect(0, 0, 64, 64);
+  aConfig.mExtraData = new MediaByteBuffer();
+  aConfig.mExtraData->AppendElements(sTestH264ExtraData,
+                                     MOZ_ARRAY_LENGTH(sTestH264ExtraData));
+
+  PDMFactory::Init();
+
+  RefPtr<PDMFactory> platform = new PDMFactory();
+  RefPtr<MediaDataDecoder> decoder(
+    platform->CreateDecoder(aConfig, nullptr, nullptr, aBackend, nullptr));
+
+  return decoder.forget();
+}
+
+/* static */ bool
+MP4Decoder::IsVideoAccelerated(layers::LayersBackend aBackend, nsACString& aFailureReason)
+{
+  VideoInfo config;
+  RefPtr<MediaDataDecoder> decoder(CreateTestH264Decoder(aBackend, config));
+  if (!decoder) {
+    aFailureReason.AssignLiteral("Failed to create H264 decoder");
+    return false;
+  }
+  bool result = decoder->IsHardwareAccelerated(aFailureReason);
+  decoder->Shutdown();
+  return result;
 }
 
 } // namespace mozilla
-

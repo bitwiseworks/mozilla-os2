@@ -5,9 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #include "nsError.h"
 #include "AbstractMediaDecoder.h"
-#include "MediaResource.h"
 #include "WaveReader.h"
-#include "mozilla/dom/TimeRanges.h"
 #include "MediaDecoderStateMachine.h"
 #include "VideoUtils.h"
 #include "nsISeekableStream.h"
@@ -16,23 +14,21 @@
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/CheckedInt.h"
 #include "mozilla/Endian.h"
+#include "mozilla/UniquePtr.h"
 #include <algorithm>
+
+using namespace mozilla::media;
 
 namespace mozilla {
 
 // Un-comment to enable logging of seek bisections.
 //#define SEEK_LOGGING
 
-#ifdef PR_LOGGING
-extern PRLogModuleInfo* gMediaDecoderLog;
-#define LOG(type, msg) PR_LOG(gMediaDecoderLog, type, msg)
+extern LazyLogModule gMediaDecoderLog;
+#define LOG(type, msg) MOZ_LOG(gMediaDecoderLog, type, msg)
 #ifdef SEEK_LOGGING
-#define SEEK_LOG(type, msg) PR_LOG(gMediaDecoderLog, type, msg)
+#define SEEK_LOG(type, msg) MOZ_LOG(gMediaDecoderLog, type, msg)
 #else
-#define SEEK_LOG(type, msg)
-#endif
-#else
-#define LOG(type, msg)
 #define SEEK_LOG(type, msg)
 #endif
 
@@ -107,10 +103,11 @@ namespace {
     *aBuffer += sizeof(uint8_t);
     return result;
   }
-}
+} // namespace
 
 WaveReader::WaveReader(AbstractMediaDecoder* aDecoder)
   : MediaDecoderReader(aDecoder)
+  , mResource(aDecoder->GetResource())
 {
   MOZ_COUNT_CTOR(WaveReader);
 }
@@ -120,15 +117,10 @@ WaveReader::~WaveReader()
   MOZ_COUNT_DTOR(WaveReader);
 }
 
-nsresult WaveReader::Init(MediaDecoderReader* aCloneDonor)
-{
-  return NS_OK;
-}
-
 nsresult WaveReader::ReadMetadata(MediaInfo* aInfo,
                                   MetadataTags** aTags)
 {
-  NS_ASSERTION(mDecoder->OnDecodeThread(), "Should be on decode thread.");
+  MOZ_ASSERT(OnTaskQueue());
 
   bool loaded = LoadRIFFChunk();
   if (!loaded) {
@@ -142,27 +134,16 @@ nsresult WaveReader::ReadMetadata(MediaInfo* aInfo,
     return NS_ERROR_FAILURE;
   }
 
-  mInfo.mAudio.mHasAudio = true;
   mInfo.mAudio.mRate = mSampleRate;
   mInfo.mAudio.mChannels = mChannels;
+  mInfo.mMetadataDuration.emplace(TimeUnit::FromSeconds(BytesToTime(GetDataLength())));
 
   *aInfo = mInfo;
 
   *aTags = tags.forget();
 
-  ReentrantMonitorAutoEnter mon(mDecoder->GetReentrantMonitor());
-
-  mDecoder->SetMediaDuration(
-    static_cast<int64_t>(BytesToTime(GetDataLength()) * USECS_PER_S));
 
   return NS_OK;
-}
-
-bool
-WaveReader::IsMediaSeekable()
-{
-  // not used
-  return true;
 }
 
 template <typename T> T UnsignedByteToAudioSample(uint8_t aValue);
@@ -192,7 +173,7 @@ SignedShortToAudioSample<int16_t>(int16_t aValue)
 
 bool WaveReader::DecodeAudioData()
 {
-  NS_ASSERTION(mDecoder->OnDecodeThread(), "Should be on decode thread.");
+  MOZ_ASSERT(OnTaskQueue());
 
   int64_t pos = GetPosition() - mWavePCMOffset;
   int64_t len = GetDataLength();
@@ -207,13 +188,13 @@ bool WaveReader::DecodeAudioData()
                 sizeof(AudioDataValue) / MAX_CHANNELS,
                 "bufferSize calculation could overflow.");
   const size_t bufferSize = static_cast<size_t>(frames * mChannels);
-  nsAutoArrayPtr<AudioDataValue> sampleBuffer(new AudioDataValue[bufferSize]);
+  auto sampleBuffer = MakeUnique<AudioDataValue[]>(bufferSize);
 
   static_assert(uint64_t(BLOCK_SIZE) < UINT_MAX / sizeof(char),
                 "BLOCK_SIZE too large for enumerator.");
-  nsAutoArrayPtr<char> dataBuffer(new char[static_cast<size_t>(readSize)]);
+  auto dataBuffer = MakeUnique<char[]>(static_cast<size_t>(readSize));
 
-  if (!ReadAll(dataBuffer, readSize)) {
+  if (!ReadAll(dataBuffer.get(), readSize)) {
     return false;
   }
 
@@ -242,7 +223,7 @@ bool WaveReader::DecodeAudioData()
                                  static_cast<int64_t>(posTime * USECS_PER_S),
                                  static_cast<int64_t>(readSizeTime * USECS_PER_S),
                                  static_cast<int32_t>(frames),
-                                 sampleBuffer.forget(),
+                                 Move(sampleBuffer),
                                  mChannels,
                                  mSampleRate));
 
@@ -252,16 +233,16 @@ bool WaveReader::DecodeAudioData()
 bool WaveReader::DecodeVideoFrame(bool &aKeyframeSkip,
                                       int64_t aTimeThreshold)
 {
-  NS_ASSERTION(mDecoder->OnDecodeThread(), "Should be on decode thread.");
+  MOZ_ASSERT(OnTaskQueue());
 
   return false;
 }
 
-nsRefPtr<MediaDecoderReader::SeekPromise>
+RefPtr<MediaDecoderReader::SeekPromise>
 WaveReader::Seek(int64_t aTarget, int64_t aEndTime)
 {
-  NS_ASSERTION(mDecoder->OnDecodeThread(), "Should be on decode thread.");
-  LOG(PR_LOG_DEBUG, ("%p About to seek to %lld", mDecoder, aTarget));
+  MOZ_ASSERT(OnTaskQueue());
+  LOG(LogLevel::Debug, ("%p About to seek to %lld", mDecoder, aTarget));
 
   if (NS_FAILED(ResetDecode())) {
     return SeekPromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
@@ -273,7 +254,7 @@ WaveReader::Seek(int64_t aTarget, int64_t aEndTime)
   int64_t position = RoundDownToFrame(static_cast<int64_t>(TimeToBytes(seekTime)));
   NS_ASSERTION(INT64_MAX - mWavePCMOffset > position, "Integer overflow during wave seek");
   position += mWavePCMOffset;
-  nsresult res = mDecoder->GetResource()->Seek(nsISeekableStream::NS_SEEK_SET, position);
+  nsresult res = mResource.Seek(nsISeekableStream::NS_SEEK_SET, position);
   if (NS_FAILED(res)) {
     return SeekPromise::CreateAndReject(res, __func__);
   } else {
@@ -281,15 +262,13 @@ WaveReader::Seek(int64_t aTarget, int64_t aEndTime)
   }
 }
 
-static double RoundToUsecs(double aSeconds) {
-  return floor(aSeconds * USECS_PER_S) / USECS_PER_S;
-}
-
-nsresult WaveReader::GetBuffered(dom::TimeRanges* aBuffered)
+media::TimeIntervals WaveReader::GetBuffered()
 {
+  MOZ_ASSERT(OnTaskQueue());
   if (!mInfo.HasAudio()) {
-    return NS_OK;
+    return media::TimeIntervals();
   }
+  media::TimeIntervals buffered;
   AutoPinned<MediaResource> resource(mDecoder->GetResource());
   int64_t startOffset = resource->GetNextCachedData(mWavePCMOffset);
   while (startOffset >= 0) {
@@ -301,44 +280,45 @@ nsresult WaveReader::GetBuffered(dom::TimeRanges* aBuffered)
     // We need to round the buffered ranges' times to microseconds so that they
     // have the same precision as the currentTime and duration attribute on
     // the media element.
-    aBuffered->Add(RoundToUsecs(BytesToTime(startOffset - mWavePCMOffset)),
-                   RoundToUsecs(BytesToTime(endOffset - mWavePCMOffset)));
+    buffered += media::TimeInterval(
+      media::TimeUnit::FromSeconds(BytesToTime(startOffset - mWavePCMOffset)),
+      media::TimeUnit::FromSeconds(BytesToTime(endOffset - mWavePCMOffset)));
     startOffset = resource->GetNextCachedData(endOffset);
   }
-  return NS_OK;
+  return buffered;
 }
 
 bool
 WaveReader::ReadAll(char* aBuf, int64_t aSize, int64_t* aBytesRead)
 {
-  uint32_t got = 0;
+  MOZ_ASSERT(OnTaskQueue());
+
   if (aBytesRead) {
     *aBytesRead = 0;
   }
-  do {
-    uint32_t read = 0;
-    if (NS_FAILED(mDecoder->GetResource()->Read(aBuf + got, uint32_t(aSize - got), &read))) {
-      NS_WARNING("Resource read failed");
-      return false;
-    }
-    if (read == 0) {
-      return false;
-    }
-    got += read;
-    if (aBytesRead) {
-      *aBytesRead = got;
-    }
-  } while (got != aSize);
+  uint32_t read = 0;
+  if (NS_FAILED(mResource.Read(aBuf, uint32_t(aSize), &read))) {
+    NS_WARNING("Resource read failed");
+    return false;
+  }
+  if (!read) {
+    return false;
+  }
+  if (aBytesRead) {
+    *aBytesRead = read;
+  }
   return true;
 }
 
 bool
 WaveReader::LoadRIFFChunk()
 {
+  MOZ_ASSERT(OnTaskQueue());
+
   char riffHeader[RIFF_INITIAL_SIZE];
   const char* p = riffHeader;
 
-  MOZ_ASSERT(mDecoder->GetResource()->Tell() == 0,
+  MOZ_ASSERT(mResource.Tell() == 0,
              "LoadRIFFChunk called when resource in invalid state");
 
   if (!ReadAll(riffHeader, sizeof(riffHeader))) {
@@ -366,12 +346,14 @@ WaveReader::LoadRIFFChunk()
 bool
 WaveReader::LoadFormatChunk(uint32_t aChunkSize)
 {
+  MOZ_ASSERT(OnTaskQueue());
+
   uint32_t rate, channels, frameSize, sampleFormat;
   char waveFormat[WAVE_FORMAT_CHUNK_SIZE];
   const char* p = waveFormat;
 
   // RIFF chunks are always word (two byte) aligned.
-  MOZ_ASSERT(mDecoder->GetResource()->Tell() % 2 == 0,
+  MOZ_ASSERT(mResource.Tell() % 2 == 0,
              "LoadFormatChunk called with unaligned resource");
 
   if (!ReadAll(waveFormat, sizeof(waveFormat))) {
@@ -425,7 +407,7 @@ WaveReader::LoadFormatChunk(uint32_t aChunkSize)
     if (extra > 0) {
       static_assert(UINT16_MAX + (UINT16_MAX % 2) < UINT_MAX / sizeof(char),
                     "chunkExtension array too large for iterator.");
-      nsAutoArrayPtr<char> chunkExtension(new char[extra]);
+      auto chunkExtension = MakeUnique<char[]>(extra);
       if (!ReadAll(chunkExtension.get(), extra)) {
         return false;
       }
@@ -433,7 +415,7 @@ WaveReader::LoadFormatChunk(uint32_t aChunkSize)
   }
 
   // RIFF chunks are always word (two byte) aligned.
-  MOZ_ASSERT(mDecoder->GetResource()->Tell() % 2 == 0,
+  MOZ_ASSERT(mResource.Tell() % 2 == 0,
              "LoadFormatChunk left resource unaligned");
 
   // Make sure metadata is fairly sane.  The rate check is fairly arbitrary,
@@ -451,7 +433,6 @@ WaveReader::LoadFormatChunk(uint32_t aChunkSize)
     return false;
   }
 
-  ReentrantMonitorAutoEnter monitor(mDecoder->GetReentrantMonitor());
   mSampleRate = rate;
   mChannels = channels;
   mFrameSize = frameSize;
@@ -466,17 +447,18 @@ WaveReader::LoadFormatChunk(uint32_t aChunkSize)
 bool
 WaveReader::FindDataOffset(uint32_t aChunkSize)
 {
+  MOZ_ASSERT(OnTaskQueue());
+
   // RIFF chunks are always word (two byte) aligned.
-  MOZ_ASSERT(mDecoder->GetResource()->Tell() % 2 == 0,
+  MOZ_ASSERT(mResource.Tell() % 2 == 0,
              "FindDataOffset called with unaligned resource");
 
-  int64_t offset = mDecoder->GetResource()->Tell();
+  int64_t offset = mResource.Tell();
   if (offset <= 0 || offset > UINT32_MAX) {
     NS_WARNING("PCM data offset out of range");
     return false;
   }
 
-  ReentrantMonitorAutoEnter monitor(mDecoder->GetReentrantMonitor());
   mWaveLength = aChunkSize;
   mWavePCMOffset = uint32_t(offset);
   return true;
@@ -485,6 +467,7 @@ WaveReader::FindDataOffset(uint32_t aChunkSize)
 double
 WaveReader::BytesToTime(int64_t aBytes) const
 {
+  MOZ_ASSERT(OnTaskQueue());
   MOZ_ASSERT(aBytes >= 0, "Must be >= 0");
   return float(aBytes) / mSampleRate / mFrameSize;
 }
@@ -492,6 +475,7 @@ WaveReader::BytesToTime(int64_t aBytes) const
 int64_t
 WaveReader::TimeToBytes(double aTime) const
 {
+  MOZ_ASSERT(OnTaskQueue());
   MOZ_ASSERT(aTime >= 0.0f, "Must be >= 0");
   return RoundDownToFrame(int64_t(aTime * mSampleRate * mFrameSize));
 }
@@ -499,6 +483,7 @@ WaveReader::TimeToBytes(double aTime) const
 int64_t
 WaveReader::RoundDownToFrame(int64_t aBytes) const
 {
+  MOZ_ASSERT(OnTaskQueue());
   MOZ_ASSERT(aBytes >= 0, "Must be >= 0");
   return aBytes - (aBytes % mFrameSize);
 }
@@ -506,6 +491,8 @@ WaveReader::RoundDownToFrame(int64_t aBytes) const
 int64_t
 WaveReader::GetDataLength()
 {
+  MOZ_ASSERT(OnTaskQueue());
+
   int64_t length = mWaveLength;
   // If the decoder has a valid content length, and it's shorter than the
   // expected length of the PCM data, calculate the playback duration from
@@ -521,38 +508,17 @@ WaveReader::GetDataLength()
 int64_t
 WaveReader::GetPosition()
 {
-  return mDecoder->GetResource()->Tell();
-}
-
-bool
-WaveReader::GetNextChunk(uint32_t* aChunk, uint32_t* aChunkSize)
-{
-  MOZ_ASSERT(aChunk, "Must have aChunk");
-  MOZ_ASSERT(aChunkSize, "Must have aChunkSize");
-  MOZ_ASSERT(mDecoder->GetResource()->Tell() % 2 == 0,
-             "GetNextChunk called with unaligned resource");
-
-  char chunkHeader[CHUNK_HEADER_SIZE];
-  const char* p = chunkHeader;
-
-  if (!ReadAll(chunkHeader, sizeof(chunkHeader))) {
-    return false;
-  }
-
-  static_assert(sizeof(uint32_t) * 2 <= CHUNK_HEADER_SIZE,
-                "Reads would overflow chunkHeader buffer.");
-  *aChunk = ReadUint32BE(&p);
-  *aChunkSize = ReadUint32LE(&p);
-
-  return true;
+  return mResource.Tell();
 }
 
 bool
 WaveReader::LoadListChunk(uint32_t aChunkSize,
                           nsAutoPtr<dom::HTMLMediaElement::MetadataTags> &aTags)
 {
+  MOZ_ASSERT(OnTaskQueue());
+
   // List chunks are always word (two byte) aligned.
-  MOZ_ASSERT(mDecoder->GetResource()->Tell() % 2 == 0,
+  MOZ_ASSERT(mResource.Tell() % 2 == 0,
              "LoadListChunk called with unaligned resource");
 
   static const unsigned int MAX_CHUNK_SIZE = 1 << 16;
@@ -563,7 +529,7 @@ WaveReader::LoadListChunk(uint32_t aChunkSize,
     return false;
   }
 
-  nsAutoArrayPtr<char> chunk(new char[aChunkSize]);
+  auto chunk = MakeUnique<char[]>(aChunkSize);
   if (!ReadAll(chunk.get(), aChunkSize)) {
     return false;
   }
@@ -627,8 +593,10 @@ WaveReader::LoadListChunk(uint32_t aChunkSize,
 bool
 WaveReader::LoadAllChunks(nsAutoPtr<dom::HTMLMediaElement::MetadataTags> &aTags)
 {
+  MOZ_ASSERT(OnTaskQueue());
+
   // Chunks are always word (two byte) aligned.
-  MOZ_ASSERT(mDecoder->GetResource()->Tell() % 2 == 0,
+  MOZ_ASSERT(mResource.Tell() % 2 == 0,
              "LoadAllChunks called with unaligned resource");
 
   bool loadFormatChunk = false;
@@ -685,7 +653,7 @@ WaveReader::LoadAllChunks(nsAutoPtr<dom::HTMLMediaElement::MetadataTags> &aTags)
     static const int64_t MAX_CHUNK_SIZE = 1 << 16;
     static_assert(uint64_t(MAX_CHUNK_SIZE) < UINT_MAX / sizeof(char),
                   "MAX_CHUNK_SIZE too large for enumerator.");
-    nsAutoArrayPtr<char> chunk(new char[MAX_CHUNK_SIZE]);
+    auto chunk = MakeUnique<char[]>(MAX_CHUNK_SIZE);
     while (forward.value() > 0) {
       int64_t size = std::min(forward.value(), MAX_CHUNK_SIZE);
       if (!ReadAll(chunk.get(), size)) {

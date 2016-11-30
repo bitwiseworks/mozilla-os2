@@ -10,6 +10,7 @@ interface WindowProxy;
 interface nsISupports;
 interface URI;
 interface nsIDocShell;
+interface nsILoadGroup;
 
 enum VisibilityState { "hidden", "visible" };
 
@@ -26,6 +27,10 @@ interface Document : Node {
   readonly attribute DOMString compatMode;
   [Pure]
   readonly attribute DOMString characterSet;
+  [Pure,BinaryName="characterSet"]
+  readonly attribute DOMString charset; // legacy alias of .characterSet
+  [Pure,BinaryName="characterSet"]
+  readonly attribute DOMString inputEncoding; // legacy alias of .characterSet
   [Pure]
   readonly attribute DOMString contentType;
 
@@ -85,8 +90,6 @@ interface Document : Node {
   Attr createAttribute(DOMString name);
   [NewObject, Throws]
   Attr createAttributeNS(DOMString? namespace, DOMString name);
-  [Pure]
-  readonly attribute DOMString? inputEncoding;
 };
 
 // http://www.whatwg.org/specs/web-apps/current-work/#the-document-object
@@ -150,6 +153,10 @@ partial interface Document {
                 attribute EventHandler onpaste;
                 attribute EventHandler onbeforescriptexecute;
                 attribute EventHandler onafterscriptexecute;
+
+                [Pref="dom.select_events.enabled"]
+                attribute EventHandler onselectionchange;
+
   /**
    * True if this document is synthetic : stand alone image, video, audio file,
    * etc.
@@ -292,10 +299,10 @@ partial interface Document {
   //(Not implemented)NodeList  findAll(DOMString selectors, optional (Element or sequence<Node>)? refNodes);
 };
 
-// http://dev.w3.org/fxtf/web-animations/#extensions-to-the-document-interface
+// http://w3c.github.io/web-animations/#extensions-to-the-document-interface
 partial interface Document {
   [Func="nsDocument::IsWebAnimationsEnabled"]
-  readonly attribute AnimationTimeline timeline;
+  readonly attribute DocumentTimeline timeline;
 };
 
 //  Mozilla extensions of various sorts
@@ -354,6 +361,8 @@ partial interface Document {
   [ChromeOnly] readonly attribute nsIDocShell? docShell;
 
   [ChromeOnly] readonly attribute DOMString contentLanguage;
+
+  [ChromeOnly] readonly attribute nsILoadGroup? documentLoadGroup;
 };
 
 // Extension to give chrome JS the ability to determine when a document was
@@ -384,6 +393,12 @@ partial interface Document {
    */
   [ChromeOnly, Throws]
   void removeAnonymousContent(AnonymousContent aContent);
+};
+
+// Extension to give chrome JS the ability to determine whether
+// the user has interacted with the document or not.
+partial interface Document {
+  [ChromeOnly] readonly attribute boolean userHasInteracted;
 };
 
 Document implements XPathEvaluator;

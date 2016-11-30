@@ -15,7 +15,7 @@
 #include "mozilla/Attributes.h"
 
 class nsLayoutHistoryState final : public nsILayoutHistoryState,
-                                       public nsSupportsWeakReference
+                                   public nsSupportsWeakReference
 {
 public:
   nsLayoutHistoryState()
@@ -49,7 +49,7 @@ private:
 already_AddRefed<nsILayoutHistoryState>
 NS_NewLayoutHistoryState()
 {
-  nsRefPtr<nsLayoutHistoryState> state = new nsLayoutHistoryState();
+  RefPtr<nsLayoutHistoryState> state = new nsLayoutHistoryState();
   return state.forget();
 }
 

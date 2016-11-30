@@ -6,13 +6,14 @@
 
 /* code for loading in @font-face defined font data */
 
-#include "prlog.h"
+#include "mozilla/Logging.h"
 
 #include "nsFontFaceLoader.h"
 
 #include "nsError.h"
 #include "nsContentUtils.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/Telemetry.h"
 #include "FontFaceSet.h"
 #include "nsPresContext.h"
 #include "nsIPrincipal.h"
@@ -24,20 +25,22 @@
 #include "mozilla/gfx/2D.h"
 
 using namespace mozilla;
+using namespace mozilla::dom;
 
-#define LOG(args) PR_LOG(gfxUserFontSet::GetUserFontsLog(), PR_LOG_DEBUG, args)
-#define LOG_ENABLED() PR_LOG_TEST(gfxUserFontSet::GetUserFontsLog(), \
-                                  PR_LOG_DEBUG)
+#define LOG(args) MOZ_LOG(gfxUserFontSet::GetUserFontsLog(), mozilla::LogLevel::Debug, args)
+#define LOG_ENABLED() MOZ_LOG_TEST(gfxUserFontSet::GetUserFontsLog(), \
+                                  LogLevel::Debug)
 
 nsFontFaceLoader::nsFontFaceLoader(gfxUserFontEntry* aUserFontEntry,
                                    nsIURI* aFontURI,
-                                   mozilla::dom::FontFaceSet* aFontFaceSet,
+                                   FontFaceSet* aFontFaceSet,
                                    nsIChannel* aChannel)
   : mUserFontEntry(aUserFontEntry),
     mFontURI(aFontURI),
     mFontFaceSet(aFontFaceSet),
     mChannel(aChannel)
 {
+  mStartTime = TimeStamp::Now();
 }
 
 nsFontFaceLoader::~nsFontFaceLoader()
@@ -73,7 +76,7 @@ nsFontFaceLoader::StartedLoading(nsIStreamLoader* aStreamLoader)
   mStreamLoader = aStreamLoader;
 }
 
-void
+/* static */ void
 nsFontFaceLoader::LoadTimerCallback(nsITimer* aTimer, void* aClosure)
 {
   nsFontFaceLoader* loader = static_cast<nsFontFaceLoader*>(aClosure);
@@ -117,12 +120,16 @@ nsFontFaceLoader::LoadTimerCallback(nsITimer* aTimer, void* aClosure)
   // font will be used in the meantime, and tell the context to refresh.
   if (updateUserFontSet) {
     ufe->mFontDataLoadingState = gfxUserFontEntry::LOADING_SLOWLY;
-    nsPresContext* ctx = loader->mFontFaceSet->GetPresContext();
-    NS_ASSERTION(ctx, "userfontset doesn't have a presContext?");
-    if (ctx) {
-      loader->mFontFaceSet->IncrementGeneration();
-      ctx->UserFontSetUpdated();
-      LOG(("userfonts (%p) timeout reflow\n", loader));
+    nsTArray<gfxUserFontSet*> fontSets;
+    ufe->GetUserFontSets(fontSets);
+    for (gfxUserFontSet* fontSet : fontSets) {
+      nsPresContext* ctx = FontFaceSet::GetPresContextFor(fontSet);
+      if (ctx) {
+        fontSet->IncrementGeneration();
+        ctx->UserFontSetUpdated(ufe);
+        LOG(("userfonts (%p) timeout reflow for pres context %p\n",
+             loader, ctx));
+      }
     }
   }
 }
@@ -143,23 +150,22 @@ nsFontFaceLoader::OnStreamComplete(nsIStreamLoader* aLoader,
 
   mFontFaceSet->RemoveLoader(this);
 
-#ifdef PR_LOGGING
+  TimeStamp doneTime = TimeStamp::Now();
+  TimeDuration downloadTime = doneTime - mStartTime;
+  uint32_t downloadTimeMS = uint32_t(downloadTime.ToMilliseconds());
+  Telemetry::Accumulate(Telemetry::WEBFONT_DOWNLOAD_TIME, downloadTimeMS);
+
   if (LOG_ENABLED()) {
     nsAutoCString fontURI;
     mFontURI->GetSpec(fontURI);
     if (NS_SUCCEEDED(aStatus)) {
-      LOG(("userfonts (%p) download completed - font uri: (%s)\n",
-           this, fontURI.get()));
+      LOG(("userfonts (%p) download completed - font uri: (%s) time: %d ms\n",
+           this, fontURI.get(), downloadTimeMS));
     } else {
       LOG(("userfonts (%p) download failed - font uri: (%s) error: %8.8x\n",
            this, fontURI.get(), aStatus));
     }
   }
-#endif
-
-  nsPresContext* ctx = mFontFaceSet->GetPresContext();
-  NS_ASSERTION(ctx && !ctx->PresShell()->IsDestroying(),
-               "We should have been canceled already");
 
   if (NS_SUCCEEDED(aStatus)) {
     // for HTTP requests, check whether the request _actually_ succeeded;
@@ -189,12 +195,21 @@ nsFontFaceLoader::OnStreamComplete(nsIStreamLoader* aLoader,
   bool fontUpdate =
     mUserFontEntry->FontDataDownloadComplete(aString, aStringLen, aStatus);
 
+  mFontFaceSet->GetUserFontSet()->RecordFontLoadDone(aStringLen, doneTime);
+
   // when new font loaded, need to reflow
   if (fontUpdate) {
-    // Update layout for the presence of the new font.  Since this is
-    // asynchronous, reflows will coalesce.
-    ctx->UserFontSetUpdated();
-    LOG(("userfonts (%p) reflow\n", this));
+    nsTArray<gfxUserFontSet*> fontSets;
+    mUserFontEntry->GetUserFontSets(fontSets);
+    for (gfxUserFontSet* fontSet : fontSets) {
+      nsPresContext* ctx = FontFaceSet::GetPresContextFor(fontSet);
+      if (ctx) {
+        // Update layout for the presence of the new font.  Since this is
+        // asynchronous, reflows will coalesce.
+        ctx->UserFontSetUpdated(mUserFontEntry);
+        LOG(("userfonts (%p) reflow for pres context %p\n", this, ctx));
+      }
+    }
   }
 
   // done with font set
@@ -220,7 +235,7 @@ nsFontFaceLoader::Cancel()
   mChannel->Cancel(NS_BINDING_ABORTED);
 }
 
-nsresult
+/* static */ nsresult
 nsFontFaceLoader::CheckLoadAllowed(nsIPrincipal* aSourcePrincipal,
                                    nsIURI* aTargetURI,
                                    nsISupports* aContext)

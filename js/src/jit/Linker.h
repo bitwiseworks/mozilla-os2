@@ -24,7 +24,7 @@ class Linker
     MacroAssembler& masm;
 
     JitCode* fail(JSContext* cx) {
-        js_ReportOutOfMemory(cx);
+        ReportOutOfMemory(cx);
         return nullptr;
     }
 
@@ -68,10 +68,11 @@ class Linker
             return nullptr;
         if (masm.oom())
             return fail(cx);
+        AutoWritableJitCode awjc(result, bytesNeeded);
         code->copyFrom(masm);
         masm.link(code);
         if (masm.embedsNurseryPointers())
-            cx->runtime()->gc.storeBuffer.putWholeCellFromMainThread(code);
+            cx->runtime()->gc.storeBuffer.putWholeCell(code);
         return code;
     }
 };

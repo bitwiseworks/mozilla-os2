@@ -8,15 +8,13 @@
 
 #include <stdint.h>                     // for uint64_t
 #include "Layers.h"                     // for Layer, etc
-#include "gfxColor.h"                   // for gfxRGBA
-#include "gfxRect.h"                    // for gfxRect
+#include "mozilla/gfx/Rect.h"           // for gfxRect
+#include "mozilla/gfx/Point.h"          // for IntPoint
 #include "mozilla/mozalloc.h"           // for operator delete
 #include "nsAutoPtr.h"                  // for nsAutoPtr
 #include "nsCOMPtr.h"                   // for already_AddRefed
 #include "nsDebug.h"                    // for NS_ASSERTION
 #include "nsPoint.h"                    // for nsIntPoint
-#include "nsRect.h"                     // for nsIntRect
-#include "nsSize.h"                     // for nsIntSize
 #include "nscore.h"                     // for nsACString
 
 class gfxContext;
@@ -28,7 +26,7 @@ class ReadbackProcessor;
 
 namespace layerscope {
 class LayersPacket;
-}
+} // namespace layerscope
 
 /**
  * A ReadbackSink receives a stream of updates to a rectangle of pixels.
@@ -61,14 +59,14 @@ public:
    * first BeginUpdate after a SetUnknown will have the complete background.
    */
   virtual already_AddRefed<gfxContext>
-      BeginUpdate(const nsIntRect& aRect, uint64_t aSequenceNumber) = 0;
+      BeginUpdate(const gfx::IntRect& aRect, uint64_t aSequenceNumber) = 0;
   /**
    * EndUpdate must be called immediately after BeginUpdate, without returning
    * to the event loop.
    * @param aContext the context returned by BeginUpdate
    * Implicitly Restore()s the state of aContext.
    */
-  virtual void EndUpdate(gfxContext* aContext, const nsIntRect& aRect) = 0;
+  virtual void EndUpdate(gfxContext* aContext, const gfx::IntRect& aRect) = 0;
 };
 
 /**
@@ -122,17 +120,17 @@ public:
    * has its top-left at 0,0 and has size aSize.
    * Can only be called while the sink is null!
    */
-  void SetSize(const nsIntSize& aSize)
+  void SetSize(const gfx::IntSize& aSize)
   {
     NS_ASSERTION(!mSink, "Should have no sink while changing size!");
     mSize = aSize;
   }
-  const nsIntSize& GetSize() { return mSize; }
-  nsIntRect GetRect() { return nsIntRect(nsIntPoint(0, 0), mSize); }
+  const gfx::IntSize& GetSize() { return mSize; }
+  gfx::IntRect GetRect() { return gfx::IntRect(gfx::IntPoint(0, 0), mSize); }
 
   bool IsBackgroundKnown()
   {
-    return mBackgroundLayer || mBackgroundColor.a == 1.0;
+    return mBackgroundLayer || mBackgroundColor.a == 1.f;
   }
 
   void NotifyRemoved() {
@@ -158,7 +156,7 @@ public:
         mSink->SetUnknown(AllocateSequenceNumber());
       }
       mBackgroundLayer = nullptr;
-      mBackgroundColor = gfxRGBA(0,0,0,0);
+      mBackgroundColor = gfx::Color();
     }
   }
 
@@ -171,7 +169,7 @@ protected:
     mSize(0,0),
     mBackgroundLayer(nullptr),
     mBackgroundLayerOffset(0, 0),
-    mBackgroundColor(gfxRGBA(0,0,0,0))
+    mBackgroundColor(gfx::Color())
   {}
 
   virtual void PrintInfo(std::stringstream& aStream, const char* aPrefix) override;
@@ -180,7 +178,7 @@ protected:
 
   uint64_t mSequenceCounter;
   nsAutoPtr<ReadbackSink> mSink;
-  nsIntSize mSize;
+  gfx::IntSize mSize;
 
   // This can refer to any (earlier) sibling PaintedLayer. That PaintedLayer
   // must have mUsedForReadback set on it. If the PaintedLayer is removed
@@ -197,9 +195,10 @@ protected:
   // When mBackgroundColor is opaque, this is the color of the ColorLayer
   // that contained the contents we reported to mSink, which covered the
   // entire readback area.
-  gfxRGBA      mBackgroundColor;
+  gfx::Color   mBackgroundColor;
 };
 
-}
-}
+} // namespace layers
+} // namespace mozilla
+
 #endif /* GFX_READBACKLAYER_H */

@@ -122,7 +122,7 @@ GetCurrentScreenConfiguration(ScreenConfiguration* aScreenConfiguration)
 }
 
 bool
-LockScreenOrientation(const dom::ScreenOrientation& aOrientation)
+LockScreenOrientation(const dom::ScreenOrientationInternal& aOrientation)
 {
   bool allowed;
   Hal()->SendLockScreenOrientation(aOrientation, &allowed);
@@ -271,13 +271,6 @@ DisableSensorNotifications(SensorType aSensor) {
   Hal()->SendDisableSensorNotifications(aSensor);
 }
 
-//TODO: bug 852944 - IPC implementations of these
-void StartMonitoringGamepadStatus()
-{}
-
-void StopMonitoringGamepadStatus()
-{}
-
 void
 EnableWakeLockNotifications()
 {
@@ -329,8 +322,8 @@ GetCurrentSwitchState(SwitchDevice aDevice)
 void
 NotifySwitchStateFromInputDevice(SwitchDevice aDevice, SwitchState aState)
 {
-  unused << aDevice;
-  unused << aState;
+  Unused << aDevice;
+  Unused << aState;
   NS_RUNTIMEABORT("Only the main process may notify switch state change.");
 }
 
@@ -355,16 +348,20 @@ SetAlarm(int32_t aSeconds, int32_t aNanoseconds)
 }
 
 void
-SetProcessPriority(int aPid,
-                   ProcessPriority aPriority,
-                   ProcessCPUPriority aCPUPriority,
-                   uint32_t aBackgroundLRU)
+SetProcessPriority(int aPid, ProcessPriority aPriority, uint32_t aLRU)
 {
   NS_RUNTIMEABORT("Only the main process may set processes' priorities.");
 }
 
 void
 SetCurrentThreadPriority(ThreadPriority aThreadPriority)
+{
+  NS_RUNTIMEABORT("Setting current thread priority cannot be called from sandboxed contexts.");
+}
+
+void
+SetThreadPriority(PlatformThreadId aThreadId,
+                  ThreadPriority aThreadPriority)
 {
   NS_RUNTIMEABORT("Setting thread priority cannot be called from sandboxed contexts.");
 }
@@ -548,7 +545,7 @@ public:
   }
 
   void Notify(const BatteryInformation& aBatteryInfo) override {
-    unused << SendNotifyBatteryChange(aBatteryInfo);
+    Unused << SendNotifyBatteryChange(aBatteryInfo);
   }
 
   virtual bool
@@ -571,7 +568,7 @@ public:
   }
 
   void Notify(const NetworkInformation& aNetworkInfo) override {
-    unused << SendNotifyNetworkChange(aNetworkInfo);
+    Unused << SendNotifyNetworkChange(aNetworkInfo);
   }
 
   virtual bool
@@ -595,7 +592,7 @@ public:
   }
 
   virtual bool
-  RecvLockScreenOrientation(const dom::ScreenOrientation& aOrientation, bool* aAllowed) override
+  RecvLockScreenOrientation(const dom::ScreenOrientationInternal& aOrientation, bool* aAllowed) override
   {
     // FIXME/bug 777980: unprivileged content may only lock
     // orientation while fullscreen.  We should check whether the
@@ -613,7 +610,7 @@ public:
   }
 
   void Notify(const ScreenConfiguration& aScreenConfiguration) override {
-    unused << SendNotifyScreenConfigurationChange(aScreenConfiguration);
+    Unused << SendNotifyScreenConfigurationChange(aScreenConfiguration);
   }
 
   virtual bool
@@ -779,7 +776,7 @@ public:
   }
   
   void Notify(const SensorData& aSensorData) override {
-    unused << SendNotifySensorChange(aSensorData);
+    Unused << SendNotifySensorChange(aSensorData);
   }
 
   virtual bool
@@ -819,7 +816,7 @@ public:
   
   void Notify(const WakeLockInformation& aWakeLockInfo) override
   {
-    unused << SendNotifyWakeLockChange(aWakeLockInfo);
+    Unused << SendNotifyWakeLockChange(aWakeLockInfo);
   }
 
   virtual bool
@@ -839,7 +836,7 @@ public:
 
   void Notify(const SwitchEvent& aSwitchEvent) override
   {
-    unused << SendNotifySwitchChange(aSwitchEvent);
+    Unused << SendNotifySwitchChange(aSwitchEvent);
   }
 
   virtual bool
@@ -852,12 +849,12 @@ public:
 
   void Notify(const int64_t& aClockDeltaMS) override
   {
-    unused << SendNotifySystemClockChange(aClockDeltaMS);
+    Unused << SendNotifySystemClockChange(aClockDeltaMS);
   }
 
   void Notify(const SystemTimezoneChangeInformation& aSystemTimezoneChangeInfo) override
   {
-    unused << SendNotifySystemTimezoneChange(aSystemTimezoneChangeInfo);
+    Unused << SendNotifySystemTimezoneChange(aSystemTimezoneChangeInfo);
   }
 
   virtual bool

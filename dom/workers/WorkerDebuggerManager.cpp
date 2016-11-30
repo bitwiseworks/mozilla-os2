@@ -1,4 +1,5 @@
-/* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -13,8 +14,8 @@ USING_WORKERS_NAMESPACE
 
 class RegisterDebuggerRunnable final : public nsRunnable
 {
-  nsRefPtr<WorkerDebuggerManager> mManager;
-  nsRefPtr<WorkerDebugger> mDebugger;
+  RefPtr<WorkerDebuggerManager> mManager;
+  RefPtr<WorkerDebugger> mDebugger;
   bool mHasListeners;
 
 public:
@@ -23,8 +24,6 @@ public:
                            bool aHasListeners)
   : mManager(aManager), mDebugger(aDebugger), mHasListeners(aHasListeners)
   { }
-
-  NS_DECL_THREADSAFE_ISUPPORTS
 
 private:
   ~RegisterDebuggerRunnable()
@@ -38,8 +37,6 @@ private:
     return NS_OK;
   }
 };
-
-NS_IMPL_ISUPPORTS(RegisterDebuggerRunnable, nsIRunnable);
 
 BEGIN_WORKERS_NAMESPACE
 
@@ -104,7 +101,7 @@ WorkerDebuggerManager::GetWorkerDebuggerEnumerator(
 
   MutexAutoLock lock(mMutex);
 
-  nsRefPtr<WorkerDebuggerEnumerator> enumerator =
+  RefPtr<WorkerDebuggerEnumerator> enumerator =
     new WorkerDebuggerEnumerator(mDebuggers);
   enumerator.forget(aResult);
   return NS_OK;
@@ -139,6 +136,16 @@ WorkerDebuggerManager::RemoveListener(
 
   mListeners.RemoveElement(aListener);
   return NS_OK;
+}
+
+void
+WorkerDebuggerManager::ClearListeners()
+{
+  AssertIsOnMainThread();
+
+  MutexAutoLock lock(mMutex);
+
+  mListeners.Clear();
 }
 
 void
@@ -177,7 +184,7 @@ WorkerDebuggerManager::UnregisterDebugger(WorkerDebugger* aDebugger)
     UnregisterDebuggerOnMainThread(aDebugger);
   } else {
     nsCOMPtr<nsIRunnable> runnable =
-      NS_NewRunnableMethodWithArg<nsRefPtr<WorkerDebugger>>(this,
+      NS_NewRunnableMethodWithArg<RefPtr<WorkerDebugger>>(this,
         &WorkerDebuggerManager::UnregisterDebuggerOnMainThread, aDebugger);
     MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
       NS_DispatchToMainThread(runnable, NS_DISPATCH_NORMAL)));

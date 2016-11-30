@@ -40,9 +40,9 @@ SpeechSynthesisUtterance::SpeechSynthesisUtterance(nsPIDOMWindow* aOwnerWindow,
 SpeechSynthesisUtterance::~SpeechSynthesisUtterance() {}
 
 JSObject*
-SpeechSynthesisUtterance::WrapObject(JSContext* aCx)
+SpeechSynthesisUtterance::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SpeechSynthesisUtteranceBinding::Wrap(aCx, this);
+  return SpeechSynthesisUtteranceBinding::Wrap(aCx, this, aGivenProto);
 }
 
 nsISupports*
@@ -55,7 +55,7 @@ already_AddRefed<SpeechSynthesisUtterance>
 SpeechSynthesisUtterance::Constructor(GlobalObject& aGlobal,
                                       ErrorResult& aRv)
 {
-  return Constructor(aGlobal, NS_LITERAL_STRING(""), aRv);
+  return Constructor(aGlobal, EmptyString(), aRv);
 }
 
 already_AddRefed<SpeechSynthesisUtterance>
@@ -70,7 +70,7 @@ SpeechSynthesisUtterance::Constructor(GlobalObject& aGlobal,
   }
 
   MOZ_ASSERT(win->IsInnerWindow());
-  nsRefPtr<SpeechSynthesisUtterance> object =
+  RefPtr<SpeechSynthesisUtterance> object =
     new SpeechSynthesisUtterance(win, aText);
   return object.forget();
 }
@@ -148,6 +148,12 @@ SpeechSynthesisUtterance::SetPitch(float aPitch)
 }
 
 void
+SpeechSynthesisUtterance::GetChosenVoiceURI(nsString& aResult) const
+{
+  aResult = mChosenVoiceURI;
+}
+
+void
 SpeechSynthesisUtterance::DispatchSpeechSynthesisEvent(const nsAString& aEventType,
                                                        uint32_t aCharIndex,
                                                        float aElapsedTime,
@@ -156,11 +162,12 @@ SpeechSynthesisUtterance::DispatchSpeechSynthesisEvent(const nsAString& aEventTy
   SpeechSynthesisEventInit init;
   init.mBubbles = false;
   init.mCancelable = false;
+  init.mUtterance = this;
   init.mCharIndex = aCharIndex;
   init.mElapsedTime = aElapsedTime;
   init.mName = aName;
 
-  nsRefPtr<SpeechSynthesisEvent> event =
+  RefPtr<SpeechSynthesisEvent> event =
     SpeechSynthesisEvent::Constructor(this, aEventType, init);
   DispatchTrustedEvent(event);
 }

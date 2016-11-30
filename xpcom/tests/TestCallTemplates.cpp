@@ -34,7 +34,7 @@ class NS_NO_VTABLE nsITestService : public nsISupports {
 NS_DEFINE_STATIC_IID_ACCESSOR(nsITestService, NS_ITESTSERVICE_IID)
 
 class nsTestService final : public nsITestService,
-                                public nsSupportsWeakReference
+                            public nsSupportsWeakReference
 {
     ~nsTestService() {}
   public:
@@ -76,7 +76,7 @@ int main()
     nsCOMPtr<nsISupports> mySupportsCOMPtr = mySupportsPtr;
     CallQueryInterface(mySupportsCOMPtr, &myITestService);
 
-    nsRefPtr<nsTestService> myTestServiceRefPtr = myTestService;
+    RefPtr<nsTestService> myTestServiceRefPtr = myTestService;
     CallQueryInterface(myTestServiceRefPtr, &mySupportsWeakRef);
 
     /* Test CallQueryReferent */

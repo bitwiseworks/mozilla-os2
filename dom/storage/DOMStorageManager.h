@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -72,7 +73,7 @@ private:
     // weak ref only since cache references its manager.
     DOMStorageCache* mCache;
     // hard ref when this is sessionStorage to keep it alive forever.
-    nsRefPtr<DOMStorageCache> mCacheRef;
+    RefPtr<DOMStorageCache> mCacheRef;
   };
 
   // Ensures cache for a scope, when it doesn't exist it is created and initalized,
@@ -98,12 +99,11 @@ private:
   bool mLowDiskSpace;
   bool IsLowDiskSpace() const { return mLowDiskSpace; };
 
-  static PLDHashOperator ClearCacheEnumerator(DOMStorageCacheHashKey* aCache,
-                                              void* aClosure);
+  void ClearCaches(uint32_t aUnloadFlags, const nsACString& aKeyPrefix);
 
 protected:
   // Keeps usage cache objects for eTLD+1 scopes we have touched.
-  nsDataHashtable<nsCStringHashKey, nsRefPtr<DOMStorageUsage> > mUsages;
+  nsDataHashtable<nsCStringHashKey, RefPtr<DOMStorageUsage> > mUsages;
 
   friend class DOMStorageCache;
   // Releases cache since it is no longer referrered by any DOMStorage object.
@@ -125,6 +125,9 @@ public:
   // Global getter of localStorage manager service
   static DOMLocalStorageManager* Self() { return sSelf; }
 
+  // Like Self, but creates an instance if we're not yet initialized.
+  static DOMLocalStorageManager* Ensure();
+
 private:
   static DOMLocalStorageManager* sSelf;
 };
@@ -135,7 +138,7 @@ public:
   DOMSessionStorageManager();
 };
 
-} // ::dom
-} // ::mozilla
+} // namespace dom
+} // namespace mozilla
 
 #endif /* nsDOMStorageManager_h__ */

@@ -17,7 +17,7 @@ class nsIPrincipal;
 namespace mozilla {
 namespace gfx {
 class SourceSurface;
-}
+} // namespace gfx
 
 namespace dom {
 class SVGMatrix;
@@ -52,9 +52,9 @@ public:
   {
   }
 
-  JSObject* WrapObject(JSContext* aCx) override
+  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override
   {
-    return CanvasPatternBinding::Wrap(aCx, this);
+    return CanvasPatternBinding::Wrap(aCx, this, aGivenProto);
   }
 
   CanvasRenderingContext2D* GetParentObject()
@@ -65,7 +65,7 @@ public:
   // WebIDL
   void SetTransform(SVGMatrix& matrix);
 
-  nsRefPtr<CanvasRenderingContext2D> mContext;
+  RefPtr<CanvasRenderingContext2D> mContext;
   RefPtr<gfx::SourceSurface> mSurface;
   nsCOMPtr<nsIPrincipal> mPrincipal;
   mozilla::gfx::Matrix mTransform;
@@ -74,7 +74,7 @@ public:
   const RepeatMode mRepeat;
 };
 
-}
-}
+} // namespace dom
+} // namespace mozilla
 
 #endif // mozilla_dom_CanvasPattern_h

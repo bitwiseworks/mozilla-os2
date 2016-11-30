@@ -49,7 +49,7 @@ GenerateGUIDFunction::create(mozIStorageConnection *aDBConn)
   NS_ENSURE_STATE(rg);
 #endif
 
-  nsRefPtr<GenerateGUIDFunction> function = new GenerateGUIDFunction();
+  RefPtr<GenerateGUIDFunction> function = new GenerateGUIDFunction();
   nsresult rv = aDBConn->CreateFunction(
     NS_LITERAL_CSTRING("generate_guid"), 0, function
   );
@@ -166,5 +166,5 @@ GenerateGUIDFunction::OnFunctionCall(mozIStorageValueArray *aArguments,
   return NS_OK;
 }
 
-} // namespace mozilla
 } // namespace downloads
+} // namespace mozilla

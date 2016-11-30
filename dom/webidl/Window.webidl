@@ -17,7 +17,6 @@
 
 interface ApplicationCache;
 interface IID;
-interface MozFrameRequestCallback;
 interface nsIBrowserDOMWindow;
 interface nsIMessageBroadcaster;
 interface nsIDOMCrypto;
@@ -29,10 +28,10 @@ typedef any Transferable;
   // the current browsing context
   [Unforgeable, Constant, StoreInSlot,
    CrossOriginReadable] readonly attribute Window window;
-  [Replaceable, Throws,
-   CrossOriginReadable] readonly attribute WindowProxy self;
+  [Replaceable, Constant, StoreInSlot,
+   CrossOriginReadable] readonly attribute Window self;
   [Unforgeable, StoreInSlot, Pure] readonly attribute Document? document;
-  [Throws] attribute DOMString name; 
+  [Throws] attribute DOMString name;
   [PutForwards=href, Unforgeable, Throws,
    CrossOriginReadable, CrossOriginWritable] readonly attribute Location? location;
   [Throws] readonly attribute History history;
@@ -66,7 +65,7 @@ typedef any Transferable;
   getter object (DOMString name);
 
   // the user agent
-  [Throws] readonly attribute Navigator navigator; 
+  [Throws] readonly attribute Navigator navigator;
 #ifdef HAVE_SIDEBAR
   [Replaceable, Throws] readonly attribute External external;
 #endif
@@ -160,8 +159,10 @@ dictionary ScrollToOptions : ScrollOptions {
 partial interface Window {
   //[Throws,NewObject] MediaQueryList matchMedia(DOMString query);
   [Throws,NewObject] MediaQueryList? matchMedia(DOMString query);
-  //[SameObject]
-  [Throws] readonly attribute Screen screen;
+  // Per spec, screen is SameObject, but we don't actually guarantee that given
+  // nsGlobalWindow::Cleanup.  :(
+  //[SameObject, Replaceable, Throws] readonly attribute Screen screen;
+  [Replaceable, Throws] readonly attribute Screen screen;
 
   // browsing context
   //[Throws] void moveTo(double x, double y);
@@ -174,36 +175,49 @@ partial interface Window {
   [Throws, UnsafeInPrerendering] void resizeBy(long x, long y);
 
   // viewport
-  //[Throws] readonly attribute double innerWidth;
-  //[Throws] readonly attribute double innerHeight;
-  [Throws] attribute long innerWidth;
-  [Throws] attribute long innerHeight;
+  // These are writable because we allow chrome to write them.  And they need
+  // to use 'any' as the type, because non-chrome writing them needs to act
+  // like a [Replaceable] attribute would, which needs the original JS value.
+  //[Replaceable, Throws] readonly attribute double innerWidth;
+  //[Replaceable, Throws] readonly attribute double innerHeight;
+  [Throws] attribute any innerWidth;
+  [Throws] attribute any innerHeight;
 
   // viewport scrolling
-  //[Throws] readonly attribute double scrollX;
-  //[Throws] readonly attribute double pageXOffset;
-  //[Throws] readonly attribute double scrollY;
-  //[Throws] readonly attribute double pageYOffset;
   void scroll(unrestricted double x, unrestricted double y);
   void scroll(optional ScrollToOptions options);
   void scrollTo(unrestricted double x, unrestricted double y);
   void scrollTo(optional ScrollToOptions options);
   void scrollBy(unrestricted double x, unrestricted double y);
   void scrollBy(optional ScrollToOptions options);
+  // mozScrollSnap is used by chrome to perform scroll snapping after the
+  // user performs actions that may affect scroll position
+  // mozScrollSnap is deprecated, to be replaced by a web accessible API, such
+  // as an extension to the ScrollOptions dictionary.  See bug 1137937.
+  [ChromeOnly] void mozScrollSnap();
+  // The four properties below are double per spec at the moment, but whether
+  // that will continue is unclear.
+  //[Replaceable, Throws] readonly attribute double scrollX;
+  //[Replaceable, Throws] readonly attribute double pageXOffset;
+  //[Replaceable, Throws] readonly attribute double scrollY;
+  //[Replaceable, Throws] readonly attribute double pageYOffset;
   [Replaceable, Throws] readonly attribute long scrollX;
-  [Throws] readonly attribute long pageXOffset;
+  [Replaceable, Throws] readonly attribute long pageXOffset;
   [Replaceable, Throws] readonly attribute long scrollY;
-  [Throws] readonly attribute long pageYOffset;
+  [Replaceable, Throws] readonly attribute long pageYOffset;
 
   // client
-  //[Throws] readonly attribute double screenX;
-  //[Throws] readonly attribute double screenY;
-  //[Throws] readonly attribute double outerWidth;
-  //[Throws] readonly attribute double outerHeight;
-  [Throws] attribute long screenX;
-  [Throws] attribute long screenY;
-  [Throws] attribute long outerWidth;
-  [Throws] attribute long outerHeight;
+  // These are writable because we allow chrome to write them.  And they need
+  // to use 'any' as the type, because non-chrome writing them needs to act
+  // like a [Replaceable] attribute would, which needs the original JS value.
+  //[Replaceable, Throws] readonly attribute double screenX;
+  //[Replaceable, Throws] readonly attribute double screenY;
+  //[Replaceable, Throws] readonly attribute double outerWidth;
+  //[Replaceable, Throws] readonly attribute double outerHeight;
+  [Throws] attribute any screenX;
+  [Throws] attribute any screenY;
+  [Throws] attribute any outerWidth;
+  [Throws] attribute any outerHeight;
 };
 
 /**
@@ -250,24 +264,16 @@ interface WindowModal {
 };
 Window implements WindowModal;
 
+// https://slightlyoff.github.io/ServiceWorker/spec/service_worker/index.html#self-caches
+partial interface Window {
+[Throws, Func="mozilla::dom::cache::CacheStorage::PrefEnabled", SameObject]
+readonly attribute CacheStorage caches;
+};
+
 // Mozilla-specific stuff
 partial interface Window {
   //[NewObject, Throws] CSSStyleDeclaration getDefaultComputedStyle(Element elt, optional DOMString pseudoElt = "");
   [NewObject, Throws] CSSStyleDeclaration? getDefaultComputedStyle(Element elt, optional DOMString pseudoElt = "");
-
-  [Throws] long mozRequestAnimationFrame(MozFrameRequestCallback aCallback);
-
-  /**
-   * Cancel a refresh callback.
-   */
-  [Throws] void mozCancelAnimationFrame(long aHandle);
-  // Backwards-compat shim for now to make Google maps work
-  [Throws] void mozCancelRequestAnimationFrame(long aHandle);
-
-  /**
-   * The current animation start time in milliseconds since the epoch.
-   */
-  [Throws] readonly attribute long long mozAnimationStartTime;
 
   // Mozilla extensions
   /**
@@ -292,10 +298,12 @@ partial interface Window {
 
   [Throws] readonly attribute float               mozInnerScreenX;
   [Throws] readonly attribute float               mozInnerScreenY;
-  [Throws] readonly attribute float               devicePixelRatio;
+  [Replaceable, Throws] readonly attribute float  devicePixelRatio;
 
   /* The maximum offset that the window can be scrolled to
      (i.e., the document width/height minus the scrollport width/height) */
+  [ChromeOnly, Throws]  readonly attribute long   scrollMinX;
+  [ChromeOnly, Throws]  readonly attribute long   scrollMinY;
   [Replaceable, Throws] readonly attribute long   scrollMaxX;
   [Replaceable, Throws] readonly attribute long   scrollMaxY;
 
@@ -337,7 +345,7 @@ partial interface Window {
    * This property exists because static attributes don't yet work for
    * JS-implemented WebIDL (see bugs 1058606 and 863952). With this hack, we
    * can use `MozSelfSupport.something(...)`, which will continue to work
-   * after we ditch this property and switch to static attributes. See 
+   * after we ditch this property and switch to static attributes. See
    */
   [ChromeOnly, Throws] readonly attribute MozSelfSupport MozSelfSupport;
 
@@ -380,11 +388,25 @@ partial interface Window {
   [ChromeOnly, Throws] readonly attribute object? __content;
 
   [Throws, ChromeOnly] any getInterface(IID iid);
+
+  /**
+   * Same as nsIDOMWindow.windowRoot, useful for event listener targeting.
+   */
+  [ChromeOnly, Throws]
+  readonly attribute WindowRoot? windowRoot;
 };
 
 Window implements TouchEventHandlers;
 
 Window implements OnErrorEventHandlerForWindow;
+
+#if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_GONK)
+// https://compat.spec.whatwg.org/#windoworientation-interface
+partial interface Window {
+  readonly attribute short orientation;
+           attribute EventHandler onorientationchange;
+};
+#endif
 
 // ConsoleAPI
 partial interface Window {
@@ -395,7 +417,7 @@ partial interface Window {
 #ifdef HAVE_SIDEBAR
 // Mozilla extension
 partial interface Window {
-  [Replaceable, Throws]
+  [Replaceable, Throws, UseCounter]
   readonly attribute (External or WindowProxy) sidebar;
 };
 #endif
@@ -471,3 +493,4 @@ interface ChromeWindow {
 
 Window implements ChromeWindow;
 Window implements GlobalFetch;
+Window implements ImageBitmapFactories;

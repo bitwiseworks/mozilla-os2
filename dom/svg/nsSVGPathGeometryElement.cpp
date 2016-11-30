@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -74,13 +75,13 @@ nsSVGPathGeometryElement::GetMarkPoints(nsTArray<nsSVGMark> *aMarks)
 {
 }
 
-TemporaryRef<Path>
+already_AddRefed<Path>
 nsSVGPathGeometryElement::GetOrBuildPath(const DrawTarget& aDrawTarget,
                                          FillRule aFillRule)
 {
   // We only cache the path if it matches the backend used for screen painting:
   bool cacheable  = aDrawTarget.GetBackendType() ==
-                      gfxPlatform::GetPlatform()->GetContentBackend();
+                    gfxPlatform::GetPlatform()->GetDefaultContentBackend();
 
   // Checking for and returning mCachedPath before checking the pref means
   // that the pref is only live on page reload (or app restart for SVG in
@@ -88,7 +89,8 @@ nsSVGPathGeometryElement::GetOrBuildPath(const DrawTarget& aDrawTarget,
   // looking at the global variable that the pref's stored in.
   if (cacheable && mCachedPath) {
     if (aDrawTarget.GetBackendType() == mCachedPath->GetBackendType()) {
-      return mCachedPath;
+      RefPtr<Path> path(mCachedPath);
+      return path.forget();
     }
   }
   RefPtr<PathBuilder> builder = aDrawTarget.CreatePathBuilder(aFillRule);
@@ -99,7 +101,7 @@ nsSVGPathGeometryElement::GetOrBuildPath(const DrawTarget& aDrawTarget,
   return path.forget();
 }
 
-TemporaryRef<Path>
+already_AddRefed<Path>
 nsSVGPathGeometryElement::GetOrBuildPathForMeasuring()
 {
   return nullptr;
@@ -110,7 +112,7 @@ nsSVGPathGeometryElement::GetFillRule()
 {
   FillRule fillRule = FillRule::FILL_WINDING; // Equivalent to NS_STYLE_FILL_RULE_NONZERO
 
-  nsRefPtr<nsStyleContext> styleContext =
+  RefPtr<nsStyleContext> styleContext =
     nsComputedDOMStyle::GetStyleContextForElementNoFlush(this, nullptr,
                                                          nullptr);
   

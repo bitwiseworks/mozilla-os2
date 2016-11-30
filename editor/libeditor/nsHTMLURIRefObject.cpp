@@ -248,13 +248,13 @@ nsHTMLURIRefObject::SetNode(nsIDOMNode *aNode)
 
 nsresult NS_NewHTMLURIRefObject(nsIURIRefObject** aResult, nsIDOMNode* aNode)
 {
-  nsRefPtr<nsHTMLURIRefObject> refObject = new nsHTMLURIRefObject();
+  RefPtr<nsHTMLURIRefObject> refObject = new nsHTMLURIRefObject();
   nsresult rv = refObject->SetNode(aNode);
   if (NS_FAILED(rv)) {
     *aResult = 0;
     return rv;
   }
-  return refObject->QueryInterface(NS_GET_IID(nsIURIRefObject),
-                                   (void**)aResult);
+  refObject.forget(aResult);
+  return NS_OK;
 }
 

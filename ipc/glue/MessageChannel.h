@@ -15,6 +15,9 @@
 #include "mozilla/Monitor.h"
 #include "mozilla/Vector.h"
 #include "mozilla/WeakPtr.h"
+#if defined(OS_WIN)
+#include "mozilla/ipc/Neutering.h"
+#endif // defined(OS_WIN)
 #include "mozilla/ipc/Transport.h"
 #include "MessageLink.h"
 #include "nsAutoPtr.h"
@@ -39,6 +42,19 @@ class RefCountedMonitor : public Monitor
 
   private:
     ~RefCountedMonitor() {}
+};
+
+enum class SyncSendError {
+    SendSuccess,
+    PreviousTimeout,
+    SendingCPOWWhileDispatchingSync,
+    SendingCPOWWhileDispatchingUrgent,
+    NotConnectedBeforeSend,
+    DisconnectedDuringSend,
+    CancelledBeforeSend,
+    CancelledAfterSend,
+    TimedOut,
+    ReplyError,
 };
 
 class MessageChannel : HasResultCodes
@@ -88,7 +104,7 @@ class MessageChannel : HasResultCodes
 
     void SetAbortOnError(bool abort)
     {
-        mAbortOnError = true;
+        mAbortOnError = abort;
     }
 
     // Misc. behavioral traits consumers can request for this channel
@@ -129,11 +145,34 @@ class MessageChannel : HasResultCodes
 
     bool CanSend() const;
 
+    // If sending a sync message returns an error, this function gives a more
+    // descriptive error message.
+    SyncSendError LastSendError() const {
+        AssertWorkerThread();
+        return mLastSendError;
+    }
+
+    // Currently only for debugging purposes, doesn't aquire mMonitor.
+    ChannelState GetChannelState__TotallyRacy() const {
+        return mChannelState;
+    }
+
     void SetReplyTimeoutMs(int32_t aTimeoutMs);
 
     bool IsOnCxxStack() const {
         return !mCxxStackFrames.empty();
     }
+
+    bool IsInTransaction() const { return mCurrentTransaction != 0; }
+    void CancelCurrentTransaction();
+
+    /**
+     * This function is used by hang annotation code to determine which IPDL
+     * actor is highest in the call stack at the time of the hang. It should
+     * be called from the main thread when a sync or intr message is about to
+     * be sent.
+     */
+    int32_t GetTopmostMessageRoutingId() const;
 
     void FlushPendingInterruptQueue();
 
@@ -156,6 +195,18 @@ class MessageChannel : HasResultCodes
     static void SetIsPumpingMessages(bool aIsPumping) {
         sIsPumpingMessages = aIsPumping;
     }
+
+#ifdef MOZ_NUWA_PROCESS
+    void Block() {
+        MOZ_ASSERT(mLink);
+        mLink->Block();
+    }
+
+    void Unblock() {
+        MOZ_ASSERT(mLink);
+        mLink->Unblock();
+    }
+#endif
 
 #ifdef OS_WIN
     struct MOZ_STACK_CLASS SyncStackFrame
@@ -207,7 +258,7 @@ class MessageChannel : HasResultCodes
 
     void PostErrorNotifyTask();
     void OnNotifyMaybeChannelError();
-    void ReportConnectionError(const char* aChannelName) const;
+    void ReportConnectionError(const char* aChannelName, Message* aMsg = nullptr) const;
     void ReportMessageRouteError(const char* channelName) const;
     bool MaybeHandleError(Result code, const Message& aMsg, const char* channelName);
 
@@ -219,6 +270,7 @@ class MessageChannel : HasResultCodes
     bool InterruptEventOccurred();
     bool HasPendingEvents();
 
+    void ProcessPendingRequests(int seqno, int transaction);
     bool ProcessPendingRequest(const Message &aUrgent);
 
     void MaybeUndeferIncall();
@@ -233,7 +285,7 @@ class MessageChannel : HasResultCodes
 
     // DispatchMessage will route to one of these functions depending on the
     // protocol type of the message.
-    void DispatchSyncMessage(const Message &aMsg);
+    void DispatchSyncMessage(const Message &aMsg, Message*& aReply);
     void DispatchUrgentMessage(const Message &aMsg);
     void DispatchAsyncMessage(const Message &aMsg);
     void DispatchRPCMessage(const Message &aMsg);
@@ -249,12 +301,15 @@ class MessageChannel : HasResultCodes
     //
     // So in sum: true is a meaningful return value; false isn't,
     // necessarily.
-    bool WaitForSyncNotify();
+    bool WaitForSyncNotify(bool aHandleWindowsMessages);
     bool WaitForInterruptNotify();
 
     bool WaitResponse(bool aWaitTimedOut);
 
     bool ShouldContinueFromTimeout();
+
+    void EndTimeout();
+    void CancelTransaction(int transaction);
 
     // The "remote view of stack depth" can be different than the
     // actual stack depth when there are out-of-turn replies.  When we
@@ -392,6 +447,7 @@ class MessageChannel : HasResultCodes
     // Tell the IO thread to close the channel and wait for it to ACK.
     void SynchronouslyClose();
 
+    bool WasTransactionCanceled(int transaction);
     bool ShouldDeferMessage(const Message& aMsg);
     void OnMessageReceivedFromLink(const Message& aMsg);
     void OnChannelErrorFromLink();
@@ -405,8 +461,8 @@ class MessageChannel : HasResultCodes
     // Can be run on either thread
     void AssertWorkerThread() const
     {
-        MOZ_ASSERT(mWorkerLoopID == MessageLoop::current()->id(),
-                   "not on worker thread!");
+        MOZ_RELEASE_ASSERT(mWorkerLoopID == MessageLoop::current()->id(),
+                           "not on worker thread!");
     }
 
     // The "link" thread is either the I/O thread (ProcessLink) or the
@@ -414,8 +470,8 @@ class MessageChannel : HasResultCodes
     // NOT our worker thread.
     void AssertLinkThread() const
     {
-        MOZ_ASSERT(mWorkerLoopID != MessageLoop::current()->id(),
-                   "on worker thread but should not be!");
+        MOZ_RELEASE_ASSERT(mWorkerLoopID != MessageLoop::current()->id(),
+                           "on worker thread but should not be!");
     }
 
   private:
@@ -454,13 +510,13 @@ class MessageChannel : HasResultCodes
         void Run() override { mTask->Run(); }
 
       private:
-        nsRefPtr<RefCountedTask> mTask;
+        RefPtr<RefCountedTask> mTask;
     };
 
   private:
     mozilla::WeakPtr<MessageListener> mListener;
     ChannelState mChannelState;
-    nsRefPtr<RefCountedMonitor> mMonitor;
+    RefPtr<RefCountedMonitor> mMonitor;
     Side mSide;
     MessageLink* mLink;
     MessageLoop* mWorkerLoop;           // thread where work is done
@@ -471,7 +527,7 @@ class MessageChannel : HasResultCodes
     int mWorkerLoopID;
 
     // A task encapsulating dequeuing one pending message.
-    nsRefPtr<RefCountedTask> mDequeueOneTask;
+    RefPtr<RefCountedTask> mDequeueOneTask;
 
     // Timeout periods are broken up in two to prevent system suspension from
     // triggering an abort. This method (called by WaitForEvent with a 'did
@@ -486,20 +542,29 @@ class MessageChannel : HasResultCodes
 
     static bool sIsPumpingMessages;
 
+    // If ::Send returns false, this gives a more descriptive error.
+    SyncSendError mLastSendError;
+
     template<class T>
     class AutoSetValue {
       public:
         explicit AutoSetValue(T &var, const T &newValue)
-          : mVar(var), mPrev(var)
+          : mVar(var), mPrev(var), mNew(newValue)
         {
             mVar = newValue;
         }
         ~AutoSetValue() {
-            mVar = mPrev;
+            // The value may have been zeroed if the transaction was
+            // canceled. In that case we shouldn't return it to its previous
+            // value.
+            if (mVar == mNew) {
+                mVar = mPrev;
+            }
         }
       private:
         T& mVar;
         T mPrev;
+        T mNew;
     };
 
     // Worker thread only.
@@ -535,19 +600,30 @@ class MessageChannel : HasResultCodes
     // The current transaction ID.
     int32_t mCurrentTransaction;
 
+    // This field describes the priorities of the sync Send calls that are
+    // currently on stack. If a Send call for a message with priority P is on
+    // the C stack, then mPendingSendPriorities & (1 << P) will be
+    // non-zero. Note that cancelled Send calls are not removed from this
+    // bitfield (until they return).
+    int mPendingSendPriorities;
+
     class AutoEnterTransaction
     {
-      public:
+     public:
        explicit AutoEnterTransaction(MessageChannel *aChan, int32_t aMsgSeqno)
         : mChan(aChan),
+          mNewTransaction(INT32_MAX),
           mOldTransaction(mChan->mCurrentTransaction)
        {
            mChan->mMonitor->AssertCurrentThreadOwns();
-           if (mChan->mCurrentTransaction == 0)
+           if (mChan->mCurrentTransaction == 0) {
+               mNewTransaction = aMsgSeqno;
                mChan->mCurrentTransaction = aMsgSeqno;
+           }
        }
        explicit AutoEnterTransaction(MessageChannel *aChan, const Message &aMessage)
         : mChan(aChan),
+          mNewTransaction(aMessage.transaction_id()),
           mOldTransaction(mChan->mCurrentTransaction)
        {
            mChan->mMonitor->AssertCurrentThreadOwns();
@@ -561,12 +637,14 @@ class MessageChannel : HasResultCodes
        }
        ~AutoEnterTransaction() {
            mChan->mMonitor->AssertCurrentThreadOwns();
-           mChan->mCurrentTransaction = mOldTransaction;
+           if (mChan->mCurrentTransaction == mNewTransaction) {
+               mChan->mCurrentTransaction = mOldTransaction;
+           }
        }
 
       private:
        MessageChannel *mChan;
-       int32_t mOldTransaction;
+       int32_t mNewTransaction, mOldTransaction;
     };
 
     // If a sync message times out, we store its sequence number here. Any
@@ -583,6 +661,7 @@ class MessageChannel : HasResultCodes
     // hitting a lot of corner cases with message nesting that we don't really
     // care about.
     int32_t mTimedOutMessageSeqno;
+    int mTimedOutMessagePriority;
 
     // If waiting for the reply to a sync out-message, it will be saved here
     // on the I/O thread and then read and cleared by the worker thread.
@@ -706,13 +785,13 @@ class MessageChannel : HasResultCodes
     // Task and state used to asynchronously notify channel has been connected
     // safely.  This is necessary to be able to cancel notification if we are
     // closed at the same time.
-    nsRefPtr<RefCountedTask> mOnChannelConnectedTask;
+    RefPtr<RefCountedTask> mOnChannelConnectedTask;
     DebugOnly<bool> mPeerPidSet;
     int32_t mPeerPid;
 };
 
-bool
-ParentProcessIsBlocked();
+void
+CancelCPOWs();
 
 } // namespace ipc
 } // namespace mozilla

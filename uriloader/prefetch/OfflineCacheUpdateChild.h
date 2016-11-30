@@ -68,6 +68,7 @@ private:
     nsCString mUpdateDomain;
     nsCOMPtr<nsIURI> mManifestURI;
     nsCOMPtr<nsIURI> mDocumentURI;
+    nsCOMPtr<nsIPrincipal> mLoadingPrincipal;
 
     nsCOMPtr<nsIObserverService> mObserverService;
 
@@ -88,7 +89,7 @@ private:
     uint64_t mByteProgress;
 };
 
-}
-}
+} // namespace docshell
+} // namespace mozilla
 
 #endif

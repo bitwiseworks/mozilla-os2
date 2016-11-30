@@ -11,6 +11,7 @@
 #include "nsCycleCollectionParticipant.h" // NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS
 #include "nsISupportsImpl.h" // NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING
 #include "nsWrapperCache.h"
+
 #include "WebGLObjectModel.h"
 
 struct JSContext;
@@ -22,7 +23,7 @@ class WebGLProgram;
 
 namespace webgl {
 struct LinkedProgramInfo;
-}
+} // namespace webgl
 
 class WebGLUniformLocation final
     : public nsWrapperCache
@@ -32,19 +33,19 @@ public:
     NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(WebGLUniformLocation)
     NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(WebGLUniformLocation)
 
-    virtual JSObject* WrapObject(JSContext* js) override;
+    virtual JSObject* WrapObject(JSContext* js, JS::Handle<JSObject*> givenProto) override;
 
     WebGLContext* GetParentObject() const {
         return mContext;
     }
 
-
     const WeakPtr<const webgl::LinkedProgramInfo> mLinkInfo;
     const GLuint mLoc;
+    const size_t mArrayIndex;
     const WebGLActiveInfo* const mActiveInfo;
 
     WebGLUniformLocation(WebGLContext* webgl, const webgl::LinkedProgramInfo* linkInfo,
-                         GLuint loc, const WebGLActiveInfo* activeInfo);
+                         GLuint loc, size_t arrayIndex, const WebGLActiveInfo* activeInfo);
 
     bool ValidateForProgram(WebGLProgram* prog, WebGLContext* webgl,
                             const char* funcName) const;

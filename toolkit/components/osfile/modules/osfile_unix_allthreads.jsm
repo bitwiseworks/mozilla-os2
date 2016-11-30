@@ -19,7 +19,7 @@
 
 "use strict";
 
-let SharedAll;
+var SharedAll;
 if (typeof Components != "undefined") {
   let Cu = Components.utils;
   // Module is opened as a jsm module
@@ -28,19 +28,19 @@ if (typeof Components != "undefined") {
   SharedAll = {};
   Cu.import("resource://gre/modules/osfile/osfile_shared_allthreads.jsm", SharedAll);
   this.exports = {};
-} else if (typeof "module" != "undefined" && typeof "require" != "undefined") {
+} else if (typeof module != "undefined" && typeof require != "undefined") {
   // Module is loaded with require()
   SharedAll = require("resource://gre/modules/osfile/osfile_shared_allthreads.jsm");
 } else {
   throw new Error("Please open this module with Component.utils.import or with require()");
 }
 
-let LOG = SharedAll.LOG.bind(SharedAll, "Unix", "allthreads");
-let Const = SharedAll.Constants.libc;
+var LOG = SharedAll.LOG.bind(SharedAll, "Unix", "allthreads");
+var Const = SharedAll.Constants.libc;
 
 // Open libc
-let libc;
-let libc_func;
+var libc;
+var libc_func;
 if (SharedAll.Constants.OS2) {
   libc = new SharedAll.Library("libc",
                                "libc065.dll", "libc064.dll");
@@ -58,11 +58,11 @@ exports.libc = libc;
 exports.libc_func = libc_func;
 
 // Define declareFFI
-let declareFFI = SharedAll.declareFFI.bind(null, libc);
+var declareFFI = SharedAll.declareFFI.bind(null, libc);
 exports.declareFFI = declareFFI;
 
 // Define lazy binding
-let LazyBindings = {};
+var LazyBindings = {};
 libc.declareLazy(LazyBindings, "strerror",
                  libc_func("strerror"), ctypes.default_abi,
                  /*return*/ ctypes.char.ptr,
@@ -93,7 +93,7 @@ libc.declareLazy(LazyBindings, "strerror",
  * @constructor
  * @extends {OS.Shared.Error}
  */
-let OSError = function OSError(operation = "unknown operation",
+var OSError = function OSError(operation = "unknown operation",
                                errno = ctypes.errno, path = "") {
   SharedAll.OSError.call(this, operation, path);
   this.unixErrno = errno;
@@ -198,7 +198,7 @@ exports.Error = OSError;
  *
  * @constructor
 */
-let AbstractInfo = function AbstractInfo(path, isDir, isSymLink, size, lastAccessDate,
+var AbstractInfo = function AbstractInfo(path, isDir, isSymLink, size, lastAccessDate,
                                          lastModificationDate, unixLastStatusChangeDate,
                                          unixOwner, unixGroup, unixMode) {
   this._path = path;
@@ -296,7 +296,7 @@ exports.AbstractInfo = AbstractInfo;
  *
  * @constructor
 */
-let AbstractEntry = function AbstractEntry(isDir, isSymLink, name, path) {
+var AbstractEntry = function AbstractEntry(isDir, isSymLink, name, path) {
   this._isDir = isDir;
   this._isSymlLink = isSymLink;
   this._name = name;
@@ -340,7 +340,7 @@ exports.POS_END = Const.SEEK_END;
 
 // Special types that need to be defined for communication
 // between threads
-let Type = Object.create(SharedAll.Type);
+var Type = Object.create(SharedAll.Type);
 exports.Type = Type;
 
 /**
@@ -368,7 +368,7 @@ OSError.invalidArgument = function invalidArgument(operation) {
   return new OSError(operation, Const.EINVAL);
 };
 
-let EXPORTED_SYMBOLS = [
+var EXPORTED_SYMBOLS = [
   "declareFFI",
   "libc",
   "Error",

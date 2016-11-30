@@ -82,7 +82,7 @@ this.ForgetAboutSite = {
 
     // EME
     let mps = Cc["@mozilla.org/gecko-media-plugin-service;1"].
-               getService(Ci.mozIGeckoMediaPluginService);
+               getService(Ci.mozIGeckoMediaPluginChromeService);
     mps.forgetThisSite(aDomain);
 
     // Plugin data
@@ -90,76 +90,28 @@ this.ForgetAboutSite = {
     const FLAG_CLEAR_ALL = phInterface.FLAG_CLEAR_ALL;
     let ph = Cc["@mozilla.org/plugin/host;1"].getService(phInterface);
     let tags = ph.getPluginTags();
+    let promises = [];
     for (let i = 0; i < tags.length; i++) {
-      try {
-        ph.clearSiteData(tags[i], aDomain, FLAG_CLEAR_ALL, -1);
-      } catch (e) {
-        // Ignore errors from the plugin
-      }
+      let promise = new Promise(resolve => {
+        let tag = tags[i];
+        try {
+          ph.clearSiteData(tags[i], aDomain, FLAG_CLEAR_ALL, -1, function(rv) {
+            resolve();
+          });
+        } catch (e) {
+          // Ignore errors from the plugin, but resolve the promise
+          resolve();
+        }
+      });
+      promises.push(promise);
     }
 
     // Downloads
-    let useJSTransfer = false;
-    try {
-      // This method throws an exception if the old Download Manager is disabled.
-      Services.downloads.activeDownloadCount;
-    } catch (ex) {
-      useJSTransfer = true;
-    }
-
-    if (useJSTransfer) {
-      Task.spawn(function*() {
-        let list = yield Downloads.getList(Downloads.ALL);
-        list.removeFinished(download => hasRootDomain(
-             NetUtil.newURI(download.source.url).host, aDomain));
-      }).then(null, Cu.reportError);
-    }
-    else {
-      let dm = Cc["@mozilla.org/download-manager;1"].
-               getService(Ci.nsIDownloadManager);
-      // Active downloads
-      for (let enumerator of [dm.activeDownloads, dm.activePrivateDownloads]) {
-        while (enumerator.hasMoreElements()) {
-          let dl = enumerator.getNext().QueryInterface(Ci.nsIDownload);
-          if (hasRootDomain(dl.source.host, aDomain)) {
-            dl.cancel();
-            dl.remove();
-          }
-        }
-
-        const deleteAllLike = function(db) {
-          // NOTE: This is lossy, but we feel that it is OK to be lossy here and not
-          //       invoke the cost of creating a URI for each download entry and
-          //       ensure that the hostname matches.
-          let stmt = db.createStatement(
-            "DELETE FROM moz_downloads " +
-            "WHERE source LIKE ?1 ESCAPE '/' " +
-            "AND state NOT IN (?2, ?3, ?4)"
-          );
-          let pattern = stmt.escapeStringForLIKE(aDomain, "/");
-          stmt.bindByIndex(0, "%" + pattern + "%");
-          stmt.bindByIndex(1, Ci.nsIDownloadManager.DOWNLOAD_DOWNLOADING);
-          stmt.bindByIndex(2, Ci.nsIDownloadManager.DOWNLOAD_PAUSED);
-          stmt.bindByIndex(3, Ci.nsIDownloadManager.DOWNLOAD_QUEUED);
-          try {
-            stmt.execute();
-          }
-          finally {
-            stmt.finalize();
-          }
-        }
-
-        // Completed downloads
-        deleteAllLike(dm.DBConnection);
-        deleteAllLike(dm.privateDBConnection);
-
-        // We want to rebuild the list if the UI is showing, so dispatch the
-        // observer topic
-        let os = Cc["@mozilla.org/observer-service;1"].
-                 getService(Ci.nsIObserverService);
-        os.notifyObservers(null, "download-manager-remove-download", null);
-      }
-    }
+    Task.spawn(function*() {
+      let list = yield Downloads.getList(Downloads.ALL);
+      list.removeFinished(download => hasRootDomain(
+           NetUtil.newURI(download.source.url).host, aDomain));
+    }).then(null, Cu.reportError);
 
     // Passwords
     let lm = Cc["@mozilla.org/login-manager;1"].
@@ -173,7 +125,11 @@ this.ForgetAboutSite = {
     }
     // XXXehsan: is there a better way to do this rather than this
     // hacky comparison?
-    catch (ex if ex.message.indexOf("User canceled Master Password entry") != -1) { }
+    catch (ex) {
+      if (ex.message.indexOf("User canceled Master Password entry") == -1) {
+        throw ex;
+      }
+    }
 
     // Clear any "do not save for this site" for this domain
     let disabledHosts = lm.getAllDisabledHosts();
@@ -188,13 +144,18 @@ this.ForgetAboutSite = {
     enumerator = pm.enumerator;
     while (enumerator.hasMoreElements()) {
       let perm = enumerator.getNext().QueryInterface(Ci.nsIPermission);
-      if (hasRootDomain(perm.host, aDomain))
-        pm.remove(perm.host, perm.type);
+      try {
+        if (hasRootDomain(perm.principal.URI.host, aDomain)) {
+          pm.removePermission(perm);
+        }
+      } catch (e) {
+        /* Ignore entry */
+      }
     }
 
     // Offline Storages
-    let qm = Cc["@mozilla.org/dom/quota/manager;1"].
-             getService(Ci.nsIQuotaManager);
+    let qms = Cc["@mozilla.org/dom/quota-manager-service;1"].
+              getService(Ci.nsIQuotaManagerService);
     // delete data from both HTTP and HTTPS sites
     let caUtils = {};
     let scriptLoader = Cc["@mozilla.org/moz/jssubscript-loader;1"].
@@ -203,8 +164,10 @@ this.ForgetAboutSite = {
                                caUtils);
     let httpURI = caUtils.makeURI("http://" + aDomain);
     let httpsURI = caUtils.makeURI("https://" + aDomain);
-    qm.clearStoragesForURI(httpURI);
-    qm.clearStoragesForURI(httpsURI);
+    let httpPrincipal = Services.scriptSecurityManager.createCodebasePrincipal(httpURI, {});
+    let httpsPrincipal = Services.scriptSecurityManager.createCodebasePrincipal(httpsURI, {});
+    qms.clearStoragesForPrincipal(httpPrincipal);
+    qms.clearStoragesForPrincipal(httpsPrincipal);
 
     function onContentPrefsRemovalFinished() {
       // Everybody else (including extensions)
@@ -215,7 +178,7 @@ this.ForgetAboutSite = {
     let cps2 = Cc["@mozilla.org/content-pref/service;1"].
                getService(Ci.nsIContentPrefService2);
     cps2.removeBySubdomain(aDomain, null, {
-      handleCompletion: function() onContentPrefsRemovalFinished(),
+      handleCompletion: () => onContentPrefsRemovalFinished(),
       handleError: function() {}
     });
 
@@ -224,5 +187,16 @@ this.ForgetAboutSite = {
     let np = Cc["@mozilla.org/network/predictor;1"].
              getService(Ci.nsINetworkPredictor);
     np.reset();
+
+    // Push notifications.
+    try {
+      var push = Cc["@mozilla.org/push/NotificationService;1"]
+                  .getService(Ci.nsIPushNotificationService);
+      push.clearForDomain(aDomain);
+    } catch (e) {
+      dump("Web Push may not be available.\n");
+    }
+
+    return Promise.all(promises);
   }
 };

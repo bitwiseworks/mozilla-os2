@@ -7,12 +7,11 @@
 #define WEBGLOBJECTMODEL_H_
 
 #include "nsCycleCollectionNoteChild.h"
-#include "nsICanvasRenderingContextInternal.h"
+
 #include "WebGLTypes.h"
 
 namespace mozilla {
 
-class WebGLBuffer;
 class WebGLContext;
 
 /* Each WebGL object class WebGLFoo wants to:
@@ -270,10 +269,8 @@ public:
 
     bool IsCompatibleWithContext(WebGLContext* other);
 
-    WebGLContext* Context() const { return mContext; }
-
-protected:
     WebGLContext* const mContext;
+protected:
     const uint32_t mContextGeneration;
 };
 

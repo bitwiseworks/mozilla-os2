@@ -24,10 +24,8 @@
 #include "ScrollbarStyles.h"
 
 struct nsFrameItems;
-struct nsAbsoluteItems;
 class nsStyleContext;
 struct nsStyleDisplay;
-class nsIDOMHTMLSelectElement;
 struct nsGenConInitializer;
 
 class nsContainerFrame;
@@ -38,7 +36,6 @@ struct PendingBinding;
 class nsGenericDOMDataNode;
 
 class nsFrameConstructorState;
-class nsFrameConstructorSaveState;
 
 namespace mozilla {
 
@@ -48,8 +45,8 @@ namespace dom {
 
 class FlattenedChildIterator;
 
-}
-}
+} // namespace dom
+} // namespace mozilla
 
 class nsCSSFrameConstructor : public nsFrameManager
 {
@@ -58,8 +55,7 @@ public:
 
   friend class mozilla::RestyleManager;
 
-  nsCSSFrameConstructor(nsIDocument *aDocument, nsIPresShell* aPresShell,
-                        nsStyleSet* aStyleSet);
+  nsCSSFrameConstructor(nsIDocument* aDocument, nsIPresShell* aPresShell);
   ~nsCSSFrameConstructor(void) {
     NS_ASSERTION(mUpdateCount == 0, "Dying in the middle of our own update?");
   }
@@ -304,8 +300,7 @@ public:
    */
   InsertionPoint GetInsertionPoint(nsIContent* aContainer, nsIContent* aChild);
 
-  nsresult CreateListBoxContent(nsPresContext*    aPresContext,
-                                nsContainerFrame* aParentFrame,
+  nsresult CreateListBoxContent(nsContainerFrame* aParentFrame,
                                 nsIFrame*         aPrevFrame,
                                 nsIContent*       aChild,
                                 nsIFrame**        aResult,
@@ -340,7 +335,6 @@ private:
   class FrameConstructionItemList;
 
   nsContainerFrame* ConstructPageFrame(nsIPresShell*      aPresShell,
-                                       nsPresContext*     aPresContext,
                                        nsContainerFrame*  aParentFrame,
                                        nsIFrame*          aPrevPageFrame,
                                        nsContainerFrame*& aCanvasFrame);
@@ -438,7 +432,7 @@ private:
    */
   already_AddRefed<nsIContent> CreateGenConTextNode(nsFrameConstructorState& aState,
                                                     const nsString& aString,
-                                                    nsRefPtr<nsTextNode>* aText,
+                                                    RefPtr<nsTextNode>* aText,
                                                     nsGenConInitializer* aInitializer);
 
   /**
@@ -934,13 +928,13 @@ private:
       // Return whether the iterator is done after doing that.
       // The iterator must not be done when this is called.
       inline bool SkipItemsThatNeedAnonFlexOrGridItem(
-        const nsFrameConstructorState& aState);
+        const nsFrameConstructorState& aState, nsIAtom* aContainerType);
 
       // Skip to the first frame that is a non-replaced inline or is
       // positioned.  Return whether the iterator is done after doing that.
       // The iterator must not be done when this is called.
       inline bool SkipItemsThatDontNeedAnonFlexOrGridItem(
-        const nsFrameConstructorState& aState);
+        const nsFrameConstructorState& aState, nsIAtom* aContainerType);
 
       // Skip over all items that do not want a ruby parent.  Return whether
       // the iterator is done after doing that.  The iterator must not be done
@@ -998,7 +992,7 @@ private:
       {}
 
       nsIContent * const mContent;
-      nsRefPtr<nsStyleContext> mStyleContext;
+      RefPtr<nsStyleContext> mStyleContext;
     };
 
     // Adjust our various counts for aItem being added or removed.  aDelta
@@ -1077,7 +1071,8 @@ private:
 
     // Indicates whether (when in a flex or grid container) this item needs
     // to be wrapped in an anonymous block.
-    bool NeedsAnonFlexOrGridItem(const nsFrameConstructorState& aState);
+    bool NeedsAnonFlexOrGridItem(const nsFrameConstructorState& aState,
+                                 nsIAtom* aContainerType);
 
     // Don't call this unless the frametree really depends on the answer!
     // Especially so for generated content, where we don't want to reframe
@@ -1123,7 +1118,7 @@ private:
     // insertion point before doing so and pop it afterward.
     PendingBinding* mPendingBinding;
     // The style context to use for creating the new frame.
-    nsRefPtr<nsStyleContext> mStyleContext;
+    RefPtr<nsStyleContext> mStyleContext;
     // The XBL-resolved namespace to use for frame construction.
     int32_t mNameSpaceID;
     // Whether optimizations to skip constructing textframes around
@@ -1608,8 +1603,6 @@ public:
   nsContainerFrame* GetFloatContainingBlock(nsIFrame* aFrame);
 
 private:
-  nsIContent* PropagateScrollToViewport();
-
   // Build a scroll frame:
   //  Calls BeginBuildingScrollFrame, InitAndRestoreFrame, and then FinishBuildingScrollFrame.
   // @param aNewFrame the created scrollframe --- output only
@@ -1699,7 +1692,6 @@ private:
                                             nsStyleContext*   aStyleContext);
 
   nsIFrame* CreateContinuingTableFrame(nsIPresShell*     aPresShell,
-                                       nsPresContext*    aPresContext,
                                        nsIFrame*         aFrame,
                                        nsContainerFrame* aParentFrame,
                                        nsIContent*       aContent,
@@ -1876,20 +1868,17 @@ private:
   void RecoverLetterFrames(nsContainerFrame* aBlockFrame);
 
   //
-  nsresult RemoveLetterFrames(nsPresContext*    aPresContext,
-                              nsIPresShell*     aPresShell,
+  nsresult RemoveLetterFrames(nsIPresShell*     aPresShell,
                               nsContainerFrame* aBlockFrame);
 
   // Recursive helper for RemoveLetterFrames
-  nsresult RemoveFirstLetterFrames(nsPresContext*    aPresContext,
-                                   nsIPresShell*     aPresShell,
+  nsresult RemoveFirstLetterFrames(nsIPresShell*     aPresShell,
                                    nsContainerFrame* aFrame,
                                    nsContainerFrame* aBlockFrame,
                                    bool*             aStopLooking);
 
   // Special remove method for those pesky floating first-letter frames
-  nsresult RemoveFloatingFirstLetterFrames(nsPresContext*  aPresContext,
-                                           nsIPresShell*    aPresShell,
+  nsresult RemoveFloatingFirstLetterFrames(nsIPresShell*    aPresShell,
                                            nsIFrame*        aBlockFrame,
                                            bool*          aStopLooking);
 

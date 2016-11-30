@@ -34,10 +34,10 @@ Cu.import("resource://gre/modules/ContentPrefStore.jsm");
 const cache = new ContentPrefStore();
 cache.set = function CPS_cache_set(group, name, val) {
   Object.getPrototypeOf(this).set.apply(this, arguments);
-  let groupCount = Object.keys(this._groups).length;
+  let groupCount = this._groups.size;
   if (groupCount >= CACHE_MAX_GROUP_ENTRIES) {
     // Clean half of the entries
-    for (let [group, name, ] in this) {
+    for (let [group, name, ] of this) {
       this.remove(group, name);
       groupCount--;
       if (groupCount < CACHE_MAX_GROUP_ENTRIES / 2)
@@ -59,7 +59,7 @@ ContentPrefService.prototype = {
       Ci.nsIContentPrefService,
       Ci.nsISupports,
     ];
-    if (supportedIIDs.some(function (i) iid.equals(i)))
+    if (supportedIIDs.some(i => iid.equals(i)))
       return this;
     if (iid.equals(Ci.nsIContentPrefService2)) {
       if (!this._contentPrefService2) {
@@ -371,7 +371,7 @@ ContentPrefService.prototype = {
                                  Cr.NS_ERROR_ILLEGAL_VALUE);
 
     if (aContext && aContext.usePrivateBrowsing) {
-      for (let [group, name, ] in this._privModeStorage) {
+      for (let [group, name, ] of this._privModeStorage) {
         if (name === aName) {
           this._privModeStorage.remove(group, aName);
           this._notifyPrefRemoved(group, aName);
@@ -428,7 +428,7 @@ ContentPrefService.prototype = {
     if (aContext && aContext.usePrivateBrowsing) {
         let prefs = Cc["@mozilla.org/hash-property-bag;1"].
                     createInstance(Ci.nsIWritablePropertyBag);
-        for (let [sgroup, sname, sval] in this._privModeStorage) {
+        for (let [sgroup, sname, sval] of this._privModeStorage) {
           if (sgroup === group)
             prefs.setProperty(sname, sval);
         }
@@ -450,7 +450,7 @@ ContentPrefService.prototype = {
     if (aContext && aContext.usePrivateBrowsing) {
       let prefs = Cc["@mozilla.org/hash-property-bag;1"].
                   createInstance(Ci.nsIWritablePropertyBag);
-      for (let [sgroup, sname, sval] in this._privModeStorage) {
+      for (let [sgroup, sname, sval] of this._privModeStorage) {
         if (sname === aName)
           prefs.setProperty(sgroup, sval);
       }
@@ -525,7 +525,7 @@ ContentPrefService.prototype = {
    * Notify all observers about the removal of a preference.
    */
   _notifyPrefRemoved: function ContentPrefService__notifyPrefRemoved(aGroup, aName) {
-    for each (var observer in this._getObservers(aName)) {
+    for (var observer of this._getObservers(aName)) {
       try {
         observer.onContentPrefRemoved(aGroup, aName);
       }
@@ -539,7 +539,7 @@ ContentPrefService.prototype = {
    * Notify all observers about a preference change.
    */
   _notifyPrefSet: function ContentPrefService__notifyPrefSet(aGroup, aName, aValue) {
-    for each (var observer in this._getObservers(aName)) {
+    for (var observer of this._getObservers(aName)) {
       try {
         observer.onContentPrefSet(aGroup, aName, aValue);
       }
@@ -1070,7 +1070,9 @@ ContentPrefService.prototype = {
       }
       // If the connection isn't ready after we open the database, that means
       // the database has been corrupted, so we back it up and then recreate it.
-      catch (e if e.result == Cr.NS_ERROR_FILE_CORRUPTED) {
+      catch (e) {
+        if (e.result != Cr.NS_ERROR_FILE_CORRUPTED)
+          throw e;
         dbConnection = this._dbBackUpAndRecreate(dbService, dbFile,
                                                  dbConnection);
       }

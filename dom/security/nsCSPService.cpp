@@ -1,9 +1,10 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "prlog.h"
+#include "mozilla/Logging.h"
 #include "nsString.h"
 #include "nsCOMPtr.h"
 #include "nsIURI.h"
@@ -26,18 +27,11 @@ using namespace mozilla;
 /* Keeps track of whether or not CSP is enabled */
 bool CSPService::sCSPEnabled = true;
 
-#ifdef PR_LOGGING
-static PRLogModuleInfo* gCspPRLog;
-#endif
+static LazyLogModule gCspPRLog("CSP");
 
 CSPService::CSPService()
 {
   Preferences::AddBoolVarCache(&sCSPEnabled, "security.csp.enable");
-
-#ifdef PR_LOGGING
-  if (!gCspPRLog)
-    gCspPRLog = PR_NewLogModule("CSP");
-#endif
 }
 
 CSPService::~CSPService()
@@ -108,18 +102,20 @@ CSPService::ShouldLoad(uint32_t aContentType,
                        nsIPrincipal *aRequestPrincipal,
                        int16_t *aDecision)
 {
+  MOZ_ASSERT(aContentType ==
+             nsContentUtils::InternalContentPolicyTypeToExternalOrCSPInternal(aContentType),
+             "We should only see external content policy types or CSP special types (preloads or workers) here.");
+
   if (!aContentLocation) {
     return NS_ERROR_FAILURE;
   }
 
-#ifdef PR_LOGGING
-  {
+  if (MOZ_LOG_TEST(gCspPRLog, LogLevel::Debug)) {
     nsAutoCString location;
     aContentLocation->GetSpec(location);
-    PR_LOG(gCspPRLog, PR_LOG_DEBUG,
+    MOZ_LOG(gCspPRLog, LogLevel::Debug,
            ("CSPService::ShouldLoad called for %s", location.get()));
   }
-#endif
 
   // default decision, CSP can revise it if there's a policy to enforce
   *aDecision = nsIContentPolicy::ACCEPT;
@@ -148,16 +144,18 @@ CSPService::ShouldLoad(uint32_t aContentType,
 
   // Cache the app status for this origin.
   uint16_t status = nsIPrincipal::APP_STATUS_NOT_INSTALLED;
-  nsAutoCString contentOrigin;
-  aContentLocation->GetPrePath(contentOrigin);
-  if (aRequestPrincipal && !mAppStatusCache.Get(contentOrigin, &status)) {
-    aRequestPrincipal->GetAppStatus(&status);
-    mAppStatusCache.Put(contentOrigin, status);
+  nsAutoCString sourceOrigin;
+  if (aRequestPrincipal && aRequestOrigin) {
+    aRequestOrigin->GetPrePath(sourceOrigin);
+    if (!mAppStatusCache.Get(sourceOrigin, &status)) {
+      aRequestPrincipal->GetAppStatus(&status);
+      mAppStatusCache.Put(sourceOrigin, status);
+    }
   }
 
   if (status == nsIPrincipal::APP_STATUS_CERTIFIED) {
     // The CSP for certified apps is :
-    // "default-src *; script-src 'self'; object-src 'none'; style-src 'self' app://theme.gaiamobile.org:*"
+    // "default-src * data: blob:; script-src 'self'; object-src 'none'; style-src 'self' app://theme.gaiamobile.org:*"
     // That means we can optimize for this case by:
     // - loading same origin scripts and stylesheets, and stylesheets from the
     //   theme url space.
@@ -170,8 +168,8 @@ CSPService::ShouldLoad(uint32_t aContentType,
         {
           // Whitelist the theme resources.
           auto themeOrigin = Preferences::GetCString("b2g.theme.origin");
-          nsAutoCString sourceOrigin;
-          aRequestOrigin->GetPrePath(sourceOrigin);
+          nsAutoCString contentOrigin;
+          aContentLocation->GetPrePath(contentOrigin);
 
           if (!(sourceOrigin.Equals(contentOrigin) ||
                 (themeOrigin && themeOrigin.Equals(contentOrigin)))) {
@@ -197,51 +195,63 @@ CSPService::ShouldLoad(uint32_t aContentType,
 
   // ----- END OF TEMPORARY FAST PATH FOR CERTIFIED APPS. -----
 
-  // find the principal of the document that initiated this request and see
-  // if it has a CSP policy object
+  // query the principal of the document; if no document is passed, then
+  // fall back to using the requestPrincipal (e.g. service workers do not
+  // pass a document).
   nsCOMPtr<nsINode> node(do_QueryInterface(aRequestContext));
-  nsCOMPtr<nsIPrincipal> principal;
-  nsCOMPtr<nsIContentSecurityPolicy> csp;
-  if (node) {
-    principal = node->NodePrincipal();
-    principal->GetCsp(getter_AddRefs(csp));
+  nsCOMPtr<nsIPrincipal> principal = node ? node->NodePrincipal()
+                                          : aRequestPrincipal;
+  if (!principal) {
+    // if we can't query a principal, then there is nothing to do.
+    return NS_OK;
+  }
+  nsresult rv = NS_OK;
 
-    if (csp) {
-#ifdef PR_LOGGING
-      {
-        uint32_t numPolicies = 0;
-        nsresult rv = csp->GetPolicyCount(&numPolicies);
-        if (NS_SUCCEEDED(rv)) {
-          for (uint32_t i=0; i<numPolicies; i++) {
-            nsAutoString policy;
-            csp->GetPolicy(i, policy);
-            PR_LOG(gCspPRLog, PR_LOG_DEBUG,
-                   ("Document has CSP[%d]: %s", i,
-                   NS_ConvertUTF16toUTF8(policy).get()));
-          }
-        }
-      }
-#endif
+  // 1) Apply speculate CSP for preloads
+  bool isPreload = nsContentUtils::IsPreloadType(aContentType);
+
+  if (isPreload) {
+    nsCOMPtr<nsIContentSecurityPolicy> preloadCsp;
+    rv = principal->GetPreloadCsp(getter_AddRefs(preloadCsp));
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    if (preloadCsp) {
       // obtain the enforcement decision
       // (don't pass aExtra, we use that slot for redirects)
-      csp->ShouldLoad(aContentType,
-                      aContentLocation,
-                      aRequestOrigin,
-                      aRequestContext,
-                      aMimeTypeGuess,
-                      nullptr,
-                      aDecision);
+      rv = preloadCsp->ShouldLoad(aContentType,
+                                  aContentLocation,
+                                  aRequestOrigin,
+                                  aRequestContext,
+                                  aMimeTypeGuess,
+                                  nullptr, // aExtra
+                                  aDecision);
+      NS_ENSURE_SUCCESS(rv, rv);
+
+      // if the preload policy already denied the load, then there
+      // is no point in checking the real policy
+      if (NS_CP_REJECTED(*aDecision)) {
+        return NS_OK;
+      }
     }
   }
-#ifdef PR_LOGGING
-  else {
-    nsAutoCString uriSpec;
-    aContentLocation->GetSpec(uriSpec);
-    PR_LOG(gCspPRLog, PR_LOG_DEBUG,
-           ("COULD NOT get nsINode for location: %s", uriSpec.get()));
-  }
-#endif
 
+  // 2) Apply actual CSP to all loads
+  nsCOMPtr<nsIContentSecurityPolicy> csp;
+  rv = principal->GetCsp(getter_AddRefs(csp));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  if (csp) {
+    // obtain the enforcement decision
+    // (don't pass aExtra, we use that slot for redirects)
+    rv = csp->ShouldLoad(aContentType,
+                         aContentLocation,
+                         aRequestOrigin,
+                         aRequestContext,
+                         aMimeTypeGuess,
+                         nullptr,
+                         aDecision);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
   return NS_OK;
 }
 
@@ -255,6 +265,10 @@ CSPService::ShouldProcess(uint32_t         aContentType,
                           nsIPrincipal     *aRequestPrincipal,
                           int16_t          *aDecision)
 {
+  MOZ_ASSERT(aContentType ==
+             nsContentUtils::InternalContentPolicyTypeToExternalOrCSPInternal(aContentType),
+             "We should only see external content policy types or preloads here.");
+
   if (!aContentLocation)
     return NS_ERROR_FAILURE;
 
@@ -292,16 +306,6 @@ CSPService::AsyncOnChannelRedirect(nsIChannel *oldChannel,
     return NS_OK;
   }
 
-  // Get the LoadingPrincipal and CSP from the loadInfo
-  nsCOMPtr<nsIContentSecurityPolicy> csp;
-  rv = loadInfo->LoadingPrincipal()->GetCsp(getter_AddRefs(csp));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // if there is no CSP, nothing for us to do
-  if (!csp) {
-    return NS_OK;
-  }
-
   /* Since redirecting channels don't call into nsIContentPolicy, we call our
    * Content Policy implementation directly when redirects occur using the
    * information set in the LoadInfo when channels are created.
@@ -312,34 +316,56 @@ CSPService::AsyncOnChannelRedirect(nsIChannel *oldChannel,
   nsCOMPtr<nsIURI> originalUri;
   rv = oldChannel->GetOriginalURI(getter_AddRefs(originalUri));
   NS_ENSURE_SUCCESS(rv, rv);
-  nsContentPolicyType policyType = loadInfo->GetContentPolicyType();
+  nsContentPolicyType policyType = loadInfo->InternalContentPolicyType();
+
+  bool isPreload = nsContentUtils::IsPreloadType(policyType);
+
+  /* On redirect, if the content policy is a preload type, rejecting the preload
+   * results in the load silently failing, so we convert preloads to the actual
+   * type. See Bug 1219453.
+   */
+  policyType =
+    nsContentUtils::InternalContentPolicyTypeToExternalOrWorker(policyType);
 
   int16_t aDecision = nsIContentPolicy::ACCEPT;
-  csp->ShouldLoad(policyType,     // load type per nsIContentPolicy (uint32_t)
-                  newUri,         // nsIURI
-                  nullptr,        // nsIURI
-                  nullptr,        // nsISupports
-                  EmptyCString(), // ACString - MIME guess
-                  originalUri,    // aMimeTypeGuess
-                  &aDecision);
+  // 1) Apply speculative CSP for preloads
+  if (isPreload) {
+    nsCOMPtr<nsIContentSecurityPolicy> preloadCsp;
+    loadInfo->LoadingPrincipal()->GetPreloadCsp(getter_AddRefs(preloadCsp));
 
-#ifdef PR_LOGGING
-  if (newUri) {
-    nsAutoCString newUriSpec("None");
-    newUri->GetSpec(newUriSpec);
-    PR_LOG(gCspPRLog, PR_LOG_DEBUG,
-           ("CSPService::AsyncOnChannelRedirect called for %s",
-            newUriSpec.get()));
+    if (preloadCsp) {
+      // Pass  originalURI as aExtra to indicate the redirect
+      preloadCsp->ShouldLoad(policyType,     // load type per nsIContentPolicy (uint32_t)
+                             newUri,         // nsIURI
+                             nullptr,        // nsIURI
+                             nullptr,        // nsISupports
+                             EmptyCString(), // ACString - MIME guess
+                             originalUri,    // aExtra
+                             &aDecision);
+
+      // if the preload policy already denied the load, then there
+      // is no point in checking the real policy
+      if (NS_CP_REJECTED(aDecision)) {
+        autoCallback.DontCallback();
+        return NS_BINDING_FAILED;
+      }
+    }
   }
-  if (aDecision == 1) {
-    PR_LOG(gCspPRLog, PR_LOG_DEBUG,
-           ("CSPService::AsyncOnChannelRedirect ALLOWING request."));
+
+  // 2) Apply actual CSP to all loads
+  nsCOMPtr<nsIContentSecurityPolicy> csp;
+  loadInfo->LoadingPrincipal()->GetCsp(getter_AddRefs(csp));
+
+  if (csp) {
+    // Pass  originalURI as aExtra to indicate the redirect
+    csp->ShouldLoad(policyType,     // load type per nsIContentPolicy (uint32_t)
+                    newUri,         // nsIURI
+                    nullptr,        // nsIURI
+                    nullptr,        // nsISupports
+                    EmptyCString(), // ACString - MIME guess
+                    originalUri,    // aExtra
+                    &aDecision);
   }
-  else {
-    PR_LOG(gCspPRLog, PR_LOG_DEBUG,
-           ("CSPService::AsyncOnChannelRedirect CANCELLING request."));
-  }
-#endif
 
   // if ShouldLoad doesn't accept the load, cancel the request
   if (!NS_CP_ACCEPTED(aDecision)) {

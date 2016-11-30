@@ -9,18 +9,15 @@
 
 #include "vm/RegExpObject.h"
 
-JSObject*
-js_InitRegExpClass(JSContext* cx, js::HandleObject obj);
-
-bool
-regexp_flags(JSContext* cx, unsigned argc, JS::Value* vp);
-
 /*
  * The following builtin natives are extern'd for pointer comparison in
  * other parts of the engine.
  */
 
 namespace js {
+
+JSObject*
+InitRegExpClass(JSContext* cx, HandleObject obj);
 
 // Whether RegExp statics should be updated with the input and results of a
 // regular expression execution.
@@ -92,6 +89,16 @@ regexp_test_no_statics(JSContext* cx, unsigned argc, Value* vp);
  */
 extern bool
 regexp_construct_no_statics(JSContext* cx, unsigned argc, Value* vp);
+
+extern bool
+IsRegExp(JSContext* cx, HandleValue value, bool* result);
+
+// RegExp ClassSpec members used in RegExpObject.cpp.
+extern bool
+regexp_construct(JSContext* cx, unsigned argc, Value* vp);
+extern const JSPropertySpec regexp_static_props[];
+extern const JSPropertySpec regexp_properties[];
+extern const JSFunctionSpec regexp_methods[];
 
 } /* namespace js */
 

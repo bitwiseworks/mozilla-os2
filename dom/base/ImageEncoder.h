@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -10,8 +11,8 @@
 #include "nsError.h"
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/HTMLCanvasElementBinding.h"
+#include "mozilla/UniquePtr.h"
 #include "nsLayoutUtils.h"
-#include "nsNetUtil.h"
 #include "nsSize.h"
 
 class nsICanvasRenderingContextInternal;
@@ -19,8 +20,9 @@ class nsICanvasRenderingContextInternal;
 namespace mozilla {
 
 namespace layers {
+class AsyncCanvasRenderer;
 class Image;
-}
+} // namespace layers
 
 namespace dom {
 
@@ -40,6 +42,7 @@ public:
                               const nsAString& aOptions,
                               const nsIntSize aSize,
                               nsICanvasRenderingContextInternal* aContext,
+                              layers::AsyncCanvasRenderer* aRenderer,
                               nsIInputStream** aStream);
 
   // Extracts data asynchronously. aType may change to "image/png" if we had to
@@ -56,7 +59,7 @@ public:
   static nsresult ExtractDataAsync(nsAString& aType,
                                    const nsAString& aOptions,
                                    bool aUsingCustomOptions,
-                                   uint8_t* aImageBuffer,
+                                   UniquePtr<uint8_t[]> aImageBuffer,
                                    int32_t aFormat,
                                    const nsIntSize aSize,
                                    EncodeCompleteCallback* aEncodeCallback);
@@ -84,7 +87,7 @@ public:
                                  nsIInputStream** aStream);
 
 private:
-  // When called asynchronously, aContext is null.
+  // When called asynchronously, aContext and aRenderer are null.
   static nsresult
   ExtractDataInternal(const nsAString& aType,
                       const nsAString& aOptions,
@@ -93,6 +96,7 @@ private:
                       const nsIntSize aSize,
                       layers::Image* aImage,
                       nsICanvasRenderingContextInternal* aContext,
+                      layers::AsyncCanvasRenderer* aRenderer,
                       nsIInputStream** aStream,
                       imgIEncoder* aEncoder);
 
@@ -115,7 +119,7 @@ class EncodeCompleteCallback
 public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(EncodeCompleteCallback)
 
-  virtual nsresult ReceiveBlob(already_AddRefed<File> aBlob) = 0;
+  virtual nsresult ReceiveBlob(already_AddRefed<Blob> aBlob) = 0;
 
 protected:
   virtual ~EncodeCompleteCallback() {}

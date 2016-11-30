@@ -41,26 +41,25 @@ class SymbolObject : public NativeObject
 
     static bool construct(JSContext* cx, unsigned argc, Value* vp);
 
-    static bool convert(JSContext* cx, HandleObject obj, JSType type, MutableHandleValue vp);
-
     // Static methods.
     static bool for_(JSContext* cx, unsigned argc, Value* vp);
     static bool keyFor(JSContext* cx, unsigned argc, Value* vp);
 
     // Methods defined on Symbol.prototype.
-    static bool toString_impl(JSContext* cx, CallArgs args);
+    static bool toString_impl(JSContext* cx, const CallArgs& args);
     static bool toString(JSContext* cx, unsigned argc, Value* vp);
-    static bool valueOf_impl(JSContext* cx, CallArgs args);
+    static bool valueOf_impl(JSContext* cx, const CallArgs& args);
     static bool valueOf(JSContext* cx, unsigned argc, Value* vp);
+    static bool toPrimitive(JSContext* cx, unsigned argc, Value* vp);
 
     static const JSPropertySpec properties[];
     static const JSFunctionSpec methods[];
     static const JSFunctionSpec staticMethods[];
 };
 
-} /* namespace js */
-
 extern JSObject*
-js_InitSymbolClass(JSContext* cx, js::HandleObject obj);
+InitSymbolClass(JSContext* cx, HandleObject obj);
+
+} /* namespace js */
 
 #endif /* builtin_SymbolObject_h */

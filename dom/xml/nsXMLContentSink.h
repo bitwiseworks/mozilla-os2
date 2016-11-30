@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -22,13 +23,12 @@ class nsIDocument;
 class nsIURI;
 class nsIContent;
 class nsIParser;
-class nsViewManager;
 
 namespace mozilla {
 namespace dom {
 class NodeInfo;
-}
-}
+} // namespace dom
+} // namespace mozilla
 
 typedef enum {
   eXMLContentSinkState_InProlog,
@@ -171,18 +171,15 @@ protected:
 
   nsCOMPtr<nsIContent> mDocElement;
   nsCOMPtr<nsIContent> mCurrentHead;  // When set, we're in an XHTML <haed>
-  char16_t*       mText;
 
   XMLContentSinkState mState;
 
+  // The length of the valid data in mText.
   int32_t mTextLength;
-  int32_t mTextSize;
   
   int32_t mNotifyLevel;
   nsCOMPtr<nsIContent> mLastTextNode;
-  int32_t mLastTextNodeSize;
 
-  uint8_t mConstrainSize : 1;
   uint8_t mPrettyPrintXML : 1;
   uint8_t mPrettyPrintHasSpecialRoot : 1;
   uint8_t mPrettyPrintHasFactoredElements : 1;
@@ -194,6 +191,10 @@ protected:
   nsTArray<StackNode>              mContentStack;
 
   nsCOMPtr<nsIDocumentTransformer> mXSLTProcessor;
+
+  static const int NS_ACCUMULATION_BUFFER_SIZE = 4096;
+  // Our currently accumulated text that we have not flushed to a textnode yet.
+  char16_t mText[NS_ACCUMULATION_BUFFER_SIZE];
 };
 
 #endif // nsXMLContentSink_h__

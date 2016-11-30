@@ -15,7 +15,6 @@ namespace js {
 namespace jit {
 
 struct SafepointSlotEntry;
-struct SafepointNunboxEntry;
 
 class LAllocation;
 class LSafepoint;
@@ -58,6 +57,9 @@ class SafepointWriter
     const uint8_t* buffer() const {
         return stream_.buffer();
     }
+    bool oom() const {
+        return stream_.oom();
+    }
 };
 
 class SafepointReader
@@ -92,20 +94,20 @@ class SafepointReader
     uint32_t osiCallPointOffset() const {
         return osiCallPointOffset_;
     }
-    GeneralRegisterSet gcSpills() const {
-        return gcSpills_;
+    LiveGeneralRegisterSet gcSpills() const {
+        return LiveGeneralRegisterSet(gcSpills_);
     }
-    GeneralRegisterSet slotsOrElementsSpills() const {
-        return slotsOrElementsSpills_;
+    LiveGeneralRegisterSet slotsOrElementsSpills() const {
+        return LiveGeneralRegisterSet(slotsOrElementsSpills_);
     }
-    GeneralRegisterSet valueSpills() const {
-        return valueSpills_;
+    LiveGeneralRegisterSet valueSpills() const {
+        return LiveGeneralRegisterSet(valueSpills_);
     }
-    GeneralRegisterSet allGprSpills() const {
-        return allGprSpills_;
+    LiveGeneralRegisterSet allGprSpills() const {
+        return LiveGeneralRegisterSet(allGprSpills_);
     }
-    FloatRegisterSet allFloatSpills() const {
-        return allFloatSpills_;
+    LiveFloatRegisterSet allFloatSpills() const {
+        return LiveFloatRegisterSet(allFloatSpills_);
     }
     uint32_t osiReturnPointOffset() const;
 

@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -13,6 +14,8 @@
 #include "nsString.h"
 
 #include "nsNetUtil.h"
+#include "nsNetCID.h"
+#include "nsIProtocolHandler.h"
 
 #include "nsIDNSListener.h"
 #include "nsIWebProgressListener.h"
@@ -137,7 +140,10 @@ nsHTMLDNSPrefetch::Prefetch(const nsAString &hostname, uint16_t flags)
     // considers empty strings to be valid hostnames
     if (!hostname.IsEmpty() &&
         net_IsValidHostName(NS_ConvertUTF16toUTF8(hostname))) {
-      gNeckoChild->SendHTMLDNSPrefetch(nsAutoString(hostname), flags);
+      // during shutdown gNeckoChild might be null
+      if (gNeckoChild) {
+        gNeckoChild->SendHTMLDNSPrefetch(nsAutoString(hostname), flags);
+      }
     }
     return NS_OK;
   }
@@ -179,8 +185,7 @@ nsHTMLDNSPrefetch::CancelPrefetch(Link *aElement,
     return NS_ERROR_NOT_AVAILABLE;
 
   nsAutoString hostname;
-  ErrorResult rv;
-  aElement->GetHostname(hostname, rv);
+  aElement->GetHostname(hostname);
   return CancelPrefetch(hostname, flags, aReason);
 }
 
@@ -195,8 +200,11 @@ nsHTMLDNSPrefetch::CancelPrefetch(const nsAString &hostname,
     // considers empty strings to be valid hostnames
     if (!hostname.IsEmpty() &&
         net_IsValidHostName(NS_ConvertUTF16toUTF8(hostname))) {
-      gNeckoChild->SendCancelHTMLDNSPrefetch(nsString(hostname), flags,
-                                             aReason);
+      // during shutdown gNeckoChild might be null
+      if (gNeckoChild) {
+        gNeckoChild->SendCancelHTMLDNSPrefetch(nsString(hostname), flags,
+                                               aReason);
+      }
     }
     return NS_OK;
   }
@@ -324,8 +332,11 @@ nsHTMLDNSPrefetch::nsDeferrals::SubmitQueue()
 
         if (!hostName.IsEmpty() && NS_SUCCEEDED(rv) && !isLocalResource) {
           if (IsNeckoChild()) {
-            gNeckoChild->SendHTMLDNSPrefetch(NS_ConvertUTF8toUTF16(hostName),
-                                           mEntries[mTail].mFlags);
+            // during shutdown gNeckoChild might be null
+            if (gNeckoChild) {
+              gNeckoChild->SendHTMLDNSPrefetch(NS_ConvertUTF8toUTF16(hostName),
+                                               mEntries[mTail].mFlags);
+            }
           } else {
             nsCOMPtr<nsICancelable> tmpOutstanding;
 

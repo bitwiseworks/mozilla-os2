@@ -130,21 +130,6 @@ std::string SysInfo::OperatingSystemName() {
 }
 
 // static
-std::string SysInfo::OperatingSystemVersion() {
-  utsname info;
-  if (uname(&info) < 0) {
-    NOTREACHED();
-    return "";
-  }
-#if defined(OS_OS2)
-  // on OS/2 EMX, release is always "1" and version cotanis "2.xx"
-  return std::string(info.version);
-#else
-  return std::string(info.release);
-#endif
-}
-
-// static
 std::string SysInfo::CPUArchitecture() {
   utsname info;
   if (uname(&info) < 0) {

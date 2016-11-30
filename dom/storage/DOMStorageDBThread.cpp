@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -19,7 +20,7 @@
 #include "mozIStorageValueArray.h"
 #include "mozIStorageFunction.h"
 #include "nsIObserverService.h"
-#include "nsIVariant.h"
+#include "nsVariant.h"
 #include "mozilla/IOInterposer.h"
 #include "mozilla/Services.h"
 
@@ -115,6 +116,7 @@ DOMStorageDBThread::Shutdown()
 void
 DOMStorageDBThread::SyncPreload(DOMStorageCacheBridge* aCache, bool aForceSync)
 {
+  PROFILER_LABEL_FUNC(js::ProfileEntry::Category::STORAGE);
   if (!aForceSync && aCache->LoadedCount()) {
     // Preload already started for this cache, just wait for it to finish.
     // LoadWait will exit after LoadDone on the cache has been called.
@@ -169,24 +171,13 @@ DOMStorageDBThread::ShouldPreloadScope(const nsACString& aScope)
   return mScopesHavingData.Contains(aScope);
 }
 
-namespace { // anon
-
-PLDHashOperator
-GetScopesHavingDataEnum(nsCStringHashKey* aKey, void* aArg)
-{
-  InfallibleTArray<nsCString>* scopes =
-      static_cast<InfallibleTArray<nsCString>*>(aArg);
-  scopes->AppendElement(aKey->GetKey());
-  return PL_DHASH_NEXT;
-}
-
-} // anon
-
 void
 DOMStorageDBThread::GetScopesHavingData(InfallibleTArray<nsCString>* aScopes)
 {
   MonitorAutoLock monitor(mThreadObserver->GetMonitor());
-  mScopesHavingData.EnumerateEntries(GetScopesHavingDataEnum, aScopes);
+  for (auto iter = mScopesHavingData.Iter(); !iter.Done(); iter.Next()) {
+    aScopes->AppendElement(iter.Get()->GetKey());
+  }
 }
 
 nsresult
@@ -197,16 +188,16 @@ DOMStorageDBThread::InsertDBOp(DOMStorageDBThread::DBOperation* aOperation)
   // Sentinel to don't forget to delete the operation when we exit early.
   nsAutoPtr<DOMStorageDBThread::DBOperation> opScope(aOperation);
 
-  if (mStopIOThread) {
-    // Thread use after shutdown demanded.
-    MOZ_ASSERT(false);
-    return NS_ERROR_NOT_INITIALIZED;
-  }
-
   if (NS_FAILED(mStatus)) {
     MonitorAutoUnlock unlock(mThreadObserver->GetMonitor());
     aOperation->Finalize(mStatus);
     return mStatus;
+  }
+
+  if (mStopIOThread) {
+    // Thread use after shutdown demanded.
+    MOZ_ASSERT(false);
+    return NS_ERROR_NOT_INITIALIZED;
   }
 
   switch (aOperation->Type()) {
@@ -372,15 +363,13 @@ DOMStorageDBThread::ThreadObserver::OnDispatchedEvent(nsIThreadInternal *thread)
 
 NS_IMETHODIMP
 DOMStorageDBThread::ThreadObserver::OnProcessNextEvent(nsIThreadInternal *thread,
-                                       bool mayWait,
-                                       uint32_t recursionDepth)
+                                       bool mayWait)
 {
   return NS_OK;
 }
 
 NS_IMETHODIMP
 DOMStorageDBThread::ThreadObserver::AfterProcessNextEvent(nsIThreadInternal *thread,
-                                          uint32_t recursionDepth,
                                           bool eventWasProcessed)
 {
   return NS_OK;
@@ -390,7 +379,7 @@ DOMStorageDBThread::ThreadObserver::AfterProcessNextEvent(nsIThreadInternal *thr
 extern void
 ReverseString(const nsCSubstring& aSource, nsCSubstring& aResult);
 
-namespace { // anon
+namespace {
 
 class nsReverseStringSQLFunction final : public mozIStorageFunction
 {
@@ -415,19 +404,15 @@ nsReverseStringSQLFunction::OnFunctionCall(
   nsAutoCString result;
   ReverseString(stringToReverse, result);
 
-  nsCOMPtr<nsIWritableVariant> outVar(do_CreateInstance(
-      NS_VARIANT_CONTRACTID, &rv));
-  NS_ENSURE_SUCCESS(rv, rv);
-
+  RefPtr<nsVariant> outVar(new nsVariant());
   rv = outVar->SetAsAUTF8String(result);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  *aResult = outVar.get();
-  outVar.forget();
+  outVar.forget(aResult);
   return NS_OK;
 }
 
-} // anon
+} // namespace
 
 nsresult
 DOMStorageDBThread::OpenDatabaseConnection()
@@ -741,7 +726,7 @@ DOMStorageDBThread::NotifyFlushCompletion()
 {
 #ifdef DOM_STORAGE_TESTS
   if (!NS_IsMainThread()) {
-    nsRefPtr<nsRunnableMethod<DOMStorageDBThread, void, false> > event =
+    RefPtr<nsRunnableMethod<DOMStorageDBThread, void, false> > event =
       NS_NewNonOwningRunnableMethod(this, &DOMStorageDBThread::NotifyFlushCompletion);
     NS_DispatchToMainThread(event);
     return;
@@ -1075,7 +1060,7 @@ DOMStorageDBThread::PendingOperations::HasTasks()
   return !!mUpdates.Count() || !!mClears.Count();
 }
 
-namespace { // anon
+namespace {
 
 PLDHashOperator
 ForgetUpdatesForScope(const nsACString& aMapping,
@@ -1097,7 +1082,7 @@ ForgetUpdatesForScope(const nsACString& aMapping,
   return PL_DHASH_REMOVE;
 }
 
-} // anon
+} // namespace
 
 bool
 DOMStorageDBThread::PendingOperations::CheckForCoalesceOpportunity(DBOperation* aNewOp,
@@ -1184,7 +1169,7 @@ DOMStorageDBThread::PendingOperations::Add(DOMStorageDBThread::DBOperation* aOpe
   }
 }
 
-namespace { // anon
+namespace {
 
 PLDHashOperator
 CollectTasks(const nsACString& aMapping, nsAutoPtr<DOMStorageDBThread::DBOperation>& aOperation, void* aArg)
@@ -1196,7 +1181,7 @@ CollectTasks(const nsACString& aMapping, nsAutoPtr<DOMStorageDBThread::DBOperati
   return PL_DHASH_NEXT;
 }
 
-} // anon
+} // namespace
 
 bool
 DOMStorageDBThread::PendingOperations::Prepare()
@@ -1267,62 +1252,44 @@ DOMStorageDBThread::PendingOperations::Finalize(nsresult aRv)
   return true;
 }
 
-namespace { // anon
+namespace {
 
-class FindPendingOperationForScopeData
+bool
+FindPendingClearForScope(const nsACString& aScope,
+                         DOMStorageDBThread::DBOperation* aPendingOperation)
 {
-public:
-  explicit FindPendingOperationForScopeData(const nsACString& aScope) : mScope(aScope), mFound(false) {}
-  nsCString mScope;
-  bool mFound;
-};
-
-PLDHashOperator
-FindPendingClearForScope(const nsACString& aMapping,
-                         DOMStorageDBThread::DBOperation* aPendingOperation,
-                         void* aArg)
-{
-  FindPendingOperationForScopeData* data =
-    static_cast<FindPendingOperationForScopeData*>(aArg);
-
   if (aPendingOperation->Type() == DOMStorageDBThread::DBOperation::opClearAll) {
-    data->mFound = true;
-    return PL_DHASH_STOP;
+    return true;
   }
 
   if (aPendingOperation->Type() == DOMStorageDBThread::DBOperation::opClear &&
-      data->mScope == aPendingOperation->Scope()) {
-    data->mFound = true;
-    return PL_DHASH_STOP;
+      aScope == aPendingOperation->Scope()) {
+    return true;
   }
 
   if (aPendingOperation->Type() == DOMStorageDBThread::DBOperation::opClearMatchingScope &&
-      StringBeginsWith(data->mScope, aPendingOperation->Scope())) {
-    data->mFound = true;
-    return PL_DHASH_STOP;
+      StringBeginsWith(aScope, aPendingOperation->Scope())) {
+    return true;
   }
 
-  return PL_DHASH_NEXT;
+  return false;
 }
 
-} // anon
+} // namespace
 
 bool
 DOMStorageDBThread::PendingOperations::IsScopeClearPending(const nsACString& aScope)
 {
   // Called under the lock
 
-  FindPendingOperationForScopeData data(aScope);
-  mClears.EnumerateRead(FindPendingClearForScope, &data);
-  if (data.mFound) {
-    return true;
+  for (auto iter = mClears.Iter(); !iter.Done(); iter.Next()) {
+    if (FindPendingClearForScope(aScope, iter.UserData())) {
+      return true;
+    }
   }
 
   for (uint32_t i = 0; i < mExecList.Length(); ++i) {
-    DOMStorageDBThread::DBOperation* task = mExecList[i];
-    FindPendingClearForScope(EmptyCString(), task, &data);
-
-    if (data.mFound) {
+    if (FindPendingClearForScope(aScope, mExecList[i])) {
       return true;
     }
   }
@@ -1330,45 +1297,37 @@ DOMStorageDBThread::PendingOperations::IsScopeClearPending(const nsACString& aSc
   return false;
 }
 
-namespace { // anon
+namespace {
 
-PLDHashOperator
-FindPendingUpdateForScope(const nsACString& aMapping,
-                          DOMStorageDBThread::DBOperation* aPendingOperation,
-                          void* aArg)
+bool
+FindPendingUpdateForScope(const nsACString& aScope,
+                          DOMStorageDBThread::DBOperation* aPendingOperation)
 {
-  FindPendingOperationForScopeData* data =
-    static_cast<FindPendingOperationForScopeData*>(aArg);
-
   if ((aPendingOperation->Type() == DOMStorageDBThread::DBOperation::opAddItem ||
        aPendingOperation->Type() == DOMStorageDBThread::DBOperation::opUpdateItem ||
        aPendingOperation->Type() == DOMStorageDBThread::DBOperation::opRemoveItem) &&
-       data->mScope == aPendingOperation->Scope()) {
-    data->mFound = true;
-    return PL_DHASH_STOP;
+       aScope == aPendingOperation->Scope()) {
+    return true;
   }
 
-  return PL_DHASH_NEXT;
+  return false;
 }
 
-} // anon
+} // namespace
 
 bool
 DOMStorageDBThread::PendingOperations::IsScopeUpdatePending(const nsACString& aScope)
 {
   // Called under the lock
 
-  FindPendingOperationForScopeData data(aScope);
-  mUpdates.EnumerateRead(FindPendingUpdateForScope, &data);
-  if (data.mFound) {
-    return true;
+  for (auto iter = mUpdates.Iter(); !iter.Done(); iter.Next()) {
+    if (FindPendingUpdateForScope(aScope, iter.UserData())) {
+      return true;
+    }
   }
 
   for (uint32_t i = 0; i < mExecList.Length(); ++i) {
-    DOMStorageDBThread::DBOperation* task = mExecList[i];
-    FindPendingUpdateForScope(EmptyCString(), task, &data);
-
-    if (data.mFound) {
+    if (FindPendingUpdateForScope(aScope, mExecList[i])) {
       return true;
     }
   }
@@ -1376,5 +1335,5 @@ DOMStorageDBThread::PendingOperations::IsScopeUpdatePending(const nsACString& aS
   return false;
 }
 
-} // ::dom
-} // ::mozilla
+} // namespace dom
+} // namespace mozilla

@@ -4,12 +4,13 @@
 
 "use strict";
 
-const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
+var { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/Troubleshoot.jsm");
 Cu.import("resource://gre/modules/ResetProfile.jsm");
+Cu.import("resource://gre/modules/AppConstants.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "PluralForm",
                                   "resource://gre/modules/PluralForm.jsm");
@@ -31,13 +32,13 @@ window.addEventListener("load", function onload(event) {
 // Each property in this object corresponds to a property in Troubleshoot.jsm's
 // snapshot data.  Each function is passed its property's corresponding data,
 // and it's the function's job to update the page with it.
-let snapshotFormatters = {
+var snapshotFormatters = {
 
   application: function application(data) {
     $("application-box").textContent = data.name;
     $("useragent-box").textContent = data.userAgent;
     $("supportLink").href = data.supportURL;
-    let version = data.version;
+    let version = AppConstants.MOZ_APP_VERSION_DISPLAY;
     if (data.vendor)
       version += " (" + data.vendor + ")";
     $("version-box").textContent = version;
@@ -47,10 +48,14 @@ let snapshotFormatters = {
 
     $("multiprocess-box").textContent = stringBundle().formatStringFromName("multiProcessStatus",
       [data.numRemoteWindows, data.numTotalWindows, data.remoteAutoStart], 3);
+
+    $("safemode-box").textContent = data.safeMode;
   },
 
-#ifdef MOZ_CRASHREPORTER
   crashes: function crashes(data) {
+    if (!AppConstants.MOZ_CRASHREPORTER)
+      return;
+
     let strings = stringBundle();
     let daysRange = Troubleshoot.kMaxCrashAge / (24 * 60 * 60 * 1000);
     $("crashes-title").textContent =
@@ -114,7 +119,6 @@ let snapshotFormatters = {
       ]);
     }));
   },
-#endif
 
   extensions: function extensions(data) {
     $.append($("extensions-tbody"), data.map(function (extension) {
@@ -138,6 +142,7 @@ let snapshotFormatters = {
         $.new("td", [
           $.new("a", experiment.detailURL, null, {href : experiment.detailURL,})
         ]),
+        $.new("td", experiment.branch),
       ]);
     }));
   },
@@ -168,8 +173,57 @@ let snapshotFormatters = {
   },
 
   graphics: function graphics(data) {
+    let strings = stringBundle();
+
+    function localizedMsg(msgArray) {
+      let nameOrMsg = msgArray.shift();
+      if (msgArray.length) {
+        // formatStringFromName logs an NS_ASSERTION failure otherwise that says
+        // "use GetStringFromName".  Lame.
+        try {
+          return strings.formatStringFromName(nameOrMsg, msgArray,
+                                              msgArray.length);
+        }
+        catch (err) {
+          // Throws if nameOrMsg is not a name in the bundle.  This shouldn't
+          // actually happen though, since msgArray.length > 1 => nameOrMsg is a
+          // name in the bundle, not a message, and the remaining msgArray
+          // elements are parameters.
+          return nameOrMsg;
+        }
+      }
+      try {
+        return strings.GetStringFromName(nameOrMsg);
+      }
+      catch (err) {
+        // Throws if nameOrMsg is not a name in the bundle.
+      }
+      return nameOrMsg;
+    }
+
+    // Read APZ info out of data.info, stripping it out in the process.
+    let apzInfo = [];
+    let formatApzInfo = function (info) {
+      let out = [];
+      for (let type of ['Wheel', 'Touch', 'Drag']) {
+        let key = 'Apz' + type + 'Input';
+
+        if (!(key in info))
+          continue;
+
+        delete info[key];
+
+        let message = localizedMsg([type.toLowerCase() + 'Enabled']);
+        out.push(message);
+      }
+
+      return out;
+    };
+
     // graphics-info-properties tbody
     if ("info" in data) {
+      apzInfo = formatApzInfo(data.info);
+
       let trs = sortedArrayFromObject(data.info).map(function ([prop, val]) {
         return $.new("tr", [
           $.new("th", prop, "column"),
@@ -213,34 +267,12 @@ let snapshotFormatters = {
 
     // graphics-tbody tbody
 
-    function localizedMsg(msgArray) {
-      let nameOrMsg = msgArray.shift();
-      if (msgArray.length) {
-        // formatStringFromName logs an NS_ASSERTION failure otherwise that says
-        // "use GetStringFromName".  Lame.
-        try {
-          return strings.formatStringFromName(nameOrMsg, msgArray,
-                                              msgArray.length);
-        }
-        catch (err) {
-          // Throws if nameOrMsg is not a name in the bundle.  This shouldn't
-          // actually happen though, since msgArray.length > 1 => nameOrMsg is a
-          // name in the bundle, not a message, and the remaining msgArray
-          // elements are parameters.
-          return nameOrMsg;
-        }
-      }
-      try {
-        return strings.GetStringFromName(nameOrMsg);
-      }
-      catch (err) {
-        // Throws if nameOrMsg is not a name in the bundle.
-      }
-      return nameOrMsg;
-    }
-
     let out = Object.create(data);
-    let strings = stringBundle();
+
+    if (apzInfo.length == 0)
+      out.asyncPanZoom = localizedMsg(["apzNone"]);
+    else
+      out.asyncPanZoom = apzInfo.join("; ");
 
     out.acceleratedWindows =
       data.numAcceleratedWindows + "/" + data.numTotalWindows;
@@ -342,24 +374,27 @@ let snapshotFormatters = {
     $("prefs-user-js-section").className = "";
   },
 
-#if defined(XP_LINUX) && defined(MOZ_SANDBOX)
   sandbox: function sandbox(data) {
-    const keys = ["hasSeccompBPF", "canSandboxContent", "canSandboxMedia"];
+    if (AppConstants.platform != "linux" || !AppConstants.MOZ_SANDBOX)
+      return;
+
     let strings = stringBundle();
     let tbody = $("sandbox-tbody");
-    for (let key of keys) {
-      if (key in data) {
-	tbody.appendChild($.new("tr", [
-	  $.new("th", strings.GetStringFromName(key), "column"),
-	  $.new("td", data[key])
-	]));
+    for (let key in data) {
+      // Simplify the display a little in the common case.
+      if (key === "hasPrivilegedUserNamespaces" &&
+          data[key] === data["hasUserNamespaces"]) {
+        continue;
       }
+      tbody.appendChild($.new("tr", [
+        $.new("th", strings.GetStringFromName(key), "column"),
+        $.new("td", data[key])
+      ]));
     }
   },
-#endif
 };
 
-let $ = document.getElementById.bind(document);
+var $ = document.getElementById.bind(document);
 
 $.new = function $_new(tag, textContentOrChildren, className, attributes) {
   let elt = document.createElement(tag);
@@ -437,15 +472,15 @@ function copyRawDataToClipboard(button) {
       Cc["@mozilla.org/widget/clipboard;1"].
         getService(Ci.nsIClipboard).
         setData(transferable, null, Ci.nsIClipboard.kGlobalClipboard);
-#ifdef ANDROID
-      // Present a toast notification.
-      let message = {
-        type: "Toast:Show",
-        message: stringBundle().GetStringFromName("rawDataCopied"),
-        duration: "short"
-      };
-      Services.androidBridge.handleGeckoMessage(message);
-#endif
+      if (AppConstants.platform == "android") {
+        // Present a toast notification.
+        let message = {
+          type: "Toast:Show",
+          message: stringBundle().GetStringFromName("rawDataCopied"),
+          duration: "short"
+        };
+        Services.androidBridge.handleGeckoMessage(message);
+      }
     });
   }
   catch (err) {
@@ -491,15 +526,15 @@ function copyContentsToClipboard() {
                     .getService(Ci.nsIClipboard);
   clipboard.setData(transferable, null, clipboard.kGlobalClipboard);
 
-#ifdef ANDROID
-  // Present a toast notification.
-  let message = {
-    type: "Toast:Show",
-    message: stringBundle().GetStringFromName("textCopied"),
-    duration: "short"
-  };
-  Services.androidBridge.handleGeckoMessage(message);
-#endif
+  if (AppConstants.platform == "android") {
+    // Present a toast notification.
+    let message = {
+      type: "Toast:Show",
+      message: stringBundle().GetStringFromName("textCopied"),
+      duration: "short"
+    };
+    Services.androidBridge.handleGeckoMessage(message);
+  }
 }
 
 // Return the plain text representation of an element.  Do a little bit
@@ -509,9 +544,9 @@ function createTextForElement(elem) {
   let text = serializer.serialize(elem);
 
   // Actual CR/LF pairs are needed for some Windows text editors.
-#ifdef XP_WIN
-  text = text.replace(/\n/g, "\r\n");
-#endif
+  if (AppConstants.platform == "win") {
+    text = text.replace(/\n/g, "\r\n");
+  }
 
   return text;
 }

@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -18,7 +20,6 @@ namespace dom {
 
 class Promise;
 class DataStore;
-class DataStoreImpl;
 class StringOrUnsignedLong;
 class OwningStringOrUnsignedLong;
 
@@ -40,7 +41,7 @@ public:
   static already_AddRefed<WorkerDataStore> Constructor(GlobalObject& aGlobal,
                                                        ErrorResult& aRv);
 
-  virtual JSObject* WrapObject(JSContext *aCx) override;
+  virtual JSObject* WrapObject(JSContext *aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   // WebIDL (public APIs)
 
@@ -95,11 +96,11 @@ protected:
 
 private:
   nsMainThreadPtrHandle<DataStore> mBackingStore;
-  nsRefPtr<DataStoreChangeEventProxy> mEventProxy;
+  RefPtr<DataStoreChangeEventProxy> mEventProxy;
 };
 
 class DataStoreChangeEventProxy final : public nsIDOMEventListener
-                                          , public WorkerFeature
+                                      , public WorkerFeature
 {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
@@ -122,7 +123,7 @@ private:
 
   WorkerPrivate* mWorkerPrivate;
 
-  nsRefPtr<WorkerDataStore> mWorkerStore;
+  RefPtr<WorkerDataStore> mWorkerStore;
 
   bool mCleanedUp; // To specify if the worker has been cancelled.
 

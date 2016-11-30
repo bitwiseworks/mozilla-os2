@@ -259,7 +259,9 @@ private:
     void ComputeClientRectUsingScreen(nsRect *outRect);
     void ComputeFullAreaUsingScreen(nsRect *outRect);
     void FindScreen(nsIScreen **outScreen);
-    void CalcPrintingSize();
+
+    // Return false if the surface is not right
+    bool CalcPrintingSize();
     void UpdateAppUnitsForFullZoom();
 
     nscoord  mWidth;
@@ -275,9 +277,9 @@ private:
     nsCOMPtr<nsIWidget>            mWidget;
     nsCOMPtr<nsIScreenManager>     mScreenManager;
     nsCOMPtr<nsIDeviceContextSpec> mDeviceContextSpec;
-    nsRefPtr<gfxASurface>          mPrintingSurface;
+    RefPtr<gfxASurface>          mPrintingSurface;
 #ifdef XP_MACOSX
-    nsRefPtr<gfxASurface>          mCachedPrintingSurface;
+    RefPtr<gfxASurface>          mCachedPrintingSurface;
 #endif
 };
 

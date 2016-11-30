@@ -11,13 +11,6 @@
 #include "js/TypeDecls.h"
 class nsPresContext;
 class nsIPresShell;
-
-namespace mozilla {
-namespace dom {
-class URLSearchParams;
-}
-}
-
 %}
 
 /**
@@ -26,16 +19,13 @@ class URLSearchParams;
 
 [ptr] native nsPresContext(nsPresContext);
 [ptr] native nsIPresShell(nsIPresShell);
-[ptr] native URLSearchParams(mozilla::dom::URLSearchParams);
 
 interface nsIURI;
 interface nsIChannel;
 interface nsIContentViewer;
-interface nsIURIContentListener;
 interface nsIDOMEventTarget;
 interface nsIDocShellLoadInfo;
 interface nsIEditor;
-interface nsIWebNavigation;
 interface nsISimpleEnumerator;
 interface nsIInputStream;
 interface nsIRequest;
@@ -46,15 +36,14 @@ interface nsIScriptGlobalObject;
 interface nsIDOMStorage;
 interface nsIPrincipal;
 interface nsIWebBrowserPrint;
-interface nsIVariant;
 interface nsIPrivacyTransitionObserver;
 interface nsIReflowObserver;
 interface nsIScrollObserver;
 interface nsITabParent;
- 
+
 typedef unsigned long nsLoadFlags;
 
-[scriptable, builtinclass, uuid(f84b1ae4-2f78-4bad-b36a-6a8516ee6e40)]
+[scriptable, builtinclass, uuid(63adb599-6dc9-4746-972e-c22e9018020b)]
 interface nsIDocShell : nsIDocShellTreeItem
 {
   /**
@@ -65,7 +54,7 @@ interface nsIDocShell : nsIDocShellTreeItem
    *
    * @param uri        - The URI to load.
    * @param loadInfo   - This is the extended load info for this load.  This
-   *                     most often will be null, but if you need to do 
+   *                     most often will be null, but if you need to do
    *                     additional setup for this load you can get a loadInfo
    *                     object by calling createLoadInfo.  Once you have this
    *                     object you can set the needed properties on it and
@@ -94,10 +83,10 @@ interface nsIDocShell : nsIDocShellTreeItem
    * @param aContentType    - The type (MIME) of data being loaded (empty if unknown).
    * @param aContentCharset - The charset of the data being loaded (empty if unknown).
    * @param aLoadInfo       - This is the extended load info for this load.  This
-   *                          most often will be null, but if you need to do 
+   *                          most often will be null, but if you need to do
    *                          additional setup for this load you can get a
    *                          loadInfo object by calling createLoadInfo.  Once
-   *                          you have this object you can set the needed 
+   *                          you have this object you can set the needed
    *                          properties on it and then pass it to loadStream.
    */
   [noscript]void loadStream(in nsIInputStream aStream,
@@ -131,9 +120,15 @@ interface nsIDocShell : nsIDocShellTreeItem
    * of an nsIDocShellLoadInfo object...
    *
    * @param aURI            - The URI to load.
+   * @param aOriginalURI    - The URI to set as the originalURI on the channel
+   *                          that does the load. If null, aURI will be set as
+   *                          the originalURI.
+   * @param aLoadReplace    - If set LOAD_REPLACE flag will be set on the
+   *                          channel. aOriginalURI is null, this argument is
+   *                          ignored.
    * @param aReferrer       - Referring URI
    * @param aReferrerPolicy - Referrer policy
-   * @param aOwner          - Owner (security principal) 
+   * @param aOwner          - Owner (security principal)
    * @param aInheritOwner   - Flag indicating whether the owner of the current
    *                          document should be inherited if aOwner is null.
    * @param aStopActiveDoc  - Flag indicating whether loading the current
@@ -157,6 +152,8 @@ interface nsIDocShell : nsIDocShellTreeItem
    *                          in certain situations such as view-source.
    */
   [noscript]void internalLoad(in nsIURI aURI,
+                              in nsIURI aOriginalURI,
+                              in boolean aLoadReplace,
                               in nsIURI aReferrer,
                               in unsigned long aReferrerPolicy,
                               in nsISupports aOwner,
@@ -199,7 +196,7 @@ interface nsIDocShell : nsIDocShellTreeItem
    * For editors and suchlike who wish to change the URI associated with the
    * document. Note if you want to get the current URI, use the read-only
    * property on nsIWebNavigation.
-   */ 
+   */
   void setCurrentURI(in nsIURI aURI);
 
   /**
@@ -290,6 +287,12 @@ interface nsIDocShell : nsIDocShellTreeItem
   [infallible] attribute boolean allowContentRetargeting;
 
   /**
+   * True if new child docshells should allow content retargeting.
+   * Setting allowContentRetargeting also overwrites this value.
+   */
+  [infallible] attribute boolean allowContentRetargetingOnChildren;
+
+  /**
    * Get an enumerator over this docShell and its children.
    *
    * @param aItemType  - Only include docShells of this type, or if typeAll,
@@ -326,7 +329,7 @@ interface nsIDocShell : nsIDocShellTreeItem
    * not supporting zoom.  Implementations not supporting zoom should return
    * 1.0 all the time for the Get operation.  1.0 by the way is the default
    * of zoom.  This means 100% of normal scaling or in other words normal size
-   * no zoom. 
+   * no zoom.
    */
   attribute float zoom;
 
@@ -349,9 +352,12 @@ interface nsIDocShell : nsIDocShellTreeItem
   /*
    * Tells the docshell to offer focus to its tree owner.
    * This is currently only necessary for embedding chrome.
+   * If forDocumentNavigation is true, then document navigation should be
+   * performed, where only the root of documents are selected. Otherwise, the
+   * next element in the parent should be returned. Returns true if focus was
+   * successfully taken by the tree owner.
    */
-  void tabToTreeOwner(in boolean forward,
-                      out boolean tookFocus);
+  bool tabToTreeOwner(in boolean forward, in boolean forDocumentNavigation);
 
   /**
    * Current busy state for DocShell
@@ -362,7 +368,7 @@ interface nsIDocShell : nsIDocShellTreeItem
   const unsigned long BUSY_FLAGS_PAGE_LOADING     = 4;
 
   /**
-   * Load commands for the document 
+   * Load commands for the document
    */
   const unsigned long LOAD_CMD_NORMAL  = 0x1;   // Normal load
   const unsigned long LOAD_CMD_RELOAD  = 0x2;   // Reload
@@ -371,7 +377,7 @@ interface nsIDocShell : nsIDocShellTreeItem
 
   readonly attribute unsigned long busyFlags;
 
-  /* 
+  /*
    * attribute to access the loadtype  for the document
    */
   attribute unsigned long  loadType;
@@ -454,11 +460,14 @@ interface nsIDocShell : nsIDocShellTreeItem
    * @param  aURI           nsIURI of the page where the error happened
    * @param  aURL           wstring of the page where the error happened
    * @param  aFailedChannel The channel related to this error
+   *
+   * Returns whether or not we displayed an error page (note: will always
+   * return false if in-content error pages are disabled!)
    */
-  void displayLoadError(in nsresult aError,
-                        in nsIURI aURI,
-                        in wstring aURL,
-                        [optional] in nsIChannel aFailedChannel);
+  boolean displayLoadError(in nsresult aError,
+                           in nsIURI aURI,
+                           in wstring aURL,
+                           [optional] in nsIChannel aFailedChannel);
 
   /**
    * The channel that failed to load and resulted in an error page.
@@ -508,7 +517,7 @@ interface nsIDocShell : nsIDocShellTreeItem
   void addSessionStorage(in nsIPrincipal principal, in nsIDOMStorage storage);
 
   /**
-   * Gets the channel for the currently loaded document, if any. 
+   * Gets the channel for the currently loaded document, if any.
    * For a new document load, this will be the channel of the previous document
    * until after OnLocationChange fires.
    */
@@ -596,7 +605,7 @@ interface nsIDocShell : nsIDocShellTreeItem
    * is actively being rendered to the screen (ex. painted on a canvas)
    * and should be treated accordingly.
    **/
-  attribute boolean isOffScreenBrowser;    
+  attribute boolean isOffScreenBrowser;
 
   /**
    * If the current content viewer isn't initialized for print preview,
@@ -618,6 +627,12 @@ interface nsIDocShell : nsIDocShellTreeItem
    * like image frame discarding. Docshells are active unless told otherwise.
    */
   attribute boolean isActive;
+
+  /**
+   * Sets whether a docshell is active, as above, but ensuring it does
+   * not discard its layers
+   */
+  void setIsActiveAndForeground(in boolean aIsActive);
 
   /**
    * Puts the docshell in prerendering mode. noscript because we want only
@@ -809,6 +824,12 @@ interface nsIDocShell : nsIDocShellTreeItem
     */
    void setIsBrowserInsideApp(in unsigned long containingAppId);
 
+   /**
+    * Indicate that this docshell corresponds to a signed package with
+    * the given packageId.
+    */
+   void setIsSignedPackage(in AString packageId);
+
   /**
    * Returns the id of the app associated with this docshell.  If this docshell
    * is an <iframe mozbrowser> inside an <iframe mozapp>, we return the app's
@@ -839,6 +860,12 @@ interface nsIDocShell : nsIDocShellTreeItem
    * mozbrowser> and <iframe mozapp> boundaries.
    */
   nsIDocShell getSameTypeParentIgnoreBrowserAndAppBoundaries();
+
+  /**
+   * Like nsIDocShellTreeItem::GetSameTypeRootTreeItem, except this ignores
+   * <iframe mozbrowser> and <iframe mozapp> boundaries.
+   */
+  nsIDocShell getSameTypeRootTreeItemIgnoreBrowserAndAppBoundaries();
 
   /**
    * True iff asynchronous panning and zooming is enabled for this
@@ -895,9 +922,9 @@ interface nsIDocShell : nsIDocShellTreeItem
   /**
    * Checks whether the channel associated with the root docShell is equal to
    * mMixedContentChannel. If they are the same, allowMixedContent is set to true.
-   * Checks if the root document has a secure connection. If it is, sets 
-   * rootHasSecureConnection to true. If the docShell is the root doc shell, 
-   * isRootDocShell is set to true. 
+   * Checks if the root document has a secure connection. If it is, sets
+   * rootHasSecureConnection to true. If the docShell is the root doc shell,
+   * isRootDocShell is set to true.
    */
   void GetAllowMixedContentAndConnectionData(out boolean rootHasSecureConnection, out boolean allowMixedContent, out boolean isRootDocShell);
 
@@ -909,7 +936,7 @@ interface nsIDocShell : nsIDocShellTreeItem
    * not be allowed.
    */
   [noscript, notxpcom] bool pluginsAllowedInCurrentDoc();
-  
+
 
   /**
    * Attribute that determines whether fullscreen is allowed to be entered for
@@ -922,8 +949,11 @@ interface nsIDocShell : nsIDocShellTreeItem
    * exception.
    */
   [infallible] readonly attribute boolean fullscreenAllowed;
-  
+
   void setFullscreenAllowed(in boolean allowed);
+
+  [notxpcom] uint32_t orientationLock();
+  [notxpcom] void setOrientationLock(in uint32_t orientationLock);
 
   [noscript, infallible] attribute boolean affectPrivateSessionLifetime;
 
@@ -936,14 +966,14 @@ interface nsIDocShell : nsIDocShellTreeItem
            attribute  nsIEditor editor;
   readonly attribute  boolean   editable;             /* this docShell is editable */
   readonly attribute  boolean   hasEditingSession;    /* this docShell has an editing session */
-    
+
   /**
    * Make this docShell editable, setting a flag that causes
    * an editor to get created, either immediately, or after
    * a url has been loaded.
    *      @param  inWaitForUriLoad    true to wait for a URI before
    *                                  creating the editor.
-   */     
+   */
   void makeEditable(in boolean inWaitForUriLoad);
 
   /**
@@ -1025,15 +1055,17 @@ interface nsIDocShell : nsIDocShellTreeItem
   [noscript,notxpcom,nostdcall] void setOpener(in nsITabParent aOpener);
   [noscript,notxpcom,nostdcall] nsITabParent getOpener();
 
-  // URLSearchParams for the window.location is owned by the docShell.
-  [noscript,notxpcom] URLSearchParams getURLSearchParams();
-
   /**
    * Notify DocShell when the browser is about to start executing JS, and after
    * that execution has stopped.  This only occurs when the Timeline devtool
    * is collecting information.
    */
-  [noscript,notxpcom,nostdcall] void notifyJSRunToCompletionStart();
+  [noscript,notxpcom,nostdcall] void notifyJSRunToCompletionStart(in string aReason,
+                                                                  in wstring functionName,
+                                                                  in wstring fileName,
+                                                                  in unsigned long lineNumber,
+                                                                  in jsval asyncStack,
+                                                                  in jsval asyncCause);
   [noscript,notxpcom,nostdcall] void notifyJSRunToCompletionStop();
 
   /**
@@ -1053,76 +1085,4 @@ interface nsIDocShell : nsIDocShellTreeItem
    * top level chrome docshell.
    */
   attribute boolean windowDraggingAllowed;
-};
-
-[scriptable, builtinclass, uuid(395c6a79-80ae-4ede-9e05-93bee6c3d9a1)]
-interface nsIDocShell_ESR38 : nsIDocShell
-{
-  /**
-   * True if new child docshells should allow content retargeting.
-   * Setting allowContentRetargeting also overwrites this value.
-   */
-  [infallible] attribute boolean allowContentRetargetingOnChildren;
-};
-
-[scriptable, builtinclass, uuid(539bce70-8261-462f-bbd0-40ee90b7d636)]
-interface nsIDocShell_ESR38_2 : nsIDocShell_ESR38
-{
-  /**
-   * Loads the given URI.  This method is identical to loadURI(...) except
-   * that its parameter list is broken out instead of being packaged inside
-   * of an nsIDocShellLoadInfo object...
-   *
-   * @param aURI            - The URI to load.
-   * @param aOriginalURI    - The URI to set as the originalURI on the channel
-   *                          that does the load. If null, aURI will be set as
-   *                          the originalURI.
-   * @param aLoadReplace    - If set LOAD_REPLACE flag will be set on the
-   *                          channel. aOriginalURI is null, this argument is
-   *                          ignored.
-   * @param aReferrer       - Referring URI
-   * @param aReferrerPolicy - Referrer policy
-   * @param aOwner          - Owner (security principal) 
-   * @param aInheritOwner   - Flag indicating whether the owner of the current
-   *                          document should be inherited if aOwner is null.
-   * @param aStopActiveDoc  - Flag indicating whether loading the current
-   *                          document should be stopped.
-   * @param aWindowTarget   - Window target for the load.
-   * @param aTypeHint       - A hint as to the content-type of the resulting
-   *                          data.  May be null or empty if no hint.
-   * @param aFileName       - Non-null when the link should be downloaded as
-                              the given filename.
-   * @param aPostDataStream - Post data stream (if POSTing)
-   * @param aHeadersStream  - Stream containing "extra" request headers...
-   * @param aLoadFlags      - Flags to modify load behaviour. Flags are defined
-   *                          in nsIWebNavigation.
-   * @param aSHEntry        - Active Session History entry (if loading from SH)
-   * @param aSrcdoc           When INTERNAL_LOAD_FLAGS_IS_SRCDOC is set, the
-   *                          contents of this parameter will be loaded instead
-   *                          of aURI.
-   * @param aSourceDocShell - The source browsing context for the navigation.
-   * @param aBaseURI        - The base URI to be used for the load.  Set in
-   *                          srcdoc loads as it cannot otherwise be inferred
-   *                          in certain situations such as view-source.
-   */
-  [noscript]void internalLoad2(in nsIURI aURI,
-                               in nsIURI aOriginalURI,
-                               in boolean aLoadReplace,
-                               in nsIURI aReferrer,
-                               in unsigned long aReferrerPolicy,
-                               in nsISupports aOwner,
-                               in uint32_t aFlags,
-                               in wstring aWindowTarget,
-                               in string aTypeHint,
-                               in AString aFileName,
-                               in nsIInputStream aPostDataStream,
-                               in nsIInputStream aHeadersStream,
-                               in unsigned long aLoadFlags,
-                               in nsISHEntry aSHEntry,
-                               in boolean firstParty,
-                               in AString aSrcdoc,
-                               in nsIDocShell aSourceDocShell,
-                               in nsIURI aBaseURI,
-                               out nsIDocShell aDocShell,
-                               out nsIRequest aRequest);
 };

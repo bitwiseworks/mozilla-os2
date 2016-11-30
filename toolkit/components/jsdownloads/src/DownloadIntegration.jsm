@@ -159,7 +159,9 @@ this.DownloadIntegration = {
   /**
    * Gets and sets test mode
    */
-  get testMode() this._testMode,
+  get testMode() {
+    return this._testMode;
+  },
   set testMode(mode) {
     this._downloadsDirectory = null;
     return (this._testMode = mode);
@@ -461,13 +463,7 @@ this.DownloadIntegration = {
 #elifdef MOZ_WIDGET_GONK
       directoryPath = yield this.getSystemDownloadsDirectory();
 #else
-      // For Metro mode on Windows 8,  we want searchability for documents
-      // that the user chose to open with an external application.
-      if (Services.metro && Services.metro.immersive) {
-        directoryPath = yield this.getSystemDownloadsDirectory();
-      } else {
-        directoryPath = this._getDirectory("TmpD");
-      }
+      directoryPath = this._getDirectory("TmpD");
 #endif
       throw new Task.Result(directoryPath);
     }.bind(this));
@@ -915,6 +911,20 @@ this.DownloadIntegration = {
       for (let topic of kObserverTopics) {
         Services.obs.addObserver(DownloadObserver, topic, false);
       }
+    }
+    return Promise.resolve();
+  },
+
+  /**
+   * Force a save on _store if it exists. Used to ensure downloads do not
+   * persist after being sanitized on Android.
+   *
+   * @return {Promise}
+   * @resolves When _store.save() completes.
+   */
+  forceSave: function DI_forceSave() {
+    if (this._store) {
+      return this._store.save();
     }
     return Promise.resolve();
   },

@@ -31,7 +31,7 @@ enum MethodStatus
 enum AbortReason {
     AbortReason_Alloc,
     AbortReason_Inlining,
-    AbortReason_NewScriptProperties,
+    AbortReason_PreliminaryObjects,
     AbortReason_Disable,
     AbortReason_Error,
     AbortReason_NoAbort
@@ -49,6 +49,7 @@ class JitContext
     JitContext(ExclusiveContext* cx, TempAllocator* temp);
     JitContext(CompileRuntime* rt, CompileCompartment* comp, TempAllocator* temp);
     explicit JitContext(CompileRuntime* rt);
+    JitContext(CompileRuntime* rt, TempAllocator* temp);
     ~JitContext();
 
     // Running context when executing on the main thread. Not available during
@@ -82,7 +83,7 @@ void SetJitContext(JitContext* ctx);
 
 bool CanIonCompileScript(JSContext* cx, JSScript* script, bool osr);
 
-MethodStatus CanEnterAtBranch(JSContext* cx, JSScript* script,
+MethodStatus CanEnterAtBranch(JSContext* cx, HandleScript script,
                               BaselineFrame* frame, jsbytecode* pc);
 MethodStatus CanEnter(JSContext* cx, RunState& state);
 MethodStatus CompileFunctionForBaseline(JSContext* cx, HandleScript script, BaselineFrame* frame);
@@ -147,12 +148,14 @@ void FinishOffThreadBuilder(JSContext* cx, IonBuilder* builder);
 void StopAllOffThreadCompilations(Zone* zone);
 void StopAllOffThreadCompilations(JSCompartment* comp);
 
+void LazyLink(JSContext* cx, HandleScript calleescript);
 uint8_t* LazyLinkTopActivation(JSContext* cx);
 
 static inline bool
 IsIonEnabled(JSContext* cx)
 {
-#ifdef JS_CODEGEN_NONE
+    // The ARM64 Ion engine is not yet implemented.
+#if defined(JS_CODEGEN_NONE) || defined(JS_CODEGEN_ARM64)
     return false;
 #else
     return cx->runtime()->options().ion() &&
@@ -172,7 +175,7 @@ IsIonInlinablePC(jsbytecode* pc) {
 inline bool
 TooManyActualArguments(unsigned nargs)
 {
-    return nargs > js_JitOptions.maxStackArgs;
+    return nargs > JitOptions.maxStackArgs;
 }
 
 inline bool
@@ -190,6 +193,8 @@ NumLocalsAndArgs(JSScript* script)
     return num;
 }
 
+bool OffThreadCompilationAvailable(JSContext* cx);
+
 void ForbidCompilation(JSContext* cx, JSScript* script);
 
 void PurgeCaches(JSScript* script);
@@ -199,6 +204,7 @@ void TraceJitScripts(JSTracer* trc, JSScript* script);
 
 bool JitSupportsFloatingPoint();
 bool JitSupportsSimd();
+bool JitSupportsAtomics();
 
 } // namespace jit
 } // namespace js

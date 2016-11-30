@@ -144,7 +144,24 @@ static bool ToNrIceCandidate(const nr_ice_candidate& candc,
       return false;
   }
 
+  NrIceCandidate::TcpType tcp_type;
+  switch (cand->tcp_type) {
+    case TCP_TYPE_ACTIVE:
+      tcp_type = NrIceCandidate::ICE_ACTIVE;
+      break;
+    case TCP_TYPE_PASSIVE:
+      tcp_type = NrIceCandidate::ICE_PASSIVE;
+      break;
+    case TCP_TYPE_SO:
+      tcp_type = NrIceCandidate::ICE_SO;
+      break;
+    default:
+      tcp_type = NrIceCandidate::ICE_NONE;
+      break;
+  }
+
   out->type = type;
+  out->tcp_type = tcp_type;
   out->codeword = candc.codeword;
   return true;
 }
@@ -248,6 +265,10 @@ nsresult NrIceMediaStream::GetActivePair(int component,
   nr_ice_candidate *local_int;
   nr_ice_candidate *remote_int;
 
+  if (!stream_) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
   r = nr_ice_media_stream_get_active(ctx_->peer(),
                                      stream_,
                                      component,
@@ -281,6 +302,9 @@ nsresult NrIceMediaStream::GetActivePair(int component,
 nsresult NrIceMediaStream::GetCandidatePairs(std::vector<NrIceCandidatePair>*
                                              out_pairs) const {
   MOZ_ASSERT(out_pairs);
+  if (!stream_) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
 
   // Get the check_list on the peer stream (this is where the check_list
   // actually lives, not in stream_)
@@ -290,14 +314,43 @@ nsresult NrIceMediaStream::GetCandidatePairs(std::vector<NrIceCandidatePair>*
     return NS_ERROR_FAILURE;
   }
 
-  nr_ice_cand_pair *p1;
+  nr_ice_cand_pair *p1, *p2;
   out_pairs->clear();
 
-  TAILQ_FOREACH(p1, &peer_stream->check_list, entry) {
+  TAILQ_FOREACH(p1, &peer_stream->check_list, check_queue_entry) {
     MOZ_ASSERT(p1);
     MOZ_ASSERT(p1->local);
     MOZ_ASSERT(p1->remote);
     NrIceCandidatePair pair;
+
+    p2 = TAILQ_FIRST(&peer_stream->check_list);
+    while (p2) {
+      if (p1 == p2) {
+        /* Don't compare with our self. */
+        p2=TAILQ_NEXT(p2, check_queue_entry);
+        continue;
+      }
+      if (strncmp(p1->codeword,p2->codeword,sizeof(p1->codeword))==0) {
+        /* In case of duplicate pairs we only report the one winning pair */
+        if (
+            ((p2->remote->component && (p2->remote->component->active == p2)) &&
+             !(p1->remote->component && (p1->remote->component->active == p1))) ||
+            ((p2->peer_nominated || p2->nominated) &&
+             !(p1->peer_nominated || p1->nominated)) ||
+            (p2->priority > p1->priority) ||
+            ((p2->state == NR_ICE_PAIR_STATE_SUCCEEDED) &&
+             (p1->state != NR_ICE_PAIR_STATE_SUCCEEDED))
+            ) {
+          /* p2 is a better pair. */
+          break;
+        }
+      }
+      p2=TAILQ_NEXT(p2, check_queue_entry);
+    }
+    if (p2) {
+      /* p2 points to a duplicate but better pair so skip this one */
+      continue;
+    }
 
     switch (p1->state) {
       case NR_ICE_PAIR_STATE_FROZEN:
@@ -340,11 +393,12 @@ nsresult NrIceMediaStream::GetCandidatePairs(std::vector<NrIceCandidatePair>*
 }
 
 nsresult NrIceMediaStream::GetDefaultCandidate(
+    int component,
     NrIceCandidate* candidate) const {
 
   nr_ice_candidate *cand;
 
-  int r = nr_ice_media_stream_get_default_candidate(stream_, 1, &cand);
+  int r = nr_ice_media_stream_get_default_candidate(stream_, component, &cand);
   if (r) {
     MOZ_MTLOG(ML_ERROR, "Couldn't get default ICE candidate for '"
               << name_ << "'");
@@ -365,6 +419,10 @@ std::vector<std::string> NrIceMediaStream::GetCandidates() const {
   int attrct;
   int r;
   std::vector<std::string> ret;
+
+  if (!stream_) {
+    return ret;
+  }
 
   r = nr_ice_media_stream_get_attributes(stream_,
                                          &attrs, &attrct);
@@ -412,11 +470,19 @@ static nsresult GetCandidatesFromStream(
 
 nsresult NrIceMediaStream::GetLocalCandidates(
     std::vector<NrIceCandidate>* candidates) const {
+  if (!stream_) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
   return GetCandidatesFromStream(stream_, candidates);
 }
 
 nsresult NrIceMediaStream::GetRemoteCandidates(
     std::vector<NrIceCandidate>* candidates) const {
+  if (!stream_) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
   nr_ice_media_stream* peer_stream;
   int r = nr_ice_peer_ctx_find_pstream(ctx_->peer(), stream_, &peer_stream);
   if (r != 0) {
@@ -480,6 +546,14 @@ void NrIceMediaStream::Ready() {
 void NrIceMediaStream::Close() {
   MOZ_MTLOG(ML_DEBUG, "Marking stream closed '" << name_ << "'");
   state_ = ICE_CLOSED;
-  stream_ = nullptr;
+
+  if (stream_) {
+    int r = nr_ice_remove_media_stream(ctx_->ctx(), &stream_);
+    if (r) {
+      MOZ_ASSERT(false, "Failed to remove stream");
+      MOZ_MTLOG(ML_ERROR, "Failed to remove stream, error=" << r);
+    }
+  }
 }
+
 }  // close namespace

@@ -26,6 +26,13 @@ js::AtomStateEntry::asPtr() const
     return atom;
 }
 
+inline JSAtom*
+js::AtomStateEntry::asPtrUnbarriered() const
+{
+    MOZ_ASSERT(bits != 0);
+    return reinterpret_cast<JSAtom*>(bits & NO_TAG_MASK);
+}
+
 namespace js {
 
 inline jsid
@@ -63,7 +70,7 @@ ValueToIdPure(const Value& v, jsid* id)
 
 template <AllowGC allowGC>
 inline bool
-ValueToId(JSContext* cx, typename MaybeRooted<Value, allowGC>::HandleType v,
+ValueToId(ExclusiveContext* cx, typename MaybeRooted<Value, allowGC>::HandleType v,
           typename MaybeRooted<jsid, allowGC>::MutableHandleType idp)
 {
     int32_t i;

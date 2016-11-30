@@ -3,15 +3,15 @@ import sys
 
 config = {
     "platform": "win64",
+    "stage_product": "firefox",
     "update_platform": "WINNT_x86_64-msvc",
     "mozconfig": "%(branch)s/browser/config/mozconfigs/win64/l10n-mozconfig",
     "bootstrap_env": {
         "MOZ_OBJDIR": "obj-l10n",
         "EN_US_BINARY_URL": "%(en_us_binary_url)s",
-        "LOCALE_MERGEDIR": "%(abs_merge_dir)s/",
         "MOZ_UPDATE_CHANNEL": "%(update_channel)s",
         "DIST": "%(abs_objdir)s",
-        "LOCALE_MERGEDIR": "%(abs_merge_dir)s/",
+        "LOCALE_MERGEDIR": "%(abs_merge_dir)s",
         "L10NBASEDIR": "../../l10n",
         "MOZ_MAKE_COMPLETE_MAR": "1",
     },

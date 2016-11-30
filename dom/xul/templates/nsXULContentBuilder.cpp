@@ -34,7 +34,7 @@
 #include "nsTextNode.h"
 #include "mozilla/dom/Element.h"
 
-#include "pldhash.h"
+#include "PLDHashTable.h"
 #include "rdf.h"
 
 using namespace mozilla;
@@ -348,9 +348,6 @@ NS_NewXULContentBuilder(nsISupports* aOuter, REFNSIID aIID, void** aResult)
 
     nsresult rv;
     nsXULContentBuilder* result = new nsXULContentBuilder();
-    if (!result)
-        return NS_ERROR_OUT_OF_MEMORY;
-
     NS_ADDREF(result); // stabilize
 
     rv = result->InitGlobals();
@@ -446,22 +443,20 @@ nsXULContentBuilder::BuildContentFromTemplate(nsIContent *aTemplateNode,
 
     nsresult rv;
 
-#ifdef PR_LOGGING
-    if (PR_LOG_TEST(gXULTemplateLog, PR_LOG_DEBUG)) {
-        PR_LOG(gXULTemplateLog, PR_LOG_ALWAYS,
+    if (MOZ_LOG_TEST(gXULTemplateLog, LogLevel::Debug)) {
+        MOZ_LOG(gXULTemplateLog, LogLevel::Debug,
                ("nsXULContentBuilder::BuildContentFromTemplate (is unique: %d)",
                aIsUnique));
 
         nsAutoString id;
         aChild->GetId(id);
 
-        PR_LOG(gXULTemplateLog, PR_LOG_ALWAYS,
+        MOZ_LOG(gXULTemplateLog, LogLevel::Debug,
                ("Tags: [Template: %s  Resource: %s  Real: %s] for id %s",
-                nsAtomCString(aTemplateNode->Tag()).get(), 
-                nsAtomCString(aResourceNode->Tag()).get(),
-                nsAtomCString(aRealNode->Tag()).get(), NS_ConvertUTF16toUTF8(id).get()));
+                nsAtomCString(aTemplateNode->NodeInfo()->NameAtom()).get(),
+                nsAtomCString(aResourceNode->NodeInfo()->NameAtom()).get(),
+                nsAtomCString(aRealNode->NodeInfo()->NameAtom()).get(), NS_ConvertUTF16toUTF8(id).get()));
     }
-#endif
 
     // Iterate through all of the template children, constructing
     // "real" content model nodes for each "template" child.
@@ -523,17 +518,15 @@ nsXULContentBuilder::BuildContentFromTemplate(nsIContent *aTemplateNode,
 
         MOZ_ASSERT_IF(isGenerationElement, tmplKid->IsElement());
 
-        nsIAtom *tag = tmplKid->Tag();
+        nsIAtom *tag = tmplKid->NodeInfo()->NameAtom();
 
-#ifdef PR_LOGGING
-        if (PR_LOG_TEST(gXULTemplateLog, PR_LOG_DEBUG)) {
-            PR_LOG(gXULTemplateLog, PR_LOG_DEBUG,
+        if (MOZ_LOG_TEST(gXULTemplateLog, LogLevel::Debug)) {
+            MOZ_LOG(gXULTemplateLog, LogLevel::Debug,
                    ("xultemplate[%p]     building %s %s %s",
                     this, nsAtomCString(tag).get(),
                     (isGenerationElement ? "[resource]" : ""),
                     (isUnique ? "[unique]" : "")));
         }
-#endif
 
         // Set to true if the child we're trying to create now
         // already existed in the content model.
@@ -622,7 +615,7 @@ nsXULContentBuilder::BuildContentFromTemplate(nsIContent *aTemplateNode,
                 rv = SubstituteText(aChild, attrValue, value);
                 if (NS_FAILED(rv)) return rv;
 
-                nsRefPtr<nsTextNode> content =
+                RefPtr<nsTextNode> content =
                   new nsTextNode(mRoot->NodeInfo()->NodeInfoManager());
 
                 content->SetText(value, false);
@@ -823,7 +816,7 @@ nsXULContentBuilder::AddPersistentAttributes(Element* aTemplateNode,
         nsCOMPtr<nsIAtom> tag;
         int32_t nameSpaceID;
 
-        nsRefPtr<mozilla::dom::NodeInfo> ni =
+        RefPtr<mozilla::dom::NodeInfo> ni =
             aTemplateNode->GetExistingAttrNameFromQName(attribute);
         if (ni) {
             tag = ni->NameAtom();
@@ -943,7 +936,7 @@ nsXULContentBuilder::CreateTemplateAndContainerContents(nsIContent* aElement,
     // and 2) recursive subcontent (if the current element refers to a
     // container result).
 
-    PR_LOG(gXULTemplateLog, PR_LOG_ALWAYS,
+    MOZ_LOG(gXULTemplateLog, LogLevel::Info,
            ("nsXULContentBuilder::CreateTemplateAndContainerContents start - flags: %d",
             mFlags));
 
@@ -979,7 +972,7 @@ nsXULContentBuilder::CreateTemplateAndContainerContents(nsIContent* aElement,
                                     false, true);
     }
 
-    PR_LOG(gXULTemplateLog, PR_LOG_ALWAYS,
+    MOZ_LOG(gXULTemplateLog, LogLevel::Info,
            ("nsXULContentBuilder::CreateTemplateAndContainerContents end"));
 
     return NS_OK;
@@ -1049,7 +1042,7 @@ nsXULContentBuilder::CreateContainerContents(nsIContent* aElement,
         nsTemplateQuerySet* queryset = mQuerySets[r];
 
         nsIAtom* tag = queryset->GetTag();
-        if (tag && tag != aElement->Tag())
+        if (tag && tag != aElement->NodeInfo()->NameAtom())
             continue;
 
         CreateContainerContentsForQuerySet(aElement, aResult, aNotify, queryset,
@@ -1077,15 +1070,13 @@ nsXULContentBuilder::CreateContainerContentsForQuerySet(nsIContent* aElement,
                                                         nsIContent** aContainer,
                                                         int32_t* aNewIndexInContainer)
 {
-#ifdef PR_LOGGING
-    if (PR_LOG_TEST(gXULTemplateLog, PR_LOG_DEBUG)) {
+    if (MOZ_LOG_TEST(gXULTemplateLog, LogLevel::Debug)) {
         nsAutoString id;
         aResult->GetId(id);
-        PR_LOG(gXULTemplateLog, PR_LOG_ALWAYS,
+        MOZ_LOG(gXULTemplateLog, LogLevel::Debug,
                ("nsXULContentBuilder::CreateContainerContentsForQuerySet start for ref %s\n",
                NS_ConvertUTF16toUTF8(id).get()));
     }
-#endif
 
     if (! mQueryProcessor)
         return NS_OK;
@@ -1250,8 +1241,7 @@ nsXULContentBuilder::EnsureElementHasGenericChild(nsIContent* parent,
         if (NS_FAILED(rv))
             return rv;
 
-        *result = element;
-        NS_ADDREF(*result);
+        element.forget(result);
         return NS_ELEMENT_GOT_CREATED;
     }
     else {
@@ -1263,16 +1253,13 @@ bool
 nsXULContentBuilder::IsOpen(nsIContent* aElement)
 {
     // Determine if this is a <treeitem> or <menu> element
-    if (!aElement->IsXUL())
-        return true;
 
     // XXXhyatt Use the XBL service to obtain a base tag.
-    nsIAtom *tag = aElement->Tag();
-    if (tag == nsGkAtoms::menu ||
-        tag == nsGkAtoms::menubutton ||
-        tag == nsGkAtoms::toolbarbutton ||
-        tag == nsGkAtoms::button ||
-        tag == nsGkAtoms::treeitem)
+    if (aElement->IsAnyOfXULElements(nsGkAtoms::menu,
+                                     nsGkAtoms::menubutton,
+                                     nsGkAtoms::toolbarbutton,
+                                     nsGkAtoms::button,
+                                     nsGkAtoms::treeitem))
         return aElement->AttrValueIs(kNameSpaceID_None, nsGkAtoms::open,
                                      nsGkAtoms::_true, eCaseMatters);
     return true;
@@ -1364,7 +1351,7 @@ nsXULContentBuilder::CreateElement(int32_t aNameSpaceID,
     if (! doc)
         return NS_ERROR_NOT_INITIALIZED;
 
-    nsRefPtr<mozilla::dom::NodeInfo> nodeInfo =
+    RefPtr<mozilla::dom::NodeInfo> nodeInfo =
         doc->NodeInfoManager()->GetNodeInfo(aTag, nullptr, aNameSpaceID,
                                             nsIDOMNode::ELEMENT_NODE);
 
@@ -1447,7 +1434,7 @@ nsXULContentBuilder::HasGeneratedContent(nsIRDFResource* aResource,
 
     // the root resource is always acceptable
     if (aResource == rootresource) {
-        if (!aTag || mRoot->Tag() == aTag)
+        if (!aTag || mRoot->NodeInfo()->NameAtom() == aTag)
             *aGenerated = true;
     }
     else {
@@ -1473,7 +1460,7 @@ nsXULContentBuilder::HasGeneratedContent(nsIRDFResource* aResource,
                 nsTemplateMatch* match;
                 if (content == mRoot || mContentSupportMap.Get(content, &match)) {
                     // If we've got a tag, check it to ensure we're consistent.
-                    if (!aTag || content->Tag() == aTag) {
+                    if (!aTag || content->NodeInfo()->NameAtom() == aTag) {
                         *aGenerated = true;
                         return NS_OK;
                     }
@@ -1520,7 +1507,8 @@ nsXULContentBuilder::AttributeChanged(nsIDocument* aDocument,
                                       Element*     aElement,
                                       int32_t      aNameSpaceID,
                                       nsIAtom*     aAttribute,
-                                      int32_t      aModType)
+                                      int32_t      aModType,
+                                      const nsAttrValue* aOldValue)
 {
     nsCOMPtr<nsIMutationObserver> kungFuDeathGrip(this);
 
@@ -1546,7 +1534,7 @@ nsXULContentBuilder::AttributeChanged(nsIDocument* aDocument,
 
     // Pass along to the generic template builder.
     nsXULTemplateBuilder::AttributeChanged(aDocument, aElement, aNameSpaceID,
-                                           aAttribute, aModType);
+                                           aAttribute, aModType, aOldValue);
 }
 
 void

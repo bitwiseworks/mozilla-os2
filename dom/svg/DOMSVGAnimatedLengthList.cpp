@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -30,9 +31,9 @@ NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(DOMSVGAnimatedLengthList, AddRef)
 NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(DOMSVGAnimatedLengthList, Release)
 
 JSObject*
-DOMSVGAnimatedLengthList::WrapObject(JSContext* aCx)
+DOMSVGAnimatedLengthList::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return dom::SVGAnimatedLengthListBinding::Wrap(aCx, this);
+  return dom::SVGAnimatedLengthListBinding::Wrap(aCx, this, aGivenProto);
 }
 
 already_AddRefed<DOMSVGLengthList>
@@ -41,7 +42,7 @@ DOMSVGAnimatedLengthList::BaseVal()
   if (!mBaseVal) {
     mBaseVal = new DOMSVGLengthList(this, InternalAList().GetBaseValue());
   }
-  nsRefPtr<DOMSVGLengthList> baseVal = mBaseVal;
+  RefPtr<DOMSVGLengthList> baseVal = mBaseVal;
   return baseVal.forget();
 }
 
@@ -51,7 +52,7 @@ DOMSVGAnimatedLengthList::AnimVal()
   if (!mAnimVal) {
     mAnimVal = new DOMSVGLengthList(this, InternalAList().GetAnimValue());
   }
-  nsRefPtr<DOMSVGLengthList> animVal = mAnimVal;
+  RefPtr<DOMSVGLengthList> animVal = mAnimVal;
   return animVal.forget();
 }
 
@@ -61,7 +62,7 @@ DOMSVGAnimatedLengthList::GetDOMWrapper(SVGAnimatedLengthList *aList,
                                         uint8_t aAttrEnum,
                                         uint8_t aAxis)
 {
-  nsRefPtr<DOMSVGAnimatedLengthList> wrapper =
+  RefPtr<DOMSVGAnimatedLengthList> wrapper =
     SVGAnimatedLengthListTearoffTable().GetTearoff(aList);
   if (!wrapper) {
     wrapper = new DOMSVGAnimatedLengthList(aElement, aAttrEnum, aAxis);
@@ -93,7 +94,7 @@ DOMSVGAnimatedLengthList::InternalBaseValListWillChangeTo(const SVGLengthList& a
   // able to access "items" at indexes that are out of bounds (read/write to
   // bad memory)!!
 
-  nsRefPtr<DOMSVGAnimatedLengthList> kungFuDeathGrip;
+  RefPtr<DOMSVGAnimatedLengthList> kungFuDeathGrip;
   if (mBaseVal) {
     if (aNewValue.Length() < mBaseVal->LengthNoFlush()) {
       // InternalListLengthWillChange might clear last reference to |this|.

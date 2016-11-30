@@ -85,57 +85,38 @@ IdToObjectMap::empty() const
     return table_.empty();
 }
 
-ObjectToIdMap::ObjectToIdMap()
-  : table_(nullptr)
+ObjectToIdMap::ObjectToIdMap(JSRuntime* rt)
+  : rt_(rt)
 {
 }
 
 ObjectToIdMap::~ObjectToIdMap()
 {
-    if (table_) {
-        dom::AddForDeferredFinalization<Table>(table_);
-        table_ = nullptr;
-    }
+    JS_ClearAllPostBarrierCallbacks(rt_);
 }
 
 bool
 ObjectToIdMap::init()
 {
-    if (table_)
-        return true;
-
-    table_ = new Table(SystemAllocPolicy());
-    return table_ && table_->init(32);
+    return table_.initialized() || table_.init(32);
 }
 
 void
 ObjectToIdMap::trace(JSTracer* trc)
 {
-    for (Table::Enum e(*table_); !e.empty(); e.popFront()) {
-        JSObject* obj = e.front().key();
-        JS_CallUnbarrieredObjectTracer(trc, &obj, "ipc-object");
-        if (obj != e.front().key())
-            e.rekeyFront(obj);
-    }
+    table_.trace(trc);
 }
 
 void
 ObjectToIdMap::sweep()
 {
-    for (Table::Enum e(*table_); !e.empty(); e.popFront()) {
-        JSObject* obj = e.front().key();
-        JS_UpdateWeakPointerAfterGCUnbarriered(&obj);
-        if (!obj)
-            e.removeFront();
-        else if (obj != e.front().key())
-            e.rekeyFront(obj);
-    }
+    table_.sweep();
 }
 
 ObjectId
 ObjectToIdMap::find(JSObject* obj)
 {
-    Table::Ptr p = table_->lookup(obj);
+    Table::Ptr p = table_.lookup(obj);
     if (!p)
         return ObjectId::nullId();
     return p->value();
@@ -144,35 +125,19 @@ ObjectToIdMap::find(JSObject* obj)
 bool
 ObjectToIdMap::add(JSContext* cx, JSObject* obj, ObjectId id)
 {
-    if (!table_->put(obj, id))
-        return false;
-    JS_StoreObjectPostBarrierCallback(cx, keyMarkCallback, obj, table_);
-    return true;
-}
-
-/*
- * This function is called during minor GCs for each key in the HashMap that has
- * been moved.
- */
-/* static */ void
-ObjectToIdMap::keyMarkCallback(JSTracer* trc, JSObject* key, void* data)
-{
-    Table* table = static_cast<Table*>(data);
-    JSObject* prior = key;
-    JS_CallUnbarrieredObjectTracer(trc, &key, "ObjectIdCache::table_ key");
-    table->rekeyIfMoved(prior, key);
+    return table_.put(obj, id);
 }
 
 void
 ObjectToIdMap::remove(JSObject* obj)
 {
-    table_->remove(obj);
+    table_.remove(obj);
 }
 
 void
 ObjectToIdMap::clear()
 {
-    table_->clear();
+    table_.clear();
 }
 
 bool JavaScriptShared::sLoggingInitialized;
@@ -182,7 +147,9 @@ bool JavaScriptShared::sStackLoggingEnabled;
 JavaScriptShared::JavaScriptShared(JSRuntime* rt)
   : rt_(rt),
     refcount_(1),
-    nextSerialNumber_(1)
+    nextSerialNumber_(1),
+    unwaivedObjectIds_(rt),
+    waivedObjectIds_(rt)
 {
     if (!sLoggingInitialized) {
         sLoggingInitialized = true;
@@ -270,7 +237,7 @@ JavaScriptShared::toVariant(JSContext* cx, JS::HandleValue from, JSVariant* to)
       {
         RootedObject obj(cx, from.toObjectOrNull());
         if (!obj) {
-            MOZ_ASSERT(from == JSVAL_NULL);
+            MOZ_ASSERT(from.isNull());
             *to = NullVariant();
             return true;
         }
@@ -362,7 +329,7 @@ JavaScriptShared::fromVariant(JSContext* cx, const JSVariant& from, MutableHandl
           return true;
 
         case JSVariant::Tbool:
-          to.set(BOOLEAN_TO_JSVAL(from.get_bool()));
+          to.setBoolean(from.get_bool());
           return true;
 
         case JSVariant::TnsString:
@@ -542,9 +509,8 @@ JavaScriptShared::findObjectById(JSContext* cx, const ObjectId& objId)
     if (objId.hasXrayWaiver()) {
         {
             JSAutoCompartment ac2(cx, obj);
-            obj = JS_ObjectToOuterObject(cx, obj);
-            if (!obj)
-                return nullptr;
+            obj = js::ToWindowProxyIfWindow(obj);
+            MOZ_ASSERT(obj);
         }
         if (!xpc::WrapperFactory::WaiveXrayAndWrap(cx, &obj))
             return nullptr;
@@ -605,7 +571,8 @@ UnknownPropertyStub(JSContext* cx, HandleObject obj, HandleId id, MutableHandleV
 }
 
 bool
-UnknownStrictPropertyStub(JSContext* cx, HandleObject obj, HandleId id, bool strict, MutableHandleValue vp)
+UnknownStrictPropertyStub(JSContext* cx, HandleObject obj, HandleId id, MutableHandleValue vp,
+                          ObjectOpResult& result)
 {
     JS_ReportError(cx, "setter could not be wrapped via CPOWs");
     return false;
@@ -627,7 +594,7 @@ JavaScriptShared::toDescriptor(JSContext* cx, const PPropertyDescriptor& in,
         getter = fromObjectVariant(cx, in.getter().get_ObjectVariant());
         if (!getter)
             return false;
-        out.setGetter(JS_DATA_TO_FUNC_PTR(JSPropertyOp, getter.get()));
+        out.setGetter(JS_DATA_TO_FUNC_PTR(JSGetterOp, getter.get()));
     } else {
         out.setGetter(UnknownPropertyStub);
     }
@@ -639,7 +606,7 @@ JavaScriptShared::toDescriptor(JSContext* cx, const PPropertyDescriptor& in,
         setter = fromObjectVariant(cx, in.setter().get_ObjectVariant());
         if (!setter)
             return false;
-        out.setSetter(JS_DATA_TO_FUNC_PTR(JSStrictPropertyOp, setter.get()));
+        out.setSetter(JS_DATA_TO_FUNC_PTR(JSSetterOp, setter.get()));
     } else {
         out.setSetter(UnknownStrictPropertyStub);
     }
@@ -733,8 +700,8 @@ JavaScriptShared::Wrap(JSContext* cx, HandleObject aObj, InfallibleTArray<CpowEn
     if (!aObj)
         return true;
 
-    AutoIdArray ids(cx, JS_Enumerate(cx, aObj));
-    if (!ids)
+    Rooted<IdVector> ids(cx, IdVector(cx));
+    if (!JS_Enumerate(cx, aObj, &ids))
         return false;
 
     RootedId id(cx);

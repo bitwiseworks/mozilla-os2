@@ -33,7 +33,7 @@ protected:
   virtual ~nsCheckSummedOutputStream() { nsSafeFileOutputStream::Close(); }
 
   nsCOMPtr<nsICryptoHash> mHash;
-  nsAutoCString mCheckSum;
+  nsCString mCheckSum;
 };
 
 // returns a file output stream which can be QI'ed to nsIFileOutputStream.
@@ -46,8 +46,9 @@ NS_NewCheckSummedOutputStream(nsIOutputStream **result,
 {
     nsCOMPtr<nsIFileOutputStream> out = new nsCheckSummedOutputStream();
     nsresult rv = out->Init(file, ioFlags, perm, behaviorFlags);
-    if (NS_SUCCEEDED(rv))
-      NS_ADDREF(*result = out);  // cannot use nsCOMPtr::swap
+    if (NS_SUCCEEDED(rv)) {
+      out.forget(result);
+    }
     return rv;
 }
 

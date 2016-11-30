@@ -1,13 +1,16 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsSVGClass.h"
+
+#include "mozilla/dom/SVGAnimatedString.h"
+#include "mozilla/Move.h"
 #include "nsSVGElement.h"
 #include "nsSMILValue.h"
 #include "SMILStringType.h"
-#include "mozilla/dom/SVGAnimatedString.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -54,7 +57,7 @@ NS_INTERFACE_MAP_END
 already_AddRefed<SVGAnimatedString>
 nsSVGClass::ToDOMAnimatedString(nsSVGElement* aSVGElement)
 {
-  nsRefPtr<DOMAnimatedString> result = new DOMAnimatedString(this, aSVGElement);
+  RefPtr<DOMAnimatedString> result = new DOMAnimatedString(this, aSVGElement);
   return result.forget();
 }
 
@@ -129,7 +132,7 @@ nsSVGClass::SMILString::ValueFromString(const nsAString& aStr,
   nsSMILValue val(SMILStringType::Singleton());
 
   *static_cast<nsAString*>(val.mU.mPtr) = aStr;
-  aValue.Swap(val);
+  aValue = Move(val);
   aPreventCachingOfSandwich = false;
   return NS_OK;
 }

@@ -1,4 +1,5 @@
-/* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -16,6 +17,10 @@
 
 struct JSContext;
 class nsIEventTarget;
+
+namespace mozilla {
+class ErrorResult;
+} // namespace mozilla
 
 BEGIN_WORKERS_NAMESPACE
 
@@ -99,6 +104,14 @@ protected:
   virtual ~WorkerRunnable()
   { }
 
+  // Returns true if this runnable should be dispatched to the debugger queue,
+  // and false otherwise.
+  virtual bool
+  IsDebuggerRunnable() const;
+
+  nsIGlobalObject*
+  DefaultGlobalObject() const;
+
   // By default asserts that Dispatch() is being called on the right thread
   // (ParentThread if |mTarget| is WorkerThread, or WorkerThread otherwise).
   // Also increments the busy count of |mWorkerPrivate| if targeting the
@@ -131,6 +144,38 @@ protected:
   // Calling Run() directly is not supported. Just call Dispatch() and
   // WorkerRun() will be called on the correct thread automatically.
   NS_DECL_NSIRUNNABLE
+};
+
+// This runnable is used to send a message to a worker debugger.
+class WorkerDebuggerRunnable : public WorkerRunnable
+{
+protected:
+  explicit WorkerDebuggerRunnable(WorkerPrivate* aWorkerPrivate)
+  : WorkerRunnable(aWorkerPrivate, WorkerThreadUnchangedBusyCount)
+  {
+  }
+
+  virtual ~WorkerDebuggerRunnable()
+  { }
+
+private:
+  virtual bool
+  IsDebuggerRunnable() const override
+  {
+    return true;
+  }
+
+  virtual bool
+  PreDispatch(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
+  {
+    AssertIsOnMainThread();
+
+    return true;
+  }
+
+  virtual void
+  PostDispatch(JSContext* aCx, WorkerPrivate* aWorkerPrivate,
+               bool aDispatchResult) override;
 };
 
 // This runnable is used to send a message directly to a worker's sync loop.
@@ -280,6 +325,9 @@ protected:
   virtual ~WorkerControlRunnable()
   { }
 
+  NS_IMETHOD
+  Cancel() override;
+
 public:
   NS_DECL_ISUPPORTS_INHERITED
 
@@ -359,10 +407,33 @@ protected:
   virtual bool MainThreadRun() = 0;
 
 public:
-  bool Dispatch(JSContext* aCx);
+  // Dispatch the runnable to the main thread.  If dispatch to main thread
+  // fails, or if the worker is shut down while dispatching, an error will be
+  // reported on aRv.  In that case the error MUST be propagated out to script.
+  void Dispatch(ErrorResult& aRv);
 
 private:
-  NS_IMETHOD Run() override;  
+  NS_IMETHOD Run() override;
+};
+
+// Class for checking API exposure.  This totally violates the "MUST" in the
+// comments on WorkerMainThreadRunnable::Dispatch, because API exposure checks
+// can't throw.  Maybe we should change it so they _could_ throw.  But for now
+// we are bad people and should be ashamed of ourselves.  Let's hope none of
+// them happen while a worker is shutting down.
+//
+// Do NOT copy what this class is doing elsewhere.  Just don't.
+class WorkerCheckAPIExposureOnMainThreadRunnable : public WorkerMainThreadRunnable
+{
+public:
+  explicit WorkerCheckAPIExposureOnMainThreadRunnable(WorkerPrivate* aWorkerPrivate):
+    WorkerMainThreadRunnable(aWorkerPrivate)
+  {}
+  ~WorkerCheckAPIExposureOnMainThreadRunnable() {}
+
+  // Returns whether the dispatch succeeded.  If this returns false, the API
+  // should not be exposed.
+  bool Dispatch();
 };
 
 END_WORKERS_NAMESPACE

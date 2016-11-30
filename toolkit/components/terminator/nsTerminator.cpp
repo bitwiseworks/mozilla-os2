@@ -222,8 +222,8 @@ void RunWriter(void* arg)
   tmpFilePath.AppendLiteral(".tmp");
 
   // Cleanup any file leftover from a previous run
-  unused << PR_Delete(tmpFilePath.get());
-  unused << PR_Delete(destinationPath.get());
+  Unused << PR_Delete(tmpFilePath.get());
+  Unused << PR_Delete(destinationPath.get());
 
   while (true) {
     //
@@ -316,7 +316,7 @@ static ShutdownStep sShutdownSteps[] = {
   ShutdownStep("xpcom-shutdown"),
 };
 
-} // anonymous namespace
+} // namespace
 
 NS_IMPL_ISUPPORTS(nsTerminator, nsIObserver)
 
@@ -392,7 +392,7 @@ void
 nsTerminator::StartWriter()
 {
 
-  if (!Telemetry::CanRecord()) {
+  if (!Telemetry::CanRecordExtended()) {
     return;
   }
   nsCOMPtr<nsIFile> profLD;
@@ -476,7 +476,7 @@ nsTerminator::UpdateHeartbeat(const char* aTopic)
 void
 nsTerminator::UpdateTelemetry()
 {
-  if (!Telemetry::CanRecord() || !gWriteReady) {
+  if (!Telemetry::CanRecordExtended() || !gWriteReady) {
     return;
   }
 
@@ -530,7 +530,7 @@ nsTerminator::UpdateCrashReport(const char* aTopic)
   // In case of crash, we wish to know where in shutdown we are
   nsAutoCString report(aTopic);
 
-  unused << CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("ShutdownProgress"),
+  Unused << CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("ShutdownProgress"),
                                                report);
 #endif // defined(MOZ_CRASH_REPORTER)
 }

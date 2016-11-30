@@ -30,22 +30,24 @@
 #include "mozilla/MemoryReporting.h"
 
 namespace mozilla {
-struct AudioChunk;
-}
+class AudioBlock;
+} // namespace mozilla
 
 namespace WebCore {
 
+typedef nsTArray<float> AudioFloatArray;
+
 class HRTFDatabaseLoader;
 
-using mozilla::AudioChunk;
+using mozilla::AudioBlock;
 
 class HRTFPanner {
 public:
-    HRTFPanner(float sampleRate, mozilla::TemporaryRef<HRTFDatabaseLoader> databaseLoader);
+    HRTFPanner(float sampleRate, already_AddRefed<HRTFDatabaseLoader> databaseLoader);
     ~HRTFPanner();
 
     // chunk durations must be 128
-    void pan(double azimuth, double elevation, const AudioChunk* inputBus, AudioChunk* outputBus);
+    void pan(double azimuth, double elevation, const AudioBlock* inputBus, AudioBlock* outputBus);
     void reset();
 
     size_t fftSize() const { return m_convolverL1.fftSize(); }
@@ -61,7 +63,7 @@ private:
     // and azimuthBlend which is an interpolation value from 0 -> 1.
     int calculateDesiredAzimuthIndexAndBlend(double azimuth, double& azimuthBlend);
 
-    mozilla::RefPtr<HRTFDatabaseLoader> m_databaseLoader;
+    RefPtr<HRTFDatabaseLoader> m_databaseLoader;
 
     float m_sampleRate;
 

@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -39,7 +40,7 @@ class DOMSVGNumber;
  * Our DOM items are created lazily on demand as and when script requests them.
  */
 class DOMSVGNumberList final : public nsISupports,
-                                   public nsWrapperCache
+                               public nsWrapperCache
 {
   friend class AutoChangeNumberListNotifier;
   friend class DOMSVGNumber;
@@ -69,7 +70,7 @@ public:
     InternalListLengthWillChange(aInternalList.Length()); // Sync mItems
   }
 
-  virtual JSObject* WrapObject(JSContext *cx) override;
+  virtual JSObject* WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto) override;
 
   nsISupports* GetParentObject()
   {
@@ -96,6 +97,12 @@ public:
    */
   bool IsAnimating() const {
     return mAList->IsAnimating();
+  }
+  /**
+   * Returns true if there is an animated list mirroring the base list.
+   */
+  bool AnimListMirrorsBaseList() const {
+    return mAList->mAnimVal && !mAList->IsAnimating();
   }
 
   uint32_t NumberOfItems() const
@@ -164,7 +171,7 @@ private:
   // of clearing our pointer to them when they die.
   FallibleTArray<DOMSVGNumber*> mItems;
 
-  nsRefPtr<DOMSVGAnimatedNumberList> mAList;
+  RefPtr<DOMSVGAnimatedNumberList> mAList;
 };
 
 } // namespace mozilla

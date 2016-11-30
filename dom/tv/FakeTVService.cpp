@@ -200,7 +200,7 @@ public:
   {
     // Notify mock EIT broadcasting.
     nsITVProgramData** programDataList =
-      static_cast<nsITVProgramData **>(NS_Alloc(1 * sizeof(nsITVProgramData*)));
+      static_cast<nsITVProgramData **>(moz_xmalloc(1 * sizeof(nsITVProgramData*)));
     programDataList[0] = new TVProgramData();
     programDataList[0]->SetEventId(NS_LITERAL_STRING("eventId"));
     programDataList[0]->SetTitle(NS_LITERAL_STRING("title"));
@@ -280,7 +280,7 @@ FakeTVService::StartScanningChannels(const nsAString& aTunerId,
     // called before firing.)
     mEITBroadcastedTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
     NS_ENSURE_TRUE(mEITBroadcastedTimer, NS_ERROR_OUT_OF_MEMORY);
-    nsRefPtr<EITBroadcastedCallback> eitBroadcastedCb =
+    RefPtr<EITBroadcastedCallback> eitBroadcastedCb =
       new EITBroadcastedCallback(aTunerId, aSourceType, mSourceListener, mChannels[0]);
     rv = mEITBroadcastedTimer->InitWithCallback(eitBroadcastedCb, 10,
                                                 nsITimer::TYPE_ONE_SHOT);
@@ -291,7 +291,7 @@ FakeTVService::StartScanningChannels(const nsAString& aTunerId,
     // called before firing.)
     mScanCompleteTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
     NS_ENSURE_TRUE(mScanCompleteTimer, NS_ERROR_OUT_OF_MEMORY);
-    nsRefPtr<ScanCompleteCallback> scanCompleteCb =
+    RefPtr<ScanCompleteCallback> scanCompleteCb =
       new ScanCompleteCallback(aTunerId, aSourceType, mSourceListener);
     rv = mScanCompleteTimer->InitWithCallback(scanCompleteCb, 20,
                                               nsITimer::TYPE_ONE_SHOT);

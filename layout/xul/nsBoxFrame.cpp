@@ -66,6 +66,7 @@
 #include "mozilla/Preferences.h"
 #include "nsThemeConstants.h"
 #include "nsLayoutUtils.h"
+#include "nsSliderFrame.h"
 #include <algorithm>
 
 // Needed for Print Preview
@@ -184,8 +185,9 @@ nsBoxFrame::Init(nsIContent*       aContent,
 
 #ifdef DEBUG_LAYOUT
     // if we are root and this
-  if (mState & NS_STATE_IS_ROOT) 
-      GetDebugPref(GetPresContext());
+  if (mState & NS_STATE_IS_ROOT) {
+    GetDebugPref();
+  }
 #endif
 
   UpdateMouseThrough();
@@ -629,6 +631,7 @@ nsBoxFrame::Reflow(nsPresContext*          aPresContext,
                    const nsHTMLReflowState& aReflowState,
                    nsReflowStatus&          aStatus)
 {
+  MarkInReflow();
   // If you make changes to this method, please keep nsLeafBoxFrame::Reflow
   // in sync, if the changes are applicable there.
 
@@ -1116,11 +1119,10 @@ nsBoxFrame::AttributeChanged(int32_t aNameSpaceID,
 
   // Ignore 'width', 'height', 'screenX', 'screenY' and 'sizemode' on a
   // <window>.
-  nsIAtom *tag = mContent->Tag();
-  if ((tag == nsGkAtoms::window ||
-       tag == nsGkAtoms::page ||
-       tag == nsGkAtoms::dialog ||
-       tag == nsGkAtoms::wizard) &&
+  if (mContent->IsAnyOfXULElements(nsGkAtoms::window,
+                                   nsGkAtoms::page,
+                                   nsGkAtoms::dialog,
+                                   nsGkAtoms::wizard) &&
       (nsGkAtoms::width == aAttribute ||
        nsGkAtoms::height == aAttribute ||
        nsGkAtoms::screenX == aAttribute ||
@@ -1246,7 +1248,7 @@ nsBoxFrame::AttributeChanged(int32_t aNameSpaceID,
     RegUnregAccessKey(true);
   }
   else if (aAttribute == nsGkAtoms::rows &&
-           tag == nsGkAtoms::tree) {
+           mContent->IsXULElement(nsGkAtoms::tree)) {
     // Reflow ourselves and all our children if "rows" changes, since
     // nsTreeBodyFrame's layout reads this from its parent (this frame).
     PresContext()->PresShell()->
@@ -1258,9 +1260,9 @@ nsBoxFrame::AttributeChanged(int32_t aNameSpaceID,
 
 #ifdef DEBUG_LAYOUT
 void
-nsBoxFrame::GetDebugPref(nsPresContext* aPresContext)
+nsBoxFrame::GetDebugPref()
 {
-    gDebug = Preferences::GetBool("xul.debug.box");
+  gDebug = Preferences::GetBool("xul.debug.box");
 }
 
 class nsDisplayXULDebug : public nsDisplayItem {
@@ -1309,21 +1311,11 @@ nsBoxFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                              const nsDisplayListSet& aLists)
 {
   bool forceLayer = false;
-  uint32_t flags = 0;
-  mozilla::layers::FrameMetrics::ViewID scrollTargetId =
-    mozilla::layers::FrameMetrics::NULL_SCROLL_ID;
 
-  if (GetContent()->IsXUL()) {
+  if (GetContent()->IsXULElement()) {
     // forcelayer is only supported on XUL elements with box layout
     if (GetContent()->HasAttr(kNameSpaceID_None, nsGkAtoms::layer)) {
       forceLayer = true;
-    } else {
-      nsIFrame* parent = GetParentBox(this);
-      if (parent && parent->GetType() == nsGkAtoms::sliderFrame) {
-        aBuilder->GetScrollbarInfo(&scrollTargetId, &flags);
-        forceLayer = (scrollTargetId != layers::FrameMetrics::NULL_SCROLL_ID);
-        nsLayoutUtils::SetScrollbarThumbLayerization(this, forceLayer);
-      }
     }
     // Check for frames that are marked as a part of the region used
     // in calculating glass margins on Windows.
@@ -1369,7 +1361,7 @@ nsBoxFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 
     // Wrap the list to make it its own layer
     aLists.Content()->AppendNewToTop(new (aBuilder)
-      nsDisplayOwnLayer(aBuilder, this, &masterList, flags, scrollTargetId));
+      nsDisplayOwnLayer(aBuilder, this, &masterList));
   }
 }
 
@@ -1417,13 +1409,13 @@ nsBoxFrame::PaintXULDebugBackground(nsRenderingContext& aRenderingContext,
   bool isHorizontal = IsHorizontal();
 
   GetDebugBorder(debugBorder);
-  PixelMarginToTwips(GetPresContext(), debugBorder);
+  PixelMarginToTwips(debugBorder);
 
   GetDebugMargin(debugMargin);
-  PixelMarginToTwips(GetPresContext(), debugMargin);
+  PixelMarginToTwips(debugMargin);
 
   GetDebugPadding(debugPadding);
-  PixelMarginToTwips(GetPresContext(), debugPadding);
+  PixelMarginToTwips(debugPadding);
 
   nsRect inner(mRect);
   inner.MoveTo(aPt);
@@ -1477,7 +1469,7 @@ nsBoxFrame::PaintXULDebugOverlay(DrawTarget& aDrawTarget, nsPoint aPt)
 
   nsMargin debugMargin;
   GetDebugMargin(debugMargin);
-  PixelMarginToTwips(GetPresContext(), debugMargin);
+  PixelMarginToTwips(debugMargin);
 
   nsRect inner(mRect);
   inner.MoveTo(aPt);
@@ -1680,7 +1672,7 @@ nsBoxFrame::GetDebugPadding(nsMargin& aPadding)
 }
 
 void 
-nsBoxFrame::PixelMarginToTwips(nsPresContext* aPresContext, nsMargin& aMarginPixels)
+nsBoxFrame::PixelMarginToTwips(nsMargin& aMarginPixels)
 {
   nscoord onePixel = nsPresContext::CSSPixelsToAppUnits(1);
   aMarginPixels.left   *= onePixel;
@@ -1751,10 +1743,10 @@ nsBoxFrame::DisplayDebugInfoFor(nsIFrame*  aBox,
     nsMargin m;
     nsMargin m2;
     GetDebugBorder(m);
-    PixelMarginToTwips(aPresContext, m);
+    PixelMarginToTwips(m);
 
     GetDebugMargin(m2);
-    PixelMarginToTwips(aPresContext, m2);
+    PixelMarginToTwips(m2);
 
     m += m2;
 
@@ -1877,16 +1869,13 @@ nsBoxFrame::RegUnregAccessKey(bool aDoReg)
 {
   MOZ_ASSERT(mContent);
 
-  // find out what type of element this is
-  nsIAtom *atom = mContent->Tag();
-
   // only support accesskeys for the following elements
-  if (atom != nsGkAtoms::button &&
-      atom != nsGkAtoms::toolbarbutton &&
-      atom != nsGkAtoms::checkbox &&
-      atom != nsGkAtoms::textbox &&
-      atom != nsGkAtoms::tab &&
-      atom != nsGkAtoms::radio) {
+  if (!mContent->IsAnyOfXULElements(nsGkAtoms::button,
+                                    nsGkAtoms::toolbarbutton,
+                                    nsGkAtoms::checkbox,
+                                    nsGkAtoms::textbox,
+                                    nsGkAtoms::tab,
+                                    nsGkAtoms::radio)) {
     return;
   }
 

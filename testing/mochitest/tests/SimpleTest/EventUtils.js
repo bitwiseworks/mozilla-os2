@@ -2,9 +2,11 @@
  * EventUtils provides some utility methods for creating and sending DOM events.
  * Current methods:
  *  sendMouseEvent
+ *  sendDragEvent
  *  sendChar
  *  sendString
  *  sendKey
+ *  sendWheelAndPaint
  *  synthesizeMouse
  *  synthesizeMouseAtCenter
  *  synthesizePointer
@@ -13,6 +15,7 @@
  *  synthesizeNativeKey
  *  synthesizeMouseExpectEvent
  *  synthesizeKeyExpectEvent
+ *  synthesizeNativeClick
  *
  *  When adding methods to this file, please add a performance test for it.
  */
@@ -34,6 +37,11 @@ window.__defineGetter__('_EU_Cc', function() {
   return c.value && !c.writable ? Components.classes : SpecialPowers.Cc;
 });
 
+window.__defineGetter__('_EU_Cu', function() {
+  var c = Object.getOwnPropertyDescriptor(window, 'Components');
+  return c.value && !c.writable ? Components.utils : SpecialPowers.Cu;
+});
+
 /**
  * Send a mouse event to the node aTarget (aTarget can be an id, or an
  * actual node) . The "event" passed in to aEvent is just a JavaScript
@@ -49,6 +57,13 @@ function getElement(id) {
 };   
 
 this.$ = this.getElement;
+
+function computeButton(aEvent) {
+  if (typeof aEvent.button != 'undefined') {
+    return aEvent.button;
+  }
+  return aEvent.type == 'contextmenu' ? 2 : 0;
+}
 
 function sendMouseEvent(aEvent, aTarget, aWindow) {
   if (['click', 'contextmenu', 'dblclick', 'mousedown', 'mouseup', 'mouseover', 'mouseout'].indexOf(aEvent.type) == -1) {
@@ -81,7 +96,7 @@ function sendMouseEvent(aEvent, aTarget, aWindow) {
   var altKeyArg        = aEvent.altKey        || false;
   var shiftKeyArg      = aEvent.shiftKey      || false;
   var metaKeyArg       = aEvent.metaKey       || false;
-  var buttonArg        = aEvent.button        || (aEvent.type == 'contextmenu' ? 2 : 0);
+  var buttonArg        = computeButton(aEvent);
   var relatedTargetArg = aEvent.relatedTarget || null;
 
   event.initMouseEvent(typeArg, canBubbleArg, cancelableArg, viewArg, detailArg,
@@ -90,6 +105,49 @@ function sendMouseEvent(aEvent, aTarget, aWindow) {
                        buttonArg, relatedTargetArg);
 
   return SpecialPowers.dispatchEvent(aWindow, aTarget, event);
+}
+
+/**
+ * Send a drag event to the node aTarget (aTarget can be an id, or an
+ * actual node) . The "event" passed in to aEvent is just a JavaScript
+ * object with the properties set that the real drag event object should
+ * have. This includes the type of the drag event.
+ */
+function sendDragEvent(aEvent, aTarget, aWindow=window) {
+  if (['drag', 'dragstart', 'dragend', 'dragover', 'dragenter', 'dragleave', 'drop'].indexOf(aEvent.type) == -1) {
+    throw new Error("sendDragEvent doesn't know about event type '" + aEvent.type + "'");
+  }
+
+  if (typeof aTarget == "string") {
+    aTarget = aWindow.document.getElementById(aTarget);
+  }
+
+  var event = aWindow.document.createEvent('DragEvent');
+
+  var typeArg          = aEvent.type;
+  var canBubbleArg     = true;
+  var cancelableArg    = true;
+  var viewArg          = aWindow;
+  var detailArg        = aEvent.detail        || 0;
+  var screenXArg       = aEvent.screenX       || 0;
+  var screenYArg       = aEvent.screenY       || 0;
+  var clientXArg       = aEvent.clientX       || 0;
+  var clientYArg       = aEvent.clientY       || 0;
+  var ctrlKeyArg       = aEvent.ctrlKey       || false;
+  var altKeyArg        = aEvent.altKey        || false;
+  var shiftKeyArg      = aEvent.shiftKey      || false;
+  var metaKeyArg       = aEvent.metaKey       || false;
+  var buttonArg        = computeButton(aEvent);
+  var relatedTargetArg = aEvent.relatedTarget || null;
+  var dataTransfer     = aEvent.dataTransfer  || null;
+
+  event.initDragEvent(typeArg, canBubbleArg, cancelableArg, viewArg, detailArg,
+                      screenXArg, screenYArg, clientXArg, clientYArg,
+                      ctrlKeyArg, altKeyArg, shiftKeyArg, metaKeyArg,
+                      buttonArg, relatedTargetArg, dataTransfer);
+
+  var utils = _getDOMWindowUtils(aWindow);
+  return utils.dispatchDOMEventViaPresShell(aTarget, event, true);
 }
 
 /**
@@ -262,7 +320,7 @@ function synthesizeMouseAtPoint(left, top, aEvent, aWindow)
   var defaultPrevented = false;
 
   if (utils) {
-    var button = aEvent.button || 0;
+    var button = computeButton(aEvent);
     var clickCount = aEvent.clickCount || 1;
     var modifiers = _parseModifiers(aEvent);
     var pressure = ("pressure" in aEvent) ? aEvent.pressure : 0;
@@ -310,7 +368,7 @@ function synthesizePointerAtPoint(left, top, aEvent, aWindow)
   var defaultPrevented = false;
 
   if (utils) {
-    var button = aEvent.button || 0;
+    var button = computeButton(aEvent);
     var clickCount = aEvent.clickCount || 1;
     var modifiers = _parseModifiers(aEvent);
     var pressure = ("pressure" in aEvent) ? aEvent.pressure : 0;
@@ -337,8 +395,8 @@ function synthesizePointerAtPoint(left, top, aEvent, aWindow)
 function synthesizeMouseAtCenter(aTarget, aEvent, aWindow)
 {
   var rect = aTarget.getBoundingClientRect();
-  synthesizeMouse(aTarget, rect.width / 2, rect.height / 2, aEvent,
-                  aWindow);
+  return synthesizeMouse(aTarget, rect.width / 2, rect.height / 2, aEvent,
+                         aWindow);
 }
 function synthesizeTouchAtCenter(aTarget, aEvent, aWindow)
 {
@@ -428,6 +486,66 @@ function synthesizeWheel(aTarget, aOffsetX, aOffsetY, aEvent, aWindow)
                        aEvent.deltaX, aEvent.deltaY, aEvent.deltaZ,
                        aEvent.deltaMode, modifiers,
                        lineOrPageDeltaX, lineOrPageDeltaY, options);
+}
+
+/**
+ * This is a wrapper around synthesizeWheel that waits for the wheel event
+ * to be dispatched and for the subsequent layout/paints to be flushed.
+ *
+ * This requires including paint_listener.js. Tests must call
+ * DOMWindowUtils.restoreNormalRefresh() before finishing, if they use this
+ * function.
+ *
+ * If no callback is provided, the caller is assumed to have its own method of
+ * determining scroll completion and the refresh driver is not automatically
+ * restored.
+ */
+function sendWheelAndPaint(aTarget, aOffsetX, aOffsetY, aEvent, aCallback, aWindow) {
+  aWindow = aWindow || window;
+
+  var utils = _getDOMWindowUtils(aWindow);
+  if (!utils)
+    return;
+
+  if (utils.isMozAfterPaintPending) {
+    // If a paint is pending, then APZ may be waiting for a scroll acknowledgement
+    // from the content thread. If we send a wheel event now, it could be ignored
+    // by APZ (or its scroll offset could be overridden). To avoid problems we
+    // just wait for the paint to complete.
+    aWindow.waitForAllPaintsFlushed(function() {
+      sendWheelAndPaint(aTarget, aOffsetX, aOffsetY, aEvent, aCallback, aWindow);
+    });
+    return;
+  }
+
+  var onwheel = function() {
+    window.removeEventListener("wheel", onwheel);
+
+    // Wait one frame since the wheel event has not caused a refresh observer
+    // to be added yet.
+    setTimeout(function() {
+      utils.advanceTimeAndRefresh(1000);
+
+      if (!aCallback)
+        return;
+
+      var waitForPaints = function () {
+        SpecialPowers.Services.obs.removeObserver(waitForPaints, "apz-repaints-flushed", false);
+        aWindow.waitForAllPaintsFlushed(function() {
+          utils.restoreNormalRefresh();
+          aCallback();
+        });
+      }
+
+      SpecialPowers.Services.obs.addObserver(waitForPaints, "apz-repaints-flushed", false);
+      if (!utils.flushApzRepaints(aWindow)) {
+        waitForPaints();
+      }
+    }, 0);
+  };
+
+  aWindow.addEventListener("wheel", onwheel);
+  synthesizeWheel(aTarget, aOffsetX, aOffsetY, aEvent, aWindow);
 }
 
 function _computeKeyCodeFromChar(aChar)
@@ -674,7 +792,10 @@ const KEYBOARD_LAYOUT_THAI =
 
 /**
  * synthesizeNativeKey() dispatches native key event on active window.
- * This is implemented only on Windows and Mac.
+ * This is implemented only on Windows and Mac. Note that this function
+ * dispatches the key event asynchronously and returns immediately. If a
+ * callback function is provided, the callback will be called upon
+ * completion of the key dispatch.
  *
  * @param aKeyboardLayout       One of KEYBOARD_LAYOUT_* defined above.
  * @param aNativeKeyCode        A native keycode value defined in
@@ -687,12 +808,16 @@ const KEYBOARD_LAYOUT_THAI =
  *                              by the key event.
  * @param aUnmodifiedChars      Specify characters of unmodified (except Shift)
  *                              aChar value.
+ * @param aCallback             If provided, this callback will be invoked
+ *                              once the native keys have been processed
+ *                              by Gecko. Will never be called if this
+ *                              function returns false.
  * @return                      True if this function succeed dispatching
  *                              native key event.  Otherwise, false.
  */
 
 function synthesizeNativeKey(aKeyboardLayout, aNativeKeyCode, aModifiers,
-                             aChars, aUnmodifiedChars)
+                             aChars, aUnmodifiedChars, aCallback)
 {
   var utils = _getDOMWindowUtils(window);
   if (!utils) {
@@ -707,9 +832,17 @@ function synthesizeNativeKey(aKeyboardLayout, aNativeKeyCode, aModifiers,
   if (nativeKeyboardLayout === null) {
     return false;
   }
+
+  var observer = {
+    observe: function(aSubject, aTopic, aData) {
+      if (aCallback && aTopic == "keyevent") {
+        aCallback(aData);
+      }
+    }
+  };
   utils.sendNativeKeyEvent(nativeKeyboardLayout, aNativeKeyCode,
                            _parseNativeModifiers(aModifiers),
-                           aChars, aUnmodifiedChars);
+                           aChars, aUnmodifiedChars, observer);
   return true;
 }
 
@@ -831,14 +964,26 @@ function _getDOMWindowUtils(aWindow)
                                getInterface(_EU_Ci.nsIDOMWindowUtils);
 }
 
+function _defineConstant(name, value) {
+  Object.defineProperty(this, name, {
+    value: value,
+    enumerable: true,
+    writable: false
+  });
+}
+
 const COMPOSITION_ATTR_RAW_CLAUSE =
   _EU_Ci.nsITextInputProcessor.ATTR_RAW_CLAUSE;
+_defineConstant("COMPOSITION_ATTR_RAW_CLAUSE", COMPOSITION_ATTR_RAW_CLAUSE);
 const COMPOSITION_ATTR_SELECTED_RAW_CLAUSE =
   _EU_Ci.nsITextInputProcessor.ATTR_SELECTED_RAW_CLAUSE;
+_defineConstant("COMPOSITION_ATTR_SELECTED_RAW_CLAUSE", COMPOSITION_ATTR_SELECTED_RAW_CLAUSE);
 const COMPOSITION_ATTR_CONVERTED_CLAUSE =
   _EU_Ci.nsITextInputProcessor.ATTR_CONVERTED_CLAUSE;
+_defineConstant("COMPOSITION_ATTR_CONVERTED_CLAUSE", COMPOSITION_ATTR_CONVERTED_CLAUSE);
 const COMPOSITION_ATTR_SELECTED_CLAUSE =
   _EU_Ci.nsITextInputProcessor.ATTR_SELECTED_CLAUSE;
+_defineConstant("COMPOSITION_ATTR_SELECTED_CLAUSE", COMPOSITION_ATTR_SELECTED_CLAUSE);
 
 var TIPMap = new WeakMap();
 
@@ -1361,4 +1506,102 @@ function synthesizeSelectionSet(aOffset, aLength, aReverse, aWindow)
   }
   var flags = aReverse ? SELECTION_SET_FLAG_REVERSE : 0;
   return utils.sendSelectionSetEvent(aOffset, aLength, flags);
+}
+
+/*
+ * Synthesize a native mouse click event at a particular point in screen.
+ * This function should be used only for testing native event loop.
+ * Use synthesizeMouse instead for most case.
+ *
+ * This works only on OS X.  Throws an error on other OS.  Also throws an error
+ * when the library or any of function are not found, or something goes wrong
+ * in native functions.
+ */
+function synthesizeNativeOSXClick(x, y)
+{
+  var { ctypes } = _EU_Cu.import("resource://gre/modules/ctypes.jsm", {});
+
+  // Library
+  var CoreFoundation = ctypes.open("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation");
+  var CoreGraphics = ctypes.open("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics");
+
+  // Contants
+  var kCGEventLeftMouseDown = 1;
+  var kCGEventLeftMouseUp = 2;
+  var kCGEventSourceStateHIDSystemState = 1;
+  var kCGHIDEventTap = 0;
+  var kCGMouseButtonLeft = 0;
+  var kCGMouseEventClickState = 1;
+
+  // Types
+  var CGEventField = ctypes.uint32_t;
+  var CGEventRef = ctypes.voidptr_t;
+  var CGEventSourceRef = ctypes.voidptr_t;
+  var CGEventSourceStateID = ctypes.uint32_t;
+  var CGEventTapLocation = ctypes.uint32_t;
+  var CGEventType = ctypes.uint32_t;
+  var CGFloat = ctypes.voidptr_t.size == 4 ? ctypes.float : ctypes.double;
+  var CGMouseButton = ctypes.uint32_t;
+
+  var CGPoint = new ctypes.StructType(
+    "CGPoint",
+    [ { "x" : CGFloat },
+      { "y" : CGFloat } ]);
+
+  // Functions
+  var CGEventSourceCreate = CoreGraphics.declare(
+    "CGEventSourceCreate",
+    ctypes.default_abi,
+    CGEventSourceRef, CGEventSourceStateID);
+  var CGEventCreateMouseEvent = CoreGraphics.declare(
+    "CGEventCreateMouseEvent",
+    ctypes.default_abi,
+    CGEventRef,
+    CGEventSourceRef, CGEventType, CGPoint, CGMouseButton);
+  var CGEventSetIntegerValueField = CoreGraphics.declare(
+    "CGEventSetIntegerValueField",
+    ctypes.default_abi,
+    ctypes.void_t,
+    CGEventRef, CGEventField, ctypes.int64_t);
+  var CGEventPost = CoreGraphics.declare(
+    "CGEventPost",
+    ctypes.default_abi,
+    ctypes.void_t,
+    CGEventTapLocation, CGEventRef);
+  var CFRelease = CoreFoundation.declare(
+    "CFRelease",
+    ctypes.default_abi,
+    ctypes.void_t,
+    CGEventRef);
+
+  var source = CGEventSourceCreate(kCGEventSourceStateHIDSystemState);
+  if (!source) {
+    throw new Error("CGEventSourceCreate returns null");
+  }
+
+  var loc = new CGPoint({ x: x, y: y });
+  var event = CGEventCreateMouseEvent(source, kCGEventLeftMouseDown, loc,
+                                      kCGMouseButtonLeft);
+  if (!event) {
+    throw new Error("CGEventCreateMouseEvent returns null");
+  }
+  CGEventSetIntegerValueField(event, kCGMouseEventClickState,
+                              new ctypes.Int64(1));
+  CGEventPost(kCGHIDEventTap, event);
+  CFRelease(event);
+
+  event = CGEventCreateMouseEvent(source, kCGEventLeftMouseUp, loc,
+                                      kCGMouseButtonLeft);
+  if (!event) {
+    throw new Error("CGEventCreateMouseEvent returns null");
+  }
+  CGEventSetIntegerValueField(event, kCGMouseEventClickState,
+                              new ctypes.Int64(1));
+  CGEventPost(kCGHIDEventTap, event);
+  CFRelease(event);
+
+  CFRelease(source);
+
+  CoreFoundation.close();
+  CoreGraphics.close();
 }

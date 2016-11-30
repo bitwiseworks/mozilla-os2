@@ -14,13 +14,16 @@ namespace mozilla {
 class RtspMediaCodecDecoder final : public MediaOmxCommonDecoder
 {
 public:
-  virtual MediaDecoder* Clone() override;
+  explicit RtspMediaCodecDecoder(MediaDecoderOwner* aOwner)
+    : MediaOmxCommonDecoder(aOwner) {}
+
+  virtual MediaDecoder* Clone(MediaDecoderOwner* aOwner) override;
 
   virtual MediaOmxCommonReader* CreateReader() override;
 
   virtual MediaDecoderStateMachine* CreateStateMachineFromReader(MediaOmxCommonReader* aReader) override;
 
-  virtual void ApplyStateToStateMachine(PlayState aState) override;
+  virtual void ChangeState(PlayState aState) override;
 };
 
 } // namespace mozilla

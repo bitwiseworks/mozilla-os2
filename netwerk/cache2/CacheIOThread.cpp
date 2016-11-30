@@ -10,7 +10,6 @@
 #include "nsPrintfCString.h"
 #include "nsThreadUtils.h"
 #include "mozilla/IOInterposer.h"
-#include "mozilla/VisualEventTracer.h"
 
 namespace mozilla {
 namespace net {
@@ -22,6 +21,7 @@ NS_IMPL_ISUPPORTS(CacheIOThread, nsIThreadObserver)
 CacheIOThread::CacheIOThread()
 : mMonitor("CacheIOThread")
 , mThread(nullptr)
+, mXPCOMThread(nullptr)
 , mLowestLevelWaiting(LAST_LEVEL)
 , mCurrentlyExecutingLevel(0)
 , mHasXPCOMEvents(false)
@@ -34,6 +34,11 @@ CacheIOThread::CacheIOThread()
 
 CacheIOThread::~CacheIOThread()
 {
+  if (mXPCOMThread) {
+    nsIThread *thread = mXPCOMThread;
+    thread->Release();
+  }
+
   sSelf = nullptr;
 #ifdef DEBUG
   for (uint32_t level = 0; level < LAST_LEVEL; ++level) {
@@ -183,7 +188,7 @@ void CacheIOThread::ThreadFunc()
     if (threadInternal)
       threadInternal->SetObserver(this);
 
-    mXPCOMThread.swap(xpcomThread);
+    mXPCOMThread = xpcomThread.forget().take();
 
     lock.NotifyAll();
 
@@ -196,9 +201,6 @@ loopStart:
 
       // Process xpcom events first
       while (mHasXPCOMEvents) {
-        eventtracer::AutoEventTracer tracer(this, eventtracer::eExec, eventtracer::eDone,
-          "net::cache::io::level(xpcom)");
-
         mHasXPCOMEvents = false;
         mCurrentlyExecutingLevel = XPCOM_LEVEL;
 
@@ -207,7 +209,8 @@ loopStart:
         bool processedEvent;
         nsresult rv;
         do {
-          rv = mXPCOMThread->ProcessNextEvent(false, &processedEvent);
+          nsIThread *thread = mXPCOMThread;
+          rv = thread->ProcessNextEvent(false, &processedEvent);
         } while (NS_SUCCEEDED(rv) && processedEvent);
       }
 
@@ -265,10 +268,7 @@ static const char* const sLevelTraceName[] = {
 
 void CacheIOThread::LoopOneLevel(uint32_t aLevel)
 {
-  eventtracer::AutoEventTracer tracer(this, eventtracer::eExec, eventtracer::eDone,
-    sLevelTraceName[aLevel]);
-
-  nsTArray<nsRefPtr<nsIRunnable> > events;
+  nsTArray<nsCOMPtr<nsIRunnable> > events;
   events.SwapElements(mEventQueue[aLevel]);
   uint32_t length = events.Length();
 
@@ -322,12 +322,12 @@ NS_IMETHODIMP CacheIOThread::OnDispatchedEvent(nsIThreadInternal *thread)
   return NS_OK;
 }
 
-NS_IMETHODIMP CacheIOThread::OnProcessNextEvent(nsIThreadInternal *thread, bool mayWait, uint32_t recursionDepth)
+NS_IMETHODIMP CacheIOThread::OnProcessNextEvent(nsIThreadInternal *thread, bool mayWait)
 {
   return NS_OK;
 }
 
-NS_IMETHODIMP CacheIOThread::AfterProcessNextEvent(nsIThreadInternal *thread, uint32_t recursionDepth,
+NS_IMETHODIMP CacheIOThread::AfterProcessNextEvent(nsIThreadInternal *thread,
                                                    bool eventWasProcessed)
 {
   return NS_OK;
@@ -342,7 +342,7 @@ size_t CacheIOThread::SizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) co
   size_t n = 0;
   n += mallocSizeOf(mThread);
   for (uint32_t level = 0; level < LAST_LEVEL; ++level) {
-    n += mEventQueue[level].SizeOfExcludingThis(mallocSizeOf);
+    n += mEventQueue[level].ShallowSizeOfExcludingThis(mallocSizeOf);
     // Events referenced by the queues are arbitrary objects we cannot be sure
     // are reported elsewhere as well as probably not implementing nsISizeOf
     // interface.  Deliberatly omitting them from reporting here.
@@ -356,5 +356,5 @@ size_t CacheIOThread::SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) co
   return mallocSizeOf(this) + SizeOfExcludingThis(mallocSizeOf);
 }
 
-} // net
-} // mozilla
+} // namespace net
+} // namespace mozilla

@@ -38,7 +38,7 @@ public:
 
   // WebIDL (internal functions)
 
-  virtual JSObject* WrapObject(JSContext *aCx) override;
+  virtual JSObject* WrapObject(JSContext *aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   nsresult SetCurrentChannel(nsITVChannelData* aChannelData);
 
@@ -101,8 +101,8 @@ private:
   nsresult DispatchEITBroadcastedEvent(const Sequence<OwningNonNull<TVProgram>>& aPrograms);
 
   nsCOMPtr<nsITVService> mTVService;
-  nsRefPtr<TVTuner> mTuner;
-  nsRefPtr<TVChannel> mCurrentChannel;
+  RefPtr<TVTuner> mTuner;
+  RefPtr<TVChannel> mCurrentChannel;
   TVSourceType mType;
   bool mIsScanning;
 };

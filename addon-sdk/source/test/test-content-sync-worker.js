@@ -369,7 +369,7 @@ exports["test:nothing is leaked to content script"] = WorkerTest(
       },
       contentScriptWhen: "ready",
       onMessage: function(list) {
-        assert.ok(!list[0], "worker API contrustor isn't leaked");
+        assert.ok(!list[0], "worker API constructor isn't leaked");
         assert.ok(!list[1], "Proxy API stuff isn't leaked 1/2");
         assert.ok(!list[2], "Proxy API stuff isn't leaked 2/2");
         done();
@@ -477,7 +477,7 @@ exports["test:setInterval async Errors passed to .onError"] = WorkerTest(
       onError: function(err) {
         count++;
         assert.equal(err.message, "ubik",
-            "error (corectly) propagated  " + count + " time(s)");
+            "error (correctly) propagated  " + count + " time(s)");
         if (count >= 3) done();
       }
     });

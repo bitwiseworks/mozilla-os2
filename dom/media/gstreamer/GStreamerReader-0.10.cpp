@@ -6,7 +6,6 @@
 #include "GStreamerMozVideoBuffer.h"
 #include "GStreamerFormatHelper.h"
 #include "VideoUtils.h"
-#include "mozilla/dom/TimeRanges.h"
 #include "mozilla/Endian.h"
 #include "mozilla/Preferences.h"
 
@@ -30,7 +29,7 @@ GstFlowReturn GStreamerReader::AllocateVideoBuffer(GstPad* aPad,
                                                    GstCaps* aCaps,
                                                    GstBuffer** aBuf)
 {
-  nsRefPtr<PlanarYCbCrImage> image;
+  RefPtr<PlanarYCbCrImage> image;
   return AllocateVideoBufferFull(aPad, aOffset, aSize, aCaps, aBuf, image);
 }
 
@@ -39,15 +38,14 @@ GstFlowReturn GStreamerReader::AllocateVideoBufferFull(GstPad* aPad,
                                                        guint aSize,
                                                        GstCaps* aCaps,
                                                        GstBuffer** aBuf,
-                                                       nsRefPtr<PlanarYCbCrImage>& aImage)
+                                                       RefPtr<PlanarYCbCrImage>& aImage)
 {
   /* allocate an image using the container */
   ImageContainer* container = mDecoder->GetImageContainer();
   if (container == nullptr) {
     return GST_FLOW_ERROR;
   }
-  nsRefPtr<PlanarYCbCrImage> image =
-    container->CreateImage(ImageFormat::PLANAR_YCBCR).downcast<PlanarYCbCrImage>();
+  RefPtr<PlanarYCbCrImage> image = container->CreatePlanarYCbCrImage();
 
   /* prepare a GstBuffer pointing to the underlying PlanarYCbCrImage buffer */
   GstBuffer* buf = GST_BUFFER(gst_moz_video_buffer_new());
@@ -113,12 +111,12 @@ gboolean GStreamerReader::EventProbeCb(GstPad* aPad,
   return reader->EventProbe(aPad, aEvent);
 }
 
-nsRefPtr<PlanarYCbCrImage> GStreamerReader::GetImageFromBuffer(GstBuffer* aBuffer)
+RefPtr<PlanarYCbCrImage> GStreamerReader::GetImageFromBuffer(GstBuffer* aBuffer)
 {
   if (!GST_IS_MOZ_VIDEO_BUFFER (aBuffer))
     return nullptr;
 
-  nsRefPtr<PlanarYCbCrImage> image;
+  RefPtr<PlanarYCbCrImage> image;
   GstMozVideoBufferData* bufferdata = reinterpret_cast<GstMozVideoBufferData*>(gst_moz_video_buffer_get_data(GST_MOZ_VIDEO_BUFFER(aBuffer)));
   image = bufferdata->mImage;
 
@@ -149,7 +147,7 @@ nsRefPtr<PlanarYCbCrImage> GStreamerReader::GetImageFromBuffer(GstBuffer* aBuffe
 
 void GStreamerReader::CopyIntoImageBuffer(GstBuffer* aBuffer,
                                           GstBuffer** aOutBuffer,
-                                          nsRefPtr<PlanarYCbCrImage> &aImage)
+                                          RefPtr<PlanarYCbCrImage> &aImage)
 {
   AllocateVideoBufferFull(nullptr, GST_BUFFER_OFFSET(aBuffer),
       GST_BUFFER_SIZE(aBuffer), nullptr, aOutBuffer, aImage);
@@ -163,12 +161,15 @@ void GStreamerReader::CopyIntoImageBuffer(GstBuffer* aBuffer,
 GstCaps* GStreamerReader::BuildAudioSinkCaps()
 {
   GstCaps* caps;
+
 #if MOZ_LITTLE_ENDIAN
   int endianness = 1234;
 #else
   int endianness = 4321;
 #endif
+
   gint width;
+
 #ifdef MOZ_SAMPLE_TYPE_FLOAT32
   caps = gst_caps_from_string("audio/x-raw-float, channels={1,2}");
   width = 32;
@@ -176,10 +177,11 @@ GstCaps* GStreamerReader::BuildAudioSinkCaps()
   caps = gst_caps_from_string("audio/x-raw-int, channels={1,2}");
   width = 16;
 #endif
+
   gst_caps_set_simple(caps,
       "width", G_TYPE_INT, width,
       "endianness", G_TYPE_INT, endianness,
-      NULL);
+      nullptr);
 
   return caps;
 }

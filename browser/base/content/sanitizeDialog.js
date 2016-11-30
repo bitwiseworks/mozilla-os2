@@ -3,8 +3,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const Cc = Components.classes;
-const Ci = Components.interfaces;
+var Cc = Components.classes;
+var Ci = Components.interfaces;
 
 var gSanitizePromptDialog = {
 
@@ -266,7 +266,7 @@ var gSanitizePromptDialog = {
       this.showItemList();
     else
       this.hideItemList();
-  }
+  },
 
 #ifdef CRH_DIALOG_TREE_VIEW
   // A duration value; used in the same context as Sanitizer.TIMESPAN_HOUR,

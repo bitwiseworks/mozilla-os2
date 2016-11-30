@@ -1,6 +1,11 @@
 config = {
     "log_name": "central_to_aurora",
-
+    "version_files": [
+        "browser/config/version.txt",
+        "browser/config/version_display.txt",
+        "config/milestone.txt",
+        "b2g/confvars.sh",
+    ],
     "replacements": [
         # File, from, to
         ("{}/{}".format(d, f),
@@ -51,6 +56,9 @@ config = {
         ("browser/config/mozconfigs/macosx-universal/nightly",
          "ac_add_options --with-branding=browser/branding/nightly",
          "ac_add_options --with-branding=browser/branding/aurora"),
+        ("browser/config/mozconfigs/macosx-universal/l10n-mozconfig",
+         "ac_add_options --with-branding=browser/branding/nightly",
+         "ac_add_options --with-branding=browser/branding/aurora"),
         ("browser/config/mozconfigs/whitelist",
          "ac_add_options --with-branding=browser/branding/nightly",
          "ac_add_options --with-branding=browser/branding/aurora"),
@@ -84,7 +92,7 @@ config = {
     "balrog_credentials_file": "oauth.txt",
 
     "virtualenv_modules": [
-        "requests==2.2.1",
+        "requests==2.8.1",
     ],
 
     "post_merge_builders": [

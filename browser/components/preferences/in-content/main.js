@@ -5,6 +5,11 @@
 Components.utils.import("resource://gre/modules/Downloads.jsm");
 Components.utils.import("resource://gre/modules/FileUtils.jsm");
 Components.utils.import("resource://gre/modules/Task.jsm");
+Components.utils.import("resource:///modules/TransientPrefs.jsm");
+#ifdef E10S_TESTING_ONLY
+XPCOMUtils.defineLazyModuleGetter(this, "UpdateUtils",
+                                  "resource://gre/modules/UpdateUtils.jsm");
+#endif
 
 var gMainPane = {
   /**
@@ -27,31 +32,6 @@ var gMainPane = {
     // in case the default changes.  On other Windows OS's defaults can also
     // be set while the prefs are open.
     window.setInterval(this.updateSetDefaultBrowser, 1000);
-
-#ifdef MOZ_METRO
-    // Pre Windows 8, we should hide the update related settings
-    // for the Metro browser
-    let version = Components.classes["@mozilla.org/system-info;1"].
-                  getService(Components.interfaces.nsIPropertyBag2).
-                  getProperty("version");
-    let preWin8 = parseFloat(version) < 6.2;
-    this._showingWin8Prefs = !preWin8;
-    if (preWin8) {
-      ["autoMetro", "autoMetroIndent"].forEach(
-        function(id) document.getElementById(id).collapsed = true
-      );
-    } else {
-      let brandShortName =
-        document.getElementById("bundleBrand").getString("brandShortName");
-      let bundlePrefs = document.getElementById("bundlePreferences");
-      let autoDesktop = document.getElementById("autoDesktop");
-      autoDesktop.label =
-        bundlePrefs.getFormattedString("updateAutoDesktop.label",
-                                       [brandShortName]);
-      autoDesktop.accessKey =
-        bundlePrefs.getString("updateAutoDesktop.accessKey");
-    }
-#endif
 #endif
 #endif
 
@@ -71,6 +51,15 @@ var gMainPane = {
       showTabsInTaskbar.hidden = ver < 6.1;
     } catch (ex) {}
 #endif
+
+    // The "closing multiple tabs" and "opening multiple tabs might slow down
+    // &brandShortName;" warnings provide options for not showing these
+    // warnings again. When the user disabled them, we provide checkboxes to
+    // re-enable the warnings.
+    if (!TransientPrefs.prefShouldBeVisible("browser.tabs.warnOnClose"))
+      document.getElementById("warnCloseMultiple").hidden = true;
+    if (!TransientPrefs.prefShouldBeVisible("browser.tabs.warnOnOpen"))
+      document.getElementById("warnOpenMany").hidden = true;
 
     setEventListener("browser.privatebrowsing.autostart", "change",
                      gMainPane.updateBrowserStartupLastSession);
@@ -112,7 +101,13 @@ var gMainPane = {
           e10sCheckbox.checked = true;
         } else {
           e10sCheckbox.disabled = true;
-          e10sCheckbox.label += " (disabled: " + e10sBlockedReason.data + ")";
+          let updateChannel = UpdateUtils.UpdateChannel;
+          // only add this label on developer channels
+          if (updateChannel == "default" ||
+              updateChannel == "nightly" ||
+              updateChannel == "aurora") {
+            e10sCheckbox.label += " (disabled: " + e10sBlockedReason.data + ")";
+          }
         }
       }
     }
@@ -180,10 +175,10 @@ var gMainPane = {
         }
 
         let tmp = {};
-        Components.utils.import("resource://gre/modules/UpdateChannel.jsm", tmp);
-        if (!e10sCheckbox.checked && tmp.UpdateChannel.get() == "nightly") {
+        Components.utils.import("resource://gre/modules/UpdateUtils.jsm", tmp);
+        if (!e10sCheckbox.checked && tmp.UpdateUtils.UpdateChannel != "default") {
           Services.prefs.setBoolPref("browser.requestE10sFeedback", true);
-          Services.prompt.alert(window, brandName, "After restart, a tab will open to input.mozilla.org where you can provide us feedback about your e10s experience.");
+          Services.prompt.alert(window, brandName, bundle.getString("e10sFeedbackAfterRestart"));
         }
         Services.startup.quit(Ci.nsIAppStartup.eAttemptQuit |  Ci.nsIAppStartup.eRestart);
       }
@@ -313,7 +308,9 @@ var gMainPane = {
   {
     let homePage = document.getElementById("browser.startup.homepage");
     let tabs = this._getTabsForHomePage();
-    function getTabURI(t) t.linkedBrowser.currentURI.spec;
+    function getTabURI(t) {
+      return t.linkedBrowser.currentURI.spec;
+    }
 
     // FIXME Bug 244192: using dangerous "|" joiner!
     if (tabs.length)
@@ -382,19 +379,18 @@ var gMainPane = {
       // We should only include visible & non-pinned tabs
 
       tabs = win.gBrowser.visibleTabs.slice(win.gBrowser._numPinnedTabs);
-      
-      tabs = tabs.filter(this.isAboutPreferences);
+      tabs = tabs.filter(this.isNotAboutPreferences);
     }
-    
+
     return tabs;
   },
-  
+
   /**
    * Check to see if a tab is not about:preferences
    */
-  isAboutPreferences: function (aElement, aIndex, aArray)
+  isNotAboutPreferences: function (aElement, aIndex, aArray)
   {
-    return (aElement.linkedBrowser.currentURI.spec != "about:preferences");
+    return !aElement.linkedBrowser.currentURI.spec.startsWith("about:preferences");
   },
 
   /**
@@ -459,7 +455,10 @@ var gMainPane = {
    * downloads are automatically saved, updating preferences and UI in
    * response to the choice, if one is made.
    */
-  chooseFolder() this.chooseFolderTask().catch(Components.utils.reportError),
+  chooseFolder()
+  {
+    return this.chooseFolderTask().catch(Components.utils.reportError);
+  },
   chooseFolderTask: Task.async(function* ()
   {
     let bundlePreferences = document.getElementById("bundlePreferences");

@@ -45,6 +45,13 @@ class InlineMap
     static_assert(ZeroIsReserved<K>::result,
                   "zero as tombstone requires that zero keys be invalid");
 
+#ifdef DEBUG
+    bool keyNonZero(const K& key) {
+        // Zero as tombstone means zero keys are invalid.
+        return !!key;
+    }
+#endif
+
     bool usingMap() const {
         return inlNext > InlineElems;
     }
@@ -60,7 +67,8 @@ class InlineMap
             MOZ_ASSERT(map.initialized());
         }
 
-        for (InlineElem* it = inl, *end = inl + inlNext; it != end; ++it) {
+        InlineElem* end = inl + inlNext;
+        for (InlineElem* it = inl; it != end; ++it) {
             if (it->key && !map.putNew(it->key, it->value))
                 return false;
         }
@@ -208,10 +216,13 @@ class InlineMap
 
     MOZ_ALWAYS_INLINE
     Ptr lookup(const K& key) {
+        MOZ_ASSERT(keyNonZero(key));
+
         if (usingMap())
             return Ptr(map.lookup(key));
 
-        for (InlineElem* it = inl, *end = inl + inlNext; it != end; ++it) {
+        InlineElem* end = inl + inlNext;
+        for (InlineElem* it = inl; it != end; ++it) {
             if (it->key == key)
                 return Ptr(it);
         }
@@ -221,10 +232,13 @@ class InlineMap
 
     MOZ_ALWAYS_INLINE
     AddPtr lookupForAdd(const K& key) {
+        MOZ_ASSERT(keyNonZero(key));
+
         if (usingMap())
             return AddPtr(map.lookupForAdd(key));
 
-        for (InlineElem* it = inl, *end = inl + inlNext; it != end; ++it) {
+        InlineElem* end = inl + inlNext;
+        for (InlineElem* it = inl; it != end; ++it) {
             if (it->key == key)
                 return AddPtr(it, true);
         }
@@ -240,6 +254,7 @@ class InlineMap
     MOZ_ALWAYS_INLINE
     bool add(AddPtr& p, const K& key, const V& value) {
         MOZ_ASSERT(!p);
+        MOZ_ASSERT(keyNonZero(key));
 
         if (p.isInlinePtr) {
             InlineElem* addPtr = p.inlAddPtr;

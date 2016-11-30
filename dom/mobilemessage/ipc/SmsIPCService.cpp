@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -7,7 +8,6 @@
 #include "SmsIPCService.h"
 #include "nsXULAppAPI.h"
 #include "mozilla/dom/mobilemessage/SmsChild.h"
-#include "SmsMessage.h"
 #include "nsJSUtils.h"
 #include "mozilla/dom/MozMobileMessageManagerBinding.h"
 #include "mozilla/dom/BindingUtils.h"
@@ -66,13 +66,13 @@ SendCursorRequest(const IPCMobileMessageCursor& aRequest,
   PSmsChild* smsChild = GetSmsChild();
   NS_ENSURE_TRUE(smsChild, NS_ERROR_FAILURE);
 
-  nsRefPtr<MobileMessageCursorChild> actor =
+  RefPtr<MobileMessageCursorChild> actor =
     new MobileMessageCursorChild(aRequestReply);
 
   // Add an extra ref for IPDL. Will be released in
   // SmsChild::DeallocPMobileMessageCursor().
-  nsRefPtr<MobileMessageCursorChild> actorCopy(actor);
-  mozilla::unused << actorCopy.forget().take();
+  RefPtr<MobileMessageCursorChild> actorCopy(actor);
+  mozilla::Unused << actorCopy.forget().take();
 
   smsChild->SendPMobileMessageCursorConstructor(actor, aRequest);
 
@@ -94,7 +94,7 @@ getDefaultServiceId(const char* aPrefKey)
   return id;
 }
 
-} // anonymous namespace
+} // namespace
 
 NS_IMPL_ISUPPORTS(SmsIPCService,
                   nsISmsService,
@@ -111,7 +111,7 @@ SmsIPCService::GetSingleton()
     sSingleton = new SmsIPCService();
   }
 
-  nsRefPtr<SmsIPCService> service = sSingleton;
+  RefPtr<SmsIPCService> service = sSingleton;
   return service.forget();
 }
 
@@ -181,6 +181,21 @@ SmsIPCService::GetSmscAddress(uint32_t aServiceId,
   return SendRequest(GetSmscAddressRequest(aServiceId), aRequest);
 }
 
+
+NS_IMETHODIMP
+SmsIPCService::SetSmscAddress(uint32_t aServiceId,
+                              const nsAString& aNumber,
+                              uint32_t aTypeOfNumber,
+                              uint32_t aNumberPlanIdentification,
+                              nsIMobileMessageCallback* aRequest)
+{
+  return SendRequest(SetSmscAddressRequest(aServiceId,
+                                           nsString(aNumber),
+                                           aTypeOfNumber,
+                                           aNumberPlanIdentification),
+                     aRequest);
+}
+
 NS_IMETHODIMP
 SmsIPCService::Send(uint32_t aServiceId,
                     const nsAString& aNumber,
@@ -244,6 +259,7 @@ SmsIPCService::CreateMessageCursor(bool aHasStartDate,
                                    const nsAString& aDelivery,
                                    bool aHasRead,
                                    bool aRead,
+                                   bool aHasThreadId,
                                    uint64_t aThreadId,
                                    bool aReverse,
                                    nsIMobileMessageCursorCallback* aCursorCallback,
@@ -268,6 +284,7 @@ SmsIPCService::CreateMessageCursor(bool aHasStartDate,
   data.delivery() = aDelivery;
   data.hasRead() = aHasRead;
   data.read() = aRead;
+  data.hasThreadId() = aHasThreadId;
   data.threadId() = aThreadId;
 
   return SendCursorRequest(CreateMessageCursorRequest(data, aReverse),

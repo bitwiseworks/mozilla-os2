@@ -23,7 +23,7 @@ namespace dom {
 class SpeechRecognition;
 
 class SpeechRecognitionResultList final : public nsISupports,
-                                              public nsWrapperCache
+                                          public nsWrapperCache
 {
 public:
   explicit SpeechRecognitionResultList(SpeechRecognition* aParent);
@@ -33,7 +33,7 @@ public:
 
   nsISupports* GetParentObject() const;
 
-  virtual JSObject* WrapObject(JSContext* aCx) override;
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   uint32_t Length() const;
 
@@ -41,11 +41,11 @@ public:
 
   already_AddRefed<SpeechRecognitionResult> IndexedGetter(uint32_t aIndex, bool& aPresent);
 
-  nsTArray<nsRefPtr<SpeechRecognitionResult> > mItems;
+  nsTArray<RefPtr<SpeechRecognitionResult>> mItems;
 private:
   ~SpeechRecognitionResultList();
 
-  nsRefPtr<SpeechRecognition> mParent;
+  RefPtr<SpeechRecognition> mParent;
 };
 
 } // namespace dom

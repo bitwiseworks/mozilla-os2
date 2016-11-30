@@ -9,7 +9,7 @@
 #include "XULTreeAccessible.h"
 #endif
 
-#include "mozilla/dom/Element.h"
+#include "mozilla/dom/HTMLLabelElement.h"
 
 using namespace mozilla;
 using namespace mozilla::a11y;
@@ -134,6 +134,14 @@ HTMLLabelIterator::
 {
 }
 
+bool
+HTMLLabelIterator::IsLabel(Accessible* aLabel)
+{
+  dom::HTMLLabelElement* labelEl =
+    dom::HTMLLabelElement::FromContent(aLabel->GetContent());
+  return labelEl && labelEl->GetControl() == mAcc->GetContent();
+}
+
 Accessible*
 HTMLLabelIterator::Next()
 {
@@ -141,8 +149,9 @@ HTMLLabelIterator::Next()
   // element, or <label> ancestor which implicitly point to it.
   Accessible* label = nullptr;
   while ((label = mRelIter.Next())) {
-    if (label->GetContent()->Tag() == nsGkAtoms::label)
+    if (IsLabel(label)) {
       return label;
+    }
   }
 
   // Ignore ancestor label on not widget accessible.
@@ -154,17 +163,15 @@ HTMLLabelIterator::Next()
   // document.
   Accessible* walkUp = mAcc->Parent();
   while (walkUp && !walkUp->IsDoc()) {
-    nsIContent* walkUpElm = walkUp->GetContent();
-    if (walkUpElm->IsHTML()) {
-      if (walkUpElm->Tag() == nsGkAtoms::label &&
-          !walkUpElm->HasAttr(kNameSpaceID_None, nsGkAtoms::_for)) {
-        mLabelFilter = eSkipAncestorLabel; // prevent infinite loop
-        return walkUp;
-      }
-
-      if (walkUpElm->Tag() == nsGkAtoms::form)
-        break;
+    nsIContent* walkUpEl = walkUp->GetContent();
+    if (IsLabel(walkUp) &&
+        !walkUpEl->HasAttr(kNameSpaceID_None, nsGkAtoms::_for)) {
+      mLabelFilter = eSkipAncestorLabel; // prevent infinite loop
+      return walkUp;
     }
+
+    if (walkUpEl->IsHTMLElement(nsGkAtoms::form))
+      break;
 
     walkUp = walkUp->Parent();
   }
@@ -188,7 +195,7 @@ HTMLOutputIterator::Next()
 {
   Accessible* output = nullptr;
   while ((output = mRelIter.Next())) {
-    if (output->GetContent()->Tag() == nsGkAtoms::output)
+    if (output->GetContent()->IsHTMLElement(nsGkAtoms::output))
       return output;
   }
 
@@ -211,7 +218,7 @@ XULLabelIterator::Next()
 {
   Accessible* label = nullptr;
   while ((label = mRelIter.Next())) {
-    if (label->GetContent()->Tag() == nsGkAtoms::label)
+    if (label->GetContent()->IsXULElement(nsGkAtoms::label))
       return label;
   }
 
@@ -234,7 +241,7 @@ XULDescriptionIterator::Next()
 {
   Accessible* descr = nullptr;
   while ((descr = mRelIter.Next())) {
-    if (descr->GetContent()->Tag() == nsGkAtoms::description)
+    if (descr->GetContent()->IsXULElement(nsGkAtoms::description))
       return descr;
   }
 
@@ -326,66 +333,14 @@ IDRefsIterator::GetElem(const nsDependentSubstring& aID)
 Accessible*
 IDRefsIterator::Next()
 {
-  nsIContent* nextElm = NextElem();
-  return nextElm ? mDoc->GetAccessible(nextElm) : nullptr;
-}
-
-
-////////////////////////////////////////////////////////////////////////////////
-// ARIAOwnedByIterator
-////////////////////////////////////////////////////////////////////////////////
-
-ARIAOwnedByIterator::ARIAOwnedByIterator(const Accessible* aDependent) :
-  RelatedAccIterator(aDependent->Document(), aDependent->GetContent(),
-                     nsGkAtoms::aria_owns), mDependent(aDependent)
-{
-}
-
-Accessible*
-ARIAOwnedByIterator::Next()
-{
-  Accessible* owner = RelatedAccIterator::Next();
-  Accessible* cur = owner;
-  while (cur) {
-    if (cur == mDependent)
-      return Next(); // owner cannot be a child of dependent.
-
-    if (cur->IsDoc())
-      break; // don't cross document boundaries
-
-    cur = cur->Parent();
+  nsIContent* nextEl = nullptr;
+  while ((nextEl = NextElem())) {
+    Accessible* acc = mDoc->GetAccessible(nextEl);
+    if (acc) {
+      return acc;
+    }
   }
-
-  return owner;
-}
-
-
-////////////////////////////////////////////////////////////////////////////////
-// ARIAOwnsIterator
-////////////////////////////////////////////////////////////////////////////////
-
-ARIAOwnsIterator::ARIAOwnsIterator(const Accessible* aOwner) :
-  mIter(aOwner->Document(), aOwner->GetContent(), nsGkAtoms::aria_owns),
-  mOwner(aOwner)
-{
-}
-
-Accessible*
-ARIAOwnsIterator::Next()
-{
-  Accessible* child = mIter.Next();
-  const Accessible* cur = mOwner;
-  while (cur) {
-    if (cur == child)
-      return Next(); // cannot own its own parent
-
-    if (cur->IsDoc())
-      break; // don't cross document boundaries
-
-    cur = cur->Parent();
-  }
-
-  return child;
+  return nullptr;
 }
 
 
@@ -396,9 +351,12 @@ ARIAOwnsIterator::Next()
 Accessible*
 SingleAccIterator::Next()
 {
-  nsRefPtr<Accessible> nextAcc;
+  RefPtr<Accessible> nextAcc;
   mAcc.swap(nextAcc);
-  return (nextAcc && !nextAcc->IsDefunct()) ? nextAcc : nullptr;
+  if (!nextAcc || nextAcc->IsDefunct()) {
+    return nullptr;
+  }
+  return nextAcc;
 }
 
 

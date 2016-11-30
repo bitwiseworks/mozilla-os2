@@ -12,7 +12,7 @@
 namespace mozilla {
 namespace dom {
 
-class MediaStreamAudioDestinationNode : public AudioNode
+class MediaStreamAudioDestinationNode final : public AudioNode
 {
 public:
   explicit MediaStreamAudioDestinationNode(AudioContext* aContext);
@@ -20,7 +20,7 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(MediaStreamAudioDestinationNode, AudioNode)
 
-  virtual JSObject* WrapObject(JSContext* aCx) override;
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   virtual uint16_t NumberOfOutputs() const final override
   {
@@ -46,11 +46,11 @@ protected:
   virtual ~MediaStreamAudioDestinationNode();
 
 private:
-  nsRefPtr<DOMMediaStream> mDOMStream;
-  nsRefPtr<MediaInputPort> mPort;
+  RefPtr<DOMMediaStream> mDOMStream;
+  RefPtr<MediaInputPort> mPort;
 };
 
-}
-}
+} // namespace dom
+} // namespace mozilla
 
 #endif

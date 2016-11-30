@@ -253,7 +253,7 @@ public:
       int32_t keyCode = 0x41; // VK_A
       NS_NAMED_LITERAL_STRING(a, "a");
 
-      if (NS_FAILED(utils->SendNativeKeyEvent(layout, keyCode, 0, a, a))) {
+      if (NS_FAILED(utils->SendNativeKeyEvent(layout, keyCode, 0, a, a, nullptr))) {
         fail("Failed to synthesize native event");
       }
 
@@ -391,8 +391,7 @@ Test4Internal(nsIAppShell* aAppShell)
 #ifndef XP_WIN
   // Not sure how to test on other platforms.
   return false;
-#endif
-
+#else
   nsCOMPtr<nsIAppShellService> appService =
     do_GetService(NS_APPSHELLSERVICE_CONTRACTID);
   if (!appService) {
@@ -437,6 +436,7 @@ Test4Internal(nsIAppShell* aAppShell)
   }
 
   return true;
+#endif
 }
 
 void
