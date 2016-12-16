@@ -134,20 +134,20 @@ elif CONFIG['MOZ_WIDGET_GTK']:
 
 elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'os2':
     EXPORTS += [
+        'gfxFontconfigFonts.h',
         'gfxFT2FontBase.h',
         'gfxOS2Platform.h',
         'gfxOS2Surface.h',
-        'gfxPangoFonts.h',
         'gfxPDFSurface.h',
         'gfxPSSurface.h',
     ]
     SOURCES += [
+        'gfxFontconfigFonts.cpp',
         'gfxFontconfigUtils.cpp',
         'gfxFT2FontBase.cpp',
         'gfxFT2Utils.cpp',
         'gfxOS2Platform.cpp',
         'gfxOS2Surface.cpp',
-        'gfxPangoFonts.cpp',
         'gfxPDFSurface.cpp',
         'gfxPSSurface.cpp',
     ]

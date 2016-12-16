@@ -18,5 +18,3 @@ LOCAL_INCLUDES += [
     '../unix',
     '/xpcom/reflect/xptinfo',
 ]
-
-FAIL_ON_WARNINGS = True
