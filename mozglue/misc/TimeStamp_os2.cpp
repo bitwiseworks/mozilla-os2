@@ -34,19 +34,19 @@ static ULONG gTicksPerSec = 0;
 static double gTicksPerSecDbl = .0;
 static double gTicksPerMsDbl = .0;
 
-double
+MFBT_API double
 BaseTimeDurationPlatformUtils::ToSeconds(int64_t aTicks)
 {
   return double(aTicks)/gTicksPerSecDbl;
 }
 
-double
+MFBT_API double
 BaseTimeDurationPlatformUtils::ToSecondsSigDigits(int64_t aTicks)
 {
   return ToSeconds(aTicks);
 }
 
-int64_t
+MFBT_API int64_t
 BaseTimeDurationPlatformUtils::TicksFromMilliseconds(double aMilliseconds)
 {
   double result = aMilliseconds * gTicksPerMsDbl;
@@ -59,17 +59,17 @@ BaseTimeDurationPlatformUtils::TicksFromMilliseconds(double aMilliseconds)
   return result;
 }
 
-int64_t
+MFBT_API int64_t
 BaseTimeDurationPlatformUtils::ResolutionInTicks()
 {
   return static_cast<int64_t>(gTicksPerSec);
 }
 
-nsresult
+MFBT_API void
 TimeStamp::Startup()
 {
   if (gInitialized)
-    return NS_OK;
+    return;
 
   const char *envp;
   APIRET rc;
@@ -90,7 +90,7 @@ TimeStamp::Startup()
     // because TimeStamp can be used very early in startup.
     gTimeStampLock = PR_NewLock();
     if (!gTimeStampLock)
-      return NS_ERROR_OUT_OF_MEMORY;
+      return;
     gRolloverCount = 1;
     gLastNow = 0;
     gTicksPerSec = PR_TicksPerSecond();
@@ -100,11 +100,9 @@ TimeStamp::Startup()
   gTicksPerMsDbl = gTicksPerSecDbl / 1000.0;
 
   gInitialized = true;
-
-  return NS_OK;
 }
 
-void
+MFBT_API void
 TimeStamp::Shutdown()
 {
   if (gInitialized) {
@@ -115,7 +113,7 @@ TimeStamp::Shutdown()
   }
 }
 
-TimeStamp
+MFBT_API TimeStamp
 TimeStamp::Now(bool aHighResolution)
 {
   // Note: we don't use aHighResolution; this was introduced to solve Windows bugs (see
@@ -150,7 +148,7 @@ TimeStamp::Now(bool aHighResolution)
 // @todo ComputeProcessUptime is a noop for now. See what can be done with DosPerSysCall
 // and DosQProcStat here http://www.edm2.com/0607/cpu.html
 
-uint64_t
+MFBT_API uint64_t
 TimeStamp::ComputeProcessUptime()
 {
   return 0;

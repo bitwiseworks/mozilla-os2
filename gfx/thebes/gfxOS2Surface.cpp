@@ -20,7 +20,7 @@
  * class gfxOS2Surface
  **********************************************************************/
 
-gfxOS2Surface::gfxOS2Surface(const gfxIntSize& aSize,
+gfxOS2Surface::gfxOS2Surface(const mozilla::gfx::IntSize& aSize,
                              gfxImageFormat aFormat)
     : mWnd(0),  mDC(0), mPS(0), mSize(aSize), mSurfType(os2Image)
 {
@@ -58,7 +58,7 @@ gfxOS2Surface::gfxOS2Surface(HWND aWnd)
 }
 
 #if 0 // This is temporariy disabled, see #147.
-gfxOS2Surface::gfxOS2Surface(HDC aDC, const gfxIntSize& aSize, int aPreview)
+gfxOS2Surface::gfxOS2Surface(HDC aDC, const mozilla::gfx::IntSize& aSize, int aPreview)
     : mWnd(0), mDC(aDC), mPS(0), mSize(aSize), mSurfType(os2Print)
 {
     // Create a PS using the same page size as the device.
@@ -130,7 +130,7 @@ void gfxOS2Surface::Refresh(RECTL *aRect, int aCount, HPS aPS)
                                       (aPS ? aPS : mPS), aRect, aCount);
 }
 
-int gfxOS2Surface::Resize(const gfxIntSize& aSize)
+int gfxOS2Surface::Resize(const mozilla::gfx::IntSize& aSize)
 {
     if (mSurfType != os2Window)
         return 0;
