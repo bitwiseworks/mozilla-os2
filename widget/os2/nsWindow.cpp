@@ -545,7 +545,7 @@ void nsWindow::ReleaseGlobals()
 
 NS_METHOD nsWindow::Create(nsIWidget* aParent,
                            nsNativeWidget aNativeParent,
-                           const nsIntRect& aRect,
+                           const LayoutDeviceIntRect& aRect,
                            nsWidgetInitData* aInitData)
 {
   mWindowState = nsWindowState_eInCreate;
@@ -617,7 +617,7 @@ NS_METHOD nsWindow::Create(nsIWidget* aParent,
 
 nsresult nsWindow::CreateWindow(nsWindow* aParent,
                                 HWND aParentWnd,
-                                const nsIntRect& aRect,
+                                const LayoutDeviceIntRect& aRect,
                                 nsWidgetInitData* aInitData)
 {
   // For pop-ups, the Desktop is the parent and aParentWnd is the owner.
@@ -655,8 +655,8 @@ nsresult nsWindow::CreateWindow(nsWindow* aParent,
   }
 
   // Store the window's dimensions, then resize accordingly.
-  mBounds = aRect;
-  nsIntRect parRect;
+  mBounds = aRect.ToUnknownRect();
+  LayoutDeviceIntRect parRect;
   if (aParent) {
     aParent->GetBounds(parRect);
   } else {
@@ -816,7 +816,7 @@ NS_METHOD nsWindow::SetFocus(bool aRaise)
 
 //-----------------------------------------------------------------------------
 
-NS_METHOD nsWindow::Invalidate(const nsIntRect& aRect)
+NS_METHOD nsWindow::Invalidate(const LayoutDeviceIntRect& aRect)
 {
   if (mWnd) {
     RECTL rcl = {aRect.x, aRect.y, aRect.x + aRect.width, aRect.y + aRect.height};
@@ -894,6 +894,17 @@ void* nsWindow::GetNativeData(uint32_t aDataType)
       }
       return (void*)hps;
     }
+    case NS_RAW_NATIVE_IME_CONTEXT:
+    {
+      // If IME context isn't available on this widget, we should set |this|
+      // instead of nullptr since if we return nullptr, IMEStateManager
+      // cannot manage composition with TextComposition instance.
+      HIMI himi;
+      if (sIm32Mod && spfnImGetInstance(mWnd, &himi) == NO_ERROR) {
+        return reinterpret_cast<void*>(himi);
+      }
+      return this;
+    }
   }
 
   return 0;
@@ -903,11 +914,18 @@ void* nsWindow::GetNativeData(uint32_t aDataType)
 
 void nsWindow::FreeNativeData(void* data, uint32_t aDataType)
 {
-  // an HPS is the only native data that needs to be freed
-  if (aDataType == NS_NATIVE_GRAPHIC &&
-      data &&
-      !ReleaseIfDragHPS((HPS)data)) {
-    WinReleasePS((HPS)data);
+  switch(aDataType) { 
+    case NS_NATIVE_GRAPHIC: {
+      HPS hps = reinterpret_cast<HPS>(data);
+      if (hps != NULLHANDLE && !ReleaseIfDragHPS(hps)){
+        WinReleasePS(hps);
+      }
+    }
+    case NS_RAW_NATIVE_IME_CONTEXT: {
+      HIMI himi = reinterpret_cast<HIMI>(data);
+      if (himi != NULLHANDLE)
+        spfnImReleaseInstance(mWnd, himi);
+    }
   }
 }
 
@@ -937,12 +955,12 @@ bool nsWindow::HasPendingInputEvent()
 // For toplevel windows, mBounds contains the dimensions of the client
 // window.  os2FrameWindow's "override" returns the size of the frame.
 
-NS_METHOD nsWindow::GetBounds(nsIntRect& aRect)
+NS_METHOD nsWindow::GetBounds(LayoutDeviceIntRect& aRect)
 {
   if (mFrame) {
     return mFrame->GetBounds(aRect);
   }
-  aRect = mBounds;
+  aRect = LayoutDeviceIntRect::FromUnknownRect(mBounds);
   return NS_OK;
 }
 
@@ -950,9 +968,9 @@ NS_METHOD nsWindow::GetBounds(nsIntRect& aRect)
 // Since mBounds contains the dimensions of the client, os2FrameWindow
 // doesn't have to provide any special handling for this method.
 
-NS_METHOD nsWindow::GetClientBounds(nsIntRect& aRect)
+NS_METHOD nsWindow::GetClientBounds(LayoutDeviceIntRect& aRect)
 {
-  aRect = mBounds;
+  aRect = LayoutDeviceIntRect::FromUnknownRect(mBounds);
   return NS_OK;
 }
 
@@ -1177,7 +1195,7 @@ nsresult nsWindow::ConfigureChildren(const nsTArray<Configuration>& aConfigurati
 {
   for (uint32_t i = 0; i < aConfigurations.Length(); ++i) {
     const Configuration& configuration = aConfigurations[i];
-    nsWindow* w = static_cast<nsWindow*>(configuration.mChild);
+    nsWindow* w = static_cast<nsWindow*>(configuration.mChild.get());
     NS_ASSERTION(w->GetParent() == this,
                  "Configured widget is not a child");
     w->SetPluginClipRegion(configuration);
@@ -1199,9 +1217,11 @@ void nsWindow::SetPluginClipRegion(const Configuration& aConfiguration)
 {
   NS_ASSERTION((mParent && mParent->mWnd), "Child window has no parent");
 
+  nsIntRect confBounds = aConfiguration.mBounds.ToUnknownRect();
+
   // If nothing has changed, exit.
   if (IsWindowClipRegionEqual(aConfiguration.mClipRegion) &&
-      mBounds.IsEqualInterior(aConfiguration.mBounds)) {
+      mBounds.IsEqualInterior(confBounds)) {
     return;
   }
 
@@ -1209,7 +1229,7 @@ void nsWindow::SetPluginClipRegion(const Configuration& aConfiguration)
 
   // Set the widget's x/y to its nominal unclipped value.  It doesn't
   // affect our calculations but other code relies on it being correct.
-  mBounds.MoveTo(aConfiguration.mBounds.TopLeft());
+  mBounds.MoveTo(confBounds.TopLeft());
 
   // Get or create the PM window we use as a clipping rectangle.
   HWND hClip = GetPluginClipWindow(mParent->mWnd);
@@ -1219,8 +1239,8 @@ void nsWindow::SetPluginClipRegion(const Configuration& aConfiguration)
   }
 
   // Create the bounding box for the clip region.
-  const nsTArray<nsIntRect>& rects = aConfiguration.mClipRegion;
-  nsIntRect r;
+  const nsTArray<LayoutDeviceIntRect>& rects = aConfiguration.mClipRegion;
+  LayoutDeviceIntRect r;
   for (uint32_t i = 0; i < rects.Length(); ++i) {
     r.UnionRect(r, rects[i]);
   }
@@ -1255,7 +1275,7 @@ void nsWindow::SetPluginClipRegion(const Configuration& aConfiguration)
   if (swp.x != ptl.x || swp.y != ptl.y) {
     wndFlags |= SWP_MOVE;
   }
-  if (mBounds.Size() != aConfiguration.mBounds.Size()) {
+  if (mBounds.Size() != confBounds.Size()) {
     wndFlags |= SWP_SIZE;
   }
   if (wndFlags) {
@@ -1335,7 +1355,7 @@ void nsWindow::ActivateTopLevelWidget()
 // only invoked on toplevel widgets.  If they're invoked on a child
 // window, there's an error upstream.
 
-NS_IMETHODIMP nsWindow::SetSizeMode(int32_t aMode)
+NS_IMETHODIMP nsWindow::SetSizeMode(nsSizeMode aMode)
 {
   NS_ENSURE_TRUE(mFrame, NS_ERROR_UNEXPECTED);
   return mFrame->SetSizeMode(aMode);
@@ -1567,7 +1587,7 @@ NS_IMETHODIMP nsWindow::SetCursor(imgIContainer* aCursor,
   MOZ_ASSERT(dataSurface->GetFormat() == SurfaceFormat::B8G8R8A8);
 
   uint8_t* data = nullptr;
-  nsAutoArrayPtr<uint8_t> autoDeleteArray;
+  UniquePtr<uint8_t[]> autoDeleteArray;
   if (map.mStride == BytesPerPixel(dataSurface->GetFormat()) * frameSize.width) {
     // Mapped data is already packed
     data = map.mData;
@@ -1580,7 +1600,8 @@ NS_IMETHODIMP nsWindow::SetCursor(imgIContainer* aCursor,
     dataSurface->Unmap();
     map.mData = nullptr;
 
-    data = autoDeleteArray = SurfaceToPackedBGRA(dataSurface);
+    autoDeleteArray = SurfaceToPackedBGRA(dataSurface);
+    data = autoDeleteArray.get();
     NS_ENSURE_TRUE(data, NS_ERROR_FAILURE);
   }
 
@@ -1971,7 +1992,7 @@ MRESULT nsWindow::ProcessMessage(ULONG msg, MPARAM mp1, MPARAM mp2)
 
     case WM_BUTTON1DOWN:
       WinSetCapture(HWND_DESKTOP, mWnd);
-      isDone = DispatchMouseEvent(NS_MOUSE_BUTTON_DOWN, mp1, mp2);
+      isDone = DispatchMouseEvent(eMouseDown, mp1, mp2);
       // If this msg is forwarded to a popup's owner, Moz will cause the
       // popup to be rolled-up in error when the owner processes the msg.
       if (mWindowType == eWindowType_popup) {
@@ -1984,44 +2005,44 @@ MRESULT nsWindow::ProcessMessage(ULONG msg, MPARAM mp1, MPARAM mp2)
 
     case WM_BUTTON1UP:
       WinSetCapture(HWND_DESKTOP, 0);
-      isDone = DispatchMouseEvent(NS_MOUSE_BUTTON_UP, mp1, mp2);
+      isDone = DispatchMouseEvent(eMouseUp, mp1, mp2);
       break;
 
     case WM_BUTTON1DBLCLK:
-      isDone = DispatchMouseEvent(NS_MOUSE_DOUBLECLICK, mp1, mp2);
+      isDone = DispatchMouseEvent(eMouseDoubleClick, mp1, mp2);
       break;
 
     case WM_BUTTON2DOWN:
       WinSetCapture(HWND_DESKTOP, mWnd);
-      isDone = DispatchMouseEvent(NS_MOUSE_BUTTON_DOWN, mp1, mp2, false,
+      isDone = DispatchMouseEvent(eMouseDown, mp1, mp2, false,
                                   WidgetMouseEvent::eRightButton);
       break;
 
     case WM_BUTTON2UP:
       WinSetCapture(HWND_DESKTOP, 0);
-      isDone = DispatchMouseEvent(NS_MOUSE_BUTTON_UP, mp1, mp2, false,
+      isDone = DispatchMouseEvent(eMouseUp, mp1, mp2, false,
                                   WidgetMouseEvent::eRightButton);
       break;
 
     case WM_BUTTON2DBLCLK:
-      isDone = DispatchMouseEvent(NS_MOUSE_DOUBLECLICK, mp1, mp2,
+      isDone = DispatchMouseEvent(eMouseDoubleClick, mp1, mp2,
                                   false, WidgetMouseEvent::eRightButton);
       break;
 
     case WM_BUTTON3DOWN:
       WinSetCapture(HWND_DESKTOP, mWnd);
-      isDone = DispatchMouseEvent(NS_MOUSE_BUTTON_DOWN, mp1, mp2, false,
+      isDone = DispatchMouseEvent(eMouseDown, mp1, mp2, false,
                                   WidgetMouseEvent::eMiddleButton);
       break;
 
     case WM_BUTTON3UP:
       WinSetCapture(HWND_DESKTOP, 0);
-      isDone = DispatchMouseEvent(NS_MOUSE_BUTTON_UP, mp1, mp2, false,
+      isDone = DispatchMouseEvent(eMouseUp, mp1, mp2, false,
                                   WidgetMouseEvent::eMiddleButton);
       break;
 
     case WM_BUTTON3DBLCLK:
-      isDone = DispatchMouseEvent(NS_MOUSE_DOUBLECLICK, mp1, mp2, false,
+      isDone = DispatchMouseEvent(eMouseDoubleClick, mp1, mp2, false,
                                   WidgetMouseEvent::eMiddleButton);
       break;
 
@@ -2031,11 +2052,11 @@ MRESULT nsWindow::ProcessMessage(ULONG msg, MPARAM mp1, MPARAM mp2)
         if (hFocus != mWnd) {
           WinSendMsg(hFocus, msg, mp1, mp2);
         } else {
-          isDone = DispatchMouseEvent(NS_CONTEXTMENU, mp1, mp2, true,
+          isDone = DispatchMouseEvent(eContextMenu, mp1, mp2, true,
                                       WidgetMouseEvent::eLeftButton);
         }
       } else {
-        isDone = DispatchMouseEvent(NS_CONTEXTMENU, mp1, mp2, false,
+        isDone = DispatchMouseEvent(eContextMenu, mp1, mp2, false,
                                     WidgetMouseEvent::eRightButton);
       }
       break;
@@ -2054,7 +2075,7 @@ MRESULT nsWindow::ProcessMessage(ULONG msg, MPARAM mp1, MPARAM mp2)
           ptlLastPos.y != (SHORT)SHORT2FROMMP(mp1)) {
         ptlLastPos.x = (SHORT)SHORT1FROMMP(mp1);
         ptlLastPos.y = (SHORT)SHORT2FROMMP(mp1);
-        DispatchMouseEvent(NS_MOUSE_MOVE, mp1, mp2);
+        DispatchMouseEvent(eMouseMove, mp1, mp2);
       }
 
       // don't propagate mouse move or the OS will change the pointer
@@ -2063,11 +2084,11 @@ MRESULT nsWindow::ProcessMessage(ULONG msg, MPARAM mp1, MPARAM mp2)
     }
 
     case WM_MOUSEENTER:
-      isDone = DispatchMouseEvent(NS_MOUSE_ENTER, mp1, mp2);
+      isDone = DispatchMouseEvent(eMouseEnterIntoWidget, mp1, mp2);
       break;
 
     case WM_MOUSELEAVE:
-      isDone = DispatchMouseEvent(NS_MOUSE_EXIT, mp1, mp2);
+      isDone = DispatchMouseEvent(eMouseExitFromWidget, mp1, mp2);
       break;
 
     case WM_APPCOMMAND: {
@@ -2148,12 +2169,6 @@ void nsWindow::OnDestroy()
 {
   mOnDestroyCalled = true;
 
-  if (mInputContext.mNativeIMEContext && mInputContext.mNativeIMEContext != this) {
-    HIMI himi = reinterpret_cast<HIMI>(mInputContext.mNativeIMEContext);
-    spfnImReleaseInstance(mWnd, himi);
-    mInputContext.mNativeIMEContext = nullptr;
-  }
-
   SetNSWindowPtr(mWnd, 0);
   mWnd = 0;
 
@@ -2206,7 +2221,7 @@ bool nsWindow::OnReposition(PSWP pSwp)
 
     // If the window is supposed to have a thebes surface, resize it.
     if (ConfirmThebesSurface()) {
-        mThebesSurface->Resize(gfxIntSize(mBounds.width, mBounds.height));
+        mThebesSurface->Resize(IntSize(mBounds.width, mBounds.height));
     }
 
     result = DispatchResizeEvent(mBounds.width, mBounds.height);
@@ -2279,9 +2294,9 @@ do {
   }
 
   // Create a Thebes context.
-  nsIntRegion region;
-//  nsRefPtr<gfxContext> thebesContext = new gfxContext(mThebesSurface);
-  nsRefPtr<gfxContext> thebesContext;
+  LayoutDeviceIntRegion region;
+//  RefPtr<gfxContext> thebesContext = new gfxContext(mThebesSurface);
+  RefPtr<gfxContext> thebesContext;
 
   NS_ASSERTION(gfxPlatform::GetPlatform()->SupportsAzureContentForType(BackendType::CAIRO),
                "OS/2 only supports Cairo backend");
@@ -2332,8 +2347,8 @@ do {
   thebesContext->NewPath();
   for (ndx = rgnrect.crcReturned, pr = arect; ndx; ndx--, pr++) {
     region.Or(region,
-              nsIntRect(pr->xLeft, mBounds.height - pr->yTop,
-                        pr->xRight - pr->xLeft, pr->yTop - pr->yBottom));
+              LayoutDeviceIntRect(pr->xLeft, mBounds.height - pr->yTop,
+                                  pr->xRight - pr->xLeft, pr->yTop - pr->yBottom));
 
     thebesContext->Rectangle(gfxRect(pr->xLeft,
                                      mBounds.height - pr->yTop,
@@ -2413,7 +2428,7 @@ bool nsWindow::OnMouseChord(MPARAM mp1, MPARAM mp2)
     isCopy = true;
   }
 
-  WidgetKeyboardEvent event(true, NS_KEY_PRESS, this);
+  WidgetKeyboardEvent event(true, eKeyPress, this);
   nsIntPoint point(0,0);
   InitEvent(event, &point);
 
@@ -2469,7 +2484,7 @@ bool nsWindow::OnMouseChord(MPARAM mp1, MPARAM mp2)
 bool nsWindow::OnDragDropMsg(ULONG msg, MPARAM mp1, MPARAM mp2, MRESULT& mr)
 {
   nsresult rv;
-  uint32_t eventType = 0;
+  EventMessage eventType = eVoidEvent;
   uint32_t dragFlags = 0;
 
   mr = 0;
@@ -2484,30 +2499,30 @@ bool nsWindow::OnDragDropMsg(ULONG msg, MPARAM mp1, MPARAM mp2, MRESULT& mr)
       switch (msg) {
 
         case DM_DRAGOVER:
-          dragService->FireDragEventAtSource(NS_DRAGDROP_DRAG);
+          dragService->FireDragEventAtSource(eDrag);
           rv = dragSession->DragOverMsg((PDRAGINFO)mp1, mr, &dragFlags);
-          eventType = NS_DRAGDROP_OVER;
+          eventType = eDragOver;
           break;
 
         case DM_DRAGLEAVE:
           rv = dragSession->DragLeaveMsg((PDRAGINFO)mp1, &dragFlags);
-          eventType = NS_DRAGDROP_EXIT;
+          eventType = eDragExit;
           break;
 
         case DM_DROP:
           rv = dragSession->DropMsg((PDRAGINFO)mp1, mWnd, &dragFlags);
-          eventType = NS_DRAGDROP_DROP;
+          eventType = eDrop;
           break;
 
         case DM_DROPHELP:
           rv = dragSession->DropHelpMsg((PDRAGINFO)mp1, &dragFlags);
-          eventType = NS_DRAGDROP_EXIT;
+          eventType = eDragExit;
           break;
 
         case DM_RENDERCOMPLETE:
           rv = dragSession->RenderCompleteMsg((PDRAGTRANSFER)mp1,
                                               SHORT1FROMMP(mp2), &dragFlags);
-          eventType = NS_DRAGDROP_DROP;
+          eventType = eDrop;
           break;
 
         default:
@@ -2519,7 +2534,7 @@ bool nsWindow::OnDragDropMsg(ULONG msg, MPARAM mp1, MPARAM mp2, MRESULT& mr)
         mDragStatus = sDragStatus = (dragFlags & DND_DragStatus);
 
         if (dragFlags & DND_DispatchEnterEvent) {
-          DispatchDragDropEvent(NS_DRAGDROP_ENTER);
+          DispatchDragDropEvent(eDragEnter);
         }
         if (dragFlags & DND_DispatchEvent) {
           DispatchDragDropEvent(eventType);
@@ -2696,13 +2711,13 @@ bool nsWindow::OnQueryConvertPos(MPARAM mp1, MRESULT& mresult)
 
   nsIntPoint point(0, 0);
 
-  WidgetQueryContentEvent selection(true, NS_QUERY_SELECTED_TEXT, this);
+  WidgetQueryContentEvent selection(true, eQuerySelectedText, this);
   InitEvent(selection, &point);
   DispatchWindowEvent(&selection);
   if (!selection.mSucceeded)
     return false;
 
-  WidgetQueryContentEvent caret(true, NS_QUERY_CARET_RECT, this);
+  WidgetQueryContentEvent caret(true, eQueryCaretRect, this);
   caret.InitForQueryCaretRect(selection.mReply.mOffset);
   InitEvent(caret, &point);
   DispatchWindowEvent(&caret);
@@ -2733,7 +2748,7 @@ bool nsWindow::ImeResultString(HIMI himi)
     return false;
   }
   if (!mIsComposing) {
-    WidgetCompositionEvent start(true, NS_COMPOSITION_START, this);
+    WidgetCompositionEvent start(true, eCompositionStart, this);
     InitEvent(start);
     DispatchWindowEvent(&start);
     mIsComposing = true;
@@ -2742,12 +2757,12 @@ bool nsWindow::ImeResultString(HIMI himi)
   NS_CopyNativeToUnicode(nsDependentCString(compositionStringA.Elements(), ulBufLen),
                          compositionString);
 
-  WidgetCompositionEvent textChange(true, NS_COMPOSITION_CHANGE, this);
+  WidgetCompositionEvent textChange(true, eCompositionChange, this);
   InitEvent(textChange);
   textChange.mData = compositionString;
   DispatchWindowEvent(&textChange);
 
-  WidgetCompositionEvent end(true, NS_COMPOSITION_END, this);
+  WidgetCompositionEvent end(true, eCompositionEnd, this);
   InitEvent(end);
   end.mData = compositionString;
   DispatchWindowEvent(&end);
@@ -2794,7 +2809,7 @@ bool nsWindow::ImeConversionString(HIMI himi)
     return false;
   }
   if (!mIsComposing) {
-    WidgetCompositionEvent start(true, NS_COMPOSITION_START, this);
+    WidgetCompositionEvent start(true, eCompositionStart, this);
     InitEvent(start);
     DispatchWindowEvent(&start);
     mIsComposing = true;
@@ -2803,11 +2818,11 @@ bool nsWindow::ImeConversionString(HIMI himi)
   NS_CopyNativeToUnicode(nsDependentCString(compositionStringA.Elements(), ulBufLen),
                          compositionString);
 
-  WidgetCompositionEvent change(true, NS_COMPOSITION_CHANGE, this);
+  WidgetCompositionEvent change(true, eCompositionChange, this);
   InitEvent(change);
   change.mData = compositionString;
 
-  nsRefPtr<TextRangeArray> textRangeArray = new TextRangeArray();
+  RefPtr<TextRangeArray> textRangeArray = new TextRangeArray();
   if (!compositionString.IsEmpty()) {
     bool oneClause = false;
 
@@ -2910,7 +2925,7 @@ bool nsWindow::ImeConversionString(HIMI himi)
   DispatchWindowEvent(&change);
 
   if (compositionString.IsEmpty()) { // IME conversion was canceled ?
-    WidgetCompositionEvent end(true, NS_COMPOSITION_END, this);
+    WidgetCompositionEvent end(true, eCompositionEnd, this);
     InitEvent(end);
     end.mData = compositionString;
     DispatchWindowEvent(&end);
@@ -2949,13 +2964,6 @@ bool nsWindow::OnImeRequest(MPARAM mp1, MPARAM mp2)
 
 NS_IMETHODIMP_(InputContext) nsWindow::GetInputContext()
 {
-  HIMI himi;
-  if (sIm32Mod && spfnImGetInstance(mWnd, &himi)) {
-    mInputContext.mNativeIMEContext = reinterpret_cast<void*>(himi);
-  }
-  if (!mInputContext.mNativeIMEContext) {
-    mInputContext.mNativeIMEContext = this;
-  }
   return mInputContext;
 }
 
@@ -2969,7 +2977,7 @@ NS_IMETHODIMP_(InputContext) nsWindow::GetInputContext()
 
 bool nsWindow::DispatchKeyEvent(MPARAM mp1, MPARAM mp2)
 {
-  WidgetKeyboardEvent pressEvent(true, 0, nullptr);
+  WidgetKeyboardEvent pressEvent(true, eVoidEvent, nullptr);
   USHORT fsFlags = SHORT1FROMMP(mp1);
   USHORT usVKey = SHORT2FROMMP(mp2);
   USHORT usChar = SHORT1FROMMP(mp2);
@@ -2997,7 +3005,7 @@ bool nsWindow::DispatchKeyEvent(MPARAM mp1, MPARAM mp2)
   // Now dispatch a keyup/keydown event.  This one is *not* meant to
   // have the unicode charcode in.
   nsIntPoint point(0,0);
-  WidgetKeyboardEvent event(true, (fsFlags & KC_KEYUP) ? NS_KEY_UP : NS_KEY_DOWN,
+  WidgetKeyboardEvent event(true, (fsFlags & KC_KEYUP) ? eKeyUp : eKeyDown,
                             this);
   InitEvent(event, &point);
   event.keyCode   = WMChar2KeyCode(mp1, mp2);
@@ -3043,7 +3051,7 @@ bool nsWindow::DispatchKeyEvent(MPARAM mp1, MPARAM mp2)
 
   // Now we need to dispatch a keypress event which has the unicode char.
   // If keydown default was prevented, do same for keypress
-  pressEvent.message = NS_KEY_PRESS;
+  pressEvent.mMessage = eKeyPress;
   if (rc) {
     pressEvent.mFlags.mDefaultPrevented = true;
   }
@@ -3328,7 +3336,7 @@ bool nsWindow::DispatchCommandEvent(uint32_t aEventCommand)
 
 //-----------------------------------------------------------------------------
 
-bool nsWindow::DispatchDragDropEvent(uint32_t aMsg)
+bool nsWindow::DispatchDragDropEvent(EventMessage aMsg)
 {
   WidgetDragEvent event(true, aMsg, this);
   InitEvent(event);
@@ -3358,8 +3366,8 @@ bool nsWindow::DispatchResizeEvent(int32_t aX, int32_t aY)
 //-----------------------------------------------------------------------------
 // Deal with all sorts of mouse events.
 
-bool nsWindow::DispatchMouseEvent(uint32_t aEventType, MPARAM mp1, MPARAM mp2,
-                                    bool aIsContextMenuKey, int16_t aButton)
+bool nsWindow::DispatchMouseEvent(EventMessage aEventType, MPARAM mp1, MPARAM mp2,
+                                  bool aIsContextMenuKey, int16_t aButton)
 {
   NS_ENSURE_TRUE(aEventType, false);
 
@@ -3368,7 +3376,7 @@ bool nsWindow::DispatchMouseEvent(uint32_t aEventType, MPARAM mp1, MPARAM mp2,
                      ? WidgetMouseEvent::eContextMenuKey
                      : WidgetMouseEvent::eNormal);
   event.button = aButton;
-  if (aEventType == NS_MOUSE_BUTTON_DOWN && mIsComposing) {
+  if (aEventType == eMouseDown && mIsComposing) {
     // If IME is composing, let it complete.
     HIMI himi;
 
@@ -3377,7 +3385,7 @@ bool nsWindow::DispatchMouseEvent(uint32_t aEventType, MPARAM mp1, MPARAM mp2,
     spfnImReleaseInstance(mWnd, himi);
   }
 
-  if (aEventType == NS_MOUSE_ENTER || aEventType == NS_MOUSE_EXIT) {
+  if (aEventType == eMouseEnterIntoWidget || aEventType == eMouseExitFromWidget) {
     // Ignore enter/leave msgs forwarded from the frame to FID_CLIENT
     // because we're only interested msgs involving the content area.
     if (HWNDFROMMP(mp1) != mWnd) {
@@ -3388,7 +3396,7 @@ bool nsWindow::DispatchMouseEvent(uint32_t aEventType, MPARAM mp1, MPARAM mp2,
     // unrelated window or what Windows would call the nonclient area
     // (i.e. frame, titlebar, etc.), mark this as a toplevel exit.
     // Note: exits to and from menus will also be marked toplevel.
-    if (aEventType == NS_MOUSE_EXIT) {
+    if (aEventType == eMouseExitFromWidget) {
       HWND  hTop = 0;
       HWND  hCur = mWnd;
       HWND  hDesk = WinQueryDesktopWindow(0, 0);
@@ -3410,7 +3418,7 @@ bool nsWindow::DispatchMouseEvent(uint32_t aEventType, MPARAM mp1, MPARAM mp2,
                              isKeyDown(VK_SHIFT), false);
   } else {
     POINTL ptl;
-    if (aEventType == NS_CONTEXTMENU && aIsContextMenuKey) {
+    if (aEventType == eContextMenu && aIsContextMenuKey) {
       WinQueryPointerPos(HWND_DESKTOP, &ptl);
       WinMapWindowPoints(HWND_DESKTOP, mWnd, &ptl, 1);
     } else {
@@ -3427,10 +3435,10 @@ bool nsWindow::DispatchMouseEvent(uint32_t aEventType, MPARAM mp1, MPARAM mp2,
   }
 
   // Dblclicks are used to set the click count, then changed to mousedowns
-  if (aEventType == NS_MOUSE_DOUBLECLICK &&
+  if (aEventType == eMouseDoubleClick &&
       (aButton == WidgetMouseEvent::eLeftButton ||
        aButton == WidgetMouseEvent::eRightButton)) {
-    event.message = NS_MOUSE_BUTTON_DOWN;
+    event.mMessage = eMouseDown;
     event.button = (aButton == WidgetMouseEvent::eLeftButton) ?
                    WidgetMouseEvent::eLeftButton : WidgetMouseEvent::eRightButton;
     event.clickCount = 2;
@@ -3441,7 +3449,7 @@ bool nsWindow::DispatchMouseEvent(uint32_t aEventType, MPARAM mp1, MPARAM mp2,
   NPEvent pluginEvent;
   switch (aEventType) {
 
-    case NS_MOUSE_BUTTON_DOWN:
+    case eMouseDown:
       switch (aButton) {
         case WidgetMouseEvent::eLeftButton:
           pluginEvent.event = WM_BUTTON1DOWN;
@@ -3457,7 +3465,7 @@ bool nsWindow::DispatchMouseEvent(uint32_t aEventType, MPARAM mp1, MPARAM mp2,
       }
       break;
 
-    case NS_MOUSE_BUTTON_UP:
+    case eMouseUp:
       switch (aButton) {
         case WidgetMouseEvent::eLeftButton:
           pluginEvent.event = WM_BUTTON1UP;
@@ -3473,7 +3481,7 @@ bool nsWindow::DispatchMouseEvent(uint32_t aEventType, MPARAM mp1, MPARAM mp2,
       }
       break;
 
-    case NS_MOUSE_DOUBLECLICK:
+    case eMouseDoubleClick:
       switch (aButton) {
         case WidgetMouseEvent::eLeftButton:
           pluginEvent.event = WM_BUTTON1DBLCLK;
@@ -3489,8 +3497,11 @@ bool nsWindow::DispatchMouseEvent(uint32_t aEventType, MPARAM mp1, MPARAM mp2,
       }
       break;
 
-    case NS_MOUSE_MOVE:
+    case eMouseMove:
       pluginEvent.event = WM_MOUSEMOVE;
+      break;
+
+    default:
       break;
   }
 
@@ -3521,7 +3532,7 @@ void nsWindow::DispatchActivationEvent(bool aIsActivate)
 
 bool nsWindow::DispatchPluginActivationEvent()
 {
-  WidgetGUIEvent event(true, NS_PLUGIN_ACTIVATE, this);
+  WidgetGUIEvent event(true, ePluginActivate, this);
 
   // These events should go to their base widget location,
   // not current mouse position.
@@ -3539,7 +3550,7 @@ bool nsWindow::DispatchPluginActivationEvent()
 
 bool nsWindow::DispatchScrollEvent(ULONG msg, MPARAM mp1, MPARAM mp2)
 {
-  WidgetWheelEvent wheelEvent(true, NS_WHEEL_WHEEL, this);
+  WidgetWheelEvent wheelEvent(true, eWheel, this);
   InitEvent(wheelEvent);
 
   wheelEvent.InitBasicModifiers(isKeyDown(VK_CTRL),

@@ -61,7 +61,7 @@ protected:
   int32_t       mYDpi;
   nsCString     mDefaultName;
   nsCOMPtr<nsIPrintSettings> mPrintSettings;
-  nsRefPtr<os2SpoolerStream> mSpoolerStream;
+  RefPtr<os2SpoolerStream> mSpoolerStream;
 };
 
 //---------------------------------------------------------------------------

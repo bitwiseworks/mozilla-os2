@@ -491,7 +491,7 @@ NS_IMETHODIMP nsDeviceContextSpecOS2::GetSurfaceForPrinter(gfxASurface **surface
   int16_t outputFormat;
   mPrintSettings->GetOutputFormat(&outputFormat);
 
-  nsRefPtr<gfxASurface> newSurface;
+  RefPtr<gfxASurface> newSurface;
 
 //*** PDF
   if (outputFormat == nsIPrintSettings::kOutputFormatPDF) {
@@ -544,7 +544,7 @@ NS_IMETHODIMP nsDeviceContextSpecOS2::GetSurfaceForPrinter(gfxASurface **surface
 
       mPrintSettings->GetToFileName(&fileName);
       filePath = GetACPString(fileName);
-      nsMemory::Free(fileName);
+      free(fileName);
     }
 
     mPrintingStarted = true;
@@ -552,7 +552,7 @@ NS_IMETHODIMP nsDeviceContextSpecOS2::GetSurfaceForPrinter(gfxASurface **surface
     NS_ENSURE_TRUE(mPrintDC, NS_ERROR_FAILURE);
 
     if (filePath)
-      nsMemory::Free(filePath);
+      free(filePath);
 
     newSurface = new(std::nothrow)
       gfxOS2Surface(mPrintDC, gfxIntSize(int(mXPixels), int(mYPixels)),
@@ -689,7 +689,7 @@ NS_IMETHODIMP nsDeviceContextSpecOS2::BeginDocument(const nsAString& aTitle,
     if (! aTitle.IsEmpty ()) {
       char *title = GetACPString(aTitle);
       nsresult rv = mSpoolerStream->BeginDocument(title);
-      nsMemory::Free(title);
+      free(title);
       return rv;
     }
     else
@@ -710,7 +710,7 @@ NS_IMETHODIMP nsDeviceContextSpecOS2::BeginDocument(const nsAString& aTitle,
                            const_cast<BYTE*>(pszDocName), 0, 0);
   mPrintingStarted = true;
   if (title) {
-    nsMemory::Free(title);
+    free(title);
   }
 
   DBGX();

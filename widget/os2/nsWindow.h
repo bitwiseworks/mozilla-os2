@@ -130,7 +130,7 @@ public:
   // from nsIWidget
   NS_IMETHOD            Create(nsIWidget* aParent,
                                nsNativeWidget aNativeParent,
-                               const nsIntRect& aRect,
+                               const LayoutDeviceIntRect& aRect,
                                nsWidgetInitData* aInitData = nullptr);
   NS_IMETHOD            Destroy();
   virtual nsIWidget*    GetParent();
@@ -140,14 +140,14 @@ public:
   NS_IMETHOD            Show(bool aState);
   virtual bool          IsVisible() const;
   NS_IMETHOD            SetFocus(bool aRaise);
-  NS_IMETHOD            Invalidate(const nsIntRect& aRect);
+  NS_IMETHOD            Invalidate(const LayoutDeviceIntRect& aRect);
   gfxASurface*          GetThebesSurface();
   virtual void*         GetNativeData(uint32_t aDataType);
   virtual void          FreeNativeData(void* aDatum, uint32_t aDataType);
   NS_IMETHOD            CaptureMouse(bool aCapture);
   virtual bool          HasPendingInputEvent();
-  NS_IMETHOD            GetBounds(nsIntRect& aRect);
-  NS_IMETHOD            GetClientBounds(nsIntRect& aRect);
+  NS_IMETHOD            GetBounds(LayoutDeviceIntRect& aRect);
+  NS_IMETHOD            GetClientBounds(LayoutDeviceIntRect& aRect);
   virtual mozilla::LayoutDeviceIntPoint WidgetToScreenOffset();
   NS_IMETHOD            Move(double aX, double aY);
   NS_IMETHOD            Resize(double aWidth, double aHeight,
@@ -159,7 +159,7 @@ public:
                                     nsIWidget* aWidget, bool aActivate);
   void                  SetZIndex(int32_t aZIndex);
   virtual nsresult      ConfigureChildren(const nsTArray<Configuration>& aConfigurations);
-  NS_IMETHOD            SetSizeMode(int32_t aMode);
+  NS_IMETHOD            SetSizeMode(nsSizeMode aMode);
   NS_IMETHOD            HideWindowChrome(bool aShouldHide);
   NS_IMETHOD            SetTitle(const nsAString& aTitle);
   NS_IMETHOD            SetIcon(const nsAString& aIconSpec);
@@ -195,7 +195,7 @@ protected:
   static void           InitGlobals();
   nsresult              CreateWindow(nsWindow* aParent,
                                      HWND aParentWnd,
-                                     const nsIntRect& aRect,
+                                     const LayoutDeviceIntRect& aRect,
                                      nsWidgetInitData* aInitData);
   gfxASurface*          ConfirmThebesSurface();
   HWND                  GetMainWindow() const;
@@ -237,11 +237,11 @@ protected:
   bool                  DispatchWindowEvent(mozilla::WidgetGUIEvent* event,
                                             nsEventStatus& aStatus);
   bool                  DispatchCommandEvent(uint32_t aEventCommand);
-  bool                  DispatchDragDropEvent(uint32_t aMsg);
+  bool                  DispatchDragDropEvent(mozilla::EventMessage aMsg);
   bool                  DispatchMoveEvent(int32_t aX, int32_t aY);
   bool                  DispatchResizeEvent(int32_t aClientX,
                                             int32_t aClientY);
-  bool                  DispatchMouseEvent(uint32_t aEventType,
+  bool                  DispatchMouseEvent(mozilla::EventMessage aEventType,
                                            MPARAM mp1, MPARAM mp2,
                                            bool aIsContextMenuKey = false,
                                            int16_t aButton = mozilla::WidgetMouseEvent::eLeftButton);
@@ -267,7 +267,7 @@ protected:
   HWND          mClipWnd;           // used to clip plugin windows
   HPOINTER      mCssCursorHPtr;     // created by SetCursor(imgIContainer*)
   nsCOMPtr<imgIContainer> mCssCursorImg;// saved by SetCursor(imgIContainer*)
-  nsRefPtr<gfxOS2Surface> mThebesSurface;
+  RefPtr<gfxOS2Surface> mThebesSurface;
   bool          mIsComposing;
 #ifdef DEBUG_FOCUS
   int           mWindowIdentifier;  // a serial number for each new window

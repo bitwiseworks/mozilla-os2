@@ -30,21 +30,21 @@ public:
 
   HWND                  CreateFrameWindow(nsWindow* aParent,
                                           HWND aParentWnd,
-                                          const nsIntRect& aRect,
+                                          const mozilla::LayoutDeviceIntRect& aRect,
                                           nsWindowType aWindowType,
                                           nsBorderStyle aBorderStyle);
   uint32_t              GetFCFlags(nsWindowType aWindowType,
                                    nsBorderStyle aBorderStyle);
   nsresult              Show(bool aState);
   void                  SetWindowListVisibility(bool aState);
-  nsresult              GetBounds(nsIntRect& aRect);
+  nsresult              GetBounds(mozilla::LayoutDeviceIntRect& aRect);
   nsresult              Move(int32_t aX, int32_t aY);
   nsresult              Resize(int32_t aWidth, int32_t aHeight,
                                bool aRepaint);
   nsresult              Resize(int32_t aX, int32_t aY, int32_t w, int32_t h,
                                bool aRepaint);
   void                  ActivateTopLevelWidget();
-  nsresult              SetSizeMode(int32_t aMode);
+  nsresult              SetSizeMode(nsSizeMode aMode);
   nsresult              HideWindowChrome(bool aShouldHide);
   nsresult              SetTitle(const nsAString& aTitle); 
   nsresult              SetIcon(const nsAString& aIconSpec); 
@@ -67,7 +67,7 @@ protected:
   bool          mChromeHidden;      // are frame controls hidden?
   bool          mNeedActivation;    // triggers activation when focus changes
   PFNWP         mPrevFrameProc;     // the frame's original wndproc
-  nsIntRect     mFrameBounds;       // the frame's location & dimensions
+  mozilla::LayoutDeviceIntRect mFrameBounds; // the frame's location & dimensions
 };
 
 #endif //_os2framewindow_h

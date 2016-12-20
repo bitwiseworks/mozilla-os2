@@ -39,6 +39,8 @@ extern uint32_t            gOS2Flags;
   #define DEBUGFOCUS(what)
 #endif
 
+using namespace mozilla;
+
 //=============================================================================
 //  os2FrameWindow Setup
 //=============================================================================
@@ -55,7 +57,7 @@ os2FrameWindow::os2FrameWindow(nsWindow* aOwner)
   mChromeHidden     = false;
   mNeedActivation   = false;
   mPrevFrameProc    = 0;
-  mFrameBounds      = nsIntRect(0, 0, 0, 0);
+  mFrameBounds      = LayoutDeviceIntRect(0, 0, 0, 0);
 }
 
 //-----------------------------------------------------------------------------
@@ -75,7 +77,7 @@ os2FrameWindow::~os2FrameWindow()
 
 HWND os2FrameWindow::CreateFrameWindow(nsWindow* aParent,
                                        HWND aParentWnd,
-                                       const nsIntRect& aRect,
+                                       const LayoutDeviceIntRect& aRect,
                                        nsWindowType aWindowType,
                                        nsBorderStyle aBorderStyle)
 {
@@ -113,8 +115,8 @@ HWND os2FrameWindow::CreateFrameWindow(nsWindow* aParent,
   // will be truncated (toplevel windows will still display correctly).
   RECTL rcl = {0, 0, aRect.width, aRect.height};
   WinCalcFrameRect(mFrameWnd, &rcl, FALSE);
-  mFrameBounds = nsIntRect(aRect.x, aRect.y,
-                           rcl.xRight-rcl.xLeft, rcl.yTop-rcl.yBottom);
+  mFrameBounds = LayoutDeviceIntRect(aRect.x, aRect.y,
+                                     rcl.xRight-rcl.xLeft, rcl.yTop-rcl.yBottom);
 
   // Move & resize the frame.
   int32_t pmY = WinQuerySysValue(HWND_DESKTOP, SV_CYSCREEN)
@@ -262,7 +264,7 @@ void os2FrameWindow::SetWindowListVisibility(bool aState)
 //  Window Positioning
 //=============================================================================
 
-nsresult os2FrameWindow::GetBounds(nsIntRect& aRect)
+nsresult os2FrameWindow::GetBounds(LayoutDeviceIntRect& aRect)
 {
   aRect = mFrameBounds;
   return NS_OK;
@@ -330,9 +332,9 @@ void os2FrameWindow::ActivateTopLevelWidget()
 // already occurred.  It only performs these actions when the frame is in
 // fullscreen mode or saved window positions are being restored at startup.
 
-nsresult os2FrameWindow::SetSizeMode(int32_t aMode)
+nsresult os2FrameWindow::SetSizeMode(nsSizeMode aMode)
 {
-  int32_t previousMode = mOwner->SizeMode();
+  nsSizeMode previousMode = mOwner->SizeMode();
 
   // save the new state
   nsresult rv = mOwner->nsBaseWidget::SetSizeMode(aMode);
@@ -459,7 +461,7 @@ nsresult os2FrameWindow::SetTitle(const nsAString& aTitle)
     WinSetWindowText(mTitleBar, title.get());
   }
 
-  nsMemory::Free(uchtemp);
+  free(uchtemp);
   return NS_OK;
 }
 

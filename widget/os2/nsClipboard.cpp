@@ -122,7 +122,7 @@ bool nsClipboard::GetClipboardDataByID(uint32_t aFormatID, const char *aFlavor)
     {
       uint32_t NumOfChars = NS_strlen( static_cast<char16_t*>(pDataMem) );
       NumOfBytes = NumOfChars * sizeof(char16_t);
-      PVOID pTempBuf = nsMemory::Alloc(NumOfBytes);
+      PVOID pTempBuf = moz_xmalloc(NumOfBytes);
       memcpy(pTempBuf, pDataMem, NumOfBytes);
       pDataMem = pTempBuf;
       TempBufAllocated = true;
@@ -178,7 +178,7 @@ bool nsClipboard::GetClipboardDataByID(uint32_t aFormatID, const char *aFlavor)
 #endif
 
   if (TempBufAllocated)
-    nsMemory::Free(pDataMem);
+    free(pDataMem);
 
   return true;
 }
@@ -312,7 +312,7 @@ void nsClipboard::SetClipboardData(const char *aFlavor)
 #endif
     }
   }
-  nsMemory::Free(pMozData);
+  free(pMozData);
 }
 
 // Go through the flavors in the transferable and either get or set them

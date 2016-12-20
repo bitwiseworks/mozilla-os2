@@ -18,6 +18,7 @@
 #include "nsNativeCharsetUtils.h"
 #include "nsFilePicker.h"
 #include "mozilla/dom/EncodingUtils.h"
+#include "prio.h"
 
 using mozilla::dom::EncodingUtils;
 
@@ -94,7 +95,7 @@ NS_IMETHODIMP nsFilePicker::Show(int16_t *retval)
   }
   else {
     fileBuffer.Assign(converted);
-    nsMemory::Free( converted );
+    free( converted );
   }
 
   char *title = ConvertToFileSystemCharset(mTitle);
@@ -286,20 +287,20 @@ NS_IMETHODIMP nsFilePicker::Show(int16_t *retval)
 
     for (i = 0; i < mTitles.Length(); i++)
     {
-      nsMemory::Free(*(filedlg.papszITypeList[i]));
+      free(*(filedlg.papszITypeList[i]));
     }
     free(filedlg.papszITypeList);
 
     for (i = 0; i < mFilters.Length(); i++)
     {
-      nsMemory::Free(*(pmydata->papszIFilterList[i]));
+      free(*(pmydata->papszIFilterList[i]));
     }
     free(pmydata->papszIFilterList);
     free(pmydata);
   }
 
   if (title)
-    nsMemory::Free( title );
+    free(title);
 
   if (result) {
     int16_t returnOKorReplace = returnOK;
@@ -512,7 +513,7 @@ char * nsFilePicker::ConvertToFileSystemCharset(const nsAString& inString)
     rv = mUnicodeEncoder->GetMaxLength(flatInString.get(), inLength,
                                        &outLength);
     if (NS_SUCCEEDED(rv)) {
-      outString = static_cast<char*>(nsMemory::Alloc( outLength+1 ));
+      outString = static_cast<char*>(moz_xmalloc( outLength+1 ));
       if (nullptr == outString) {
         return nullptr;
       }
@@ -546,7 +547,7 @@ char16_t * nsFilePicker::ConvertFromFileSystemCharset(const char *inString)
     int32_t outLength;
     rv = mUnicodeDecoder->GetMaxLength(inString, inLength, &outLength);
     if (NS_SUCCEEDED(rv)) {
-      outString = static_cast<char16_t*>(nsMemory::Alloc( (outLength+1) * sizeof( char16_t ) ));
+      outString = static_cast<char16_t*>(moz_xmalloc( (outLength+1) * sizeof( char16_t ) ));
       if (nullptr == outString) {
         return nullptr;
       }

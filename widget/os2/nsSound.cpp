@@ -27,6 +27,8 @@
 
 #include "nsSound.h"
 #include "nsIURL.h"
+#include "nsIFile.h"
+#include "nsIFileURL.h"
 #include "nsNetUtil.h"
 #include "nsContentUtils.h"
 #include "nsNativeCharsetUtils.h"
