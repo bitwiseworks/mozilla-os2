@@ -637,7 +637,6 @@ namespace places {
   nsresult
   GenerateGUIDFunction::create(mozIStorageConnection *aDBConn)
   {
-<<<<<<< HEAD
 #if defined(XP_OS2)
     // We need this service to be initialized on the main thread because it is
     // not threadsafe.  We are about to use it asynchronously, so initialize it

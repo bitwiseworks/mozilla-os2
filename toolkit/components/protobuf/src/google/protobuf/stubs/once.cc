@@ -41,6 +41,8 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#elif defined(__EMX__)
+#include <stdlib.h> // _sleep2
 #else
 #include <sched.h>
 #endif
@@ -55,6 +57,9 @@ namespace {
 void SchedYield() {
 #ifdef _WIN32
   Sleep(0);
+#elif defined(__EMX__)
+  // On OS/2, this is a direct call to DosSleep which is what we need
+  _sleep2(0);
 #else  // POSIX
   sched_yield();
 #endif

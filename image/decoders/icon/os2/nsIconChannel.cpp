@@ -10,7 +10,10 @@
 #include "nsIIconURI.h"
 #include "nsReadableUtils.h"
 #include "nsMemory.h"
-#include "nsNetUtil.h"
+#include "nsIInputStream.h"
+#include "nsIOutputStream.h"
+#include "nsIPipe.h"
+#include "nsNetCID.h"
 #include "nsMimeTypes.h"
 #include "nsIFile.h"
 #include "nsIFileURL.h"
@@ -313,14 +316,14 @@ nsIconChannel::MakeInputStream(nsIInputStream** _retval,
 
     // alloc space for the color bitmap's info, including its color table
     uint32_t cbBMInfo = sizeof(BITMAPINFO2) + (sizeof(RGB2) * 255);
-    pBMInfo = (PBITMAPINFO2)nsMemory::Alloc(cbBMInfo);
+    pBMInfo = (PBITMAPINFO2)moz_xmalloc(cbBMInfo);
     if (!pBMInfo)
       break;
 
     // alloc space for the color bitmap data
     uint32_t cbInRow = ALIGNEDBPR(BMHeader.cx, BMHeader.cBitCount);
     uint32_t cbInBuf = cbInRow * BMHeader.cy;
-    pInBuf = (uint8_t*)nsMemory::Alloc(cbInBuf);
+    pInBuf = (uint8_t*)moz_xmalloc(cbInBuf);
     if (!pInBuf)
       break;
     memset(pInBuf, 0, cbInBuf);
@@ -329,7 +332,7 @@ nsIconChannel::MakeInputStream(nsIInputStream** _retval,
     uint32_t cxOut    = fShrink ? BMHeader.cx / 2 : BMHeader.cx;
     uint32_t cyOut    = fShrink ? BMHeader.cy / 2 : BMHeader.cy;
     uint32_t cbOutBuf = 2 + ALIGNEDBPR(cxOut, 32) * cyOut;
-    pOutBuf = (uint8_t*)nsMemory::Alloc(cbOutBuf);
+    pOutBuf = (uint8_t*)moz_xmalloc(cbOutBuf);
     if (!pOutBuf)
       break;
     memset(pOutBuf, 0, cbOutBuf);
@@ -377,8 +380,8 @@ nsIconChannel::MakeInputStream(nsIInputStream** _retval,
     if ((cbInRow * BMHeader.cy) > cbInBuf)  // Need more for mask
     {
       cbInBuf = cbInRow * BMHeader.cy;
-      nsMemory::Free(pInBuf);
-      pInBuf = (uint8_t*)nsMemory::Alloc(cbInBuf);
+      free(pInBuf);
+      pInBuf = (uint8_t*)moz_xmalloc(cbInBuf);
       memset(pInBuf, 0, cbInBuf);
     }
 
@@ -415,11 +418,11 @@ nsIconChannel::MakeInputStream(nsIInputStream** _retval,
 
   // free all the resources we allocated
   if (pOutBuf)
-    nsMemory::Free(pOutBuf);
+    free(pOutBuf);
   if (pInBuf)
-    nsMemory::Free(pInBuf);
+    free(pInBuf);
   if (pBMInfo)
-    nsMemory::Free(pBMInfo);
+    free(pBMInfo);
   if (hps) {
     GpiAssociate(hps, NULLHANDLE);
     GpiDestroyPS(hps);

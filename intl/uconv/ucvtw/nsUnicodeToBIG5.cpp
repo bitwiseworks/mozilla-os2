@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsUnicodeToBIG5.h"
+#include "nsBIG5Data.h"
 
 NS_IMPL_ADDREF(nsUnicodeToBIG5)
 NS_IMPL_RELEASE(nsUnicodeToBIG5)

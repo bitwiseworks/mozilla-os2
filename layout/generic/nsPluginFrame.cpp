@@ -1274,7 +1274,7 @@ nsPluginFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 static void *
 GetPSFromRC(nsRenderingContext& aRenderingContext)
 {
-  nsRefPtr<gfxASurface>
+  RefPtr<gfxASurface>
     surf = aRenderingContext.ThebesContext()->CurrentSurface();
   if (!surf || surf->CairoStatus())
     return nullptr;
