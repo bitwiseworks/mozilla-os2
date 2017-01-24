@@ -85,6 +85,9 @@
 
         HWND mWnd;
     };
+#elif defined(XP_OS2)
+    // There is nothing to do on OS/2 yet, we will simply pretend that we
+    // failed to load the GL library to make the code build and work w/o GL.
 #else
     #error "Platform not recognized"
 #endif
@@ -244,6 +247,10 @@ GLContextEGL::~GLContextEGL()
 bool
 GLContextEGL::Init()
 {
+#if defined(XP_OS2)
+    NS_WARNING("GL functons are not currently availiable on OS/2.");
+    return false;
+#else
 #if defined(ANDROID)
     // We can't use LoadApitraceLibrary here because the GLContext
     // expects its own handle to the GL library
@@ -277,6 +284,7 @@ GLContextEGL::Init()
                           IsExtensionSupported(OES_EGL_image);
 
     return true;
+#endif    
 }
 
 bool

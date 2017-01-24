@@ -16,7 +16,7 @@
 #include "nsServiceManagerUtils.h"
 
 #include "gfxFontconfigUtils.h"
-#include "gfxPangoFonts.h"
+#include "gfxFontconfigFonts.h"
 #include "gfx2DGlue.h"
 #include "gfxUserFontSet.h"
 
@@ -46,23 +46,21 @@ gfxOS2Platform::~gfxOS2Platform()
 
 already_AddRefed<gfxASurface>
 gfxOS2Platform::CreateOffscreenSurface(const IntSize & aSize,
-                                       gfxContentType contentType)
+                                       gfxImageFormat aFormat)
 {
-    gfxImageFormat format =
-        OptimalFormatForContent(contentType);
     int stride =
-        cairo_format_stride_for_width(static_cast<cairo_format_t>(format),
+        cairo_format_stride_for_width(static_cast<cairo_format_t>(aFormat),
                                       aSize.width);
 
     // To avoid memory fragmentation, return a standard image surface
     // for small images (32x32x4 or 64x64x1).  Their bitmaps will be
     // be allocated from libc's heap rather than system memory.
 
-    nsRefPtr<gfxASurface> surf;
+    RefPtr<gfxASurface> surf;
     if (stride * aSize.height <= 4096) {
-        surf = new gfxImageSurface(ThebesIntSize(aSize), format);
+        surf = new gfxImageSurface(aSize, aFormat);
     } else {
-        surf = new gfxOS2Surface(ThebesIntSize(aSize), format);
+        surf = new gfxOS2Surface(aSize, aFormat);
     }
 
     return surf.forget();
@@ -100,33 +98,36 @@ gfxOS2Platform::GetStandardFamilyName(const nsAString& aFontName, nsAString& aFa
 
 gfxFontGroup *
 gfxOS2Platform::CreateFontGroup(const mozilla::FontFamilyList& aFontFamilyList,
-                                const gfxFontStyle *aStyle,
-                                gfxUserFontSet *aUserFontSet)
+                                const gfxFontStyle* aStyle,
+                                gfxTextPerfMetrics* aTextPerf,
+                                gfxUserFontSet* aUserFontSet,
+                                gfxFloat aDevToCssSize)
 {
-    return new gfxPangoFontGroup(aFontFamilyList, aStyle, aUserFontSet);
+    return new gfxPangoFontGroup(aFontFamilyList, aStyle,
+                                 aUserFontSet, aDevToCssSize);
 }
 
 gfxFontEntry*
 gfxOS2Platform::LookupLocalFont(const nsAString& aFontName,
                                 uint16_t aWeight,
                                 int16_t aStretch,
-                                bool aItalic)
+                                uint8_t aStyle)
 {
     return gfxPangoFontGroup::NewFontEntry(aFontName, aWeight,
-                                           aStretch, aItalic);
+                                           aStretch, aStyle);
 }
 
 gfxFontEntry*
 gfxOS2Platform::MakePlatformFont(const nsAString& aFontName,
                                  uint16_t aWeight,
                                  int16_t aStretch,
-                                 bool aItalic,
+                                 uint8_t aStyle,
                                  const uint8_t* aFontData,
                                  uint32_t aLength)
 {
     // passing ownership of the font data to the new font entry
     return gfxPangoFontGroup::NewFontEntry(aFontName, aWeight,
-                                           aStretch, aItalic,
+                                           aStretch, aStyle,
                                            aFontData, aLength);
 }
 
