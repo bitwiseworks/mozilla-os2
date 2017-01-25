@@ -751,7 +751,7 @@ NS_IMETHODIMP nsPluginInstanceOwner::GetNetscapeWindow(void *value)
 #endif
 }
 
-#if defined(XP_WIN)
+#if defined(XP_WIN) || defined(XP_OS2)
 void
 nsPluginInstanceOwner::SetWidgetWindowAsParent(HWND aWindowToAdopt)
 {
@@ -761,7 +761,11 @@ nsPluginInstanceOwner::SetWidgetWindowAsParent(HWND aWindowToAdopt)
   }
 
   mWidget->SetNativeData(NS_NATIVE_CHILD_WINDOW,
+#if defined(XP_OS2)    
+                         aWindowToAdopt);
+#else
                          reinterpret_cast<uintptr_t>(aWindowToAdopt));
+#endif
 }
 
 nsresult
@@ -776,7 +780,11 @@ nsPluginInstanceOwner::SetNetscapeWindowAsParent(HWND aWindowToAdopt)
   nsIWidget* offsetWidget = GetContainingWidgetIfOffset();
   if (offsetWidget) {
     offsetWidget->SetNativeData(NS_NATIVE_CHILD_WINDOW,
+#if defined(XP_OS2)    
+                                aWindowToAdopt);
+#else
                                 reinterpret_cast<uintptr_t>(aWindowToAdopt));
+#endif
     return NS_OK;
   }
 
@@ -788,7 +796,11 @@ nsPluginInstanceOwner::SetNetscapeWindowAsParent(HWND aWindowToAdopt)
   }
 
   rootWidget->SetNativeData(NS_NATIVE_CHILD_OF_SHAREABLE_WINDOW,
+#if defined(XP_OS2)    
+                            aWindowToAdopt);
+#else
                             reinterpret_cast<uintptr_t>(aWindowToAdopt));
+#endif
   return NS_OK;
 }
 #endif

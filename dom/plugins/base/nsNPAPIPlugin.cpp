@@ -177,10 +177,10 @@ static NPNetscapeFuncs sBrowserFuncs = {
   NPN_convertpoint,
   nullptr, // handleevent, unimplemented
   nullptr, // unfocusinstance, unimplemented
-  NPN__urlredirectresponse,
-  NPN__initasyncsurface,
-  NPN__finalizeasyncsurface,
-  NPN__setcurrentasyncsurface
+  NPN_urlredirectresponse,
+  NPN_initasyncsurface,
+  NPN_finalizeasyncsurface,
+  NPN_setcurrentasyncsurface
 };
 
 static Mutex *sPluginThreadAsyncCallLock = nullptr;

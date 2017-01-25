@@ -121,6 +121,8 @@ typedef void* nsNativeWidget;
 #define NS_NATIVE_TSF_CATEGORY_MGR     101
 #define NS_NATIVE_TSF_DISPLAY_ATTR_MGR 102
 #define NS_NATIVE_ICOREWINDOW          103 // winrt specific
+#endif
+#if defined(XP_WIN) || defined(XP_OS2)
 #define NS_NATIVE_CHILD_WINDOW         104
 #define NS_NATIVE_CHILD_OF_SHAREABLE_WINDOW 105
 #endif

@@ -60,7 +60,7 @@ AsyncNPObject::GetRealObject()
   }
   if (realObject->_class != PluginScriptableObjectParent::GetClass()) {
     NS_ERROR("Don't know what kind of object this is!");
-    parent::_releaseobject(realObject);
+    parent::NPN_releaseobject(realObject);
     return nullptr;
   }
   mRealObject = static_cast<ParentNPObject*>(realObject);

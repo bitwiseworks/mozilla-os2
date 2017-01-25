@@ -109,7 +109,7 @@ public:
   NS_DECL_NSIRUNNABLE
 
 private:
-  nsRefPtr<nsNPAPIPluginInstance> mInst;
+  RefPtr<nsNPAPIPluginInstance> mInst;
 };
 
 NS_IMETHODIMP nsDelayedPopupsEnabledEvent::Run()
@@ -136,7 +136,7 @@ public:
   nsPluginNativeWindowOS2();
   virtual ~nsPluginNativeWindowOS2();
 
-  virtual nsresult CallSetWindow(nsRefPtr<nsNPAPIPluginInstance> &aPluginInstance);
+  virtual nsresult CallSetWindow(RefPtr<nsNPAPIPluginInstance> &aPluginInstance);
 
 private:
   nsresult SubclassAndAssociateWindow();
@@ -153,7 +153,7 @@ public:
 private:
   PFNWP mPluginWinProc;
   PluginWindowWeakRef mWeakRef;
-  nsRefPtr<PluginWindowEvent> mCachedPluginWindowEvent;
+  RefPtr<PluginWindowEvent> mCachedPluginWindowEvent;
 
 public:
   nsPluginType mPluginType;
@@ -204,7 +204,7 @@ static MRESULT EXPENTRY PluginWndProc(HWND hWnd, ULONG msg, MPARAM mp1, MPARAM m
   // The DispatchEvent(NS_PLUGIN_ACTIVATE) below can trigger a reentrant focus
   // event which might destroy us.  Hold a strong ref on the plugin instance
   // to prevent that, bug 374229.
-  nsRefPtr<nsNPAPIPluginInstance> inst;
+  RefPtr<nsNPAPIPluginInstance> inst;
   win->GetPluginInstance(inst);
 
   // check plugin mime type and cache whether it is Flash or java-vm or not;
@@ -387,7 +387,7 @@ NS_IMETHODIMP PluginWindowEvent::Run()
   if (!hWnd)
     return NS_OK;
 
-  nsRefPtr<nsNPAPIPluginInstance> inst;
+  RefPtr<nsNPAPIPluginInstance> inst;
   win->GetPluginInstance(inst);
 
   if (GetMsg() == WM_USER_FLASH)
@@ -439,7 +439,7 @@ nsPluginNativeWindowOS2::GetPluginWindowEvent(HWND aWnd, ULONG aMsg, MPARAM aMp1
   return event;
 }
 
-nsresult nsPluginNativeWindowOS2::CallSetWindow(nsRefPtr<nsNPAPIPluginInstance> &aPluginInstance)
+nsresult nsPluginNativeWindowOS2::CallSetWindow(RefPtr<nsNPAPIPluginInstance> &aPluginInstance)
 {
   // check the incoming instance, null indicates that window is going away and we are
   // not interested in subclassing business any more, undo and don't subclass

@@ -31,6 +31,16 @@
 #include "nsExceptionHandler.h"
 #endif
 
+// NOTE: stolen from nsNPAPIPlugin.h
+
+/*
+ * Use this macro before each exported function
+ * (between the return address and the function
+ * itself), to ensure that the function has the
+ * right calling conventions on OS/2.
+ */
+#define NP_CALLBACK NP_LOADDS
+
 class nsIProfileSaveEvent;
 class nsPluginTag;
 

@@ -1291,7 +1291,11 @@ PluginInstanceChild::AnswerNPP_SetWindow(const NPRemoteWindow& aWindow)
           HWND parentHWND =  reinterpret_cast<HWND>(aWindow.window);
           if (mPluginWindowHWND != parentHWND) {
               mPluginParentHWND = parentHWND;
+#if defined(OS_WIN)
               ShowWindow(mPluginWindowHWND, SW_SHOWNA);
+#else
+              WinShowWindow(mPluginWindowHWND, TRUE);
+#endif              
           }
 
           SizePluginWindow(aWindow.width, aWindow.height);
@@ -1320,10 +1324,6 @@ PluginInstanceChild::AnswerNPP_SetWindow(const NPRemoteWindow& aWindow)
 #else
               (void) mPluginIface->setwindow(&mData, &mWindow);
 #endif
-          }
-      }
-      break;
-
           }
       }
       break;
@@ -4407,7 +4407,6 @@ PluginInstanceChild::Destroy()
 #endif
 
 #if defined(XP_OS2)
-    SharedSurfaceRelease();
     DestroyPluginWindow();
 #endif
 

@@ -330,14 +330,14 @@ NPN_getJavaPeer(NPP npp);
 void NP_CALLBACK
 NPN_urlredirectresponse(NPP instance, void* notifyData, NPBool allow);
 
-NPError
-_initasyncsurface(NPP instance, NPSize *size, NPImageFormat format, void *initData, NPAsyncSurface *surface);
+NPError NP_CALLBACK
+NPN_initasyncsurface(NPP instance, NPSize *size, NPImageFormat format, void *initData, NPAsyncSurface *surface);
 
-NPError
-_finalizeasyncsurface(NPP instance, NPAsyncSurface *surface);
+NPError NP_CALLBACK
+NPN_finalizeasyncsurface(NPP instance, NPAsyncSurface *surface);
 
-void
-_setcurrentasyncsurface(NPP instance, NPAsyncSurface *surface, NPRect *changed);
+void NP_CALLBACK
+NPN_setcurrentasyncsurface(NPP instance, NPAsyncSurface *surface, NPRect *changed);
 
 } /* namespace parent */
 } /* namespace plugins */

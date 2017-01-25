@@ -63,6 +63,7 @@
 extern const wchar_t* kFlashFullscreenClass;
 #elif defined(XP_OS2)
 #include "mozilla/plugins/PluginSurfaceParent.h"
+#include "PluginQuirks.h"
 #elif defined(MOZ_WIDGET_GTK)
 #include "mozilla/dom/ContentChild.h"
 #include <gdk/gdk.h>
@@ -137,6 +138,8 @@ PluginInstanceParent::PluginInstanceParent(PluginModuleParent* parent,
     , mChildPluginsParentHWND(nullptr)
 #elif defined(XP_OS2)
     , mPluginHWND(NULLHANDLE)
+    , mChildPluginHWND(NULLHANDLE)
+    , mChildPluginsParentHWND(NULLHANDLE)
 #endif // defined(XP_WIN) || defined(XP_OS2)
     , mPluginWndProc(nullptr)
     , mNestedEventState(false)
@@ -485,9 +488,11 @@ PluginInstanceParent::AnswerNPN_SetValue_NPPVpluginDrawingModel(
         case NPDrawingModelSyncWin:
             allowed = true;
             break;
+#if defined(XP_WIN)
         case NPDrawingModelAsyncWindowsDXGISurface:
             allowed = AllowDirectDXGISurfaceDrawing();
             break;
+#endif            
 #elif defined(MOZ_X11)
         case NPDrawingModelSyncX:
             allowed = true;
@@ -1008,7 +1013,7 @@ PluginInstanceParent::AsyncSetWindow(NPWindow* aWindow)
     window.contentsScaleFactor = scaleFactor;
 #endif
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(XP_OS2)
     MaybeCreateChildPopupSurrogate();
 #endif
 
@@ -1590,20 +1595,6 @@ PluginInstanceParent::NPP_HandleEvent(void* event)
 #if defined(XP_OS2)
     if (mWindowType == NPWindowTypeDrawable) {
         switch (npevent->event) {
-            case WM_PAINT:
-            {
-                RECTL rcl;
-                RECTL dr;
-                HPS parentHps = ::WinBeginPaint(mPluginHWND, NULLHANDLE, &dr);
-                SharedSurfaceBeforePaint(rcl, dr, parentHps, npremoteevent);
-                if (!CallPaint(npremoteevent, &handled)) {
-                    handled = false;
-                }
-                SharedSurfaceAfterPaint(dr, parentHps);
-                return handled;
-            }
-            break;
-
             case WM_WINDOWPOSCHANGED:
             {
                 // We send this in nsObjectFrame just before painting
@@ -2273,6 +2264,10 @@ PluginInstanceParent::UnsubclassPluginWindow()
     }
 }
 
+#endif // defined(OS_WIN)
+
+#if defined(OS_WIN) || defined(XP_OS2)
+
 /* windowless drawing helpers */
 
 /*
@@ -2354,7 +2349,7 @@ PluginInstanceParent::MaybeCreateChildPopupSurrogate()
     }
 }
 
-#endif // defined(OS_WIN)
+#endif // defined(OS_WIN) || defined(XP_OS2)
 
 #if defined(XP_OS2)
 
@@ -2378,7 +2373,7 @@ PluginInstanceParent::PluginWindowHookProc(HWND hWnd,
         case WM_SETFOCUS:
         if (SHORT1FROMMP(mp2) == TRUE) {
             // Let the child plugin window know it should take focus.
-            unused << self->CallSetPluginFocus();
+            Unused << self->CallSetPluginFocus();
         }
         break;
 
@@ -2457,93 +2452,6 @@ PluginInstanceParent::UnsubclassPluginWindow()
 }
 
 /* windowless drawing helpers */
-
-void
-PluginInstanceParent::SharedSurfaceRelease()
-{
-    mSharedSurfaceDib.Close();
-}
-
-bool
-PluginInstanceParent::SharedSurfaceSetWindow(const NPWindow* aWindow,
-                                             NPRemoteWindow& aRemoteWindow)
-{
-    aRemoteWindow.window = 0;
-    aRemoteWindow.x      = aWindow->x;
-    aRemoteWindow.y      = aWindow->y;
-    aRemoteWindow.width  = aWindow->width;
-    aRemoteWindow.height = aWindow->height;
-    aRemoteWindow.type   = aWindow->type;
-
-    nsIntRect newPort(aWindow->x, aWindow->y, aWindow->width, aWindow->height);
-
-    // save the the rect location within the browser window.
-    mPluginPort = newPort;
-
-    // move the port to our shared surface origin
-    newPort.MoveTo(0,0);
-
-    // check to see if we have the room in shared surface
-    if (mSharedSurfaceDib.IsValid() && mSharedSize.Contains(newPort)) {
-      // ok to paint
-      aRemoteWindow.surfaceHandle = 0;
-      return true;
-    }
-
-    // allocate a new shared surface
-    SharedSurfaceRelease();
-    if (NS_FAILED(mSharedSurfaceDib.Create(reinterpret_cast<HPS>(aWindow->window),
-                                           newPort.width, newPort.height, false)))
-      return false;
-
-    // save the new shared surface size we just allocated
-    mSharedSize = newPort;
-
-    base::SharedMemoryHandle handle;
-    if (NS_FAILED(mSharedSurfaceDib.ShareToProcess(OtherProcess(), &handle)))
-      return false;
-
-    aRemoteWindow.surfaceHandle = handle;
-
-    return true;
-}
-
-void
-PluginInstanceParent::SharedSurfaceBeforePaint(RECTL& rcl, RECTL& dr, HPS parentHps,
-                                               NPRemoteEvent& npremoteevent)
-{
-    nsIntRect dirtyRect(dr.xLeft, dr.yBottom, dr.xRight-dr.xLeft, dr.yTop-dr.yBottom);
-    dirtyRect.MoveBy(-mPluginPort.x, -mPluginPort.y); // should always be smaller than dirtyRect
-
-    POINTL ptls[3] = { { dirtyRect.x, dirtyRect.y },
-                       { dirtyRect.x + dirtyRect.width, dirtyRect.y + dirtyRect.height },
-                       { dr.xLeft, dr.yBottom } };
-    ::GpiBitBlt(mSharedSurfaceDib.GetHPS(), parentHps, 3, ptls, ROP_SRCCOPY, BBO_IGNORE);
-
-    // setup the translated dirty rect we'll send to the child
-    rcl.xLeft   = dirtyRect.x;
-    rcl.yBottom = dirtyRect.y;
-    rcl.xRight  = dirtyRect.x + dirtyRect.width;
-    rcl.yTop    = dirtyRect.y + dirtyRect.height;
-
-    npremoteevent.event.wParam = 0;
-    npremoteevent.event.lParam = (uint32_t)&rcl;
-}
-
-void
-PluginInstanceParent::SharedSurfaceAfterPaint(RECTL& dr, HPS parentHps)
-{
-    nsIntRect dirtyRect(dr.xLeft, dr.yBottom, dr.xRight-dr.xLeft, dr.yTop-dr.yBottom);
-    dirtyRect.MoveBy(-mPluginPort.x, -mPluginPort.y);
-
-    POINTL ptls[3] = { { dr.xLeft, dr.yBottom },
-                       { dr.xLeft + dr.xRight, dr.yBottom + dr.yTop },
-                       { dirtyRect.x, dirtyRect.y } };
-
-
-    // src copy the shared dib into the parent surface we are handed.
-    ::GpiBitBlt(parentHps, mSharedSurfaceDib.GetHPS(), 3, ptls, ROP_SRCCOPY, BBO_IGNORE);
-}
 
 #endif // defined(XP_OS2)
 

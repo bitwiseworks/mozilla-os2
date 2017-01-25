@@ -126,7 +126,7 @@ public:
 
   nsEventStatus ProcessEvent(const mozilla::WidgetGUIEvent& anEvent);
 
-#if defined(XP_WIN)
+#if defined(XP_WIN) || defined(XP_OS2)
   void SetWidgetWindowAsParent(HWND aWindowToAdopt);
   nsresult SetNetscapeWindowAsParent(HWND aWindowToAdopt);
 #endif
@@ -289,7 +289,7 @@ private:
   void* mJavaView;
 #endif 
 
-#if defined(XP_WIN)
+#if defined(XP_WIN) || defined(XP_OS2)
   nsIWidget* GetContainingWidgetIfOffset();
 #endif
  
