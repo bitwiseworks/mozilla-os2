@@ -28,6 +28,8 @@
 #include "nsXPCOM.h"
 #include "nsISupportsPrimitives.h"
 #include "nsIWindowWatcher.h"
+#include "nsPIDOMWindow.h"
+#include "nsGlobalWindow.h"
 #include "nsIDocShell.h"
 #include "nsIDocShellTreeItem.h"
 #include "nsIBaseWindow.h"
@@ -105,7 +107,8 @@ activateWindow( nsIDOMWindow *win ) {
                          SWP_SHOW | SWP_RESTORE | SWP_ACTIVATE );
     } else {
         // Use internal method.
-        win->Focus();
+        nsCOMPtr<nsPIDOMWindow> piWin = do_QueryInterface(win);
+        piWin->Focus();
     }
 }
 
@@ -115,9 +118,9 @@ activateWindow( nsIDOMWindow *win ) {
 #define MOZ_DEBUG_DDE 1
 #endif
 
-// Simple Win32 mutex wrapper.
-struct Mutex {
-    Mutex( const char *name )
+// Simple OS/2 mutex wrapper.
+struct OS2Mutex {
+    OS2Mutex( const char *name )
         : mName( name ),
           mHandle( 0 ),
           mState( 0xFFFF ) {
@@ -130,7 +133,7 @@ struct Mutex {
 #endif
         }
     }
-    ~Mutex() {
+    ~OS2Mutex() {
         if ( mHandle ) {
             // Make sure we release it if we own it.
             Unlock();
@@ -752,7 +755,7 @@ nsNativeAppSupportOS2::Start( bool *aResult ) {
 
     // Build mutex name from app name.
     PR_snprintf( mMutexName, sizeof mMutexName, "%s%s", gAppData->name, MOZ_STARTUP_MUTEX_NAME );
-    Mutex startupLock = Mutex( mMutexName );
+    OS2Mutex startupLock = OS2Mutex( mMutexName );
 
     NS_ENSURE_TRUE( startupLock.Lock( MOZ_DDE_START_TIMEOUT ), NS_ERROR_FAILURE );
 
@@ -881,7 +884,7 @@ nsNativeAppSupportOS2::Stop( bool *aResult ) {
        return rv;
     }
 
-    Mutex ddeLock( mMutexName );
+    OS2Mutex ddeLock( mMutexName );
 
     if ( ddeLock.Lock( MOZ_DDE_STOP_TIMEOUT ) ) {
         if ( mConversations == 0 ) {
@@ -921,7 +924,7 @@ nsNativeAppSupportOS2::Quit() {
     // to wait to hold the lock, in which case they will not find the
     // window as we will destroy ours under our lock.
     // When the mutex goes off the stack, it is unlocked via destructor.
-    Mutex mutexLock(mMutexName);
+    OS2Mutex mutexLock(mMutexName);
     NS_ENSURE_TRUE(mutexLock.Lock(MOZ_DDE_START_TIMEOUT), NS_ERROR_FAILURE);
 
     // If we've got a message window to receive IPC or new window requests,
@@ -1113,24 +1116,19 @@ nsNativeAppSupportOS2::HandleDDENotification( ULONG idInst,     // DDEML instanc
                         nsCOMPtr<nsIDOMWindow> navWin;
                         GetMostRecentWindow( MOZ_UTF16( "navigator:browser" ),
                                              getter_AddRefs( navWin ) );
-                        if ( !navWin ) {
+                        nsCOMPtr<nsPIDOMWindow> piNavWin = do_QueryInterface(navWin);
+                        if ( !piNavWin ) {
                             // There is not a window open
                             break;
                         }
                         // Get content window.
-                        nsCOMPtr<nsIDOMWindow> content;
-                        navWin->GetContent( getter_AddRefs( content ) );
-                        if ( !content ) {
-                            break;
-                        }
-                        // Convert that to internal interface.
-                        nsCOMPtr<nsPIDOMWindow> internalContent( do_QueryInterface( content ) );
+                        nsCOMPtr<nsIDOMWindow> internalContent_ = nsGlobalWindow::Cast(piNavWin)->GetContent();
+                        nsCOMPtr<nsPIDOMWindow> internalContent = do_QueryInterface(internalContent_);
                         if ( !internalContent ) {
                             break;
                         }
                         // Get location.
-                        nsCOMPtr<nsIDOMLocation> location;
-                        internalContent->GetLocation( getter_AddRefs( location ) );
+                        nsCOMPtr<nsIDOMLocation> location = internalContent->GetLocation();
                         if ( !location ) {
                             break;
                         }

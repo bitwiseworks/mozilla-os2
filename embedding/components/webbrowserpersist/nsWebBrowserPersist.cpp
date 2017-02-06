@@ -1812,7 +1812,7 @@ nsWebBrowserPersist::FinishSaveDocumentInternal(nsIURI* aFile,
             nsCOMPtr<nsILocalFileOS2> localFileOS2 = do_QueryInterface(aDataPath);
             if (localFileOS2) {
                 nsAutoCString url;
-                mParent->mCurrentBaseURI->GetSpec(url);
+                mCurrentBaseURI->GetSpec(url);
                 localFileOS2->SetFileSource(url);
             }
 #endif

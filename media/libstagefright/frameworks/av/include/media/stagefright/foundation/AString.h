@@ -20,6 +20,11 @@
 
 #include <sys/types.h>
 
+#if defined(__EMX__) && defined(tolower)
+// Avoid renaming of AString::tolower to __tolower
+#undef tolower
+#endif
+
 namespace stagefright {
 
 struct AString {

@@ -17,11 +17,11 @@
 #include "nsIProcess.h"
 #include "nsNetUtil.h"
 #include "nsDirectoryServiceDefs.h"
-#include "nsIVariant.h"
 #include "nsArrayEnumerator.h"
 #include "nsIRwsService.h"
 #include <stdlib.h>
 #include "mozilla/Preferences.h"
+#include "nsVariant.h"
 
 using namespace mozilla;
 
@@ -29,7 +29,7 @@ using namespace mozilla;
 
 #define SALT_SIZE 8
 #define TABLE_SIZE 36
-static const char16_t table[] = 
+static const char16_t table[] =
   { 'a','b','c','d','e','f','g','h','i','j',
     'k','l','m','n','o','p','q','r','s','t',
     'u','v','w','x','y','z','0','1','2','3',
@@ -559,9 +559,6 @@ nsMIMEInfoOS2::GetProperty(const nsAString& aName, nsIVariant **_retval)
 NS_IMETHODIMP
 nsMIMEInfoOS2::GetIconURLVariant(nsIFile *aApplication, nsIVariant **_retval)
 {
-  nsresult rv = CallCreateInstance("@mozilla.org/variant;1", _retval);
-  NS_ENSURE_SUCCESS(rv, rv);
-
   nsAutoCString fileURLSpec;
   if (aApplication)
     NS_GetURLSpecFromFile(aApplication, fileURLSpec);
@@ -572,8 +569,9 @@ nsMIMEInfoOS2::GetIconURLVariant(nsIFile *aApplication, nsIVariant **_retval)
 
   nsAutoCString iconURLSpec(NS_LITERAL_CSTRING("moz-icon://"));
   iconURLSpec += fileURLSpec;
-  nsCOMPtr<nsIWritableVariant> writable(do_QueryInterface(*_retval));
+  RefPtr<nsVariant> writable(new nsVariant());
   writable->SetAsAUTF8String(iconURLSpec);
+  writable.forget(_retval);
 
   return NS_OK;
 }

@@ -184,7 +184,7 @@ nsLocaleService::nsLocaleService(void)
         nsAutoString category;
         int i;
 
-        nsRefPtr<nsLocale> resultLocale(new nsLocale());
+        RefPtr<nsLocale> resultLocale(new nsLocale());
 
         LocaleObject locale_object = nullptr;
         int result = UniCreateLocaleObject(UNI_UCS_STRING_POINTER,

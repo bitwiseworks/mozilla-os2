@@ -23,10 +23,6 @@
 #include "ADebug.h"
 #include "AString.h"
 
-#if defined(__EMX__) && defined(tolower)
-#undef tolower
-#endif
-
 namespace stagefright {
 
 // static
