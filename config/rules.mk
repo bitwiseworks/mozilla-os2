@@ -223,7 +223,8 @@ DEBUG_SYMFILE_GEN =
 
 ifeq ($(OS_ARCH),OS2)
 ifdef SHARED_LIBRARY
-DEF_FILE := $(SHARED_LIBRARY:.dll=.def)
+# Use CURDIR to avid clashes with .def files found in sources via VPATH
+DEF_FILE := $(CURDIR)/$(SHARED_LIBRARY:.dll=.def)
 endif
 ifndef MOZ_DEBUG
 ifdef MOZ_DEBUG_SYMBOLS
@@ -833,7 +834,7 @@ $(filter-out %.$(LIB_SUFFIX),$(LIBRARY)): $(filter %.$(LIB_SUFFIX),$(LIBRARY)) $
 	$(if $(filter %.$(LIB_SUFFIX),$(LIBRARY)),,$(RM) $(REAL_LIBRARY))
 	$(EXPAND_LIBS_GEN) -o $@ $(OBJS) $(STATIC_LIBS) $(filter %.$(LIB_SUFFIX),$(EXTRA_LIBS))
 
-ifeq ($(OS_ARCH),WINNT)
+ifneq (,$(filter OS2 WINNT,$(OS_ARCH)))
 # Import libraries are created by the rules creating shared libraries.
 # The rules to copy them to $(DIST)/lib depend on $(IMPORT_LIBRARY),
 # but make will happily consider the import library before it is refreshed
@@ -852,13 +853,7 @@ $(DEF_FILE): $(OBJS) $(SHARED_LIBRARY_LIBS_DEPS)
 	echo CODE    LOADONCALL MOVEABLE DISCARDABLE >> $@
 	echo DATA    PRELOAD MOVEABLE MULTIPLE NONSHARED >> $@
 	echo EXPORTS >> $@
-
 	$(ADD_TO_DEF_FILE)
-
-$(IMPORT_LIBRARY): $(SHARED_LIBRARY)
-	$(RM) $@
-	$(IMPLIB) $@ $^
-	$(RANLIB) $@
 endif # OS/2
 
 $(HOST_LIBRARY): $(HOST_OBJS) Makefile
@@ -915,6 +910,11 @@ endif	# WINNT && !GCC
 	chmod +x $@
 ifdef ENABLE_STRIP
 	$(STRIP) $(STRIP_FLAGS) $@
+endif
+ifeq ($(OS_ARCH),OS2)
+ifndef IS_COMPONENT
+	$(IMPLIB) $(IMPORT_LIBRARY) $@
+endif
 endif
 ifdef MOZ_POST_DSO_LIB_COMMAND
 	$(MOZ_POST_DSO_LIB_COMMAND) $@

@@ -16,7 +16,6 @@
 #include "mozilla/TimeStamp.h"
 #include "prlock.h"
 #include "prinrval.h"
-#include "nsDebug.h"
 
 namespace mozilla {
 
@@ -122,9 +121,8 @@ TimeStamp::Now(bool aHighResolution)
   if (gUseHighResTimer) {
     QWORD timestamp;
     APIRET rc = DosTmrQueryTime(&timestamp);
-    if (rc != NO_ERROR)
-      NS_RUNTIMEABORT("DosTmrQueryTime failed!");
-    return TimeStamp((uint64_t(timestamp.ulHi) << 32) + timestamp.ulLo);
+    if (rc == NO_ERROR)
+      return TimeStamp((uint64_t(timestamp.ulHi) << 32) + timestamp.ulLo);
   }
 
   // XXX this could be considerably simpler and faster if we had
@@ -132,11 +130,8 @@ TimeStamp::Now(bool aHighResolution)
   PR_Lock(gTimeStampLock);
 
   PRIntervalTime now = PR_IntervalNow();
-  if (now < gLastNow) {
+  if (now < gLastNow)
     ++gRolloverCount;
-    // This can't happen unless you've been running for millions of years
-    NS_ASSERTION(gRolloverCount > 0, "Rollover in rollover count???");
-  }
 
   gLastNow = now;
   TimeStamp result((uint64_t(gRolloverCount) << 32) + now);

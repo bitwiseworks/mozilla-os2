@@ -67,7 +67,7 @@ def GeckoBinary(linkage='dependent', msvcrt='dynamic', mozglue=None):
             if mozglue == 'program':
                 USE_LIBS += ['mozglue']
                 if CONFIG['MOZ_GLUE_IN_PROGRAM']:
-                    if CONFIG['GNU_CC']:
+                    if CONFIG['GNU_CC'] and CONFIG['OS_ARCH'] != 'OS2':
                         LDFLAGS += ['-rdynamic']
                     if CONFIG['MOZ_MEMORY']:
                         USE_LIBS += ['memory']

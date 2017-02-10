@@ -35,6 +35,11 @@ elif CONFIG['OS_ARCH'] == 'OS2':
     SOURCES += [
         'TimeStamp_os2.cpp',
     ]
+    # OS/2 uses NSPR for TimeStamp
+    if CONFIG['MOZ_NATIVE_NSPR']:
+        OS_LIBS += CONFIG['NSPR_LIBS']
+    else:
+        USE_LIBS += [ '/nsprpub/pr/src/nspr4' ]
 elif CONFIG['COMPILE_ENVIRONMENT']:
     error('No TimeStamp implementation on this platform.  Build will not succeed')
 
