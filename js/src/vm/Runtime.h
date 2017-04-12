@@ -1123,12 +1123,12 @@ struct JSRuntime : public JS::shadow::Runtime,
     /* Client opaque pointers */
     void*               data;
 
-#if defined(XP_DARWIN) && defined(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB)
+#if defined(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB)
+# if defined(XP_DARWIN)
     js::AsmJSMachExceptionHandler asmJSMachExceptionHandler;
-#endif
-
-#ifdef XP_OS2
+# elif defined(XP_OS2)
     js::AsmJSOS2ExceptionHandler asmJSOS2ExceptionHandler;
+# endif
 #endif
 
   private:

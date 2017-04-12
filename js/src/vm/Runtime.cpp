@@ -263,7 +263,7 @@ JSRuntime::init(uint32_t maxbytes, uint32_t maxNurseryBytes)
 {
     ownerThread_ = PR_GetCurrentThread();
 
-#ifdef XP_OS2
+#if defined(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB) && defined(XP_OS2)
     asmJSOS2ExceptionHandler.setCurrentThread();
 #endif
 
@@ -429,7 +429,7 @@ JSRuntime::~JSRuntime()
     MOZ_ASSERT(!numExclusiveThreads);
     mainThreadHasExclusiveAccess = true;
 
-#ifdef XP_OS2
+#if defined(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB) && defined(XP_OS2)
     asmJSOS2ExceptionHandler.clearCurrentThread();
 #endif
 

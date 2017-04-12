@@ -1,4 +1,6 @@
-/*
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
+ *
  * Copyright (C) 2008 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -23,16 +25,16 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-
-#include "jit/ExecutableAllocator.h"
-
 #define INCL_BASE
 #define INCL_PM
 #include <os2.h>
 
+#include "jit/ExecutableAllocator.h"
+
 using namespace js::jit;
 
-size_t ExecutableAllocator::determinePageSize()
+size_t
+ExecutableAllocator::determinePageSize()
 {
     return 4096u;
 }
@@ -42,7 +44,6 @@ js::jit::AllocateExecutableMemory(void* addr, size_t bytes, unsigned permissions
                                   size_t pageSize)
 {
     MOZ_ASSERT(bytes % pageSize == 0);
-    MOZ_ASSERT(permissions == PAG_READ | PAG_WRITE | PAG_EXECUTE);
 
     void* p = nullptr;
 #if defined(MOZ_OS2_HIGH_MEMORY)
@@ -62,20 +63,48 @@ js::jit::DeallocateExecutableMemory(void* addr, size_t bytes, size_t pageSize)
     DosFreeMem(addr);
 }
 
-ExecutablePool::Allocation ExecutableAllocator::systemAlloc(size_t n)
+ExecutablePool::Allocation
+ExecutableAllocator::systemAlloc(size_t n)
 {
-    void* allocation = AllocateExecutableMemory(nullptr, n, PAG_READ | PAG_WRITE | PAG_EXECUTE,
+    void* allocation = AllocateExecutableMemory(nullptr, n, initialProtectionFlags(Executable),
                                                 "js-jit-code", pageSize);
     ExecutablePool::Allocation alloc = { reinterpret_cast<char*>(allocation), n };
     return alloc;
 }
 
-void ExecutableAllocator::systemRelease(const ExecutablePool::Allocation& alloc)
+void
+ExecutableAllocator::systemRelease(const ExecutablePool::Allocation& alloc)
 {
     DeallocateExecutableMemory(alloc.pages, alloc.size, pageSize);
 }
 
-#if ENABLE_ASSEMBLER_WX_EXCLUSIVE
-#error "ASSEMBLER_WX_EXCLUSIVE not yet suported on this platform."
-#endif
+void
+ExecutableAllocator::reprotectRegion(void* start, size_t size, ProtectionSetting setting)
+{
+    MOZ_ASSERT(nonWritableJitCode);
+    MOZ_ASSERT(pageSize);
 
+    // Calculate the start of the page containing this region,
+    // and account for this extra memory within size.
+    intptr_t startPtr = reinterpret_cast<intptr_t>(start);
+    intptr_t pageStartPtr = startPtr & ~(pageSize - 1);
+    void* pageStart = reinterpret_cast<void*>(pageStartPtr);
+    size += (startPtr - pageStartPtr);
+
+    // Round size up
+    size += (pageSize - 1);
+    size &= ~(pageSize - 1);
+
+    ULONG flags = (setting == Writable) ? PAG_READ | PAG_WRITE : PAG_READ | PAG_EXECUTE;
+    if (DosSetMem(pageStart, size, flags))
+        MOZ_CRASH();
+}
+
+/* static */ unsigned
+ExecutableAllocator::initialProtectionFlags(ProtectionSetting protection)
+{
+    if (!nonWritableJitCode)
+        return PAG_READ | PAG_WRITE | PAG_EXECUTE;
+
+    return (protection == Writable) ? PAG_READ | PAG_WRITE : PAG_READ | PAG_EXECUTE;
+}

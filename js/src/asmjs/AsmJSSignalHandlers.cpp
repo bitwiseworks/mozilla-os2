@@ -843,7 +843,7 @@ HandleException(PEXCEPTIONREPORTRECORD pReport,
     if (!activation)
         return false;
 
-    return false;
+    return true;
 }
 
 static ULONG _System
@@ -1298,13 +1298,15 @@ JitInterruptHandler(int signum, siginfo_t* info, void* context)
 bool
 js::EnsureSignalHandlersInstalled(JSRuntime* rt)
 {
-#if defined(XP_DARWIN) && defined(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB)
+#if defined(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB)
+# if defined(XP_DARWIN)
     // On OSX, each JSRuntime gets its own handler thread.
     if (!rt->asmJSMachExceptionHandler.installed() && !rt->asmJSMachExceptionHandler.install(rt))
         return false;
-#elif defined(XP_OS2)
+# elif defined(XP_OS2)
     if (!rt->asmJSOS2ExceptionHandler.installed() && !rt->asmJSOS2ExceptionHandler.setCurrentThread())
         return false;
+# endif
 #endif
 
     // All the rest of the handlers are process-wide and thus must only be
