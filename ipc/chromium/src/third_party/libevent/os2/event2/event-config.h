@@ -154,7 +154,7 @@
 #define _EVENT_HAVE_OPENSSL_BIO_H 1
 
 /* Define to 1 if you have the `pipe' function. */
-#define _EVENT_HAVE_PIPE 1
+/* #undef _EVENT_HAVE_PIPE */
 
 /* Define to 1 if you have the `poll' function. */
 /* #undef _EVENT_HAVE_POLL */
