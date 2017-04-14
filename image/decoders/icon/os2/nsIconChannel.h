@@ -4,8 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef nsIconChannel_h___
-#define nsIconChannel_h___
+#ifndef mozilla_image_encoders_icon_os2_nsIconChannel_h
+#define mozilla_image_encoders_icon_os2_nsIconChannel_h
 
 #include "mozilla/Attributes.h"
 
@@ -58,4 +58,4 @@ protected:
 #define ID_ICO_FILE    5800
 #define ID_ICO_FOLDER  5801
 
-#endif /* nsIconChannel_h___ */
+#endif /* mozilla_image_encoders_icon_os2_nsIconChannel_h */

@@ -81,6 +81,11 @@
   on Linux do a reasonable thing using signalfd.
 */
 
+/* In GCC for OS/2 __cdecl is a define, get rid of it for the below ifndef */
+#if defined(__OS2__) && defined(__cdecl)
+#undef __cdecl
+#endif
+
 #ifndef WIN32
 /* Windows wants us to call our signal handlers as __cdecl.  Nobody else
  * expects you to do anything crazy like this. */

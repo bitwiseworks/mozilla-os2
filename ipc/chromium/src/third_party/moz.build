@@ -29,7 +29,6 @@ UNIFIED_SOURCES += [
     'libevent/http.c',
     'libevent/listener.c',
     'libevent/log.c',
-    'libevent/poll.c',
     'libevent/select.c',
     'libevent/signal.c',
     'libevent/strlcpy.c',
@@ -39,6 +38,11 @@ SOURCES += [
     # symbol clash.
     'libevent/evdns.c',
 ]
+
+if not os_os2:
+    UNIFIED_SOURCES += [
+        'libevent/poll.c',
+    ]
 
 if os_macosx or os_bsd:
     UNIFIED_SOURCES += [

@@ -67,6 +67,7 @@ NS_IMETHODIMP
 nsScreenManagerOS2::ScreenForId(uint32_t aId, nsIScreen** aOutScreen)
 {
   GetPrimaryScreen(aOutScreen);
+  return NS_OK;
 }
 
 //

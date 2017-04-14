@@ -19,6 +19,8 @@
 #include "nsIFileURL.h"
 #include "nsDirectoryServiceDefs.h"
 #include "nsProxyRelease.h"
+#include "nsContentSecurityManager.h"
+#include "nsContentUtils.h"
 #include "nsIRwsService.h"
 
 #define INCL_BASE
@@ -185,8 +187,24 @@ nsIconChannel::Open(nsIInputStream **_retval)
 }
 
 NS_IMETHODIMP
+nsIconChannel::Open2(nsIInputStream** aStream)
+{
+  nsCOMPtr<nsIStreamListener> listener;
+  nsresult rv = nsContentSecurityManager::doContentSecurityCheck(this, listener);
+  NS_ENSURE_SUCCESS(rv, rv);
+  return Open(aStream);
+}
+
+NS_IMETHODIMP
 nsIconChannel::AsyncOpen(nsIStreamListener *aListener, nsISupports *ctxt)
 {
+  MOZ_ASSERT(!mLoadInfo ||
+             mLoadInfo->GetSecurityMode() == 0 ||
+             mLoadInfo->GetInitialSecurityCheckDone() ||
+             (mLoadInfo->GetSecurityMode() == nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL &&
+              nsContentUtils::IsSystemPrincipal(mLoadInfo->LoadingPrincipal())),
+             "security flags in loadInfo but asyncOpen2() not called");
+
   nsCOMPtr<nsIInputStream> inStream;
   nsresult rv = MakeInputStream(getter_AddRefs(inStream), true);
   if (NS_FAILED(rv))
@@ -206,6 +224,15 @@ nsIconChannel::AsyncOpen(nsIStreamListener *aListener, nsISupports *ctxt)
       mLoadGroup->AddRequest(this, nullptr);
   }
   return rv;
+}
+
+NS_IMETHODIMP
+nsIconChannel::AsyncOpen2(nsIStreamListener* aListener)
+{
+  nsCOMPtr<nsIStreamListener> listener = aListener;
+  nsresult rv = nsContentSecurityManager::doContentSecurityCheck(this, listener);
+  NS_ENSURE_SUCCESS(rv, rv);
+  return AsyncOpen(listener, nullptr);
 }
 
 nsresult

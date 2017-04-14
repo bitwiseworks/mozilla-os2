@@ -237,136 +237,130 @@ static int isleadbyte(int c)
 // nsDirEnumerator
 //-----------------------------------------------------------------------------
 
-class nsDirEnumerator final : public nsISimpleEnumerator,
-                              public nsIDirectoryEnumerator
+class nsDirEnumerator final
+    : public nsISimpleEnumerator
+    , public nsIDirectoryEnumerator
 {
     friend class nsLocalFile;
 
-    private:
-        ~nsDirEnumerator()
-        {
-            Close();
+private:
+    ~nsDirEnumerator()
+    {
+        Close();
+    }
+
+public:
+    NS_DECL_ISUPPORTS
+
+    nsDirEnumerator() : mDir(nullptr)
+    {
+    }
+
+    nsresult Init(nsIFile* aParent)
+    {
+        nsAutoCString filepath;
+        aParent->GetNativeTarget(filepath);
+
+        if (filepath.IsEmpty()) {
+            aParent->GetNativePath(filepath);
         }
 
-    public:
-
-        NS_DECL_ISUPPORTS
-
-        nsDirEnumerator() : mDir(nullptr)
-        {
+        if (filepath.IsEmpty()) {
+            return NS_ERROR_UNEXPECTED;
         }
 
-        nsresult Init(nsIFile* parent)
-        {
-            nsAutoCString filepath;
-            parent->GetNativeTarget(filepath);
+        mDir = PR_OpenDir(filepath.get());
+        if (mDir == nullptr)    // not a directory?
+            return NS_ERROR_FAILURE;
 
-            if (filepath.IsEmpty())
-            {
-                parent->GetNativePath(filepath);
-            }
+        mParent = aParent;
+        return NS_OK;
+    }
 
-            if (filepath.IsEmpty())
-            {
-                return NS_ERROR_UNEXPECTED;
-            }
+    NS_IMETHOD HasMoreElements(bool *aResult)
+    {
+        nsresult rv;
+        if (mNext == nullptr && mDir) {
+            PRDirEntry* entry = PR_ReadDir(mDir, PR_SKIP_BOTH);
+            if (entry == nullptr) {
+                // end of dir entries
 
-            mDir = PR_OpenDir(filepath.get());
-            if (mDir == nullptr)    // not a directory?
-                return NS_ERROR_FAILURE;
-
-            mParent = parent;
-            return NS_OK;
-        }
-
-        NS_IMETHOD HasMoreElements(bool *result)
-        {
-            nsresult rv;
-            if (mNext == nullptr && mDir)
-            {
-                PRDirEntry* entry = PR_ReadDir(mDir, PR_SKIP_BOTH);
-                if (entry == nullptr)
-                {
-                    // end of dir entries
-
-                    PRStatus status = PR_CloseDir(mDir);
-                    if (status != PR_SUCCESS)
-                        return NS_ERROR_FAILURE;
-                    mDir = nullptr;
-
-                    *result = false;
-                    return NS_OK;
-                }
-
-                nsCOMPtr<nsIFile> file;
-                rv = mParent->Clone(getter_AddRefs(file));
-                if (NS_FAILED(rv))
-                    return rv;
-
-                rv = file->AppendNative(nsDependentCString(entry->name));
-                if (NS_FAILED(rv))
-                    return rv;
-
-                // make sure the thing exists.  If it does, try the next one.
-                bool exists;
-                rv = file->Exists(&exists);
-                if (NS_FAILED(rv) || !exists)
-                {
-                    return HasMoreElements(result);
-                }
-
-                mNext = do_QueryInterface(file);
-            }
-            *result = mNext != nullptr;
-            if (!*result)
-                Close();
-            return NS_OK;
-        }
-
-        NS_IMETHOD GetNext(nsISupports **result)
-        {
-            nsresult rv;
-            bool hasMore;
-            rv = HasMoreElements(&hasMore);
-            if (NS_FAILED(rv)) return rv;
-
-            *result = mNext;        // might return nullptr
-            NS_IF_ADDREF(*result);
-
-            mNext = nullptr;
-            return NS_OK;
-        }
-
-        NS_IMETHOD GetNextFile(nsIFile **result)
-        {
-            *result = nullptr;
-            bool hasMore = false;
-            nsresult rv = HasMoreElements(&hasMore);
-            if (NS_FAILED(rv) || !hasMore)
-                return rv;
-            *result = mNext;
-            NS_IF_ADDREF(*result);
-            mNext = nullptr;
-            return NS_OK;
-        }
-
-        NS_IMETHOD Close()
-        {
-            if (mDir)
-            {
                 PRStatus status = PR_CloseDir(mDir);
-                NS_ASSERTION(status == PR_SUCCESS, "close failed");
                 if (status != PR_SUCCESS)
                     return NS_ERROR_FAILURE;
                 mDir = nullptr;
-            }
-            return NS_OK;
-        }
 
-    protected:
-        PRDir*             mDir;
-        nsCOMPtr<nsIFile>  mParent;
-        nsCOMPtr<nsIFile>  mNext;
+                *aResult = false;
+                return NS_OK;
+            }
+
+            nsCOMPtr<nsIFile> file;
+            rv = mParent->Clone(getter_AddRefs(file));
+            if (NS_FAILED(rv))
+                return rv;
+
+            rv = file->AppendNative(nsDependentCString(entry->name));
+            if (NS_FAILED(rv))
+                return rv;
+
+            // make sure the thing exists.  If it does, try the next one.
+            bool exists;
+            rv = file->Exists(&exists);
+            if (NS_FAILED(rv) || !exists) {
+                return HasMoreElements(aResult);
+            }
+
+            mNext = do_QueryInterface(file);
+        }
+        *aResult = mNext != nullptr;
+        if (!*aResult)
+            Close();
+        return NS_OK;
+    }
+
+    NS_IMETHOD GetNext(nsISupports **aResult)
+    {
+        nsresult rv;
+        bool hasMore;
+        rv = HasMoreElements(&hasMore);
+        if (NS_FAILED(rv)) return rv;
+
+        *aResult = mNext;        // might return nullptr
+        NS_IF_ADDREF(*aResult);
+
+        mNext = nullptr;
+        return NS_OK;
+    }
+
+    NS_IMETHOD GetNextFile(nsIFile **aResult)
+    {
+        *aResult = nullptr;
+        bool hasMore = false;
+        nsresult rv = HasMoreElements(&hasMore);
+        if (NS_FAILED(rv) || !hasMore)
+            return rv;
+        *aResult = mNext;
+        NS_IF_ADDREF(*aResult);
+        mNext = nullptr;
+        return NS_OK;
+    }
+
+    NS_IMETHOD Close()
+    {
+        if (mDir) {
+            PRStatus status = PR_CloseDir(mDir);
+            NS_ASSERTION(status == PR_SUCCESS, "close failed");
+            if (status != PR_SUCCESS)
+                return NS_ERROR_FAILURE;
+            mDir = nullptr;
+        }
+        return NS_OK;
+    }
+
+protected:
+    PRDir*             mDir;
+    nsCOMPtr<nsIFile>  mParent;
+    nsCOMPtr<nsIFile>  mNext;
 };
 
 NS_IMPL_ISUPPORTS(nsDirEnumerator, nsISimpleEnumerator, nsIDirectoryEnumerator)
@@ -498,9 +492,6 @@ nsresult TypeEaEnumerator::Init(nsLocalFile * aFile)
 
     // provide a buffer for the results
     mEaBuf = (char*)NS_Alloc(EABUFSIZE);
-    if (!mEaBuf)
-        return NS_ERROR_OUT_OF_MEMORY;
-
     PFEA2LIST   pfea2list = (PFEA2LIST)mEaBuf;
     pfea2list->cbList = EABUFSIZE;
 
@@ -565,20 +556,18 @@ nsLocalFile::nsLocalFile()
 }
 
 nsresult
-nsLocalFile::nsLocalFileConstructor(nsISupports* outer, const nsIID& aIID, void* *aInstancePtr)
+nsLocalFile::nsLocalFileConstructor(nsISupports* aOuter, const nsIID& aIID, void* *aInstancePtr)
 {
-    if (NS_WARN_IF(!aInstancePtr))
+    if (NS_WARN_IF(!aInstancePtr)) {
         return NS_ERROR_INVALID_ARG;
-    if (NS_WARN_IF(outer))
+    }
+    if (NS_WARN_IF(aOuter)) {
         return NS_ERROR_NO_AGGREGATION;
+    }
 
     nsLocalFile* inst = new nsLocalFile();
-    if (inst == NULL)
-        return NS_ERROR_OUT_OF_MEMORY;
-
     nsresult rv = inst->QueryInterface(aIID, aInstancePtr);
-    if (NS_FAILED(rv))
-    {
+    if (NS_FAILED(rv)) {
         delete inst;
         return rv;
     }
@@ -601,9 +590,9 @@ NS_IMPL_ISUPPORTS(nsLocalFile,
 // nsLocalFile <private>
 //-----------------------------------------------------------------------------
 
-nsLocalFile::nsLocalFile(const nsLocalFile& other)
+nsLocalFile::nsLocalFile(const nsLocalFile& aOther)
   : mDirty(true)
-  , mWorkingPath(other.mWorkingPath)
+  , mWorkingPath(aOther.mWorkingPath)
 {
 }
 
@@ -650,14 +639,11 @@ nsLocalFile::Stat()
 //-----------------------------------------------------------------------------
 
 NS_IMETHODIMP
-nsLocalFile::Clone(nsIFile **file)
+nsLocalFile::Clone(nsIFile **aFile)
 {
     // Just copy-construct ourselves
-    *file = new nsLocalFile(*this);
-    if (!*file)
-      return NS_ERROR_OUT_OF_MEMORY;
-
-    NS_ADDREF(*file);
+    RefPtr<nsLocalFile> file = new nsLocalFile(*this);
+    file.forget(aFile);
 
     return NS_OK;
 }
@@ -1224,9 +1210,6 @@ nsLocalFile::SetFileTypes(const nsACString& fileTypes)
     uint32_t size = sizeof(TYPEEA) + lth;
 
     char *pBuf = (char*)NS_Alloc(size);
-    if (!pBuf)
-        return NS_ERROR_OUT_OF_MEMORY;
-
     TYPEEA *pEA = (TYPEEA *)pBuf;
 
     // the buffer has an extra byte due to TYPEEA.data[1]
@@ -1306,9 +1289,6 @@ nsLocalFile::SetFileSource(const nsACString& aURI)
     // this includes an extra character for the spec's trailing null
     uint32_t lth = sizeof(SUBJEA) + aURI.Length();
     char *   pBuf = (char*)NS_Alloc(lth);
-    if (!pBuf)
-        return NS_ERROR_OUT_OF_MEMORY;
-
     SUBJEA *pEA = (SUBJEA *)pBuf;
 
     // the trailing null doesn't get saved, so don't include it in the size
@@ -1642,58 +1622,64 @@ nsLocalFile::MoveToNative(nsIFile *newParentDir, const nsACString &newName)
 }
 
 NS_IMETHODIMP
-nsLocalFile::RenameTo(nsIFile *newParentDir, const nsAString & newNameUnicode)
+nsLocalFile::RenameTo(nsIFile *aNewParentDir, const nsAString & aNewName)
 {
-  nsAutoCString newName;
-  nsresult rv = NS_CopyUnicodeToNative(newNameUnicode, newName);
-  if (NS_FAILED(rv)) {
-      return rv;
-  }
+    nsAutoCString tmp;
+    nsresult rv = NS_CopyUnicodeToNative(aNewName, tmp);
+    if (NS_SUCCEEDED(rv)) {
+        return RenameToNative(aNewParentDir, tmp);
+    }
 
-  nsCOMPtr<nsIFile> targetParentDir = newParentDir;
-  // check to see if this exists, otherwise return an error.
-  // we will check this by resolving.  If the user wants us
-  // to follow links, then we are talking about the target,
-  // hence we can use the |followSymlinks| parameter.
-  rv = Stat();
-  if (NS_FAILED(rv)) {
-      return rv;
-  }
+    return rv;
+}
 
-  if (!targetParentDir) {
-      // no parent was specified.  We must rename.
-      if (newName.IsEmpty()) {
-          return NS_ERROR_INVALID_ARG;
-      }
-      rv = GetParent(getter_AddRefs(targetParentDir));
-      if (NS_FAILED(rv)) {
-          return rv;
-      }
-  }
+NS_IMETHODIMP
+nsLocalFile::RenameToNative(nsIFile* aNewParentDir, const nsACString& aNewName)
+{
+    nsCOMPtr<nsIFile> targetParentDir = aNewParentDir;
+    // check to see if this exists, otherwise return an error.
+    // we will check this by resolving.  If the user wants us
+    // to follow links, then we are talking about the target,
+    // hence we can use the |followSymlinks| parameter.
+    nsresult rv = Stat();
+    if (NS_FAILED(rv)) {
+        return rv;
+    }
 
-  if (!targetParentDir) {
-      return NS_ERROR_FILE_DESTINATION_NOT_DIR;
-  }
+    if (!targetParentDir) {
+        // no parent was specified.  We must rename.
+        if (aNewName.IsEmpty()) {
+            return NS_ERROR_INVALID_ARG;
+        }
+        rv = GetParent(getter_AddRefs(targetParentDir));
+        if (NS_FAILED(rv)) {
+            return rv;
+        }
+    }
 
-  // make sure it exists and is a directory.  Create it if not there.
-  bool exists;
-  targetParentDir->Exists(&exists);
-  if (!exists) {
-      rv = targetParentDir->Create(DIRECTORY_TYPE, 0644);
-      if (NS_FAILED(rv)) {
-          return rv;
-      }
-  } else {
-      bool isDir;
-      targetParentDir->IsDirectory(&isDir);
-      if (!isDir) {
-          return NS_ERROR_FILE_DESTINATION_NOT_DIR;
-      }
-  }
+    if (!targetParentDir) {
+        return NS_ERROR_FILE_DESTINATION_NOT_DIR;
+    }
 
-  uint32_t options = Rename;
-  // Move single file, or move a directory
-  return CopySingleFile(this, targetParentDir, newName, options);
+    // make sure it exists and is a directory.  Create it if not there.
+    bool exists;
+    targetParentDir->Exists(&exists);
+    if (!exists) {
+        rv = targetParentDir->Create(DIRECTORY_TYPE, 0644);
+        if (NS_FAILED(rv)) {
+            return rv;
+        }
+    } else {
+        bool isDir;
+        targetParentDir->IsDirectory(&isDir);
+        if (!isDir) {
+            return NS_ERROR_FILE_DESTINATION_NOT_DIR;
+        }
+    }
+
+    uint32_t options = Rename;
+    // Move single file, or move a directory
+    return CopySingleFile(this, targetParentDir, aNewName, options);
 }
 
 NS_IMETHODIMP
@@ -2361,24 +2347,18 @@ nsLocalFile::SetFollowLinks(bool aFollowLinks)
 }
 
 NS_IMETHODIMP
-nsLocalFile::GetDirectoryEntries(nsISimpleEnumerator * *entries)
+nsLocalFile::GetDirectoryEntries(nsISimpleEnumerator** aEntries)
 {
-    if (NS_WARN_IF(!entries))
-        return NS_ERROR_INVALID_ARG;
     nsresult rv;
-    *entries = nullptr;
 
+    *aEntries = nullptr;
     if (mWorkingPath.EqualsLiteral("\\\\.")) {
-        nsDriveEnumerator *drives = new nsDriveEnumerator;
-        if (!drives)
-            return NS_ERROR_OUT_OF_MEMORY;
-        NS_ADDREF(drives);
+        RefPtr<nsDriveEnumerator> drives = new nsDriveEnumerator;
         rv = drives->Init();
         if (NS_FAILED(rv)) {
-            NS_RELEASE(drives);
             return rv;
         }
-        *entries = drives;
+        drives.forget(aEntries);
         return NS_OK;
     }
 
@@ -2389,18 +2369,14 @@ nsLocalFile::GetDirectoryEntries(nsISimpleEnumerator * *entries)
     if (!isDir)
         return NS_ERROR_FILE_NOT_DIRECTORY;
 
-    nsDirEnumerator* dirEnum = new nsDirEnumerator();
-    if (dirEnum == nullptr)
-        return NS_ERROR_OUT_OF_MEMORY;
-    NS_ADDREF(dirEnum);
+    RefPtr<nsDirEnumerator> dirEnum = new nsDirEnumerator();
     rv = dirEnum->Init(this);
-    if (NS_FAILED(rv))
-    {
-        NS_RELEASE(dirEnum);
+    if (NS_FAILED(rv)) {
         return rv;
     }
 
-    *entries = dirEnum;
+    dirEnum.forget(aEntries);
+
     return NS_OK;
 }
 
@@ -2461,22 +2437,18 @@ nsLocalFile::Launch()
 }
 
 nsresult
-NS_NewNativeLocalFile(const nsACString &path, bool followLinks, nsIFile* *result)
+NS_NewNativeLocalFile(const nsACString &aPath, bool aFollowLinks, nsIFile** aResult)
 {
-    nsLocalFile* file = new nsLocalFile();
-    if (file == nullptr)
-        return NS_ERROR_OUT_OF_MEMORY;
-    NS_ADDREF(file);
+    RefPtr<nsLocalFile> file = new nsLocalFile();
 
-    if (!path.IsEmpty()) {
-        nsresult rv = file->InitWithNativePath(path);
+    if (!aPath.IsEmpty()) {
+        nsresult rv = file->InitWithNativePath(aPath);
         if (NS_FAILED(rv)) {
-            NS_RELEASE(file);
             return rv;
         }
     }
 
-    *result = file;
+    file.forget(aResult);
     return NS_OK;
 }
 
@@ -2632,15 +2604,15 @@ nsLocalFile::GetHashCode(uint32_t *aResult)
 }
 
 nsresult
-NS_NewLocalFile(const nsAString &path, bool followLinks, nsIFile* *result)
+NS_NewLocalFile(const nsAString &aPath, bool aFollowLinks, nsIFile** aResult)
 {
     nsAutoCString buf;
-    nsresult rv = NS_CopyUnicodeToNative(path, buf);
+    nsresult rv = NS_CopyUnicodeToNative(aPath, buf);
     if (NS_FAILED(rv)) {
-        *result = nullptr;
+        *aResult = nullptr;
         return rv;
     }
-    return NS_NewNativeLocalFile(buf, followLinks, result);
+    return NS_NewNativeLocalFile(buf, aFollowLinks, aResult);
 }
 
 //-----------------------------------------------------------------------------

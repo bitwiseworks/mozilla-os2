@@ -56,7 +56,7 @@ typedef unsigned long   ulong;
 
 #include "soundtouch_config.h"
 
-#if defined(WIN32)
+#if defined(WIN32) || defined(__OS2__)
 #define EXPORT __declspec(dllexport)
 #else
 #define EXPORT

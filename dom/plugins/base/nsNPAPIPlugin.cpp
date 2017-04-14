@@ -2804,8 +2804,8 @@ NPN_urlredirectresponse(NPP instance, void* notifyData, NPBool allow)
   inst->URLRedirectResponse(notifyData, allow);
 }
 
-NPError
-_initasyncsurface(NPP instance, NPSize *size, NPImageFormat format, void *initData, NPAsyncSurface *surface)
+NPError NP_CALLBACK
+NPN_initasyncsurface(NPP instance, NPSize *size, NPImageFormat format, void *initData, NPAsyncSurface *surface)
 {
   nsNPAPIPluginInstance *inst = (nsNPAPIPluginInstance *)instance->ndata;
   if (!inst) {
@@ -2815,8 +2815,8 @@ _initasyncsurface(NPP instance, NPSize *size, NPImageFormat format, void *initDa
   return inst->InitAsyncSurface(size, format, initData, surface);
 }
 
-NPError
-_finalizeasyncsurface(NPP instance, NPAsyncSurface *surface)
+NPError NP_CALLBACK
+NPN_finalizeasyncsurface(NPP instance, NPAsyncSurface *surface)
 {
   nsNPAPIPluginInstance *inst = (nsNPAPIPluginInstance *)instance->ndata;
   if (!inst) {
@@ -2826,8 +2826,8 @@ _finalizeasyncsurface(NPP instance, NPAsyncSurface *surface)
   return inst->FinalizeAsyncSurface(surface);
 }
 
-void
-_setcurrentasyncsurface(NPP instance, NPAsyncSurface *surface, NPRect *changed)
+void NP_CALLBACK
+NPN_setcurrentasyncsurface(NPP instance, NPAsyncSurface *surface, NPRect *changed)
 {
   nsNPAPIPluginInstance *inst = (nsNPAPIPluginInstance *)instance->ndata;
   if (!inst) {
