@@ -13,7 +13,9 @@ DEFFILE = $(DEPTH)/db/sqlite3/src/sqlite-processed.def
 else
 ifndef MOZ_FOLD_LIBS
 ifeq ($(OS_ARCH),OS2)
-ADD_TO_DEF_FILE = $(call py_action,preprocessor,$(DEFINES) $(ACDEFINES) $(XULPPFLAGS) \
+# We have to preprocess our def file because we need different symbols in debug
+# builds exposed that are not built in non-debug builds.
+ADD_TO_DEF_FILE = $(call py_action,preprocessor,$(DEFINES) $(ACDEFINES) $(MOZ_DEBUG_DEFINES) \
        $(topsrcdir)/db/sqlite3/src/sqlite.def) | sed -e '1,/^EXPORTS$$/ d' -e 's,sqlite3,_\0,' \
        -e 's,\ DATA.*$$,,' >> $(DEF_FILE)
 else
