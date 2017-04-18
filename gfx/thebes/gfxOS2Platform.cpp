@@ -15,29 +15,41 @@
 #include "nsTArray.h"
 #include "nsServiceManagerUtils.h"
 
+#include "gfxFcPlatformFontList.h"
 #include "gfxFontconfigUtils.h"
 #include "gfxFontconfigFonts.h"
 #include "gfx2DGlue.h"
 #include "gfxUserFontSet.h"
+#include "gfxPrefs.h"
 
-/**********************************************************************
- * class gfxOS2Platform
- **********************************************************************/
+#include "mozilla/Preferences.h"
+
+#define GFX_PREF_MAX_GENERIC_SUBSTITUTIONS "gfx.font_rendering.fontconfig.max_generic_substitutions"
+
+using namespace mozilla;
+
 gfxFontconfigUtils *gfxOS2Platform::sFontconfigUtils = nullptr;
+
+bool gfxOS2Platform::sUseFcFontList = false;
 
 gfxOS2Platform::gfxOS2Platform()
 {
     cairo_os2_init();
 
-    if (!sFontconfigUtils) {
+    sUseFcFontList = mozilla::Preferences::GetBool("gfx.font_rendering.fontconfig.fontlist.enabled");
+    if (!sUseFcFontList && !sFontconfigUtils) {
         sFontconfigUtils = gfxFontconfigUtils::GetFontconfigUtils();
     }
+
+    mMaxGenericSubstitutions = UNINITIALIZED_VALUE;
 }
 
 gfxOS2Platform::~gfxOS2Platform()
 {
-    gfxFontconfigUtils::Shutdown();
-    sFontconfigUtils = nullptr;
+    if (!sUseFcFontList) {
+        gfxFontconfigUtils::Shutdown();
+        sFontconfigUtils = nullptr;
+    }
 
     // Clean up cairo_os2 sruff.
     cairo_os2_surface_enable_dive(false, false);
@@ -81,18 +93,48 @@ gfxOS2Platform::GetFontList(nsIAtom *aLangGroup,
            langgroup, family);
     free(family);
 #endif
-    return sFontconfigUtils->GetFontList(aLangGroup, aGenericFamily,
+    if (sUseFcFontList) {
+        gfxPlatformFontList::PlatformFontList()->GetFontList(aLangGroup,
+                                                             aGenericFamily,
+                                                             aListOfFonts);
+        return NS_OK;
+    }
+
+    return sFontconfigUtils->GetFontList(aLangGroup,
+                                         aGenericFamily,
                                          aListOfFonts);
 }
 
 nsresult gfxOS2Platform::UpdateFontList()
 {
+    if (sUseFcFontList) {
+        gfxPlatformFontList::PlatformFontList()->UpdateFontList();
+        return NS_OK;
+    }
+
     return sFontconfigUtils->UpdateFontList();
+}
+
+gfxPlatformFontList*
+gfxOS2Platform::CreatePlatformFontList()
+{
+    gfxPlatformFontList* list = new gfxFcPlatformFontList();
+    if (NS_SUCCEEDED(list->InitFontList())) {
+        return list;
+    }
+    gfxPlatformFontList::Shutdown();
+    return nullptr;
 }
 
 nsresult
 gfxOS2Platform::GetStandardFamilyName(const nsAString& aFontName, nsAString& aFamilyName)
 {
+    if (sUseFcFontList) {
+        gfxPlatformFontList::PlatformFontList()->
+            GetStandardFamilyName(aFontName, aFamilyName);
+        return NS_OK;
+    }
+
     return sFontconfigUtils->GetStandardFamilyName(aFontName, aFamilyName);
 }
 
@@ -103,6 +145,11 @@ gfxOS2Platform::CreateFontGroup(const mozilla::FontFamilyList& aFontFamilyList,
                                 gfxUserFontSet* aUserFontSet,
                                 gfxFloat aDevToCssSize)
 {
+    if (sUseFcFontList) {
+        return new gfxFontGroup(aFontFamilyList, aStyle, aTextPerf,
+                                aUserFontSet, aDevToCssSize);
+    }
+
     return new gfxPangoFontGroup(aFontFamilyList, aStyle,
                                  aUserFontSet, aDevToCssSize);
 }
@@ -113,6 +160,12 @@ gfxOS2Platform::LookupLocalFont(const nsAString& aFontName,
                                 int16_t aStretch,
                                 uint8_t aStyle)
 {
+    if (sUseFcFontList) {
+        gfxPlatformFontList* pfl = gfxPlatformFontList::PlatformFontList();
+        return pfl->LookupLocalFont(aFontName, aWeight, aStretch,
+                                    aStyle);
+    }
+
     return gfxPangoFontGroup::NewFontEntry(aFontName, aWeight,
                                            aStretch, aStyle);
 }
@@ -125,6 +178,12 @@ gfxOS2Platform::MakePlatformFont(const nsAString& aFontName,
                                  const uint8_t* aFontData,
                                  uint32_t aLength)
 {
+    if (sUseFcFontList) {
+        gfxPlatformFontList* pfl = gfxPlatformFontList::PlatformFontList();
+        return pfl->MakePlatformFont(aFontName, aWeight, aStretch,
+                                     aStyle, aFontData, aLength);
+    }
+
     // passing ownership of the font data to the new font entry
     return gfxPangoFontGroup::NewFontEntry(aFontName, aWeight,
                                            aStretch, aStyle,
@@ -153,4 +212,33 @@ gfxOS2Platform::IsFontFormatSupported(nsIURI *aFontURI, uint32_t aFormatFlags)
 
     // no format hint set, need to look at data
     return true;
+}
+
+void gfxOS2Platform::FontsPrefsChanged(const char *aPref)
+{
+    // only checking for generic substitions, pass other changes up
+    if (strcmp(GFX_PREF_MAX_GENERIC_SUBSTITUTIONS, aPref)) {
+        gfxPlatform::FontsPrefsChanged(aPref);
+        return;
+    }
+
+    mMaxGenericSubstitutions = UNINITIALIZED_VALUE;
+    if (sUseFcFontList) {
+        gfxFcPlatformFontList* pfl = gfxFcPlatformFontList::PlatformFontList();
+        pfl->ClearGenericMappings();
+        FlushFontAndWordCaches();
+    }
+}
+
+uint32_t gfxOS2Platform::MaxGenericSubstitions()
+{
+    if (mMaxGenericSubstitutions == UNINITIALIZED_VALUE) {
+        mMaxGenericSubstitutions =
+            Preferences::GetInt(GFX_PREF_MAX_GENERIC_SUBSTITUTIONS, 3);
+        if (mMaxGenericSubstitutions < 0) {
+            mMaxGenericSubstitutions = 3;
+        }
+    }
+
+    return uint32_t(mMaxGenericSubstitutions);
 }

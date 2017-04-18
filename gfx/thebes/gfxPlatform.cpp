@@ -568,6 +568,8 @@ gfxPlatform::Init()
     bool usePlatformFontList = true;
 #if defined(MOZ_WIDGET_GTK)
     usePlatformFontList = gfxPlatformGtk::UseFcFontList();
+#elif defined(XP_OS2)
+    usePlatformFontList = gfxOS2Platform::UseFcFontList();
 #elif defined(MOZ_WIDGET_QT)
     usePlatformFontList = false;
 #endif

@@ -27,9 +27,11 @@
 
 #include <fontconfig/fcfreetype.h>
 
-#ifdef MOZ_WIDGET_GTK
+#if defined(MOZ_WIDGET_GTK)
 #include <gdk/gdk.h>
 #include "gfxPlatformGtk.h"
+#elif defined(XP_OS2)
+#include "gfxOS2Platform.h"
 #endif
 
 using namespace mozilla;
@@ -1656,7 +1658,13 @@ gfxFcPlatformFontList::FindGenericFamilies(const nsAString& aGeneric,
 
     // -- select the fonts to be used for the generic
     prefFonts = new PrefFontList; // can be empty but in practice won't happen
+#if defined(MOZ_WIDGET_GTK)
     uint32_t limit = gfxPlatformGtk::GetPlatform()->MaxGenericSubstitions();
+#elif defined(XP_OS2)
+    uint32_t limit = gfxOS2Platform::GetPlatform()->MaxGenericSubstitions();
+#else
+    #error "Usage of gfxFcPlatformFontList is not supported on this platform"
+#endif
     bool foundFontWithLang = false;
     for (int i = 0; i < faces->nfont; i++) {
         FcPattern* font = faces->fonts[i];

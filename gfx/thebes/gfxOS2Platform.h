@@ -26,17 +26,23 @@ public:
       CreateOffscreenSurface(const IntSize& aSize,
                              gfxImageFormat aFormat) override;
 
-    nsresult GetFontList(nsIAtom *aLangGroup,
-                         const nsACString& aGenericFamily,
-                         nsTArray<nsString>& aListOfFonts);
-    nsresult UpdateFontList();
-    nsresult GetStandardFamilyName(const nsAString& aFontName, nsAString& aFamilyName);
+    virtual nsresult GetFontList(nsIAtom *aLangGroup,
+                                 const nsACString& aGenericFamily,
+                                 nsTArray<nsString>& aListOfFonts) override;
 
-    gfxFontGroup *CreateFontGroup(const mozilla::FontFamilyList& aFontFamilyList,
-                                  const gfxFontStyle* aStyle,
-                                  gfxTextPerfMetrics* aTextPerf,
-                                  gfxUserFontSet* aUserFontSet,
-                                  gfxFloat aDevToCssSize) override;
+    virtual nsresult UpdateFontList() override;
+
+    virtual gfxPlatformFontList* CreatePlatformFontList() override;
+
+    virtual nsresult GetStandardFamilyName(const nsAString& aFontName,
+                                           nsAString& aFamilyName) override;
+
+    gfxFontGroup*
+    CreateFontGroup(const mozilla::FontFamilyList& aFontFamilyList,
+                    const gfxFontStyle* aStyle,
+                    gfxTextPerfMetrics* aTextPerf,
+                    gfxUserFontSet* aUserFontSet,
+                    gfxFloat aDevToCssSize) override;
 
     /**
      * Look up a local platform font using the full font face name (needed to
@@ -65,8 +71,24 @@ public:
     virtual bool IsFontFormatSupported(nsIURI *aFontURI,
                                        uint32_t aFormatFlags) override;
 
+
+    static bool UseFcFontList() { return sUseFcFontList; }
+
+    void FontsPrefsChanged(const char *aPref) override;
+
+    // maximum number of fonts to substitute for a generic
+    uint32_t MaxGenericSubstitions();
+
 protected:
     static gfxFontconfigUtils *sFontconfigUtils;
+
+    int8_t mMaxGenericSubstitutions;
+
+private:
+
+    // xxx - this will be removed once the new fontconfig platform font list
+    // replaces gfxPangoFontGroup
+    static bool sUseFcFontList;
 };
 
 #endif /* GFX_OS2_PLATFORM_H */

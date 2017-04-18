@@ -3789,6 +3789,15 @@ pref("ui.panel.default_level_parent", false);
 
 pref("mousewheel.system_scroll_override_on_root_content.enabled", false);
 
+# enable new platform fontlist for OS/2 (as for linux on GTK platforms)
+# temporary pref to allow flipping back to the existing
+# gfxPangoFontGroup/gfxFontconfigUtils code for handling system fonts
+
+pref("gfx.font_rendering.fontconfig.fontlist.enabled", true);
+
+// maximum number of fonts to substitute for a generic
+pref("gfx.font_rendering.fontconfig.max_generic_substitutions", 3);
+
 # OS2
 #endif
 
