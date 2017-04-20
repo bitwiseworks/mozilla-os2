@@ -865,6 +865,21 @@ nsLocalFile::Normalize()
     if (mWorkingPath.IsEmpty())
         return NS_OK;
 
+#ifdef __KLIBC__
+    // Resolve kLIBC symlinks just like Unix does
+    {
+        char *real_path = (char *)alloca(PATH_MAX);
+        if (realpath(mWorkingPath.get(), real_path))
+        {
+            for (char *p = real_path; *p; ++p)
+                if (*p == '/')
+                    *p = '\\';
+            mWorkingPath = real_path;
+            MakeDirty();
+        }
+    }
+#endif
+
     // work in unicode for ease
     nsAutoString path;
     NS_CopyNativeToUnicode(mWorkingPath, path);
