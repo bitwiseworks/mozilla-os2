@@ -48,7 +48,7 @@
 #include "nsTHashtable.h"
 #include "nsGkAtoms.h"
 #include "wdgtos2rc.h"
-#include <ddi.h>
+
 #include "nsIDOMWheelEvent.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/DataSurfaceHelpers.h"
@@ -58,12 +58,19 @@
 #include "mozilla/TextEvents.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Likely.h"
+
+#include "mozilla/layers/CompositorParent.h"
+#include "ClientLayerManager.h"
+
+#include <ddi.h>
 #include <os2im.h>
 #include <algorithm>    // std::max
+
 using namespace mozilla;
 using namespace mozilla::gfx;
 using namespace mozilla::layers;
 using namespace mozilla::widget;
+
 //=============================================================================
 //  Macros
 //=============================================================================
@@ -2250,129 +2257,147 @@ bool nsWindow::OnPaint()
   }
 #endif
 
-// Use a dummy do..while(0) loop to facilitate error handling & early-outs.
-do {
+  // Use a dummy do..while(0) loop to facilitate error handling & early-outs.
+  do {
 
-  // Get the current drag status.  If we're in a Moz-originated drag,
-  // it will return a special drag HPS to pass to WinBeginPaint().
-  // Oherwise, get a cached micro PS.
-  CheckDragStatus(ACTION_PAINT, &hpsDrag);
-  hPS = hpsDrag ? hpsDrag : WinGetPS(mWnd);
+    // Get the current drag status.  If we're in a Moz-originated drag,
+    // it will return a special drag HPS to pass to WinBeginPaint().
+    // Oherwise, get a cached micro PS.
+    CheckDragStatus(ACTION_PAINT, &hpsDrag);
+    hPS = hpsDrag ? hpsDrag : WinGetPS(mWnd);
 
-  // If we can't get an HPS, validate the window so we don't
-  // keep getting the same WM_PAINT msg over & over again.
-  RECTL  rcl = { 0 };
-  if (!hPS) {
-    WinQueryWindowRect(mWnd, &rcl);
-    WinValidateRect(mWnd, &rcl, FALSE);
-    break;
-  }
+    // If we can't get an HPS, validate the window so we don't
+    // keep getting the same WM_PAINT msg over & over again.
+    RECTL  rcl = { 0 };
+    if (!hPS) {
+      WinQueryWindowRect(mWnd, &rcl);
+      WinValidateRect(mWnd, &rcl, FALSE);
+      break;
+    }
 
-  // Get the update region before WinBeginPaint() resets it.
-  hrgn = GpiCreateRegion(hPS, 0, 0);
-  WinQueryUpdateRegion(mWnd, hrgn);
-  WinBeginPaint(mWnd, hPS, &rcl);
+    // Get the update region before WinBeginPaint() resets it.
+    hrgn = GpiCreateRegion(hPS, 0, 0);
+    WinQueryUpdateRegion(mWnd, hrgn);
+    WinBeginPaint(mWnd, hPS, &rcl);
 
-  // Exit if the update rect is empty.
-  if (WinIsRectEmpty(0, &rcl)) {
-    break;
-  }
+    // Exit if the update rect is empty.
+    if (WinIsRectEmpty(0, &rcl)) {
+      break;
+    }
 
-  // Exit if a thebes surface can not/should not be created,
-  // but first fill the area with the default background color
-  // to erase any visual artifacts.
-  if (!ConfirmThebesSurface()) {
-    WinDrawBorder(hPS, &rcl, 0, 0, 0, 0, DB_INTERIOR | DB_AREAATTRS);
-    break;
-  }
+    // Exit if a thebes surface can not/should not be created,
+    // but first fill the area with the default background color
+    // to erase any visual artifacts.
+    if (!ConfirmThebesSurface()) {
+      WinDrawBorder(hPS, &rcl, 0, 0, 0, 0, DB_INTERIOR | DB_AREAATTRS);
+      break;
+    }
 
-  // Even if there is no callback to update the content (unlikely)
-  // we still want to update the screen with whatever's available.
-  if (!mWidgetListener) {
-    mThebesSurface->Refresh(&rcl, 1, hPS);
-    break;
-  }
+    // Even if there is no callback to update the content (unlikely)
+    // we still want to update the screen with whatever's available.
+    if (!mWidgetListener) {
+      mThebesSurface->Refresh(&rcl, 1, hPS);
+      break;
+    }
 
-  // Create a Thebes context.
-  LayoutDeviceIntRegion region;
-//  RefPtr<gfxContext> thebesContext = new gfxContext(mThebesSurface);
-  RefPtr<gfxContext> thebesContext;
+    LayoutDeviceIntRegion region;
 
-  NS_ASSERTION(gfxPlatform::GetPlatform()->SupportsAzureContentForType(BackendType::CAIRO),
-               "OS/2 only supports Cairo backend");
-  IntSize intSize(mThebesSurface->GetSize().width, mThebesSurface->GetSize().height);
-  RefPtr<DrawTarget> dt = gfxPlatform::GetPlatform()->
-                          CreateDrawTargetForSurface(mThebesSurface, intSize);
-  thebesContext = new gfxContext(dt);
-  if (MOZ_UNLIKELY(!thebesContext->GetDrawTarget()))
-      NS_RUNTIMEABORT("Thebes layers require a DrawTarget context");
+    // Decide whether to display the entire update rectangle or
+    // just the individual rects that comprise the update region.
+    // Display the entire area if any of these are true:
+    // - the region has a single rect (the most common situation);
+    // - the region has more than 10 rects (very uncommon);
+    // - the region rects cover 80% or more of the update rect (common).
 
-  // Decide whether to display the entire update rectangle or
-  // just the individual rects that comprise the update region.
-  // Display the entire area if any of these are true:
-  // - the region has a single rect (the most common situation);
-  // - the region has more than 10 rects (very uncommon);
-  // - the region rects cover 80% or more of the update rect (common).
+    enum { MAX_CLIPRECTS = 10 };
+    bool    useRegion = false;
+    uint32_t  ndx;
+    RECTL*    pr;
+    RECTL     arect[MAX_CLIPRECTS];
+    RGNRECT   rgnrect = { 1, 1024, 0, RECTDIR_LFRT_TOPBOT };
 
-  #define MAX_CLIPRECTS 10
-  bool    useRegion = false;
-  uint32_t  ndx;
-  RECTL*    pr;
-  RECTL     arect[MAX_CLIPRECTS];
-  RGNRECT   rgnrect = { 1, 1024, 0, RECTDIR_LFRT_TOPBOT };
+    if (GpiQueryRegionRects(hPS, hrgn, 0, &rgnrect, 0) &&
+        rgnrect.crcReturned > 1 && rgnrect.crcReturned <= MAX_CLIPRECTS) {
+      rgnrect.crc = MAX_CLIPRECTS;
+      GpiQueryRegionRects(hPS, hrgn, 0, &rgnrect, arect);
 
-  if (GpiQueryRegionRects(hPS, hrgn, 0, &rgnrect, 0) &&
-      rgnrect.crcReturned > 1 && rgnrect.crcReturned <= MAX_CLIPRECTS) {
-    rgnrect.crc = MAX_CLIPRECTS;
-    GpiQueryRegionRects(hPS, hrgn, 0, &rgnrect, arect);
-
-    useRegion = true;
-    int32_t rgnArea = 0;
-    int32_t rclArea = (rcl.xRight - rcl.xLeft) * (rcl.yTop - rcl.yBottom) * 4 / 5;
-    for (ndx = rgnrect.crcReturned, pr = arect; ndx; ndx--, pr++) {
-      rgnArea += (pr->xRight - pr->xLeft) * (pr->yTop - pr->yBottom);
-      if (rgnArea >= rclArea) {
-        useRegion = false;
-        break;
+      useRegion = true;
+      int32_t rgnArea = 0;
+      int32_t rclArea = (rcl.xRight - rcl.xLeft) * (rcl.yTop - rcl.yBottom) * 4 / 5;
+      for (ndx = rgnrect.crcReturned, pr = arect; ndx; ndx--, pr++) {
+        rgnArea += (pr->xRight - pr->xLeft) * (pr->yTop - pr->yBottom);
+        if (rgnArea >= rclArea) {
+          useRegion = false;
+          break;
+        }
       }
     }
-  }
 
-  if (!useRegion) {
-    arect[0] = rcl;
-    rgnrect.crcReturned = 1;
-  }
+    if (!useRegion) {
+      arect[0] = rcl;
+      rgnrect.crcReturned = 1;
+    }
 
-  // Establish a clipping region for Thebes.
-  thebesContext->NewPath();
-  for (ndx = rgnrect.crcReturned, pr = arect; ndx; ndx--, pr++) {
-    region.Or(region,
-              LayoutDeviceIntRect(pr->xLeft, mBounds.height - pr->yTop,
-                                  pr->xRight - pr->xLeft, pr->yTop - pr->yBottom));
+    // Establish a clipping region for Thebes.
+    for (ndx = rgnrect.crcReturned, pr = arect; ndx; ndx--, pr++) {
+      region.Or(region,
+                LayoutDeviceIntRect(pr->xLeft, mBounds.height - pr->yTop,
+                                    pr->xRight - pr->xLeft, pr->yTop - pr->yBottom));
 
-    thebesContext->Rectangle(gfxRect(pr->xLeft,
-                                     mBounds.height - pr->yTop,
-                                     pr->xRight - pr->xLeft,
-                                     pr->yTop - pr->yBottom));
-  }
-  thebesContext->Clip();
+    }
 
-  if (!region.IsEmpty()) {
-#ifdef DEBUG_PAINT
-    debug_DumpPaintEvent(stdout, this, region, nsAutoCString("noname"),
-                         (int32_t)mWnd);
-#endif
+    ClientLayerManager *clientLayerManager =
+        (GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_CLIENT)
+        ? static_cast<ClientLayerManager*>(GetLayerManager())
+        : nullptr;
 
-    // Init the Layers manager then dispatch the event.
-    // If it returns false there's nothing to paint, so exit.
-    AutoLayerManagerSetup
-        setupLayerManager(this, thebesContext, BufferMode::BUFFER_NONE);
-    result = mWidgetListener->PaintWindow(this, region);
+    if (clientLayerManager && mCompositorParent) {
+      // We need to paint to the screen even if nothing changed, since if we
+      // don't have a compositing window manager, our pixels could be stale.
+      clientLayerManager->SetNeedsComposite(true);
+      clientLayerManager->SendInvalidRegion(region.ToUnknownRegion());
+    }
 
-    // Have Thebes display the rectangle(s).
-    mThebesSurface->Refresh(arect, rgnrect.crcReturned, hPS);
-  }
-} while (0);
+    RefPtr<nsWindow> strongThis(this);
+
+    if (!region.IsEmpty()) {
+  #ifdef DEBUG_PAINT
+      debug_DumpPaintEvent(stdout, this, region, nsAutoCString("noname"),
+                           (int32_t)mWnd);
+  #endif
+
+      switch (GetLayerManager()->GetBackendType()) {
+        case LayersBackend::LAYERS_BASIC:
+          {
+            // Create a Thebes context.
+            NS_ASSERTION(gfxPlatform::GetPlatform()->SupportsAzureContentForType(BackendType::CAIRO),
+                         "OS/2 only supports Cairo backend");
+            IntSize intSize(mThebesSurface->GetSize().width, mThebesSurface->GetSize().height);
+            RefPtr<DrawTarget> dt = gfxPlatform::GetPlatform()->
+                CreateDrawTargetForSurface(mThebesSurface, intSize);
+
+            RefPtr<gfxContext> thebesContext = new gfxContext(dt);
+            if (MOZ_UNLIKELY(!thebesContext->GetDrawTarget()))
+              NS_RUNTIMEABORT("Thebes layers require a DrawTarget context");
+
+            // Init the Layers manager then dispatch the event.
+            // If it returns false there's nothing to paint, so exit.
+            AutoLayerManagerSetup
+                setupLayerManager(this, thebesContext, BufferMode::BUFFER_NONE);
+            result = mWidgetListener->PaintWindow(this, region);
+
+            // Have Thebes display the rectangle(s).
+            mThebesSurface->Refresh(arect, rgnrect.crcReturned, hPS);
+          }
+        case LayersBackend::LAYERS_CLIENT:
+          result = mWidgetListener->PaintWindow(this, region);
+          break;
+        default:
+          NS_ERROR("Unknown layers backend used!");
+          break;
+      }
+    }
+  } while (0);
 
   // Cleanup.
   if (hPS) {
