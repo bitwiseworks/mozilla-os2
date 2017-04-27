@@ -4559,6 +4559,11 @@ pref("layers.d3d11.force-warp", false);
 pref("layers.d3d11.disable-warp", false);
 #endif
 
+#ifdef XP_OS2
+// Disabled for now, see #200
+pref("layers.offmainthreadcomposition.enabled", false);
+#endif
+
 // Force all possible layers to be always active layers
 pref("layers.force-active", false);
 
