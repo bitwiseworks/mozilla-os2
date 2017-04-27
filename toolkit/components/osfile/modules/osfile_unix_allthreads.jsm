@@ -43,7 +43,7 @@ var libc;
 var libc_func;
 if (SharedAll.Constants.OS2) {
   libc = new SharedAll.Library("libc",
-                               "libc065.dll", "libc064.dll");
+                               "libc066.dll", "libc065.dll", "libc064.dll");
   libc_func = function libc_func(name) {
     return "_std_" + name;
   };

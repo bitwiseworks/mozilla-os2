@@ -2792,7 +2792,7 @@ function run_load_system_library()
   if (OS == "WINNT") {
     syslib = ctypes.open("user32.dll");
   } else if (OS == "OS2") {
-    syslib = ctypes.open("libc065.dll");
+    syslib = ctypes.open("libc066.dll");
   } else if (OS == "Darwin") {
     syslib = ctypes.open("libm.dylib");
   } else if (OS == "Linux" || OS == "Android" || OS.match(/BSD$/)) {
