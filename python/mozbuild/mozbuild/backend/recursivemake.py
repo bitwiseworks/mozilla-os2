@@ -1306,7 +1306,12 @@ INSTALL_TARGETS += %(prefix)s
             for f in files:
                 if not isinstance(f, ObjDirPath):
                     dest = mozpath.join(reltarget, path, mozpath.basename(f))
-                    install_manifest.add_symlink(f.full_path, dest)
+                    # Copy everything to dist/bin instead of symlinking to
+                    # avoid symlinks in new profiles from dist/bin runs
+                    if target.startswith('dist/bin'):
+                        install_manifest.add_copy(f.full_path, dest)
+                    else:
+                        install_manifest.add_symlink(f.full_path, dest)
                 else:
                     backend_file.write('%s_FILES += %s\n' % (
                         target_var, self._pretty_path(f, backend_file)))
