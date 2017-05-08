@@ -218,25 +218,10 @@ endif # !GNU_CC
 
 endif # WINNT
 
-DEBUG_SYMFILE =
-DEBUG_SYMFILE_GEN =
-
 ifeq ($(OS_ARCH),OS2)
 ifdef SHARED_LIBRARY
 # Use CURDIR to avid clashes with .def files found in sources via VPATH
 DEF_FILE := $(CURDIR)/$(SHARED_LIBRARY:.dll=.def)
-endif
-ifndef MOZ_DEBUG
-ifdef MOZ_DEBUG_SYMBOLS
-ifneq ($(filter WLINK wlink,$(EMXOMFLD_TYPE)),)
-DEBUG_SYMFILE = $(basename $(1)).dbg
-OS_LDFLAGS += -Zlinker 'option symfile=$(basename $(@)).dbg'
-endif
-endif
-ifndef DEBUG_SYMFILE
-DEBUG_SYMFILE = $(basename $(1)).xqs
-DEBUG_SYMFILE_GEN = mapxqs $(basename $(1)).map -o $(basename $(1)).xqs
-endif
 endif
 endif # OS2
 
@@ -324,7 +309,7 @@ ifeq ($(OS_ARCH),OS2)
 ALL_TRASH += \
 	$(foreach f, \
 		$(PROGRAM) $(SIMPLE_PROGRAMS) $(SHARED_LIBRARY) $(HOST_PROGRAM) $(HOST_SIMPLE_PROGRAMS), \
-		$(basename $f).map $(call DEBUG_SYMFILE,$f))
+		$(basename $f).map
 endif
 
 ifdef QTDIR
@@ -728,13 +713,6 @@ endif
 ifdef MOZ_POST_PROGRAM_COMMAND
 	$(MOZ_POST_PROGRAM_COMMAND) $@
 endif
-ifdef DEBUG_SYMFILE_GEN
-	$(call DEBUG_SYMFILE_GEN,$@)
-endif
-
-ifdef DEBUG_SYMFILE
-$(call DEBUG_SYMFILE,$(PROGRAM)): $(PROGRAM)
-endif
 
 $(HOST_PROGRAM): $(HOST_PROGOBJS) $(HOST_LIBS) $(HOST_EXTRA_DEPS) $(GLOBAL_DEPS)
 	$(REPORT_BUILD)
@@ -793,13 +771,6 @@ ifdef ENABLE_STRIP
 endif
 ifdef MOZ_POST_PROGRAM_COMMAND
 	$(MOZ_POST_PROGRAM_COMMAND) $@
-endif
-ifdef DEBUG_SYMFILE_GEN
-	$(call DEBUG_SYMFILE_GEN,$@)
-endif
-
-ifdef DEBUG_SYMFILE
-$(foreach f,$(SIMPLE_PROGRAMS),$(call DEBUG_SYMFILE,$f): $f)
 endif
 
 $(HOST_SIMPLE_PROGRAMS): host_%$(HOST_BIN_SUFFIX): host_%.$(OBJ_SUFFIX) $(HOST_LIBS) $(HOST_EXTRA_DEPS) $(GLOBAL_DEPS)
@@ -918,13 +889,6 @@ endif
 endif
 ifdef MOZ_POST_DSO_LIB_COMMAND
 	$(MOZ_POST_DSO_LIB_COMMAND) $@
-endif
-ifdef DEBUG_SYMFILE_GEN
-	$(call DEBUG_SYMFILE_GEN,$@)
-endif
-
-ifdef DEBUG_SYMFILE
-$(call DEBUG_SYMFILE,$(SHARED_LIBRARY)): $(SHARED_LIBRARY)
 endif
 
 ifeq ($(SOLARIS_SUNPRO_CC),1)

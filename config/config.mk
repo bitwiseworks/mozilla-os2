@@ -162,7 +162,6 @@ _DEBUG_LDFLAGS :=
 
 _DEBUG_CFLAGS += $(MOZ_DEBUG_DEFINES)
 
-ifneq ($(OS_ARCH),OS2)
 ifneq (,$(MOZ_DEBUG)$(MOZ_DEBUG_SYMBOLS))
   ifeq ($(AS),yasm)
     ifeq ($(OS_ARCH)_$(GNU_CC),WINNT_)
@@ -181,23 +180,6 @@ ifneq (,$(MOZ_DEBUG)$(MOZ_DEBUG_SYMBOLS))
   endif
   _DEBUG_CFLAGS += $(MOZ_DEBUG_FLAGS)
   _DEBUG_LDFLAGS += $(MOZ_DEBUG_LDFLAGS)
-endif
-else
-  # Distinguish between debug and debug-symbols to be able
-  # to e.g have debug-symbols in release builds etc.
-  ifneq (,$(MOZ_DEBUG))
-    _DEBUG_CFLAGS += $(MOZ_DEBUG_FLAGS)
-    _DEBUG_LDFLAGS += $(MOZ_DEBUG_LDFLAGS)
-  endif
-  ifneq (,$(MOZ_DEBUG_SYMBOLS))
-    _DEBUG_ASFLAGS += -g
-    _DEBUG_CFLAGS += -g
-    _DEBUG_LDFLAGS += -g
-  else
-    _DEBUG_ASFLAGS += -s
-    _DEBUG_CFLAGS += -s
-    _DEBUG_LDFLAGS += -s
-  endif
 endif
 
 ifeq ($(YASM),$(AS))

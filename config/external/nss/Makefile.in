@@ -332,31 +332,8 @@ NSS_DIRS += nss/lib/zlib
 endif
 endif # MOZ_FOLD_LIBS
 
-DEBUG_SYMFILE =
-DEBUG_SYMFILE_GEN =
-
-# Platform .mk files are not visible here; duplicate some bits from OS2.mk
-ifeq ($(OS_ARCH),OS2)
-ifndef MOZ_DEBUG
-ifdef MOZ_DEBUG_SYMBOLS
-ifneq ($(filter WLINK wlink,$(EMXOMFLD_TYPE)),)
-DEBUG_SYMFILE = $(basename $(1)).dbg
-DSO_LDOPTS += -Zlinker 'option symfile=$(basename $(@)).dbg'
-LDFLAGS += -Zlinker 'option symfile=$(basename $(@)).dbg'
-endif
-endif
-ifndef DEBUG_SYMFILE
-DEBUG_SYMFILE = $(basename $(1)).xqs
-DEBUG_SYMFILE_GEN = mapxqs $(basename $(1)).map -o $(basename $(1)).xqs
-endif
-endif
-endif # OS2
-
 # Filter-out $(LIBRARY_NAME) because it's already handled in config/rules.mk.
 NSS_DIST_DLL_FILES := $(addprefix $(DIST)/lib/$(DLL_PREFIX),$(addsuffix $(DLL_SUFFIX),$(filter-out $(LIBRARY_NAME),$(NSS_DLLS)) $(NSS_EXTRA_DLLS)))
-ifdef DEBUG_SYMFILE
-NSS_DIST_DLL_FILES += $(foreach f,$(NSS_DIST_DLL_FILES),$(call DEBUG_SYMFILE,$f))
-endif
 NSS_DIST_DLL_DEST := $(DIST)/bin
 NSS_DIST_DLL_TARGET := target
 INSTALL_TARGETS += NSS_DIST_DLL

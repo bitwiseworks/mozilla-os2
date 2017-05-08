@@ -2463,8 +2463,6 @@ ia64*-hpux*)
     if test "$EMXOMFLD_TYPE" = "WLINK" -o "$EMXOMFLD_TYPE" = "wlink"; then
         LDFLAGS="$LDFLAGS -Zlinker 'DISABLE 1121'"
     fi
-    WARNINGS_AS_ERRORS='-Werror'
-    MOZ_DEBUG_FLAGS="-fno-inline"
     MOZ_OPTIMIZE_FLAGS="-O2"
     if test "$EMXOMFLD_TYPE" = "WLINK" -o "$EMXOMFLD_TYPE" = "wlink"; then
         MOZ_OPTIMIZE_LDFLAGS=

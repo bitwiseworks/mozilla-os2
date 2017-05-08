@@ -178,7 +178,7 @@ MOZ_ARG_ENABLE_STRING(debug-symbols,
   fi ],
   MOZ_DEBUG_SYMBOLS=1)
 
-if test \( -n "$MOZ_DEBUG" -a "$OS_ARCH" != "OS2" \) -o -n "$MOZ_DEBUG_SYMBOLS"; then
+if test -n "$MOZ_DEBUG" -o -n "$MOZ_DEBUG_SYMBOLS"; then
     AC_DEFINE(MOZ_DEBUG_SYMBOLS)
     export MOZ_DEBUG_SYMBOLS
 fi

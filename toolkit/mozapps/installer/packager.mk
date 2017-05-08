@@ -29,18 +29,6 @@ endif
 	$(call MAKE_SIGN_EME_VOUCHER,$(DEPTH)/installer-stage/core)
 	@(cd $(DEPTH)/installer-stage/core && $(CREATE_PRECOMPLETE_CMD))
 
-ifeq ($(OS_ARCH),OS2)
-package-symbols: # $(PACKAGE_BASE_DIR)/$(PACKAGE)
-	@echo gathering symbols
-	$(RM) "$(DIST)/$(STAGEPATH)$(SYMBOL_ARCHIVE_BASENAME).zip"
-	$(foreach f,\
-		$(shell cd $(DIST)/$(STAGEPATH)$(MOZ_PKG_DIR) && find -name "*.exe" -or -name "*.dll"),\
-		cp -pf $(DIST)/bin/$(call DEBUG_SYMFILE,$f) $(DIST)/$(STAGEPATH)$(MOZ_PKG_DIR)/$(dir $f) &&)
-	@echo packing symbols
-	cd $(DIST)/$(STAGEPATH) && \
-		$(ZIP) -r9D "$(SYMBOL_ARCHIVE_BASENAME).zip" $(MOZ_PKG_DIR) -i "$(call DEBUG_SYMFILE,*)"
-endif
-
 ifeq (gonk,$(MOZ_WIDGET_TOOLKIT))
 ELF_HACK_FLAGS = --fill
 endif
