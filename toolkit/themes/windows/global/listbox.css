@@ -153,6 +153,7 @@ listheader[sortable="true"]:hover:active {
 
 .listcell-check[disabled="true"][checked="true"] {
   background-image: url("chrome://global/skin/checkbox/cbox-check-dis.gif");
+}
 
 @media (-moz-windows-default-theme) {
   @media not all and (-moz-os-version: windows-xp) {
