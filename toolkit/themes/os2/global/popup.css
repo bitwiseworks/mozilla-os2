@@ -21,15 +21,16 @@ panel {
   color:MenuText;
 }
 
-menupopup {
-  border-top: 1px solid;
-  -moz-border-top-colors: ThreeDHighlight;
+menupopup > menu > menupopup {
+  /* align submenus in popups */
+  -moz-margin-start: 2px;
+  margin-top: 1px;
 }
 
-menupopup > menu > menupopup {
- /* align submenus */
-  -moz-margin-start: 2px;
-  margin-top: 2px;
+menubar > menu > menupopup {
+  /* align submenus in menubar */
+  -moz-margin-start: -4px;
+  margin-top: -1px;
 }
 
 panel[type="arrow"] {
