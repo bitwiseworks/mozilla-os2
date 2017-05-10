@@ -11,9 +11,13 @@ toolkit.jar:
   skin/classic/global/checkbox.css
   skin/classic/global/dropmarker.css
   skin/classic/global/groupbox.css
+#ifndef XP_OS2
 * skin/classic/global/menu.css
+#endif
   skin/classic/global/menulist.css
+#ifndef XP_OS2
 * skin/classic/global/popup.css
+#endif
   skin/classic/global/radio.css
   skin/classic/global/tabbox.css
   skin/classic/global/textbox.css
@@ -33,7 +37,9 @@ toolkit.jar:
   skin/classic/global/printPreview.css
   skin/classic/global/scrollbox.css
   skin/classic/global/splitter.css
+#ifndef XP_OS2
   skin/classic/global/toolbar.css
+#endif
   skin/classic/global/toolbarbutton.css
 * skin/classic/global/tree.css
   skin/classic/global/alerts/alert.css                     (alerts/alert.css)
