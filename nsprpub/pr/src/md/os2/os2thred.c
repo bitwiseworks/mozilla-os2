@@ -3,14 +3,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-// exceptq trap file generator
-#include <string.h>
-#define INCL_BASE
-#define INCL_PM
-#include <os2.h>
-#define INCL_LIBLOADEXCEPTQ
-#include <exceptq.h>
-
 #include "primpl.h"
 #include <process.h>  /* for _beginthread() */
 #include <signal.h>
@@ -164,24 +156,17 @@ typedef struct param_store
 static void
 ExcpStartFunc(void* arg)
 {
-    // For arrays it's guaranteed that &[0] < &[1] which we use to make sure that the registration
-    // record of the top (last) exception handler has a smaller address (i.e. located lower on the
-    // stack) — this is a requirement of the SEH logic.
-    EXCEPTIONREGISTRATIONRECORD excpreg[2];
+    EXCEPTIONREGISTRATIONRECORD excpreg;
 
     PARAMSTORE params, *pParams = arg;
 
-    LibLoadExceptq(&excpreg[1]);
-
-    PR_OS2_SetFloatExcpHandler(&excpreg[0]);
+    PR_OS2_SetFloatExcpHandler(&excpreg);
 
     params = *pParams;
     PR_Free(pParams);
     params.start(params.thread);
 
-    PR_OS2_UnsetFloatExcpHandler(&excpreg[0]);
-
-    UninstallExceptq(&excpreg[1]);
+    PR_OS2_UnsetFloatExcpHandler(&excpreg);
 }
 
 PRStatus

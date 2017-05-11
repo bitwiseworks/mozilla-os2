@@ -2,13 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// exceptq trap file generator
-#define INCL_BASE
-#define INCL_PM
-#include <os2.h>
-#define INCL_LIBLOADEXCEPTQ
-#include <exceptq.h>
-
 #include "base/platform_thread.h"
 
 #include "base/logging.h"
@@ -18,22 +11,15 @@
 namespace {
 
 void ThreadFunc(void* closure) {
-  // For arrays it's guaranteed that &[0] < &[1] which we use to make sure that the registration
-  // record of the top (last) exception handler has a smaller address (i.e. located lower on the
-  // stack) — this is a requirement of the SEH logic.
-  EXCEPTIONREGISTRATIONRECORD excpreg[2];
+  EXCEPTIONREGISTRATIONRECORD excpreg;
 
-  LibLoadExceptq(&excpreg[1]);
-
-  PR_OS2_SetFloatExcpHandler(&excpreg[0]);
+  PR_OS2_SetFloatExcpHandler(&excpreg);
 
   PlatformThread::Delegate* delegate =
       static_cast<PlatformThread::Delegate*>(closure);
   delegate->ThreadMain();
 
-  PR_OS2_UnsetFloatExcpHandler(&excpreg[0]);
-
-  UninstallExceptq(&excpreg[1]);
+  PR_OS2_UnsetFloatExcpHandler(&excpreg);
 }
 
 }  // namespace
