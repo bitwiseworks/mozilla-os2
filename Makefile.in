@@ -228,11 +228,6 @@ endif
 SYMBOL_INDEX_NAME = \
   $(MOZ_APP_NAME)-$(MOZ_APP_VERSION)-$(OS_TARGET)-$(BUILDID)-$(CPU_ARCH)$(EXTRA_BUILDID)-symbols.txt
 
-ifeq ($(OS_ARCH),OS2)
-buildsymbols:
-package-symbols:
-	$(MAKE) -C $(MOZ_BUILD_APP)/installer package-symbols
-else
 buildsymbols:
 ifdef MOZ_CRASHREPORTER
 	echo building symbol store
@@ -258,7 +253,6 @@ ifdef MOZ_CRASHREPORTER
 	cd $(DIST)/crashreporter-symbols && \
           zip -r9D '../$(PKG_PATH)$(SYMBOL_ARCHIVE_BASENAME).zip' . -i '*.sym' -i '*.txt'  -x '*test*' -x '*Test*'
 endif # MOZ_CRASHREPORTER
-endif # OS2
 
 uploadsymbols:
 ifdef MOZ_CRASHREPORTER
