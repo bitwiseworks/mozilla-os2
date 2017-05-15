@@ -84,7 +84,7 @@ class FasterMakeBackend(CommonBackend):
                                              defines=defines)
                     else:
                         # Copy everything to dist/bin instead of symlinking to
-                        # avoid symlinks in new profiles from dist/bin runs
+                        # avoid symlinks in new profiles from dist/bin runs.
                         self._install_manifests[obj.install_target].add_copy(
                             f.full_path,
                             mozpath.join(path, mozpath.basename(f))

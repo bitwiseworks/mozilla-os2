@@ -979,7 +979,12 @@ INSTALL_TARGETS += %(prefix)s
             if not os.path.exists(source):
                 raise Exception('File listed in BRANDING_FILES does not exist: %s' % source)
 
-            self._install_manifests['dist_branding'].add_symlink(source, dest)
+            if os.name == 'os2':
+                # Copy .ico files and alike instead of symlinking as Resource
+                # Compuler from OS2TK knows nothing about kLIBC symlinks.
+                self._install_manifests['dist_branding'].add_copy(source, dest)
+            else:
+                self._install_manifests['dist_branding'].add_symlink(source, dest)
 
         # Also emit the necessary rules to create $(DIST)/branding during partial
         # tree builds. The locale makefiles rely on this working.
@@ -1307,7 +1312,7 @@ INSTALL_TARGETS += %(prefix)s
                 if not isinstance(f, ObjDirPath):
                     dest = mozpath.join(reltarget, path, mozpath.basename(f))
                     # Copy everything to dist/bin instead of symlinking to
-                    # avoid symlinks in new profiles from dist/bin runs
+                    # avoid symlinks in new profiles from dist/bin runs.
                     if target.startswith('dist/bin'):
                         install_manifest.add_copy(f.full_path, dest)
                     else:
