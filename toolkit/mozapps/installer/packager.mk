@@ -132,7 +132,9 @@ endif
 	  (cd $(DESTDIR)$(installdir) && tar -xf -)
 	$(NSINSTALL) -D $(DESTDIR)$(bindir)
 	$(RM) -f $(DESTDIR)$(bindir)/$(MOZ_APP_NAME)
+ifneq ($(OS_ARCH),OS2)
 	ln -s $(installdir)/$(MOZ_APP_NAME) $(DESTDIR)$(bindir)
+endif
 ifdef INSTALL_SDK # Here comes the hard part
 	$(NSINSTALL) -D $(DESTDIR)$(includedir)
 	(cd $(DIST)/include && $(TAR) $(TAR_CREATE_FLAGS) - .) | \
