@@ -281,6 +281,26 @@ sizeof(XPCOM_DLL) - 1))
     return NS_ERROR_FAILURE;
   }
 
+#ifdef XP_OS2
+  // Set BEGINLIBPATH/LIBPATHSTRICT to load private versions of XUL.DLL and
+  // support libraries instead of the ones from a common LIBPATH and other
+  // running processes.
+  {
+    const char *BeginLibPathVar = ";%BEGINLIBPATH%";
+    char buf[MAXPATHLEN + sizeof(BeginLibPathVar)];
+    APIRET arc;
+    memcpy(buf, exePath, lastSlash - exePath);
+    strcpy(buf + (lastSlash - exePath), BeginLibPathVar);
+    arc = DosSetExtLIBPATH(buf, BEGIN_LIBPATH);
+    if (!arc)
+      arc = DosSetExtLIBPATH("T", LIBPATHSTRICT);
+    if (arc) {
+      Output("Could not setup environment for the Mozilla runtime (DOS error %lu).\n", arc);
+      return NS_ERROR_FAILURE;
+    }
+  }
+#endif
+
   // We do this because of data in bug 771745
   XPCOMGlueEnablePreload();
 
