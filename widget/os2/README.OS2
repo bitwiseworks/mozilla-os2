@@ -87,6 +87,7 @@ application (ANPM). The following instructions describe the necessary steps.
 2. Install the following packages needed by Firefox using either YUM or ANPM:
 
    libstdc++6 nspr nss libicu pixman cairo pango fontconfig freetype libkai
+   libvpx libjpeg-turbo libpng zlib bzip2 hunspell libcx
 
    If you use YUM, simply type `yum install <package_list>` on the command line
    and press Enter. For ANPM, select "YUM -> Quick install..." from the menu,

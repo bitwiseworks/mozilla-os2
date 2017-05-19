@@ -5,6 +5,23 @@ in the Mozilla product series from release to release.
 CHANGES
 
 
+Firefox 45.5.0 Beta 8 (2017-05-19)
+
+   - Update Firefox to latest version 45.5.0 ESR (including many fixes to
+     the OS/2 code to adapt it to the ongoing Firefox evolution).
+
+   - Make firefox.exe set BEGINLIBPATH/LIBPATHSTRICT so that a run! or
+     script wrapper is no more necessary to start different versions of
+     Firefox in parallel or to launch firefox.exe from an arbitrary directory.
+
+   - Link against external LIBJPEG, LIBPNG, ZLIB, BZIP2 and HUNSPELL DLLs.
+
+   - Use kLIBC 0.6.6 DLL directly in JS code.
+
+   - Link against LIBCx DLL for automatic EXCEPTQ trap report creation
+     everywhere.
+
+
 Firefox 38.8.0 Beta 7 (2016-05-27)
 
    - Update Firefox to latest version 38.8.0 ESR.
