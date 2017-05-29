@@ -286,7 +286,7 @@ sizeof(XPCOM_DLL) - 1))
   // support libraries instead of the ones from a common LIBPATH and other
   // running processes.
   {
-    const char *BeginLibPathVar = ";%BEGINLIBPATH%";
+    const char BeginLibPathVar[] = ";%BEGINLIBPATH%";
     char buf[MAXPATHLEN + sizeof(BeginLibPathVar)];
     APIRET arc;
     memcpy(buf, exePath, lastSlash - exePath);
