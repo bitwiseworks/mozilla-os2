@@ -305,6 +305,13 @@ TrackBuffersManager::CompleteResetParserState()
   MOZ_ASSERT(OnTaskQueue());
   MSE_DEBUG("");
 
+  // We shouldn't change mInputDemuxer while a demuxer init/reset request is
+  // being processed. See bug 1239983.
+  NS_ASSERTION(!mDemuxerInitRequest.Exists(), "Previous AppendBuffer didn't complete");
+  if (mDemuxerInitRequest.Exists()) {
+    mDemuxerInitRequest.Disconnect();
+  }
+
   for (auto& track : GetTracksList()) {
     // 2. Unset the last decode timestamp on all track buffers.
     // 3. Unset the last frame duration on all track buffers.
@@ -839,16 +846,25 @@ void
 TrackBuffersManager::InitializationSegmentReceived()
 {
   MOZ_ASSERT(mParser->HasCompleteInitData());
+
+  int64_t endInit = mParser->InitSegmentRange().mEnd;
+  if (mInputBuffer->Length() > mProcessedInput ||
+      int64_t(mProcessedInput - mInputBuffer->Length()) > endInit) {
+    // Something is not quite right with the data appended. Refuse it.
+    RejectAppend(NS_ERROR_FAILURE, __func__);
+    return;
+  }
+
   mCurrentInputBuffer = new SourceBufferResource(mType);
   // The demuxer isn't initialized yet ; we don't want to notify it
   // that data has been appended yet ; so we simply append the init segment
   // to the resource.
   mCurrentInputBuffer->AppendData(mParser->InitData());
-  uint32_t length =
-    mParser->InitSegmentRange().mEnd - (mProcessedInput - mInputBuffer->Length());
+  uint32_t length = endInit - (mProcessedInput - mInputBuffer->Length());
   if (mInputBuffer->Length() == length) {
     mInputBuffer = nullptr;
   } else {
+    MOZ_RELEASE_ASSERT(length <= mInputBuffer->Length());
     mInputBuffer->RemoveElementsAt(0, length);
   }
   CreateDemuxerforMIMEType();
@@ -870,9 +886,12 @@ TrackBuffersManager::OnDemuxerInitDone(nsresult)
   MOZ_ASSERT(OnTaskQueue());
   mDemuxerInitRequest.Complete();
 
-  // mInputDemuxer shouldn't have been destroyed while a demuxer init/reset
-  // request was being processed. See bug 1239983.
-  MOZ_DIAGNOSTIC_ASSERT(mInputDemuxer);
+  if (!mInputDemuxer) {
+    // mInputDemuxer shouldn't have been destroyed while a demuxer init/reset
+    // request was being processed. See bug 1239983.
+    NS_ASSERTION(false, "mInputDemuxer has been destroyed");
+    RejectAppend(NS_ERROR_ABORT, __func__);
+  }
 
   MediaInfo info;
 

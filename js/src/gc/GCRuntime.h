@@ -923,7 +923,7 @@ class GCRuntime
     void purgeRuntime();
     bool beginMarkPhase(JS::gcreason::Reason reason);
     bool shouldPreserveJITCode(JSCompartment* comp, int64_t currentTime,
-                               JS::gcreason::Reason reason);
+                               JS::gcreason::Reason reason, bool canAllocateMoreCode);
     void bufferGrayRoots();
     void markCompartments();
     IncrementalProgress drainMarkStack(SliceBudget& sliceBudget, gcstats::Phase phase);
@@ -937,7 +937,7 @@ class GCRuntime
 
     void beginSweepPhase(bool lastGC);
     void findZoneGroups();
-    bool findZoneEdgesForWeakMaps();
+    bool findInterZoneEdges();
     void getNextZoneGroup();
     void endMarkingZoneGroup();
     void beginSweepingZoneGroup();

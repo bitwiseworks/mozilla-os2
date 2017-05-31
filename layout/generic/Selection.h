@@ -25,6 +25,8 @@ class nsIContentIterator;
 class nsIFrame;
 class nsFrameSelection;
 struct SelectionDetails;
+class nsCopySupport;
+class nsHTMLCopyEncoder;
 
 namespace mozilla {
 class ErrorResult;
@@ -65,6 +67,8 @@ public:
   NS_DECL_NSISELECTION
   NS_DECL_NSISELECTIONPRIVATE
 
+  virtual Selection* AsSelection() override { return this; }
+
   nsresult EndBatchChangesInternal(int16_t aReason = nsISelectionListener::NO_REASON);
 
   nsIDocument* GetParentObject() const;
@@ -92,11 +96,14 @@ public:
   enum {
     SCROLL_SYNCHRONOUS = 1<<1,
     SCROLL_FIRST_ANCESTOR_ONLY = 1<<2,
-    SCROLL_DO_FLUSH = 1<<3,
+    SCROLL_DO_FLUSH = 1<<3,  // only matters if SCROLL_SYNCHRONOUS is passed too
     SCROLL_OVERFLOW_HIDDEN = 1<<5
   };
-  // aDoFlush only matters if aIsSynchronous is true.  If not, we'll just flush
-  // when the scroll event fires so we make sure to scroll to the right place.
+  // If aFlags doesn't contain SCROLL_SYNCHRONOUS, then we'll flush when
+  // the scroll event fires so we make sure to scroll to the right place.
+  // Otherwise, if SCROLL_DO_FLUSH is also in aFlags, then this method will
+  // flush layout and you MUST hold a strong ref on 'this' for the duration
+  // of this call.  This might destroy arbitrary layout objects.
   nsresult      ScrollIntoView(SelectionRegion aRegion,
                                nsIPresShell::ScrollAxis aVertical =
                                  nsIPresShell::ScrollAxis(),
@@ -215,6 +222,12 @@ private:
 
   // Note: DoAutoScroll might destroy arbitrary frames etc.
   nsresult DoAutoScroll(nsIFrame *aFrame, nsPoint& aPoint);
+
+  // XXX Please don't add additional uses of this method, it's only for
+  // XXX supporting broken code (bug 1245883) in the following classes:
+  friend class ::nsCopySupport;
+  friend class ::nsHTMLCopyEncoder;
+  void AddRangeInternal(nsRange& aRange, nsIDocument* aDocument, ErrorResult&);
 
 public:
   SelectionType GetType(){return mType;}

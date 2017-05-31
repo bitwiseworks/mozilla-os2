@@ -194,11 +194,11 @@ void nsViewManager::DoSetWindowDimensions(nscoord aWidth, nscoord aHeight)
 }
 
 void
-nsViewManager::SetWindowDimensions(nscoord aWidth, nscoord aHeight)
+nsViewManager::SetWindowDimensions(nscoord aWidth, nscoord aHeight, bool aDelayResize)
 {
   if (mRootView) {
     if (mRootView->IsEffectivelyVisible() && mPresShell &&
-        mPresShell->IsVisible() && !mPresShell->IsInFullscreenChange()) {
+        mPresShell->IsVisible() && !mPresShell->IsInFullscreenChange() && !aDelayResize) {
       if (mDelayedResize != nsSize(NSCOORD_NONE, NSCOORD_NONE) &&
           mDelayedResize != nsSize(aWidth, aHeight)) {
         // We have a delayed resize; that now obsolete size may already have
@@ -214,7 +214,9 @@ nsViewManager::SetWindowDimensions(nscoord aWidth, nscoord aHeight)
     } else {
       mDelayedResize.SizeTo(aWidth, aHeight);
       if (mPresShell && mPresShell->GetDocument()) {
-        mPresShell->GetDocument()->SetNeedStyleFlush();
+        nsIDocument* doc = mPresShell->GetDocument();
+        doc->SetNeedStyleFlush();
+        doc->SetNeedLayoutFlush();
       }
     }
   }
