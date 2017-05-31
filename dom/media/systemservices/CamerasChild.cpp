@@ -243,12 +243,8 @@ CamerasChild::NumberOfCapabilities(CaptureEngine aCapEngine,
   LOG(("NumberOfCapabilities for %s", deviceUniqueIdUTF8));
   nsCString unique_id(deviceUniqueIdUTF8);
   nsCOMPtr<nsIRunnable> runnable =
-    media::NewRunnableFrom([this, aCapEngine, unique_id]() -> nsresult {
-      if (this->SendNumberOfCapabilities(aCapEngine, unique_id)) {
-        return NS_OK;
-      }
-      return NS_ERROR_FAILURE;
-    });
+    NS_NewNonOwningRunnableMethodWithArgs<CaptureEngine, nsCString>
+    (this, &CamerasChild::SendNumberOfCapabilities, aCapEngine, unique_id);
   // Prevent concurrent use of the reply variables. Note
   // that this is unlocked while waiting for the reply to be
   // filled in, necessitating the first Mutex above.
@@ -278,12 +274,8 @@ CamerasChild::NumberOfCaptureDevices(CaptureEngine aCapEngine)
   MutexAutoLock requestLock(mRequestMutex);
   LOG((__PRETTY_FUNCTION__));
   nsCOMPtr<nsIRunnable> runnable =
-    media::NewRunnableFrom([this, aCapEngine]() -> nsresult {
-      if (this->SendNumberOfCaptureDevices(aCapEngine)) {
-        return NS_OK;
-      }
-      return NS_ERROR_FAILURE;
-    });
+    NS_NewNonOwningRunnableMethodWithArgs<CaptureEngine>
+    (this, &CamerasChild::SendNumberOfCaptureDevices, aCapEngine);
   MonitorAutoLock monitor(mReplyMonitor);
   if (!DispatchToParent(runnable, monitor)) {
     LOG(("Get NumberOfCaptureDevices failed"));
@@ -331,12 +323,8 @@ CamerasChild::GetCaptureCapability(CaptureEngine aCapEngine,
   LOG(("GetCaptureCapability: %s %d", unique_idUTF8, capability_number));
   nsCString unique_id(unique_idUTF8);
   nsCOMPtr<nsIRunnable> runnable =
-    media::NewRunnableFrom([this, aCapEngine, unique_id, capability_number]() -> nsresult {
-      if (this->SendGetCaptureCapability(aCapEngine, unique_id, capability_number)) {
-        return NS_OK;
-      }
-      return NS_ERROR_FAILURE;
-    });
+    NS_NewNonOwningRunnableMethodWithArgs<CaptureEngine, nsCString, unsigned int>
+    (this, &CamerasChild::SendGetCaptureCapability, aCapEngine, unique_id, capability_number);
   MonitorAutoLock monitor(mReplyMonitor);
   if (!DispatchToParent(runnable, monitor)) {
     return -1;
@@ -394,12 +382,8 @@ CamerasChild::GetCaptureDevice(CaptureEngine aCapEngine,
   MutexAutoLock requestLock(mRequestMutex);
   LOG((__PRETTY_FUNCTION__));
   nsCOMPtr<nsIRunnable> runnable =
-    media::NewRunnableFrom([this, aCapEngine, list_number]() -> nsresult {
-      if (this->SendGetCaptureDevice(aCapEngine, list_number)) {
-        return NS_OK;
-      }
-      return NS_ERROR_FAILURE;
-    });
+    NS_NewNonOwningRunnableMethodWithArgs<CaptureEngine, unsigned int>
+    (this, &CamerasChild::SendGetCaptureDevice, aCapEngine, list_number);
   MonitorAutoLock monitor(mReplyMonitor);
   if (!DispatchToParent(runnable, monitor)) {
     LOG(("GetCaptureDevice failed"));
@@ -452,12 +436,8 @@ CamerasChild::AllocateCaptureDevice(CaptureEngine aCapEngine,
   LOG((__PRETTY_FUNCTION__));
   nsCString unique_id(unique_idUTF8);
   nsCOMPtr<nsIRunnable> runnable =
-    media::NewRunnableFrom([this, aCapEngine, unique_id]() -> nsresult {
-      if (this->SendAllocateCaptureDevice(aCapEngine, unique_id)) {
-        return NS_OK;
-      }
-      return NS_ERROR_FAILURE;
-    });
+    NS_NewNonOwningRunnableMethodWithArgs<CaptureEngine, nsCString>
+    (this, &CamerasChild::SendAllocateCaptureDevice, aCapEngine, unique_id);
   MonitorAutoLock monitor(mReplyMonitor);
   if (!DispatchToParent(runnable, monitor)) {
     LOG(("AllocateCaptureDevice failed"));
@@ -499,12 +479,8 @@ CamerasChild::ReleaseCaptureDevice(CaptureEngine aCapEngine,
   MutexAutoLock requestLock(mRequestMutex);
   LOG((__PRETTY_FUNCTION__));
   nsCOMPtr<nsIRunnable> runnable =
-    media::NewRunnableFrom([this, aCapEngine, capture_id]() -> nsresult {
-      if (this->SendReleaseCaptureDevice(aCapEngine, capture_id)) {
-        return NS_OK;
-      }
-      return NS_ERROR_FAILURE;
-    });
+    NS_NewNonOwningRunnableMethodWithArgs<CaptureEngine, const int>
+    (this, &CamerasChild::SendReleaseCaptureDevice, aCapEngine, capture_id);
   MonitorAutoLock monitor(mReplyMonitor);
   if (!DispatchToParent(runnable, monitor)) {
     return -1;
@@ -571,12 +547,8 @@ CamerasChild::StartCapture(CaptureEngine aCapEngine,
                            webrtcCaps.codecType,
                            webrtcCaps.interlaced);
   nsCOMPtr<nsIRunnable> runnable =
-    media::NewRunnableFrom([this, aCapEngine, capture_id, capCap]() -> nsresult {
-      if (this->SendStartCapture(aCapEngine, capture_id, capCap)) {
-        return NS_OK;
-      }
-      return NS_ERROR_FAILURE;
-    });
+    NS_NewNonOwningRunnableMethodWithArgs<CaptureEngine, const int, CaptureCapability>
+    (this, &CamerasChild::SendStartCapture, aCapEngine, capture_id, capCap);
   MonitorAutoLock monitor(mReplyMonitor);
   if (!DispatchToParent(runnable, monitor)) {
     return -1;
@@ -601,12 +573,8 @@ CamerasChild::StopCapture(CaptureEngine aCapEngine, const int capture_id)
   MutexAutoLock requestLock(mRequestMutex);
   LOG((__PRETTY_FUNCTION__));
   nsCOMPtr<nsIRunnable> runnable =
-    media::NewRunnableFrom([this, aCapEngine, capture_id]() -> nsresult {
-      if (this->SendStopCapture(aCapEngine, capture_id)) {
-        return NS_OK;
-      }
-      return NS_ERROR_FAILURE;
-    });
+    NS_NewNonOwningRunnableMethodWithArgs<CaptureEngine, const int>
+    (this, &CamerasChild::SendStopCapture, aCapEngine, capture_id);
   MonitorAutoLock monitor(mReplyMonitor);
   if (!DispatchToParent(runnable, monitor)) {
     return -1;
@@ -673,10 +641,7 @@ CamerasChild::ShutdownParent()
     RefPtr<nsRunnable> deleteRunnable =
       // CamerasChild (this) will remain alive and is only deleted by the
       // IPC layer when SendAllDone returns.
-      media::NewRunnableFrom([this]() -> nsresult {
-        Unused << this->SendAllDone();
-        return NS_OK;
-      });
+      NS_NewNonOwningRunnableMethod(this, &CamerasChild::SendAllDone);
     CamerasSingleton::Thread()->Dispatch(deleteRunnable, NS_DISPATCH_NORMAL);
   } else {
     LOG(("ShutdownParent called without PBackground thread"));
