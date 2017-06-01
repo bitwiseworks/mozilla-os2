@@ -13,8 +13,11 @@
 namespace mozilla
 {
 
-FFmpegRuntimeLinker::LinkStatus FFmpegRuntimeLinker::sLinkStatus =
-  LinkStatus_INIT;
+static enum LinkStatus {
+  LinkStatus_INIT = 0,
+      LinkStatus_FAILED,
+      LinkStatus_SUCCEEDED
+} sLinkStatus = LinkStatus_INIT;
 
 template <int V> class FFmpegDecoderModule
 {
@@ -22,6 +25,20 @@ public:
   static already_AddRefed<PlatformDecoderModule> Create();
 };
 
+#if defined(XP_OS2)
+// On OS/2, we must load avutil directly to access its symbols
+static const char* sLibs[][2] = {
+  { "avcode57.dll", "avutil55.dll" },
+  { "avcode56.dll", "avutil54.dll" },
+  { "avcode55.dll", "avutil54.dll" },
+  { "avcode53.dll", "avutil51.dll" },
+};
+
+static PRLibrary* sLinkedLib[2] = { nullptr };
+static const char** sLib = nullptr;
+
+static bool Bind(const char* aLibName[2]);
+#else
 static const char* sLibs[] = {
 #if defined(XP_DARWIN)
   "libavcodec.57.dylib",
@@ -29,11 +46,6 @@ static const char* sLibs[] = {
   "libavcodec.55.dylib",
   "libavcodec.54.dylib",
   "libavcodec.53.dylib",
-#elif defined(XP_OS2)
-  "avcode57.dll",
-  "avcode56.dll",
-  "avcode55.dll",
-  "avcode53.dll",
 #else
   "libavcodec-ffmpeg.so.57",
   "libavcodec-ffmpeg.so.56",
@@ -45,8 +57,11 @@ static const char* sLibs[] = {
 #endif
 };
 
-PRLibrary* FFmpegRuntimeLinker::sLinkedLib = nullptr;
-const char* FFmpegRuntimeLinker::sLib = nullptr;
+static PRLibrary* sLinkedLib = nullptr;
+static const char* sLib = nullptr;
+
+static bool Bind(const char* aLibName);
+#endif
 static unsigned (*avcodec_version)() = nullptr;
 
 #define AV_FUNC(func, ver) void (*func)();
@@ -66,6 +81,22 @@ FFmpegRuntimeLinker::Link()
   MOZ_ASSERT(NS_IsMainThread());
 
   for (size_t i = 0; i < ArrayLength(sLibs); i++) {
+#if defined(XP_OS2)
+    PRLibSpec lspec;
+    lspec.type = PR_LibSpec_Pathname;
+    lspec.value.pathname = sLibs[i][0];
+    sLinkedLib[0] = PR_LoadLibraryWithFlags(lspec, PR_LD_NOW | PR_LD_LOCAL);
+    if (sLinkedLib[0]) {
+      lspec.value.pathname = sLibs[i][1];
+      sLinkedLib[1] = PR_LoadLibraryWithFlags(lspec, PR_LD_NOW | PR_LD_LOCAL);
+      if (sLinkedLib[1]) {
+        if (Bind(sLibs[i])) {
+          sLib = sLibs[i];
+          sLinkStatus = LinkStatus_SUCCEEDED;
+          return true;
+        }
+      }
+#else
     const char* lib = sLibs[i];
     PRLibSpec lspec;
     lspec.type = PR_LibSpec_Pathname;
@@ -77,6 +108,7 @@ FFmpegRuntimeLinker::Link()
         sLinkStatus = LinkStatus_SUCCEEDED;
         return true;
       }
+#endif
       // Shouldn't happen but if it does then we try the next lib..
       Unlink();
     }
@@ -84,7 +116,11 @@ FFmpegRuntimeLinker::Link()
 
   FFMPEG_LOG("H264/AAC codecs unsupported without [");
   for (size_t i = 0; i < ArrayLength(sLibs); i++) {
+#if defined(XP_OS2)
+    FFMPEG_LOG("%s %s/%s", i ? "," : "", sLibs[i][0], sLibs[i][1]);
+#else
     FFMPEG_LOG("%s %s", i ? "," : "", sLibs[i]);
+#endif
   }
   FFMPEG_LOG(" ]\n");
 
@@ -94,13 +130,19 @@ FFmpegRuntimeLinker::Link()
   return false;
 }
 
-/* static */ bool
-FFmpegRuntimeLinker::Bind(const char* aLibName)
+static bool
+#if defined(XP_OS2)
+Bind(const char* aLibName[2])
+{
+  avcodec_version = (typeof(avcodec_version))PR_FindSymbol(sLinkedLib[0],
+                                                           "avcodec_version");
+#else
+Bind(const char* aLibName)
 {
   avcodec_version = (typeof(avcodec_version))PR_FindSymbol(sLinkedLib,
-                                                           "avcodec_version");
+#endif
   uint32_t fullVersion, major, minor, micro;
-  fullVersion = GetVersion(major, minor, micro);
+  fullVersion = FFmpegRuntimeLinker::GetVersion(major, minor, micro);
   if (!fullVersion) {
     return false;
   }
@@ -110,7 +152,7 @@ FFmpegRuntimeLinker::Bind(const char* aLibName)
       !Preferences::GetBool("media.libavcodec.allow-obsolete", false)) {
     // Refuse any libavcodec version prior to 54.35.1.
     // (Unless media.libavcodec.allow-obsolete==true)
-    Unlink();
+    FFmpegRuntimeLinker::Unlink();
     LogToBrowserConsole(NS_LITERAL_STRING(
       "libavcodec may be vulnerable or is not supported, and should be updated to play video."));
     return false;
@@ -144,6 +186,18 @@ FFmpegRuntimeLinker::Bind(const char* aLibName)
   }
 
 #define LIBAVCODEC_ALLVERSION
+#if defined(XP_OS2)
+#define AV_FUNC(func, ver)                                                     \
+  if ((ver) & version) {                                                       \
+    const int i = ((ver) & AV_FUNC_AVUTIL_MASK) ? 1 : 0;                       \
+    if (!(func = (typeof(func))PR_FindSymbol(sLinkedLib[i], #func))) {         \
+      FFMPEG_LOG("Couldn't load function " #func " from %s.", aLibName[i]);    \
+      return false;                                                            \
+    }                                                                          \
+  } else {                                                                     \
+    func = (typeof(func))nullptr;                                              \
+  }
+#else
 #define AV_FUNC(func, ver)                                                     \
   if ((ver) & version) {                                                       \
     if (!(func = (typeof(func))PR_FindSymbol(sLinkedLib, #func))) {            \
@@ -153,6 +207,7 @@ FFmpegRuntimeLinker::Bind(const char* aLibName)
   } else {                                                                     \
     func = (typeof(func))nullptr;                                              \
   }
+#endif
 #include "FFmpegFunctionList.h"
 #undef AV_FUNC
 #undef LIBAVCODEC_ALLVERSION
@@ -185,9 +240,20 @@ FFmpegRuntimeLinker::CreateDecoderModule()
 /* static */ void
 FFmpegRuntimeLinker::Unlink()
 {
+#if defined(XP_OS2)
+  if (sLinkedLib[0]) {
+    if (sLinkedLib[1]) {
+      PR_UnloadLibrary(sLinkedLib[1]);
+      sLinkedLib[1] = nullptr;
+    }
+    PR_UnloadLibrary(sLinkedLib[0]);
+    sLinkedLib[0] = nullptr;
+#else
+    sLib = nullptr;
   if (sLinkedLib) {
     PR_UnloadLibrary(sLinkedLib);
     sLinkedLib = nullptr;
+#endif
     sLib = nullptr;
     sLinkStatus = LinkStatus_INIT;
     avcodec_version = nullptr;

@@ -38,18 +38,6 @@ public:
   static void Unlink();
   static already_AddRefed<PlatformDecoderModule> CreateDecoderModule();
   static uint32_t GetVersion(uint32_t& aMajor, uint32_t& aMinor, uint32_t& aMicro);
-
-private:
-  static PRLibrary* sLinkedLib;
-  static const char* sLib;
-
-  static bool Bind(const char* aLibName);
-
-  static enum LinkStatus {
-    LinkStatus_INIT = 0,
-    LinkStatus_FAILED,
-    LinkStatus_SUCCEEDED
-  } sLinkStatus;
 };
 
 }
