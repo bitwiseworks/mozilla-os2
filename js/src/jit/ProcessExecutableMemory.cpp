@@ -23,8 +23,12 @@
 
 #include "gc/Memory.h"
 
-#ifdef XP_WIN
+#if defined(XP_WIN)
 # include "mozilla/WindowsVersion.h"
+#elif defined(XP_OS2)
+# define INCL_BASE
+# define INCL_PM
+# include <os2.h>
 #else
 # include <sys/mman.h>
 # include <unistd.h>
@@ -33,7 +37,7 @@
 using namespace js;
 using namespace js::jit;
 
-#ifdef XP_WIN
+#if defined(XP_WIN)
 static void*
 ComputeRandomAllocationAddress()
 {
@@ -235,7 +239,47 @@ DecommitPages(void* addr, size_t bytes)
     if (!VirtualFree(addr, bytes, MEM_DECOMMIT))
         MOZ_CRASH("DecommitPages failed");
 }
-#else // !XP_WIN
+#elif defined(XP_OS2)
+static void*
+ReserveProcessExecutableMemory(size_t bytes)
+{
+    // Note that we don't use ComputeRandomAllocationAddress() on OS/2 as there
+    // is no native API to allocate memory at a predefined address.
+    void* p = nullptr;
+#if defined(MOZ_OS2_HIGH_MEMORY)
+    if (DosAllocMem(&p, bytes, OBJ_ANY | PAG_READ))
+#endif
+        if (DosAllocMem(&p, bytes, PAG_READ))
+            return nullptr;
+    return p;
+}
+
+static void
+DeallocateProcessExecutableMemory(void* addr, size_t bytes)
+{
+    DosFreeMem(addr);
+}
+
+static ULONG
+ProtectionSettingToFlags(ProtectionSetting protection)
+{
+    return PAG_READ | PAG_WRITE | PAG_EXECUTE;
+}
+
+static void
+CommitPages(void* addr, size_t bytes, ProtectionSetting protection)
+{
+    if (DosSetMem(addr, bytes, PAG_COMMIT | ProtectionSettingToFlags(protection)))
+        MOZ_CRASH("CommitPages failed");
+}
+
+static void
+DecommitPages(void* addr, size_t bytes)
+{
+    if (DosSetMem(addr, bytes, PAG_DECOMMIT))
+        MOZ_CRASH("DecommitPages failed");
+}
+#else // !XP_WIN && !XP_OS2
 static void*
 ComputeRandomAllocationAddress()
 {

@@ -927,6 +927,9 @@ ProtectPages(void* p, size_t size)
     if (!VirtualProtect(p, size, PAGE_NOACCESS, &oldProtect))
         MOZ_CRASH("VirtualProtect(PAGE_NOACCESS) failed");
     MOZ_ASSERT(oldProtect == PAGE_READWRITE);
+#elif defined(XP_OS2)
+    if (DosSetMem(p, size, PAG_READ | PAG_WRITE | PAG_GUARD))
+        MOZ_CRASH("DosSetMem(PAG_READ | PAG_WRITE | PAG_GUARD) failed");
 #else  // assume Unix
     if (mprotect(p, size, PROT_NONE))
         MOZ_CRASH("mprotect(PROT_NONE) failed");
@@ -942,6 +945,9 @@ UnprotectPages(void* p, size_t size)
     if (!VirtualProtect(p, size, PAGE_READWRITE, &oldProtect))
         MOZ_CRASH("VirtualProtect(PAGE_READWRITE) failed");
     MOZ_ASSERT(oldProtect == PAGE_NOACCESS);
+#elif defined(XP_OS2)
+    if (DosSetMem(p, size, PAG_READ | PAG_WRITE))
+        MOZ_CRASH("DosSetMem(PAG_READ | PAG_WRITE) failed");
 #else  // assume Unix
     if (mprotect(p, size, PROT_READ | PROT_WRITE))
         MOZ_CRASH("mprotect(PROT_READ | PROT_WRITE) failed");
