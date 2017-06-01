@@ -270,10 +270,14 @@ GLLibraryEGL::EnsureInitialized(bool forceAccel)
         mEGLLibrary = LoadApitraceLibrary();
 #endif
 
+#if defined(XP_OS2)
+    NS_WARNING("EGL is not supported on OS/2 yet.");
+#else
     if (!mEGLLibrary) {
         printf_stderr("Attempting load of libEGL.so\n");
         mEGLLibrary = PR_LoadLibrary("libEGL.so");
     }
+#endif
 #if defined(XP_UNIX)
     if (!mEGLLibrary) {
         mEGLLibrary = PR_LoadLibrary("libEGL.so.1");
