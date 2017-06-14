@@ -901,6 +901,7 @@ void* nsWindow::GetNativeData(uint32_t aDataType)
       }
       return (void*)hps;
     }
+
     case NS_RAW_NATIVE_IME_CONTEXT:
     {
       // If IME context isn't available on this widget, we should set |this|
@@ -912,6 +913,9 @@ void* nsWindow::GetNativeData(uint32_t aDataType)
       }
       return this;
     }
+
+    default:
+      break;
   }
 
   return 0;
@@ -927,12 +931,18 @@ void nsWindow::FreeNativeData(void* data, uint32_t aDataType)
       if (hps != NULLHANDLE && !ReleaseIfDragHPS(hps)){
         WinReleasePS(hps);
       }
+      break;
     }
+
     case NS_RAW_NATIVE_IME_CONTEXT: {
       HIMI himi = reinterpret_cast<HIMI>(data);
       if (himi != NULLHANDLE)
         spfnImReleaseInstance(mWnd, himi);
+      break;
     }
+
+    default:
+      break;
   }
 }
 
