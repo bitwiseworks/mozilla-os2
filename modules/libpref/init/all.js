@@ -2465,7 +2465,13 @@ pref("layout.interruptible-reflow.enabled", true);
 // pref to control browser frame rate, in Hz. A value <= 0 means choose
 // automatically based on knowledge of the platform (or 60Hz if no platform-
 // specific information is available).
+#ifdef XP_OS2
+// Software Vsync behaves poorly on OS/2 and there is no hardware implementation
+// (see #208 for details), so force ASAP mode
+pref("layout.frame_rate", 0);
+#else
 pref("layout.frame_rate", -1);
+#endif
 
 // pref to dump the display list to the log. Useful for debugging drawing.
 pref("layout.display-list.dump", false);
