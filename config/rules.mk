@@ -309,7 +309,7 @@ ifeq ($(OS_ARCH),OS2)
 ALL_TRASH += \
 	$(foreach f, \
 		$(PROGRAM) $(SIMPLE_PROGRAMS) $(SHARED_LIBRARY) $(HOST_PROGRAM) $(HOST_SIMPLE_PROGRAMS), \
-		$(basename $f).map
+		$(basename $f).map)
 endif
 
 ifdef QTDIR
