@@ -588,21 +588,35 @@ struct MessageWindow {
         COPYDATASTRUCT *pcds;
         PVOID pvData = nullptr;
 
-        // Step 1: count the command line size
-        uint32_t cmdLineSize = 0;
+        // Step 1: count the command line size according to MS spec so that
+        // nsNativeAppSupportOS2::HandleCommandLine() can break it back in
+        // individual arguments when handling the requiest.
+        uint32_t cmdLineSize = 0, bSlashCount = 0;
         for (int i = 0; i < argc; ++i) {
             if (i)
                 cmdLineSize++; // space between args
             uint32_t len = strlen(argv[i]);
             cmdLineSize += len;
-            bool seenSpace = false;
+            bool needQuotes = false;
             for (uint32_t j = 0; j < len; j++) {
-                if (argv[i][j] == '"' || argv[i][j] == '\\')
-                    cmdLineSize++; // backslash before each quote or backslash
-                else if (!seenSpace && argv[i][j] == ' ') {
-                    seenSpace = true;
-                    cmdLineSize += 2; // pair of quotes for spaces
+                if (argv[i][j] == '\\') {
+                    // count backslashes (strange MS spec requirement to
+                    // escape them when followed by a double quote)
+                    bSlashCount++;
+                } else if (argv[i][j] == '"') {
+                    cmdLineSize++; // backslash before each quote
+                    cmdLineSize += bSlashCount; // and before each preceding backslash
+                    bSlashCount = 0;
+                } else {
+                    if (!needQuotes && argv[i][j] == ' ') {
+                        needQuotes = true;
+                        cmdLineSize += 2; // pair of quotes
+                    }
+                    bSlashCount = 0;
                 }
+            }
+            if (needQuotes && bSlashCount) {
+                cmdLineSize += bSlashCount; // backslash before each preceding backslash
             }
         }
 
@@ -637,20 +651,35 @@ struct MessageWindow {
         char * ptr = &(pcds->chBuff);
         pcds->lpData = ptr;
 
-        // Step 2: flatten command line aguments
+        // Step 2: flatten command line aguments according to MS spec
+        bSlashCount = 0;
         for (int i = 0; i < argc; ++i) {
             if (i)
                 *ptr++ = ' '; // space between args
-            bool seenSpace = !!strchr(argv[i], ' ');
-            if (seenSpace)
+            bool needQuotes = !!strchr(argv[i], ' ');
+            if (needQuotes)
                 *ptr++ = '"'; // opening quote
             for (uint32_t j = 0; j < strlen(argv[i]); j++) {
-                if (argv[i][j] == '"' || argv[i][j] == '\\')
-                    *ptr++ = '\\';
+                if (argv[i][j] == '\\') {
+                    bSlashCount++;
+                } else if (argv[i][j] == '"') {
+                    bSlashCount++; // backslash before each quote
+                    while (bSlashCount) { // and before each preceding backslash
+                        *ptr++ = '\\';
+                        bSlashCount--;
+                    }
+                } else {
+                    bSlashCount = 0;
+                }
                 *ptr++ = argv[i][j];
             }
-            if (seenSpace)
+            if (needQuotes) {
+                while (bSlashCount) { // backslash before each preceding backslash
+                    *ptr++ = '\\';
+                    bSlashCount--;
+                }
                 *ptr++ = '"'; // closing quote
+            }
         }
         *ptr++ = '\0';
         pcds->cbData = (ptr - (char*)pcds->lpData);
@@ -1398,6 +1427,9 @@ nsNativeAppSupportOS2::HandleCommandLine(const char* aCmdLineString,
         return;
     }
 
+    // Parse command line args according to MS spec
+    // (see "Parsing C++ Command-Line Arguments" at
+    // https://docs.microsoft.com/en-us/cpp/cpp/parsing-cpp-command-line-arguments).
     // We loop if we've not finished the second pass through.
     while ( 1 ) {
         // Initialize if required.
