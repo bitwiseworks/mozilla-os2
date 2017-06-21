@@ -17,6 +17,14 @@
 #define INCL_PM
 #include <os2.h>
 
+// Image formats require CF_BITMAP <-> JPG/PNG/GIF conversion which isn't there
+// yet (see OS2TODO below). This define disables reporting `image/*` as being
+// present in the clipboard if there is CF_BITMAP as it would not return
+// any usable data anyway and could prevent FF from trying other formats
+// (see e.g. #98 for a real life example). This define needs to be removed once
+// CF_BITMAP <-> JPG/PNG/GIF conversion is done.
+#define NO_BITMAP_CONVERSION
+
 inline uint32_t RegisterClipboardFormat(PCSZ pcszFormat)
 {
   ATOM atom = WinFindAtom(WinQuerySystemAtomTable(), pcszFormat);
@@ -79,10 +87,12 @@ bool nsClipboard::GetClipboardData(const char *aFlavor)
     {
       found = GetClipboardDataByID( CF_TEXT, aFlavor );
     }
+#ifndef NO_BITMAP_CONVERSION
     else if (strstr( aFlavor, "image/" ))
     {
       found = GetClipboardDataByID( CF_BITMAP, aFlavor );
     }
+#endif
   }
 
   return found;
@@ -90,8 +100,8 @@ bool nsClipboard::GetClipboardData(const char *aFlavor)
 
 bool nsClipboard::GetClipboardDataByID(uint32_t aFormatID, const char *aFlavor)
 {
-  PVOID pDataMem;
-  uint32_t NumOfBytes;
+  PVOID pDataMem = nullptr;
+  uint32_t NumOfBytes = 0;
   bool TempBufAllocated = false;
 
   PVOID pClipboardData = reinterpret_cast<PVOID>(WinQueryClipbrdData(0, aFormatID));
@@ -135,6 +145,7 @@ bool nsClipboard::GetClipboardDataByID(uint32_t aFormatID, const char *aFlavor)
   }
   else                             // Assume rest of flavors are binary data
   {
+#ifndef NO_BITMAP_CONVERSION
     if (aFormatID == CF_BITMAP)
     {
       if (!strcmp( aFlavor, kJPEGImageMime ) || !strcmp( aFlavor, kJPGImageMime ))
@@ -160,6 +171,7 @@ bool nsClipboard::GetClipboardDataByID(uint32_t aFormatID, const char *aFlavor)
       }
     }
     else
+#endif
     {
       pDataMem = static_cast<PBYTE>(pClipboardData) + sizeof(uint32_t);
       NumOfBytes = *(static_cast<uint32_t*>(pClipboardData));
@@ -304,6 +316,7 @@ void nsClipboard::SetClipboardData(const char *aFlavor)
     // If the flavor is image, we also put it on clipboard as CF_BITMAP
     // after conversion to OS2 bitmap
 
+#ifndef NO_BITMAP_CONVERSION
     if (strstr (aFlavor, "image/"))
     {
       //  XXX OS2TODO  Convert jpg, gif, png to bitmap
@@ -311,6 +324,7 @@ void nsClipboard::SetClipboardData(const char *aFlavor)
       printf( "nsClipboard:: Putting image on clipboard; should also convert to BMP\n" );
 #endif
     }
+#endif
   }
   free(pMozData);
 }
@@ -397,6 +411,7 @@ NS_IMETHODIMP nsClipboard::HasDataMatchingFlavors(const char** aFlavorList,
       }
     }
 
+#ifndef NO_BITMAP_CONVERSION
 // OS2TODO - Support for Images
     // if the client asked for image/.. and it wasn't present, check if we have CF_BITMAP.
     if (strstr(aFlavorList[i], "image/")) {
@@ -408,6 +423,7 @@ NS_IMETHODIMP nsClipboard::HasDataMatchingFlavors(const char** aFlavorList,
 //          break;
       }
     }
+#endif
   }
   return NS_OK;
 }
