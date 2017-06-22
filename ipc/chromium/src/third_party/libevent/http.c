@@ -83,7 +83,7 @@
 #include <fcntl.h>
 #endif
 
-#ifdef OS_OS2
+#ifdef __OS2__
 #include <arpa/inet.h> // for inet_ntoa
 #endif
 

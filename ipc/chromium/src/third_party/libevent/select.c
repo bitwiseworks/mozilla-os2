@@ -43,7 +43,7 @@
 #include <unistd.h>
 #include <errno.h>
 
-#ifdef OS_OS2
+#ifdef __OS2__
 #include <sys/socket.h>
 #endif
 
@@ -170,34 +170,35 @@ select_dispatch(struct event_base *base, struct timeval *tv)
 	check_selectop(sop);
 
 	if (res == -1) {
-#ifdef OS_OS2
-        if (errno == EBADF) {
-            /*
-             * On OS/2, select will return EBADF if some fd represents a socketpair whose
-             * other end unexpectedly dies (e.g. the process crashes). In this case we must
-             * call the callbacks in order to give them an opportunity to remove the failed
-             * fd from the set and let other fds be selected (not doing so will cause a tight
-             * select loop always returning EBADF and giving 100% CPU load).
-             */
-            for (i = 0; i < nfds; ++i) {
-                res = 0;
-                if (FD_ISSET(i, sop->event_readset_in))
-                    res |= EV_READ;
-                if (FD_ISSET(i, sop->event_writeset_in))
-                    res |= EV_WRITE;
-                if (res) {
-                    /* Use a dummy call to find out which fd is guilty */
-                    int dummy = 0, dummy_len = sizeof(dummy);
-                    if (getsockopt(i, SOL_SOCKET, SO_ERROR, &dummy, &dummy_len) == -1 &&
-                        errno == EBADF) {
-                        event_debug(("%s: select reports EBADF for fd %d, dead socketpair?",
-                                     __func__, i));
-                        evmap_io_active(base, i, res);
-                    }
-                }
-            }
-            return (0);
-        }
+#ifdef __OS2__
+		if (errno == EBADF) {
+			/*
+			 * On OS/2, select will return EBADF if some fd represents a socketpair
+			 * whose other end unexpectedly dies (e.g. the process crashes). In this
+			 * case we must call the callbacks in order to give them an opportunity to
+			 * remove the failed fd from the set and let other fds be selected (not
+			 * doing so will cause a tight select loop always returning EBADF and
+			 * giving 100% CPU load).
+			 */
+			for (i = 0; i < nfds; ++i) {
+				res = 0;
+				if (FD_ISSET(i, sop->event_readset_in))
+					res |= EV_READ;
+				if (FD_ISSET(i, sop->event_writeset_in))
+					res |= EV_WRITE;
+				if (res) {
+					/* Use a dummy call to find out which fd is guilty */
+					int dummy = 0, dummy_len = sizeof(dummy);
+					if (getsockopt(i, SOL_SOCKET, SO_ERROR, &dummy, &dummy_len) == -1 &&
+							errno == EBADF) {
+						event_debug(("%s: select reports EBADF for fd %d, dead socketpair?",
+												 __func__, i));
+						evmap_io_active(base, i, res);
+					}
+				}
+			}
+			return (0);
+		}
 #endif
 		if (errno != EINTR) {
 			event_warn("select");
