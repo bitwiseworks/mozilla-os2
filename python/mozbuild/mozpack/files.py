@@ -316,23 +316,28 @@ class AbsoluteSymlinkFile(File):
             if ose.errno != errno.ENOENT:
                 raise
 
+        # Place a relative path to the symlink to make it readable over Samba
+        # shares etc. Note that this path will remain valid as long as the
+        # relative position of the build dir to the source dir does not change.
+        relpath = mozpath.relpath(self.path, mozpath.dirname(dest))
+
         # If the dest is a symlink pointing to us, we have nothing to do.
         # If it's the wrong symlink, the filesystem must support symlinks,
         # so we replace with a proper symlink.
         if st and stat.S_ISLNK(st.st_mode):
             link = os.readlink(dest)
-            if link == self.path:
+            if link == relpath:
                 return False
 
             os.remove(dest)
-            os.symlink(self.path, dest)
+            os.symlink(relpath, dest)
             return True
 
         # If the destination doesn't exist, we try to create a symlink. If that
         # fails, we fall back to copy code.
         if not st:
             try:
-                os.symlink(self.path, dest)
+                os.symlink(relpath, dest)
                 return True
             except OSError:
                 return File.copy(self, dest, skip_if_older=skip_if_older)
@@ -355,7 +360,7 @@ class AbsoluteSymlinkFile(File):
 
         temp_dest = os.path.join(os.path.dirname(dest), str(uuid.uuid4()))
         try:
-            os.symlink(self.path, temp_dest)
+            os.symlink(relpath, temp_dest)
         # TODO Figure out exactly how symlink creation fails and only trap
         # that.
         except EnvironmentError:
