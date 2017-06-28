@@ -442,10 +442,17 @@ bool Channel::ChannelImpl::ProcessIncomingMessages() {
 
   msg.msg_iov = &iov;
   msg.msg_iovlen = 1;
+#ifdef OS_OS2
+  // OS/2 TCP/IP does not use ancillary data fields of msghdr and recvmsg()
+  // leaves them untouched so keep them 0 to avoid parsing garbage later.
+#else
   msg.msg_control = input_cmsg_buf_;
+#endif
 
   for (;;) {
+#ifndef OS_OS2
     msg.msg_controllen = sizeof(input_cmsg_buf_);
+#endif
 
     if (bytes_read == 0) {
       if (pipe_ == -1)
@@ -696,6 +703,9 @@ bool Channel::ChannelImpl::ProcessOutgoingMessages() {
 
     if (message_send_bytes_written_ == 0 &&
         !msg->file_descriptor_set()->empty()) {
+#ifdef OS_OS2
+      NS_RUNTIMEABORT("No SCM_RIGHTS support on OS/2!");
+#endif
       // This is the first chunk of a message which has descriptors to send
       struct cmsghdr *cmsg;
       const unsigned num_fds = msg->file_descriptor_set()->size();
