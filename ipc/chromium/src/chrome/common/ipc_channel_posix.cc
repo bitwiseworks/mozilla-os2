@@ -316,7 +316,12 @@ bool Channel::ChannelImpl::CreatePipe(const std::wstring& channel_id,
     // TODO(playmobil): We shouldn't need to create fifos on disk.
     // TODO(playmobil): If we do, they should be in the user data directory.
     // TODO(playmobil): Cleanup any stale fifos.
+#ifdef OS_OS2
+    // On OS/2, socket names should start with "\socket\"
+    pipe_name_ = "\\socket\\chrome_" + WideToASCII(channel_id);
+#else
     pipe_name_ = "/var/tmp/chrome_" + WideToASCII(channel_id);
+#endif
     if (mode == MODE_SERVER) {
       if (!CreateServerFifo(pipe_name_, &server_listen_pipe_)) {
         return false;
