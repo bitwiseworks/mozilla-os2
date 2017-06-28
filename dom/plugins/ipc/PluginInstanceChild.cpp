@@ -1168,7 +1168,7 @@ void PluginInstanceChild::DeleteWindow()
 bool
 PluginInstanceChild::AnswerCreateChildPluginWindow(NativeWindowHandle* aChildPluginWindow)
 {
-#if defined(XP_WIN)
+#if defined(XP_WIN) || defined(XP_OS2)
     MOZ_ASSERT(!mPluginWindowHWND);
 
     if (!CreatePluginWindow()) {
@@ -1188,9 +1188,11 @@ PluginInstanceChild::AnswerCreateChildPluginWindow(NativeWindowHandle* aChildPlu
 bool
 PluginInstanceChild::RecvCreateChildPopupSurrogate(const NativeWindowHandle& aNetscapeWindow)
 {
-#if defined(XP_WIN)
+#if defined(XP_WIN) || defined(XP_OS2)
     mCachedWinlessPluginHWND = aNetscapeWindow;
+#if defined(XP_WIN)
     CreateWinlessPopupSurrogate();
+#endif
     return true;
 #else
     NS_NOTREACHED("PluginInstanceChild::CreateChildPluginWindow not implemented!");

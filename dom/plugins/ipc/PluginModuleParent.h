@@ -375,7 +375,7 @@ class PluginModuleContentParent : public PluginModuleParent
 
     virtual ~PluginModuleContentParent();
 
-#if defined(XP_WIN) || defined(XP_MACOSX)
+#if defined(XP_WIN) || defined(XP_MACOSX) || defined(XP_OS2)
     nsresult NP_Initialize(NPNetscapeFuncs* bFuncs, NPError* error) override;
 #endif
 
