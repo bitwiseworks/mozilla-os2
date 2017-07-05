@@ -111,10 +111,8 @@ PR_DuplicateEnvironment(void)
 class EnvironmentEnvp
 {
 public:
-#if !defined(OS_OS2)
   EnvironmentEnvp()
     : mEnvp(PR_DuplicateEnvironment()) {}
-#endif
 
   EnvironmentEnvp(const environment_map &em)
   {
@@ -168,16 +166,10 @@ private:
 class Environment : public environment_map
 {
 public:
-#if !defined(OS_OS2)
   Environment()
   {
     EnvironmentEnvp envp;
     envp.ToMap(*this);
-  }
-#endif
-
-  Environment(const environment_map &m) : environment_map(m)
-  {
   }
 
   char * const *AsEnvp() {
@@ -289,12 +281,8 @@ bool LaunchApp(const std::vector<std::string>& argv,
   fd_shuffle2.reserve(fds_to_remap.size());
 
 #ifdef HAVE_PR_DUPLICATE_ENVIRONMENT
-#ifdef OS_OS2
-  Environment env (env_vars_to_set);
-#else
   Environment env;
   env.Merge(env_vars_to_set);
-#endif
   char * const *envp = env.AsEnvp();
   if (!envp) {
     DLOG(ERROR) << "FAILED to duplicate environment for: " << argv_cstr[0];
