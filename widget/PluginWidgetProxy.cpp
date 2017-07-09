@@ -141,7 +141,7 @@ PluginWidgetProxy::GetNativeData(uint32_t aDataType)
   return (void*)value;
 }
 
-#if defined(XP_WIN)
+#if defined(XP_WIN) || defined(XP_OS2)
 void
 PluginWidgetProxy::SetNativeData(uint32_t aDataType, uintptr_t aVal)
 {

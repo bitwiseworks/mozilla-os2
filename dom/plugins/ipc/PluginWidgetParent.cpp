@@ -216,7 +216,7 @@ PluginWidgetParent::RecvGetNativePluginPort(uintptr_t* value)
 bool
 PluginWidgetParent::RecvSetNativeChildWindow(const uintptr_t& aChildWindow)
 {
-#if defined(XP_WIN)
+#if defined(XP_WIN) || defined(XP_OS2)
   ENSURE_CHANNEL;
   PWLOG("PluginWidgetParent::RecvSetNativeChildWindow(%p)\n",
         (void*)aChildWindow);

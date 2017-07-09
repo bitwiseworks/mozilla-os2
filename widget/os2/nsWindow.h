@@ -143,6 +143,7 @@ public:
   NS_IMETHOD            Invalidate(const LayoutDeviceIntRect& aRect);
   gfxASurface*          GetThebesSurface();
   virtual void*         GetNativeData(uint32_t aDataType);
+  void                  SetNativeData(uint32_t aDataType, uintptr_t aVal) override;
   virtual void          FreeNativeData(void* aDatum, uint32_t aDataType);
   NS_IMETHOD            CaptureMouse(bool aCapture);
   virtual bool          HasPendingInputEvent();

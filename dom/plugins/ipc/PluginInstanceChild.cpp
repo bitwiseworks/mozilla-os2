@@ -2324,20 +2324,6 @@ PluginInstanceChild::DestroyPluginWindow()
 }
 
 void
-PluginInstanceChild::ReparentPluginWindow(HWND hWndParent)
-{
-    if (hWndParent != mPluginParentHWND && WinIsWindow(0, hWndParent)) {
-        // Do the reparenting.
-        WinSetParent(mPluginWindowHWND, hWndParent, TRUE);
-
-        // Make sure we're visible.
-        WinShowWindow(mPluginWindowHWND, TRUE);
-
-    }
-    mPluginParentHWND = hWndParent;
-}
-
-void
 PluginInstanceChild::SizePluginWindow(int width,
                                       int height)
 {

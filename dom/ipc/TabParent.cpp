@@ -2485,7 +2485,7 @@ TabParent::RecvGetWidgetNativeData(WindowsHandle* aValue)
 bool
 TabParent::RecvSetNativeChildOfShareableWindow(const uintptr_t& aChildWindow)
 {
-#if defined(XP_WIN)
+#if defined(XP_WIN) || defined(XP_OS2)
   nsCOMPtr<nsIWidget> widget = GetTopLevelWidget();
   if (widget) {
     // Note that this call will probably cause a sync native message to the

@@ -923,6 +923,42 @@ void* nsWindow::GetNativeData(uint32_t aDataType)
 
 //-----------------------------------------------------------------------------
 
+static HWND GetTopLevelHWND(HWND aWnd)
+{
+  HWND parent, desktop = WinQueryDesktopWindow(0, NULLHANDLE);
+
+  while ((parent = WinQueryWindow(aWnd, QW_PARENT)) != NULLHANDLE &&
+          parent != desktop)
+    aWnd = parent;
+
+  return aWnd;
+}
+
+static void
+SetChildStyleAndParent(HWND aChildWindow, HWND aParentWindow)
+{
+  // Do the reparenting. Note that this call will probably cause a sync native
+  // message to the process that owns the child window.
+  WinSetParent(aChildWindow, aParentWindow, TRUE);
+}
+
+void
+nsWindow::SetNativeData(uint32_t aDataType, uintptr_t aVal)
+{
+  switch (aDataType) {
+    case NS_NATIVE_CHILD_WINDOW:
+      SetChildStyleAndParent(aVal, mWnd);
+      break;
+    case NS_NATIVE_CHILD_OF_SHAREABLE_WINDOW:
+      SetChildStyleAndParent(aVal, GetTopLevelHWND(mWnd));
+      break;
+    default:
+      NS_ERROR("SetNativeData called with unsupported data type.");
+  }
+}
+
+//-----------------------------------------------------------------------------
+
 void nsWindow::FreeNativeData(void* data, uint32_t aDataType)
 {
   switch(aDataType) { 

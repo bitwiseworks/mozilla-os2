@@ -43,7 +43,7 @@ public:
 
   virtual nsIWidget* GetParent(void) override;
   virtual void* GetNativeData(uint32_t aDataType) override;
-#if defined(XP_WIN)
+#if defined(XP_WIN) || defined(XP_OS2)
   void SetNativeData(uint32_t aDataType, uintptr_t aVal) override;
 #endif
   virtual nsTransparencyMode GetTransparencyMode() override

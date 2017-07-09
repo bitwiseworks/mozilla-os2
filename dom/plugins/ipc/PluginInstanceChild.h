@@ -392,7 +392,6 @@ private:
     static bool RegisterWindowClass();
     bool CreatePluginWindow();
     void DestroyPluginWindow();
-    void ReparentPluginWindow(HWND hWndParent);
     void SizePluginWindow(int width, int height);
     int16_t WinlessHandleEvent(NPEvent& event);
     static MRESULT EXPENTRY PluginWindowProc(HWND hWnd,
