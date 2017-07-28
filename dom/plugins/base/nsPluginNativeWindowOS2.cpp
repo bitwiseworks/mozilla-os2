@@ -9,6 +9,8 @@
 #define INCL_PM
 #include "os2.h"
 
+#include "mozilla/DebugOnly.h"
+
 #include "nsDebug.h"
 #include "nsPluginNativeWindow.h"
 #include "nsThreadUtils.h"
@@ -123,13 +125,6 @@ NS_IMETHODIMP nsDelayedPopupsEnabledEvent::Run()
  *  nsPluginNativeWindow OS/2-specific class declaration
  */
 
-typedef enum {
-  nsPluginType_Unknown = 0,
-  nsPluginType_Flash,
-  nsPluginType_Java_vm,
-  nsPluginType_Other
-} nsPluginType;
-
 class nsPluginNativeWindowOS2 : public nsPluginNativeWindow
 {
 public: 
@@ -156,7 +151,7 @@ private:
   RefPtr<PluginWindowEvent> mCachedPluginWindowEvent;
 
 public:
-  nsPluginType mPluginType;
+  nsPluginHost::SpecialType mPluginType;
 };
 
 /*****************************************************************************/
@@ -201,28 +196,11 @@ static MRESULT EXPENTRY PluginWndProc(HWND hWnd, ULONG msg, MPARAM mp1, MPARAM m
   if (!win)
     return (MRESULT)TRUE;
 
-  // The DispatchEvent(NS_PLUGIN_ACTIVATE) below can trigger a reentrant focus
+  // The DispatchEvent(ePluginActivate) below can trigger a reentrant focus
   // event which might destroy us.  Hold a strong ref on the plugin instance
   // to prevent that, bug 374229.
   RefPtr<nsNPAPIPluginInstance> inst;
   win->GetPluginInstance(inst);
-
-  // check plugin mime type and cache whether it is Flash or java-vm or not;
-  // flash and java-vm will need special treatment later
-  if (win->mPluginType == nsPluginType_Unknown) {
-    if (inst) {
-      const char* mimetype = nullptr;
-      inst->GetMIMEType(&mimetype);
-      if (mimetype) {
-        if (!strcmp(mimetype, "application/x-shockwave-flash"))
-          win->mPluginType = nsPluginType_Flash;
-        else if (!strcmp(mimetype, "application/x-java-vm"))
-          win->mPluginType = nsPluginType_Java_vm;
-        else
-          win->mPluginType = nsPluginType_Other;
-      }
-    }
-  }
 
   bool enablePopups = false;
 
@@ -295,7 +273,7 @@ static MRESULT EXPENTRY PluginWndProc(HWND hWnd, ULONG msg, MPARAM mp1, MPARAM m
   // Macromedia Flash plugin may flood the message queue with some special messages
   // (WM_USER+1) causing 100% CPU consumption and GUI freeze, see mozilla bug 132759;
   // we can prevent this from happening by delaying the processing such messages;
-  if (win->mPluginType == nsPluginType_Flash) {
+  if (win->mPluginType == nsPluginHost::eSpecialType_Flash) {
     if (ProcessFlashMessageDelayed(win, inst, hWnd, msg, mp1, mp2))
       return (MRESULT)TRUE;
   }
@@ -308,7 +286,7 @@ static MRESULT EXPENTRY PluginWndProc(HWND hWnd, ULONG msg, MPARAM mp1, MPARAM m
   }
 
   MRESULT res = (MRESULT)TRUE;
-  if (win->mPluginType == nsPluginType_Java_vm)
+  if (win->mPluginType == nsPluginHost::eSpecialType_Java)
     NS_TRY_SAFE_CALL_RETURN(res, ::WinDefWindowProc(hWnd, msg, mp1, mp2), inst,
                             NS_PLUGIN_CALL_UNSAFE_TO_REENTER_GECKO);
   else
@@ -353,7 +331,7 @@ nsPluginNativeWindowOS2::nsPluginNativeWindowOS2() : nsPluginNativeWindow()
   height = 0; 
 
   mPluginWinProc = nullptr;
-  mPluginType = nsPluginType_Unknown;
+  mPluginType = nsPluginHost::eSpecialType_None;
 
   // once the atom has been added, it won't be deleted
   if (!sWM_FLASHBOUNCEMSG) {
@@ -441,43 +419,70 @@ nsPluginNativeWindowOS2::GetPluginWindowEvent(HWND aWnd, ULONG aMsg, MPARAM aMp1
 
 nsresult nsPluginNativeWindowOS2::CallSetWindow(RefPtr<nsNPAPIPluginInstance> &aPluginInstance)
 {
+  // Note, 'window' can be null
+
   // check the incoming instance, null indicates that window is going away and we are
   // not interested in subclassing business any more, undo and don't subclass
   if (!aPluginInstance) {
     UndoSubclassAndAssociateWindow();
+    // release plugin instance
+    SetPluginInstance(nullptr);
+    nsPluginNativeWindow::CallSetWindow(aPluginInstance);
+    return NS_OK;
+  }
+
+  // check plugin mime type and cache it if it will need special treatment later
+  if (mPluginType == nsPluginHost::eSpecialType_None) {
+    const char* mimetype = nullptr;
+    if (NS_SUCCEEDED(aPluginInstance->GetMIMEType(&mimetype)) && mimetype) {
+      mPluginType = nsPluginHost::GetSpecialType(nsDependentCString(mimetype));
+    }
+  }
+
+  // With e10s we execute in the content process and as such we don't
+  // have access to native widgets. CallSetWindow and skip native widget
+  // subclassing.
+  if (!XRE_IsParentProcess()) {
+    nsPluginNativeWindow::CallSetWindow(aPluginInstance);
+    return NS_OK;
   }
 
   nsPluginNativeWindow::CallSetWindow(aPluginInstance);
 
-  if (aPluginInstance)
-    SubclassAndAssociateWindow();
+  SubclassAndAssociateWindow();
 
   return NS_OK;
 }
 
 nsresult nsPluginNativeWindowOS2::SubclassAndAssociateWindow()
 {
-  if (type != NPWindowTypeWindow)
+  if (type != NPWindowTypeWindow || !window)
     return NS_ERROR_FAILURE;
 
   HWND hWnd = (HWND)window;
-  if (!hWnd)
-    return NS_ERROR_FAILURE;
 
   // check if we need to re-subclass
   PFNWP currentWndProc = (PFNWP)::WinQueryWindowPtr(hWnd, QWP_PFNWP);
   if (PluginWndProc == currentWndProc)
     return NS_OK;
 
+  ULONG style = ::WinQueryWindowULong(hWnd, QWL_STYLE);
+  // Out of process plugins must not have the WS_CLIPCHILDREN style set on their
+  // parent windows or else synchronous paints (via UpdateWindow() and others)
+  // will cause deadlocks.
+  if (::WinQueryWindowULong(hWnd, QWL_PENDATA))
+    style &= ~WS_CLIPCHILDREN;
+  else
+    style |= WS_CLIPCHILDREN;
+  ::WinSetWindowULong(hWnd, QWL_STYLE, style);
+
   mPluginWinProc = ::WinSubclassWindow(hWnd, PluginWndProc);
   if (!mPluginWinProc)
     return NS_ERROR_FAILURE;
 
-#ifdef DEBUG
-  nsPluginNativeWindowOS2 * win = (nsPluginNativeWindowOS2 *)
+  DebugOnly<nsPluginNativeWindowOS2 *> win = (nsPluginNativeWindowOS2 *)
             ::WinQueryProperty(hWnd, NS_PLUGIN_WINDOW_PROPERTY_ASSOCIATION);
   NS_ASSERTION(!win || (win == this), "plugin window already has property and this is not us");
-#endif
 
   if (!::WinSetProperty(hWnd, NS_PLUGIN_WINDOW_PROPERTY_ASSOCIATION, (PVOID)this, 0))
     return NS_ERROR_FAILURE;
@@ -487,9 +492,6 @@ nsresult nsPluginNativeWindowOS2::SubclassAndAssociateWindow()
 
 nsresult nsPluginNativeWindowOS2::UndoSubclassAndAssociateWindow()
 {
-  // release plugin instance
-  SetPluginInstance(nullptr);
-
   // remove window property
   HWND hWnd = (HWND)window;
   if (::WinIsWindow(/*HAB*/0, hWnd))
