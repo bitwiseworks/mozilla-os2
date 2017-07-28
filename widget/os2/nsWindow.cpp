@@ -2435,6 +2435,7 @@ bool nsWindow::OnPaint()
             // Have Thebes display the rectangle(s).
             mThebesSurface->Refresh(arect, rgnrect.crcReturned, hPS);
           }
+          break;
         case LayersBackend::LAYERS_CLIENT:
           result = mWidgetListener->PaintWindow(this, region);
           break;
