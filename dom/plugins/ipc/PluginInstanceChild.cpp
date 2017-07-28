@@ -2274,8 +2274,7 @@ PluginInstanceChild::FlashThrottleMessage(HWND aWnd,
 static const char kWindowClassName[] = "GeckoPluginWindow";
 
 enum {
-    WD_User          = 0, // this is reserved for QWL_USER (used by e.g. Flash plugin)
-    WD_InstanceChild = 4,
+    WD_InstanceChild = 0,
     WD_Last = WD_InstanceChild
 };
 

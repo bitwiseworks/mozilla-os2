@@ -290,11 +290,12 @@ void nsWindow::InitGlobals()
 {
   gOS2Flags = kIsInitialized;
 
-  // Register the MozillaWindowClass with PM.
-  WinRegisterClass(0, kWindowClassName, fnwpNSWindow, 0, 8);
+  // Register the MozillaWindowClass with PM (allocate window data for
+  // QWL_NSWINDOWPTR).
+  WinRegisterClass(0, kWindowClassName, fnwpNSWindow, 0, 4);
 
   // Register the dummy window class used to clip plugins.
-  WinRegisterClass(0, kClipWndClass, WinDefWindowProc, 0, 4);
+  WinRegisterClass(0, kClipWndClass, WinDefWindowProc, 0, 0);
 
   // Load the mouse pointers from the dll containing 'gOS2Flags'.
   HMODULE hModResources = 0;

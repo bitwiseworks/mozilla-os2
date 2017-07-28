@@ -87,7 +87,7 @@ extern "C" {
 
 // nsWindow's PM window class name
 #define kWindowClassName            "MozillaWindowClass"
-#define QWL_NSWINDOWPTR             (QWL_USER+4)
+#define QWL_NSWINDOWPTR             (QWL_USER)
 
 // Miscellaneous global flags stored in gOS2Flags
 #define kIsInitialized              0x0001
