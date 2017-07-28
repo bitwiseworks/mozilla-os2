@@ -197,6 +197,7 @@ class MessagePumpForUI : public MessagePumpOS2 {
   bool ProcessPumpReplacementMessage();
 
   // A hidden message-only window.
+  HAB hab_;
   HMQ hmq_;
   HWND message_hwnd_;
   ULONG timer_id_;

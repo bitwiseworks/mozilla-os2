@@ -101,6 +101,8 @@ MessagePumpForUI::MessagePumpForUI() {
 
 MessagePumpForUI::~MessagePumpForUI() {
   WinDestroyWindow(message_hwnd_);
+  WinDestroyMsgQueue(hmq_);
+  WinTerminate(hab_);
 }
 
 void MessagePumpForUI::ScheduleWork() {
@@ -295,14 +297,15 @@ void MessagePumpForUI::DoRunLoop() {
   }
 }
 
-void MessagePumpForUI::InitMessageWnd() {
+void MessagePumpForUI::InitMessageWnd()
+{
   // morph to the PM session (needed to use message queues)
   PPIB ppib;
   DosGetInfoBlocks(NULL,&ppib);
   ppib->pib_ultype = 3;
 
-  HAB hab = WinInitialize(0);
-  hmq_ = WinCreateMsgQueue(hab, 0);
+  hab_ = WinInitialize(0);
+  hmq_ = WinCreateMsgQueue(hab_, 0);
   DCHECK(hmq_);
 
   BOOL rc = WinRegisterClass(0, kWndClass, WndProcThunk, 0, 0);
