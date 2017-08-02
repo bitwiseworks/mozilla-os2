@@ -2370,13 +2370,6 @@ PluginInstanceParent::PluginWindowHookProc(HWND hWnd,
     NS_ASSERTION(self->mPluginHWND == hWnd, "Wrong window!");
 
     switch (message) {
-        case WM_SETFOCUS:
-        if (SHORT1FROMMP(mp2) == TRUE) {
-            // Let the child plugin window know it should take focus.
-            Unused << self->CallSetPluginFocus();
-        }
-        break;
-
         case WM_CLOSE:
         self->UnsubclassPluginWindow();
         break;

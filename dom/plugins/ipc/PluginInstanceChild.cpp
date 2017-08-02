@@ -2392,10 +2392,6 @@ PluginInstanceChild::PluginWindowProc(HWND hWnd,
         }
     }
 
-    // The plugin received or lost keyboard focus, let the parent know so the dom is up to date.
-    if (message == WM_SETFOCUS)
-      self->CallPluginFocusChange(SHORT1FROMMP(mp2) == TRUE);
-
     MRESULT res = WinDefWindowProc(hWnd, message, mp1, mp2);
 
     if (message == WM_CLOSE)
