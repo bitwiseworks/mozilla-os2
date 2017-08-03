@@ -161,6 +161,7 @@ public:
   void                  SetZIndex(int32_t aZIndex);
   virtual nsresult      ConfigureChildren(const nsTArray<Configuration>& aConfigurations);
   NS_IMETHOD            SetSizeMode(nsSizeMode aMode);
+  NS_IMETHOD            MakeFullScreen(bool aFullScreen, nsIScreen* aScreen = nullptr);
   NS_IMETHOD            HideWindowChrome(bool aShouldHide);
   NS_IMETHOD            SetTitle(const nsAString& aTitle);
   NS_IMETHOD            SetIcon(const nsAString& aIconSpec);
@@ -221,6 +222,7 @@ protected:
   static void           RollupOnFocusLost(HWND aFocus);
   MRESULT               ProcessMessage(ULONG msg, MPARAM mp1, MPARAM mp2);
   bool                  OnReposition(PSWP pNewSwp);
+  nsIWidgetListener*    GetPaintListener();
   bool                  OnPaint();
   bool                  OnMouseChord(MPARAM mp1, MPARAM mp2);
   bool                  OnDragDropMsg(ULONG msg, MPARAM mp1, MPARAM mp2,

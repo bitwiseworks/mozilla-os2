@@ -1415,6 +1415,13 @@ NS_IMETHODIMP nsWindow::SetSizeMode(nsSizeMode aMode)
   return mFrame->SetSizeMode(aMode);
 }
 
+NS_IMETHODIMP
+nsWindow::MakeFullScreen(bool aFullScreen, nsIScreen* aTargetScreen)
+{
+  NS_ENSURE_TRUE(mFrame, NS_ERROR_UNEXPECTED);
+  return mFrame->MakeFullScreen(aFullScreen, aTargetScreen);
+}
+
 NS_IMETHODIMP nsWindow::HideWindowChrome(bool aShouldHide)
 {
   NS_ENSURE_TRUE(mFrame, NS_ERROR_UNEXPECTED);
@@ -2286,6 +2293,13 @@ bool nsWindow::OnReposition(PSWP pSwp)
 
 //-----------------------------------------------------------------------------
 
+nsIWidgetListener* nsWindow::GetPaintListener()
+{
+  if (!mWindowState & nsWindowState_eDoingDelete)
+    return nullptr;
+  return mAttachedWidgetListener ? mAttachedWidgetListener : mWidgetListener;
+}
+
 bool nsWindow::OnPaint()
 {
   bool   result = false;
@@ -2303,6 +2317,8 @@ bool nsWindow::OnPaint()
     WinQueryUpdateRegion(mWnd, debugPaintFlashRegion);
   }
 #endif
+
+  nsIWidgetListener* listener = nullptr;
 
   // Use a dummy do..while(0) loop to facilitate error handling & early-outs.
   do {
@@ -2340,9 +2356,16 @@ bool nsWindow::OnPaint()
       break;
     }
 
+    listener = GetPaintListener();
+    if (listener) {
+      listener->WillPaintWindow(this);
+    }
+    // Re-get the listener since the will paint notification may have killed it.
+    listener = GetPaintListener();
+
     // Even if there is no callback to update the content (unlikely)
     // we still want to update the screen with whatever's available.
-    if (!mWidgetListener) {
+    if (!listener) {
       mThebesSurface->Refresh(&rcl, 1, hPS);
       break;
     }
@@ -2431,14 +2454,14 @@ bool nsWindow::OnPaint()
             // If it returns false there's nothing to paint, so exit.
             AutoLayerManagerSetup
                 setupLayerManager(this, thebesContext, BufferMode::BUFFER_NONE);
-            result = mWidgetListener->PaintWindow(this, region);
+            result = listener->PaintWindow(this, region);
 
             // Have Thebes display the rectangle(s).
             mThebesSurface->Refresh(arect, rgnrect.crcReturned, hPS);
           }
           break;
         case LayersBackend::LAYERS_CLIENT:
-          result = mWidgetListener->PaintWindow(this, region);
+          result = listener->PaintWindow(this, region);
           break;
         default:
           NS_ERROR("Unknown layers backend used!");
@@ -2478,6 +2501,11 @@ bool nsWindow::OnPaint()
     WinReleasePS(debugPaintFlashPS);
   }
 #endif
+
+  // Re-get the listener since painting may have killed it.
+  listener = GetPaintListener();
+  if (listener)
+    listener->DidPaintWindow();
 
   return result;
 }
@@ -3346,14 +3374,20 @@ NS_IMETHODIMP nsWindow::DispatchEvent(WidgetGUIEvent* event, nsEventStatus& aSta
 {
   aStatus = nsEventStatus_eIgnore;
 
-  if (!mWidgetListener) {
-    return NS_OK;
+  // if state is eDoingDelete, don't send out anything
+  if (!(mWindowState & nsWindowState_eDoingDelete)) {
+    // Top level windows can have a view attached which requires events be sent
+    // to the underlying base window and the view. Added when we combined the
+    // base chrome window with the main content child for nc client area (title
+    // bar) rendering.
+    if (mAttachedWidgetListener) {
+      aStatus = mAttachedWidgetListener->HandleEvent(event, mUseAttachedEvents);
+    }
+    else if (mWidgetListener) {
+      aStatus = mWidgetListener->HandleEvent(event, mUseAttachedEvents);
+    }
   }
 
-  // if state is eDoingDelete, don't send out anything
-  if (mWindowState & nsWindowState_eLive) {
-    aStatus = mWidgetListener->HandleEvent(event, mUseAttachedEvents);
-  }
   return NS_OK;
 }
 
@@ -3426,14 +3460,28 @@ bool nsWindow::DispatchDragDropEvent(EventMessage aMsg)
 bool nsWindow::DispatchMoveEvent(int32_t aX, int32_t aY)
 {
   // Params here are in XP-space for the desktop
-  return mWidgetListener ? mWidgetListener->WindowMoved(this, aX, aY) : false;
+  bool result = mWidgetListener ? mWidgetListener->WindowMoved(this, aX, aY) : false;
+
+    // If there is an attached view, inform it as well as the normal widget listener.
+  if (mAttachedWidgetListener) {
+    return mAttachedWidgetListener->WindowMoved(this, aX, aY);
+  }
+
+  return result;
 }
 
 //-----------------------------------------------------------------------------
 
 bool nsWindow::DispatchResizeEvent(int32_t aX, int32_t aY)
 {
-  return mWidgetListener ? mWidgetListener->WindowResized(this, aX, aY) : false;
+  bool result = mWidgetListener ? mWidgetListener->WindowResized(this, aX, aY) : false;
+
+  // If there is an attached view, inform it as well as the normal widget listener.
+  if (mAttachedWidgetListener) {
+    return mAttachedWidgetListener->WindowResized(this, aX, aY);
+  }
+
+  return result;
 }
 
 //-----------------------------------------------------------------------------

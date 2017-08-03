@@ -385,6 +385,26 @@ nsresult os2FrameWindow::SetSizeMode(nsSizeMode aMode)
 }
 
 //-----------------------------------------------------------------------------
+// Go full screen
+
+nsresult os2FrameWindow::MakeFullScreen(bool aFullScreen, nsIScreen* aScreen)
+{
+  // Will call hide chrome, reposition window. Note this will
+  // also cache dimensions for restoration, so it should only
+  // be called once per fullscreen request.
+  nsresult rv = mOwner->nsBaseWidget::MakeFullScreen(aFullScreen, aScreen);
+  if (!NS_SUCCEEDED(rv)) {
+    return rv;
+  }
+
+  if (mOwner->mWidgetListener) {
+    mOwner->mWidgetListener->FullscreenChanged(aFullScreen);
+  }
+
+  return NS_OK;
+}
+
+//-----------------------------------------------------------------------------
 // Hide or show the frame & its controls (titlebar, minmax, etc.).
 
 nsresult os2FrameWindow::HideWindowChrome(bool aShouldHide)

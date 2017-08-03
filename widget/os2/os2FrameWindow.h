@@ -45,6 +45,7 @@ public:
                                bool aRepaint);
   void                  ActivateTopLevelWidget();
   nsresult              SetSizeMode(nsSizeMode aMode);
+  nsresult              MakeFullScreen(bool aFullScreen, nsIScreen* aScreen = nullptr);
   nsresult              HideWindowChrome(bool aShouldHide);
   nsresult              SetTitle(const nsAString& aTitle); 
   nsresult              SetIcon(const nsAString& aIconSpec); 
