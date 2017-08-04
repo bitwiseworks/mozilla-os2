@@ -2295,7 +2295,7 @@ bool nsWindow::OnReposition(PSWP pSwp)
 
 nsIWidgetListener* nsWindow::GetPaintListener()
 {
-  if (!mWindowState & nsWindowState_eDoingDelete)
+  if (mWindowState & nsWindowState_eDoingDelete)
     return nullptr;
   return mAttachedWidgetListener ? mAttachedWidgetListener : mWidgetListener;
 }
