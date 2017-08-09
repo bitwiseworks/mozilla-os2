@@ -58,22 +58,7 @@ NS_IMETHODIMP
 nsPlatformCharset::GetCharset(nsPlatformCharsetSel selector,
                               nsACString& oResult)
 {
-  if ((selector == kPlatformCharsetSel_4xBookmarkFile) || (selector == kPlatformCharsetSel_4xPrefsJS)) {
-    if ((mCharset.Find("IBM850", IGNORE_CASE) != -1) || (mCharset.Find("IBM437", IGNORE_CASE) != -1)) 
-      oResult.AssignLiteral("ISO-8859-1");
-    else if (mCharset.Find("IBM852", IGNORE_CASE) != -1)
-      oResult.AssignLiteral("windows-1250");
-    else if ((mCharset.Find("IBM855", IGNORE_CASE) != -1) || (mCharset.Find("IBM866", IGNORE_CASE) != -1))
-      oResult.AssignLiteral("windows-1251");
-    else if ((mCharset.Find("IBM869", IGNORE_CASE) != -1) || (mCharset.Find("IBM813", IGNORE_CASE) != -1))
-      oResult.AssignLiteral("windows-1253");
-    else if (mCharset.Find("IBM857", IGNORE_CASE) != -1)
-      oResult.AssignLiteral("windows-1254");
-    else
-      oResult = mCharset;
-  } else {
-    oResult = mCharset;
-  }
+  oResult = mCharset;
   return NS_OK;
 }
 
@@ -99,7 +84,6 @@ nsPlatformCharset::GetDefaultCharsetForLocale(const nsAString& localeName, nsACS
   os2_key.AppendInt((uint32_t)codepage);
 
   return MapToCharset(os2_key, oResult);
-
 }
 
 NS_IMETHODIMP 
