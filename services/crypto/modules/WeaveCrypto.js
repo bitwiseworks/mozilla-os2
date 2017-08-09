@@ -11,6 +11,7 @@ var Cr = Components.results;
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 Components.utils.import("resource://gre/modules/Services.jsm");
 Components.utils.import("resource://gre/modules/ctypes.jsm");
+Components.utils.import("resource://services-common/utils.js");
 
 /**
  * Shortcuts for some algorithm SEC OIDs.  Full list available here:
@@ -403,10 +404,15 @@ WeaveCrypto.prototype = {
     encrypt : function(clearTextUCS2, symmetricKey, iv) {
         this.log("encrypt() called");
 
-        // js-ctypes autoconverts to a UTF8 buffer, but also includes a null
-        // at the end which we don't want. Decrement length to skip it.
-        let inputBuffer = new ctypes.ArrayType(ctypes.unsigned_char)(clearTextUCS2);
-        let inputBufferSize = inputBuffer.length - 1;
+        // NOTE: although js-ctypes provides autoconversion to/from UTF-8 for byte arrays
+        // on many platforms, it doesn't do so on *all* platforms (OS/2 is one exception).
+        // So don't rely on it and use the UTF-8 encoder/decoder directly.
+        let clearTextUTF8 = CommonUtils.encodeUTF8(clearTextUCS2);
+        let inputBufferSize = clearTextUTF8.length;
+        let inputBuffer = this._getInputBuffer(inputBufferSize);
+
+        // Compress a JS string (2-byte chars) into a normal C string (1-byte chars).
+        this.byteCompressInts(clearTextUTF8, this._sharedInputBufferInts, inputBufferSize);
 
         // When using CBC padding, the output size is the input size rounded
         // up to the nearest block. If the input size is exactly on a block
@@ -429,10 +435,6 @@ WeaveCrypto.prototype = {
         if (cipherText.length)
             inputUCS2 = atob(cipherText);
 
-        // We can't have js-ctypes create the buffer directly from the string
-        // (as in encrypt()), because we do _not_ want it to do UTF8
-        // conversion... We've got random binary data in the input's low byte.
-        //
         // Compress a JS string (2-byte chars) into a normal C string (1-byte chars).
         let len   = inputUCS2.length;
         let input = this._getInputBuffer(len);
@@ -442,10 +444,16 @@ WeaveCrypto.prototype = {
                                              this._getOutputBuffer(len), len,
                                              symmetricKey, iv, this.nss.CKA_DECRYPT);
 
-        // outputBuffer contains UTF-8 data, let js-ctypes autoconvert that to a JS string.
-        // XXX Bug 573842: wrap the string from ctypes to get a new string, so
-        // we don't hit bug 573841.
-        return "" + outputBuffer.readString() + "";
+        // NOTE: although js-ctypes provides autoconversion to/from UTF-8 for byte arrays
+        // on many platforms, it doesn't do so on *all* platforms (OS/2 is one exception).
+        // So don't rely on it and use the UTF-8 encoder/decoder directly.
+        let outBufInts = ctypes.cast(outputBuffer, ctypes.uint8_t.array(outputBuffer.length));
+
+        // Uncompresss a C string (1-byte chars) to a JS string (2-byte chars).
+        // Note that this also obsoletes a workaround from bug 573842 for bug 573841.
+        let outBufUTF8 = this.byteUncompressInts(outBufInts, outBufInts.length);
+
+        return CommonUtils.decodeUTF8(outBufUTF8);
     },
 
     _commonCrypt : function (input, inputLength, output, outputLength, symmetricKey, iv, operation) {
@@ -620,6 +628,13 @@ WeaveCrypto.prototype = {
         let end = Math.min(len, count);
         for (let i = 0; i < end; i++)
             intArray[i] = jsString.charCodeAt(i) & 0xFF;  // convert to bytes.
+    },
+
+    byteUncompressInts : function byteUncompressInts (intArray, count) {
+        let jsString = "";
+        for (let i = 0; i < count; i++)
+            jsString += String.fromCharCode(intArray[i]);
+        return jsString;
     },
 
     // Expand a normal C string (1-byte chars) into a JS string (2-byte chars)
