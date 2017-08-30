@@ -57,23 +57,24 @@ nsOS2Locale::GetPlatformLocale(const nsAString& locale, PULONG os2Codepage)
   nsAutoString tempLocale(locale);
   tempLocale.ReplaceChar('-', '_');
 
- 
-  int  ret = UniCreateLocaleObject(UNI_UCS_STRING_POINTER, (UniChar *)tempLocale.get(), &locObj);
+  int ret = UniCreateLocaleObject(UNI_UCS_STRING_POINTER, (UniChar *)tempLocale.get(), &locObj);
   if (ret != ULS_SUCCESS)
-    UniCreateLocaleObject(UNI_UCS_STRING_POINTER, (UniChar *)L"C", &locObj);
+    ret = UniCreateLocaleObject(UNI_UCS_STRING_POINTER, (UniChar *)L"C", &locObj);
 
-  ret = UniQueryLocaleValue(locObj, LOCI_iCodepage, &codePage);
-  if (ret != ULS_SUCCESS)
-    return NS_ERROR_FAILURE;
-
-  if (codePage == 437) {
-    *os2Codepage = 850;
-  } else {
-    *os2Codepage = codePage;
+  if (ret == ULS_SUCCESS)
+  {
+    ret = UniQueryLocaleValue(locObj, LOCI_iCodepage, &codePage);
+    if (ret == ULS_SUCCESS) {
+      if (codePage == 437) {
+        *os2Codepage = 850;
+      } else {
+        *os2Codepage = codePage;
+      }
+    }
+    UniFreeLocaleObject(locObj);
   }
-  UniFreeLocaleObject(locObj);
 
-  return NS_OK;
+  return ret == ULS_SUCCESS ? NS_OK : NS_ERROR_FAILURE;
 }
 
 NS_IMETHODIMP
