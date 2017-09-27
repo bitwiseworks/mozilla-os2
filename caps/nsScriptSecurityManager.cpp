@@ -69,6 +69,13 @@
 #include "nsILoadInfo.h"
 #include "nsXPCOMStrings.h"
 
+#ifdef XP_OS2
+// For nsScriptSecurityManager::CanCreateWrapper() hack
+#include "nsIPrintSettings.h"
+#include "nsIWebBrowserPrint.h"
+#include "nsIDialogParamBlock.h"
+#endif
+
 // This should be probably defined on some other place... but I couldn't find it
 #define WEBAPPS_PERM_NAME "webapps-manage"
 
@@ -1178,6 +1185,37 @@ nsScriptSecurityManager::CanCreateWrapper(JSContext *cx,
     nsAutoCString origin;
     nsIPrincipal* subjectPrincipal = nsContentUtils::SubjectPrincipal();
     GetPrincipalDomainOrigin(subjectPrincipal, origin);
+#ifdef XP_OS2
+    // OS/2 is a special case: its nsPrintingPromptService::ShowPrintDialog()
+    // implementation still uses the XUL-based Print dialog which needs to be
+    // shown from the built-in JS Pdf viewer (pdf.js) but fails with
+    // NS_ERROR_XPC_SECURITY_MANAGER_VETO due to this method blocking a wrapper
+    // for nsIPrintSettings and others (note that all other Tier 1 platforms are
+    // not affected as they provide a native Print dialog which doesn't interact
+    // with JS). In order to make it work w/o redesigning this JS security
+    // enforcement, we simply check for interface and origin for this particular
+    // case. More at https://github.com/bitwiseworks/mozilla-os2/issues/231.
+    if (origin.EqualsASCII("resource://pdf.js"))
+    {
+      // Supported interfaces must be kept in sync with items put into a
+      // nsISupportsArray in nsPrintingPromptService::DoDialog().
+      {
+        nsCOMPtr<nsIPrintSettings> ps(do_QueryInterface(aObj));
+        if (ps)
+          return NS_OK;
+      }
+      {
+        nsCOMPtr<nsIWebBrowserPrint> wbp(do_QueryInterface(aObj));
+        if (wbp)
+          return NS_OK;
+      }
+      {
+        nsCOMPtr<nsIDialogParamBlock> dpb(do_QueryInterface(aObj));
+        if (dpb)
+          return NS_OK;
+      }
+    }
+#endif
     NS_ConvertUTF8toUTF16 originUnicode(origin);
     NS_ConvertUTF8toUTF16 classInfoName(objClassInfo.GetName());
     const char16_t* formatStrings[] = {
