@@ -7,18 +7,13 @@
 
 #include <stdlib.h>
 
-#define INCL_BASE
-#define INCL_PM
-// too pity the above two don't include this one (looks like a bug):
-#define INCL_SPLDOSPRINT
-#include <os2.h>
+#include "nsPrintOS2.h"
 
 #include "nsIServiceManager.h"
 #include "nsIPrefService.h"
 #include "nsIPrefBranch.h"
 #include "nsUnicharUtils.h"
 #include "nsNativeCharsetUtils.h"
-#include "nsPrintOS2.h"
 
 //---------------------------------------------------------------------------
 
@@ -165,14 +160,13 @@ DBGNX();
 
   ULONG  TotalQueues = 0;
   ULONG  MemNeeded = 0;
-  SPLERR rc;
 
-  rc = SplEnumQueue(0, 3, 0, 0, &mQueueCount, &TotalQueues,
-                    &MemNeeded, 0);
+   SplEnumQueue(0, 3, 0, 0, &mQueueCount, &TotalQueues,
+                &MemNeeded, 0);
 
   PRQINFO3* pPQI3Buf = (PRQINFO3*)malloc(MemNeeded);
-  rc = SplEnumQueue(0, 3, pPQI3Buf, MemNeeded, &mQueueCount, &TotalQueues,
-                    &MemNeeded, 0);
+  SplEnumQueue(0, 3, pPQI3Buf, MemNeeded, &mQueueCount, &TotalQueues,
+               &MemNeeded, 0);
 
   if (mQueueCount > MAX_PRINT_QUEUES)
     mQueueCount = MAX_PRINT_QUEUES;
@@ -203,18 +197,17 @@ DBGNX();
 
 void os2Printers::RefreshPrintQueue()
 {
-DBGX();
+DBGN();
   ULONG  newQueueCount = 0;
   ULONG  TotalQueues = 0;
   ULONG  MemNeeded = 0;
-  SPLERR rc;
 
-  rc = SplEnumQueue(0, 3, 0, 0, &newQueueCount, &TotalQueues,
-                    &MemNeeded, 0);
+  SplEnumQueue(0, 3, 0, 0, &newQueueCount, &TotalQueues,
+               &MemNeeded, 0);
   PRQINFO3* pPQI3Buf = (PRQINFO3*)malloc(MemNeeded);
 
-  rc = SplEnumQueue(0, 3, pPQI3Buf, MemNeeded, &newQueueCount, &TotalQueues,
-                    &MemNeeded, 0);
+  SplEnumQueue(0, 3, pPQI3Buf, MemNeeded, &newQueueCount, &TotalQueues,
+               &MemNeeded, 0);
   if (newQueueCount > MAX_PRINT_QUEUES)
     newQueueCount = MAX_PRINT_QUEUES;
 

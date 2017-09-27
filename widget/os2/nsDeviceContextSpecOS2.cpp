@@ -8,12 +8,7 @@
 
 #include <stdlib.h>
 
-#define INCL_BASE
-#define INCL_PM
-// too pity the above two don't include this one (looks like a bug):
-#define INCL_SPLDOSPRINT
-#define INCL_DEVDJP
-#include <os2.h>
+#include "nsDeviceContextSpecOS2.h"
 
 #define INCL_GRE_DEVICE
 #include <pmddim.h>
@@ -38,7 +33,6 @@
 #include "nsIStringBundle.h"
 #include "nsILocalFile.h"
 
-#include "nsDeviceContextSpecOS2.h"
 #include "nsPrintOS2.h"
 #include "nsPrintfCString.h"
 #include "mozilla/Preferences.h"
@@ -81,7 +75,9 @@ static int16_t  AdjustFormatAndExtension(int16_t aFormat,
                                          nsAString& aFileName);
 static nsresult GetFileNameForPrintSettings(nsIPrintSettings* aPS,
                                             nsAString& aFileName);
+#if 0 // This is temporariy disabled, see #147.
 static char *   GetACPString(const char16_t* aStr);
+#endif
 static char *   GetACPString(const nsAString& aStr);
 static void     SetDevModeFromSettings(ULONG printer,
                                        nsIPrintSettings* aPrintSettings);
@@ -341,8 +337,8 @@ int16_t nsDeviceContextSpecOS2::AdjustDestinationForFormat(int16_t aFormat,
   }
 
   // Determine whether to use the native or builtin PS generator
-  bool useBuiltinPS;
-      if (!NS_SUCCEEDED(Preferences::GetBool(kOS2UseBuiltinPS, &useBuiltinPS)))
+  bool useBuiltinPS = false;
+  if (!NS_SUCCEEDED(Preferences::GetBool(kOS2UseBuiltinPS, &useBuiltinPS)))
     Preferences::SetBool(kOS2UseBuiltinPS, false);
 
   // Postscript format - If the driver can't handle PS, redirect to file.
@@ -651,11 +647,13 @@ nsresult nsDeviceContextSpecOS2::CreateStreamForFormat(int16_t aFormat,
 // Helper function to convert the string to the native codepage,
 // similar to UnicodeToCodepage() in nsDragService.cpp.
 
+#if 0 // This is temporariy disabled, see #147.
 static
 char* GetACPString(const char16_t* aStr)
 {
    return GetACPString(nsDependentString(aStr));
 }
+#endif
 
 static
 char* GetACPString(const nsAString& aStr)
@@ -1088,8 +1086,8 @@ nsresult os2SpoolerStream::Init(os2PrintQ* aQueue, const char* aTitle)
   ULONG   ulSize = 0;
 
   // Determine whether to use IBMNULL or the native driver
-  bool useIbmNull;
-      if (!NS_SUCCEEDED(Preferences::GetBool(kOS2UseIbmNull, &useIbmNull)))
+  bool useIbmNull = true;
+  if (!NS_SUCCEEDED(Preferences::GetBool(kOS2UseIbmNull, &useIbmNull)))
     Preferences::SetBool(kOS2UseIbmNull, true);
 
   // Sending Moz's Postscript output through the native PS driver adds printer
@@ -1202,7 +1200,7 @@ NS_IMETHODIMP os2SpoolerStream::Close()
 {
   DBGN();
 
-  BOOL rc = SplQmNewPage(mSpl, mPages);
+  DebugOnly <BOOL> rc = SplQmNewPage(mSpl, mPages);
 #ifdef debug_thebes_print
   if (!rc) {
     printf("SplQmNewPage failed setting page count - continuing\n");
