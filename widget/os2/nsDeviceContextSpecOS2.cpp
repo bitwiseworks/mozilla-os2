@@ -176,7 +176,7 @@ NS_IMETHODIMP nsDeviceContextSpecOS2::Init(nsIWidget *aWidget,
 
   nsXPIDLString printerName;
   mPrintSettings->GetPrinterName(getter_Copies(printerName));
-  NS_ENSURE_TRUE(!printerName.IsEmpty(), NS_ERROR_FAILURE);
+  NS_ENSURE_TRUE(!printerName.IsEmpty(), NS_ERROR_GFX_PRINTER_NO_PRINTER_AVAILABLE);
 
   int32_t printerNdx = sPrinterList.GetPrinterIndex(printerName);
   if (printerNdx < 0) {
