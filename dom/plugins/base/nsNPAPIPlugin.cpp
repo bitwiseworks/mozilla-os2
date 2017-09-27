@@ -261,8 +261,11 @@ nsNPAPIPlugin::PluginCrashed(const nsAString& pluginDumpID,
 bool
 nsNPAPIPlugin::RunPluginOOP(const nsPluginTag *aPluginTag)
 {
-#ifdef MOZ_WIDGET_ANDROID
+#if defined(MOZ_WIDGET_ANDROID)
   return false;
+#elif defined(XP_OS2)
+  // Allow to completely disable OOP for plugins for testing purposes
+  return getenv("MOZ_DISABLE_PLUGIN_OOP") == NULL;
 #else
   return true;
 #endif
