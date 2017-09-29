@@ -19,7 +19,7 @@ public:
     // constructor for an os2Window surface
     gfxOS2Surface(HWND aWnd);
 
-#if 0 // This is temporariy disabled, see #147.
+#if 0 // This is temporariy disabled, see #171.
     // constructor for an os2Print surface
     gfxOS2Surface(HDC aDC, const mozilla::gfx::IntSize& aSize, int aPreview);
 #endif

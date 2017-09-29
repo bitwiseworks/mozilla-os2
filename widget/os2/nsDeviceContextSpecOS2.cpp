@@ -75,7 +75,7 @@ static int16_t  AdjustFormatAndExtension(int16_t aFormat,
                                          nsAString& aFileName);
 static nsresult GetFileNameForPrintSettings(nsIPrintSettings* aPS,
                                             nsAString& aFileName);
-#if 0 // This is temporariy disabled, see #147.
+#if 0 // This is temporariy disabled, see #171.
 static char *   GetACPString(const char16_t* aStr);
 #endif
 static char *   GetACPString(const nsAString& aStr);
@@ -89,7 +89,9 @@ static void     SetDevModeFromSettings(ULONG printer,
 os2Printers sPrinterList;
 
 // Pref Constants
+#if 0 // This is temporariy disabled, see #171.
 static const char kOS2UseBuiltinPS[]    = "print.os2.postscript.use_builtin";
+#endif
 static const char kOS2UseIbmNull[]      = "print.os2.postscript.use_ibmnull";
 
 //---------------------------------------------------------------------------
@@ -337,9 +339,15 @@ int16_t nsDeviceContextSpecOS2::AdjustDestinationForFormat(int16_t aFormat,
   }
 
   // Determine whether to use the native or builtin PS generator
+#if 1
+  // With native GPI printing temporarily disabled, we always want Cairo
+  // (builtin) PS generator, see #171.
+  enum { useBuiltinPS = true };
+#else
   bool useBuiltinPS = false;
   if (!NS_SUCCEEDED(Preferences::GetBool(kOS2UseBuiltinPS, &useBuiltinPS)))
     Preferences::SetBool(kOS2UseBuiltinPS, false);
+#endif
 
   // Postscript format - If the driver can't handle PS, redirect to file.
   // If it can and the user wants native support, change the format.
@@ -532,7 +540,7 @@ NS_IMETHODIMP nsDeviceContextSpecOS2::GetSurfaceForPrinter(gfxASurface **surface
   }
 
 //*** Native
-#if 0 // This is temporariy disabled, see #147.
+#if 0 // This is temporariy disabled, see #171.
   else {
     char* filePath = nullptr;
     if (mDestination == printToFile) {
@@ -647,7 +655,7 @@ nsresult nsDeviceContextSpecOS2::CreateStreamForFormat(int16_t aFormat,
 // Helper function to convert the string to the native codepage,
 // similar to UnicodeToCodepage() in nsDragService.cpp.
 
-#if 0 // This is temporariy disabled, see #147.
+#if 0 // This is temporariy disabled, see #171.
 static
 char* GetACPString(const char16_t* aStr)
 {

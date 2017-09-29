@@ -353,7 +353,7 @@ nsDeviceContext::SetDPI()
             if (!hdc || !DevQueryCaps(hdc, CAPS_VERTICAL_FONT_RES, 1, &scrn))
                 scrn = 96;
 
-#if 0 // This is temporariy disabled, see #147.
+#if 0 // This is temporariy disabled, see #171.
             hps = reinterpret_cast<gfxOS2Surface*>(mPrintingSurface.get())->GetPS();
             hdc = GpiQueryDevice(hps);
             if (!hdc || !DevQueryCaps(hdc, CAPS_VERTICAL_FONT_RES, 1, &prnt))

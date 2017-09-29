@@ -339,59 +339,65 @@ The following enable additional logging:
 -- Printing -------------------------------------------------------------------
 ===============================================================================
 
-IMPORTANT NOTE: The current version of the Mozilla graphics engine is work
-in progress and has Native Driver Support temporarily disabled because it
-does not currently work. Therefore, the section called "Native Driver Support"
-below should be ignored. Printing to PDF and Postscript should still work as
-described below.
-
-This version offers printing support using both native drivers and the
-app's built-in PDF and Postscript generators.
-
-* Native Driver Support
-    All native printer drivers should work and all features offered by
-    the driver should be supported.
-
-* Built-in PDF Support
-    PDF files can be created by selecting any printer, then checking
-    'Print to file',  When the file dialog appears, give the file's
-    name a ".pdf" extension.
+This version offers printing support using the application's built-in PDF and
+Postscript generators. Native printing using the GPI subsystem is disabled in
+this version due to incompatible changes in the underlying graphical library.
+Taking into account generally poor quality of native printing compared to built-
+in generators and the fact that modern printers don't have (and will never have)
+native OS/2 drivers, there are no plans to add support for native printing back
+in the near future.
 
 * Built-in Postscript Support
-    Mozilla's built-in Postscript support provides an alternative to
-    using the native PSCRIPT drivers.  If you use CUPS or plan to
-    direct Postscript output to file for further processing, you may
-    want to use this feature.  There are two ways to enable it.
 
-    = Always =
-    This method may produce better quality output than the native PS
-    driver if you use CUPS.  After performing the one-time setup below,
-    select a printer associated with a native PS driver, then press 'OK'.
+There are two supported methods to print to a physical printer: use a native
+Postscript driver for this printer, if it's available, or set up the printer as
+a CUPS printer and create a native printer object for it. Both methods will
+involve the built-in Postscript generator to produce output that is then sent
+directly to the connected printer. No special setup is required in the
+application itself for either of these methods because the built-in Postscript
+generator is now always active when printing to a physical device and cannot be
+turned off.
 
-    Setup:
-    - enter "about:config" in the browser's address bar, press Enter
-      (for Thunderbird, use the 'Config Editor' in the Options dialog)
-    - look for the entry "print.os2.postscript.use_builtin"
-    - if it exists, doubleclick on it to change it to "true"
-    - if the entry doesn't exist, add it:
-      o  click MB2 on any item in the preferences listing
-      o  select 'New->Boolean' from the popup menu
-      o  enter "print.os2.postscript.use_builtin" (no quotes), press OK
-      o  select "true", press OK
+Note that all printers using non-Postscript drivers (e.g. LASERJET, OMNI,
+IBMPCL5, etc.) are hidden from the application's Print dialog to avoid the
+confusion of always getting "An error occured while printing" message when
+attempting to print to such a device. If there are no Postscript printers on
+your system (or no configured printers at all), you will see "No printers
+available" in the printer selection drop-down box in the Print dialog.
 
-    = As Needed =
-    Use this method to create Postscript files for further processing
-    without having to add or change the "use_builtin" setting:
-    - select a non-Postscript printer (see below)
-    - check 'Print to file', then press 'OK'
-    - when the file dialog appears, give the filename a ".ps" extension
+It is recommended to set up your printer as a CUPS printer rather than use the
+native Postscript driver, even when it's available, because in most cases using
+CUPS will result in better print-out quality. Note that by default any printer-
+specific features specified in the native printer job properties dialog are
+stripped out because CUPS may not recognize them. If you use a prnter with the
+native Postscript driver without CUPS, you may wish to disable such stripping.
+This can be done by setting the `print.os2.postscript.use_ibmnull` preference to
+`false` in the preference editor which can be opened by typing `about:config`
+in the browser's address bar (or with the 'Config Editor' in the Options dialog
+in Thunderbird).
 
-    !! With either method, the native driver isn't used to create the
-       print job, so most of its optional settings (e.g. duplexing)
-       are ignored.  Only its Orientation (portrait/landscape) and
-       Resolution (dpi) settings are used.  For print-to-file usage,
-       choose a non-Postscript printer that has suitable DPI settings.
-       (e.g. the HP Laserjet 2100 driver offers 300, 600, & 1200 dpi).
+Note that the `print.os2.postscript.use_builtin` preference used to enable
+built-in Postscript support in earlier versions does no longer have any effect
+as this support is always on now.
+
+* Built-in PDF Support
+
+PDF files can be created by selecting any printer, then checking "Print to
+file". When the file dialog appears, give the file's name a ".pdf" extension
+and the application will generate a PDF file with the printed contents. Note
+that providing any other extension (including ".ps") will cause raw Postscript
+data to be saved to the given file.
+
+Note that if you don't have any Postscript printer supported by OS/2 or simply
+don't have any printer at all but still want to print to PDF using the described
+method, you will have to install a fake printer. Just install a new printer
+using legacy drives in the Printers folder and make sure you select a Postscript
+(PSCRIPT) driver for it. You may have to install a new PSCRIPT driver if you
+don't already have one in the list. Just select any printer model supported by
+OS/2 when installing the driver - it doesn't matter as you will not actually
+print to that printer. For the same reason you may select any output port (or
+just check "Output to File"). The only printer job properties that will be used
+by the PDF generator are paper size and margins.
 
 
 ===============================================================================

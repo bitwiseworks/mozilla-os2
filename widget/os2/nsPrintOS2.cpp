@@ -171,12 +171,39 @@ DBGNX();
   if (mQueueCount > MAX_PRINT_QUEUES)
     mQueueCount = MAX_PRINT_QUEUES;
 
+  // Since we have native GPI printing temporarily disabled (see #171), we rely
+  // on internal PostScript support in Cairo (former print.os2.postscript.use_builtin
+  // pref) which, in turn, requires the native printer driver to support PS.
+  // It makes no sense to show any other printers in the FF UI since printing
+  // to them will always fail with a vague "An error occurred while printing"
+  // message box. Thus, we hide other printers from the UI.
+
   ULONG defaultQueue = 0;
+  ULONG idx = 0;
   for (ULONG cnt = 0; cnt < mQueueCount; cnt++) {
+    os2PrintQ *pq = new os2PrintQ(&pPQI3Buf[cnt]);
+    HDC hdc = pq->OpenHDC();
+    if (!hdc) {
+      DBGM("OpenHDC failed");
+      delete pq;
+      continue;
+    }
+    long driverType;
+    if (!DevQueryCaps(hdc, CAPS_TECHNOLOGY, 1, &driverType))
+      driverType = 0;
+    DevCloseDC(hdc);
+    if (driverType != CAPS_TECH_POSTSCRIPT) {
+      delete pq;
+      continue;
+    }
+    mPQBuf[idx] = pq;
     if (pPQI3Buf[cnt].fsType & PRQ3_TYPE_APPDEFAULT)
-      defaultQueue = cnt;
-    mPQBuf[cnt] = new os2PrintQ(&pPQI3Buf[cnt]);
+      defaultQueue = idx;
+    ++idx;
   }
+
+  // adjust the number of printers we accepted
+  mQueueCount = idx;
 
   // move the entry for the default printer to index 0 (if necessary)
   if (defaultQueue > 0) {
@@ -213,11 +240,16 @@ DBGN();
 
   os2PrintQ* tmpBuf[MAX_PRINT_QUEUES];
 
-  ULONG defaultQueue = 0;
-  for (ULONG cnt = 0; cnt < newQueueCount; cnt++) {
-    if (pPQI3Buf[cnt].fsType & PRQ3_TYPE_APPDEFAULT)
-      defaultQueue = cnt;
+  // Since we have native GPI printing temporarily disabled (see #171), we rely
+  // on internal PostScript support in Cairo (former print.os2.postscript.use_builtin
+  // pref) which, in turn, requires the native printer driver to support PS.
+  // It makes no sense to show any other printers in the FF UI since printing
+  // to them will always fail with a vague "An error occurred while printing"
+  // message box. Thus, we hide other printers from the UI.
 
+  ULONG defaultQueue = 0;
+  ULONG newIdx = 0;
+  for (ULONG cnt = 0; cnt < newQueueCount; cnt++) {
     BOOL found = FALSE;
     for (ULONG index = 0; index < mQueueCount && !found; index++) {
        // Compare printer from requeried list with what's already in
@@ -227,14 +259,36 @@ DBGN();
          if (!strcmp(pPQI3Buf[cnt].pszPrinters, mPQBuf[index]->PrinterName()) &&
              !strcmp(pPQI3Buf[cnt].pszDriverName, mPQBuf[index]->FullName())) {
            found = TRUE;
-           tmpBuf[cnt] = mPQBuf[index];
+           tmpBuf[newIdx] = mPQBuf[index];
            mPQBuf[index] = 0;
          }
        }
     }
-    if (!found)
-       tmpBuf[cnt] = new os2PrintQ(&pPQI3Buf[cnt]);
+    if (!found) {
+      os2PrintQ *pq = new os2PrintQ(&pPQI3Buf[cnt]);
+      HDC hdc = pq->OpenHDC();
+      if (!hdc) {
+        DBGM("OpenHDC failed");
+        delete pq;
+        continue;
+      }
+      long driverType;
+      if (!DevQueryCaps(hdc, CAPS_TECHNOLOGY, 1, &driverType))
+        driverType = 0;
+      DevCloseDC(hdc);
+      if (driverType != CAPS_TECH_POSTSCRIPT) {
+        delete pq;
+        continue;
+      }
+      tmpBuf[newIdx] = pq;
+    }
+    if (pPQI3Buf[cnt].fsType & PRQ3_TYPE_APPDEFAULT)
+      defaultQueue = newIdx;
+    ++newIdx;
   }
+
+  // adjust the number of printers we accepted
+  newQueueCount = newIdx;
 
   for (ULONG index = 0; index < newQueueCount; index++) {
     if (mPQBuf[index] != 0)

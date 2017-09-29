@@ -57,7 +57,7 @@ gfxOS2Surface::gfxOS2Surface(HWND aWnd)
     RecordMemoryUsed(mSize.width * mSize.height * 4 + OS2_OVERHEAD);
 }
 
-#if 0 // This is temporariy disabled, see #147.
+#if 0 // This is temporariy disabled, see #171.
 gfxOS2Surface::gfxOS2Surface(HDC aDC, const mozilla::gfx::IntSize& aSize, int aPreview)
     : mWnd(0), mDC(aDC), mPS(0), mSize(aSize), mSurfType(os2Print)
 {
