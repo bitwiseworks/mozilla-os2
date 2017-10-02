@@ -390,14 +390,15 @@ data to be saved to the given file.
 
 Note that if you don't have any Postscript printer supported by OS/2 or simply
 don't have any printer at all but still want to print to PDF using the described
-method, you will have to install a fake printer. Just install a new printer
-using legacy drives in the Printers folder and make sure you select a Postscript
-(PSCRIPT) driver for it. You may have to install a new PSCRIPT driver if you
-don't already have one in the list. Just select any printer model supported by
-OS/2 when installing the driver - it doesn't matter as you will not actually
-print to that printer. For the same reason you may select any output port (or
-just check "Output to File"). The only printer job properties that will be used
-by the PDF generator are paper size and margins.
+method, you will need to install a generic PostScript printer (drivers for this
+printer are shipped with any OS/2 distribution including ArcaOS). Just go to the
+printer installation program and select "Generic PostScript Printer" from the
+list when installing a new printer driver (make sure that PSCRIPT is the driver
+used for this printer). Then select this newly installed driver and an output
+port for the new printer object and you are done. Note that you may select any
+output port for it (or simply check "Output to File") since you are not going
+to actually print to a physical device anyway. The only printer job properties
+that will be used by the PDF generator are paper size and margins.
 
 
 ===============================================================================
