@@ -116,17 +116,21 @@ application (ANPM). The following instructions describe the necessary steps.
    installation, rename it first (e.g. to 'firefox-old').  Do not let the new
    version install on top of the old one.
 
-5. Choose a directory where the Mozilla applications can store their profile
-   data, then add a line like this to CONFIG.SYS:
+5. Optional. Choose a directory where the Mozilla applications will store their
+   profile data, then add a line like this to CONFIG.SYS:
 
    SET MOZILLA_HOME=D:\Home
 
-   The first time you run any Mozilla application, it will create a 'Mozilla'
-   subdirectory in 'D:\Home' where your customized settings are saved.
+   The first time you run any Mozilla application, it will create a `Mozilla`
+   subdirectory in `D:\Home` where your customized settings are saved.
 
-   WARNING!!! Without "SET MOZILLA_HOME=", the 'Mozilla' subdirectory will be
-   created in the same directory as the program itself. This can make it very
-   hard to upgrade to new versions without deleting your customized settings.
+   By default, the `Mozilla` subdirectory is created in a directory specified
+   in the HOME environment variable.
+   
+   WARNING!!! Without `MOZILLA_HOME` or `HOME` environment variables, the
+   `Mozilla` subdirectory will be created in the same directory as the program
+   itself. This can make it very hard to upgrade to new versions without
+   deleting your customized settings.
 
 6. Optional. Use mozinst to create application icons on the Desktop. Download
    mozinit from:

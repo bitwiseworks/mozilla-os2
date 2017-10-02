@@ -1304,20 +1304,15 @@ nsXREDirProvider::GetUserDataDirectoryHome(nsIFile** aFile, bool aLocal)
 
   rv = NS_NewLocalFile(path, true, getter_AddRefs(localDir));
 #elif defined(XP_OS2)
-#if 0 /* For OS/2 we want to always use MOZILLA_HOME */
-  // we want an environment variable of the form
-  // FIREFOX_HOME, etc
-  if (!gAppData)
-    return NS_ERROR_FAILURE;
-  nsDependentCString envVar(nsDependentCString(gAppData->name));
-  envVar.Append("_HOME");
-  char *pHome = getenv(envVar.get());
-#endif
+  // Prefer MOZILLA_HOME for compatibility with old installs
   char *pHome = getenv("MOZILLA_HOME");
+  if (!pHome || !*pHome)
+    pHome = getenv("HOME");
   if (pHome && *pHome) {
     rv = NS_NewNativeLocalFile(nsDependentCString(pHome), true,
                                getter_AddRefs(localDir));
   } else {
+    // Fall back to the EXE directory
     PPIB ppib;
     PTIB ptib;
     char appDir[CCHMAXPATH];

@@ -878,11 +878,13 @@ GetSpecialSystemDirectory(SystemDirectories aSystemSystemDirectory,
     case OS2_HomeDirectory:
     {
       nsresult rv;
+      // Prefer MOZILLA_HOME for compatibility with old installs
       char *tPath = PR_GetEnv("MOZILLA_HOME");
+      if (!tPath || !*tPath)
+        tPath = PR_GetEnv("HOME");
       char buffer[CCHMAXPATH];
-      /* If MOZILLA_HOME is not set, use GetCurrentProcessDirectory */
-      /* To ensure we get a long filename system */
       if (!tPath || !*tPath) {
+        // Fall back to the EXE directory
         PPIB ppib;
         PTIB ptib;
         DosGetInfoBlocks( &ptib, &ppib);
