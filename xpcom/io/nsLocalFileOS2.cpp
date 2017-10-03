@@ -664,15 +664,44 @@ nsLocalFile::InitWithNativePath(const nsACString &filePath)
     char firstChar = *begin;
     char secondChar = *(++begin);
 
-    // just do a sanity check.  if it has any forward slashes, it is not
-    // a Native path.  Also, it must have a colon at after the first char.
-    if (FindCharInReadable('/', begin, end))
+    // Do a sanity check. Note that we treat forward slashes as legal path
+    // separators since many OS/2 software is based on Unix software and handles
+    // both kinds of separators perfectly well. We also support /@xyz paths on
+    // EMX becasue they are widely used in the UNIXROOT environment.
+    if ((((firstChar >= 'A' && firstChar <= 'Z') ||
+          (firstChar >= 'a' && firstChar <= 'z')) && secondChar == ':') ||
+        ((firstChar == '\\' || firstChar == '/') &&
+         (secondChar == '\\' || secondChar == '/'))
+#ifdef __EMX__
+        ||
+        (firstChar == '/' && secondChar == '@')
+#endif
+        )
+        ;
+    else
         return NS_ERROR_FILE_UNRECOGNIZED_PATH;
 
-    if (secondChar != ':' && (secondChar != '\\' || firstChar != '\\'))
-        return NS_ERROR_FILE_UNRECOGNIZED_PATH;
-
+#ifdef __EMX__
+    if (FindCharInReadable('/', --begin, end))
+    {
+        // Convert a unixroot path to a native path (this will also care about
+        // separators)
+        char path[PATH_MAX];
+        if (_fullpath(path, filePath.BeginReading(), PATH_MAX) == -1)
+            return NS_ERROR_FILE_UNRECOGNIZED_PATH;
+        mWorkingPath = path;
+    }
+    else
+    {
+      mWorkingPath = filePath;
+    }
+#else
     mWorkingPath = filePath;
+
+    // Convert path separators to the native format
+    mWorkingPath.ReplaceChar ('/', '\\');
+#endif
+
     // kill any trailing '\' provided it isn't the second char of DBCS
     int32_t len = mWorkingPath.Length() - 1;
     if (mWorkingPath[len] == '\\' && !::isleadbyte(mWorkingPath[len - 1]))
