@@ -56,7 +56,7 @@
 #define NS_MACOSX_USER_PLUGIN_DIR   "OSXUserPlugins"
 #define NS_MACOSX_LOCAL_PLUGIN_DIR  "OSXLocalPlugins"
 #define NS_MACOSX_JAVA2_PLUGIN_DIR  "OSXJavaPlugins"
-#elif XP_UNIX
+#elif defined(XP_UNIX) || (defined(XP_OS2) && defined(__EMX__))
 #define NS_SYSTEM_PLUGINS_DIR       "SysPlugins"
 #endif
 
@@ -197,16 +197,20 @@ nsAppFileLocationProvider::GetFile(const char* aProp, bool* aPersistent,
     rv = NS_ERROR_FAILURE;
 #endif
   }
-#ifdef XP_UNIX
+#if defined(XP_UNIX) || (defined(XP_OS2) && defined(__EMX__))
   else if (nsCRT::strcmp(aProp, NS_SYSTEM_PLUGINS_DIR) == 0) {
 #ifdef ENABLE_SYSTEM_EXTENSION_DIRS
     static const char* const sysLPlgDir =
+#if defined(XP_OS2) && defined(__EMX__)
+      "/@unixroot/usr/lib/mozilla/plugins";
+#else
 #if defined(HAVE_USR_LIB64_DIR) && defined(__LP64__)
       "/usr/lib64/mozilla/plugins";
 #elif defined(__OpenBSD__) || defined (__FreeBSD__)
       "/usr/local/lib/mozilla/plugins";
 #else
       "/usr/lib/mozilla/plugins";
+#endif
 #endif
     rv = NS_NewNativeLocalFile(nsDependentCString(sysLPlgDir),
                                false, getter_AddRefs(localFile));
@@ -583,7 +587,7 @@ nsAppFileLocationProvider::GetFiles(const char* aProp,
     };
     *aResult = new nsAppDirectoryEnumerator(this, keys);
 #else
-#ifdef XP_UNIX
+#if defined(XP_UNIX) || (defined(XP_OS2) && defined(__EMX__))
     static const char* keys[] = { nullptr, NS_USER_PLUGINS_DIR, NS_APP_PLUGINS_DIR, NS_SYSTEM_PLUGINS_DIR, nullptr };
 #else
     static const char* keys[] = { nullptr, NS_USER_PLUGINS_DIR, NS_APP_PLUGINS_DIR, nullptr };
