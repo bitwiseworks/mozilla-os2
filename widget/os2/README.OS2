@@ -60,19 +60,34 @@
 Mozilla is a complex product that uses a huge number of 3rd party libraries
 such as Cairo, FreeType, NSPR and many others. In order to provide better OS/2
 support for both Mozilla and these libraries we build them as dynamically
-loadable modules (DLLs) which are maintained and distributed separately and
+loadable modules (DLLs), which are maintained and distributed separately and
 which Mozilla executables are simply linked with. This approach also allows
-other applications use the same library modules which, among other benefits,
+other applications to use the same library modules which, among other benefits,
 reduces the overall memory footprint and saves other vital system resources.
 
 As a side effect of this approach, Mozilla applications got so many external
 dependencies that it is nearly impossible for the end user to install all of
-them from the ZIP files manually — and even naming them all in this file
+them from the ZIP files manually - and even naming them all in this file
 would be a very hard task. For this reason, starting from the release of
-Firfox version 38.8.0 (Beta 7), manual installation of Mozilla requirements
+Firefox version 38.8.0 (Beta 7), manual installation of Mozilla requirements
 is no longer supported. The only supported way of installing all the
 requirements now is the YUM command line tool or the Arca Noae Package Manager
-application (ANPM). The following instructions describe the necessary steps.
+application (ANPM), which is part of ArcaOS (an OS/2 and eComstation successor
+distribution by Arca Noae which you can obtain from http://arcanoae.com).
+
+Moreover, starting from the release of Firefox version 45.9.0 GA, a separate
+ZIP distribution of Firefox is no longer maintained. There are now two supported
+methods of installing Firefox:
+
+- From an RPM repository using YUM or ANPM (this method requires a valid ArcaOS
+  Software Subscription, visit http://arcanoae.com for details). This is the
+  preferred and the easiest way to install Firefox including all its
+  dependencies and to keep everything updated with a single mouse click.
+
+- From a ZIP archive automatically generated from the RPM distribution. See
+  below for details.
+
+The following instruction describe the steps necessary for both methods.
 
 1. Install the RPM/YUM environment. The simplest way to do so is to download
    and install ANPM as described here:
@@ -84,39 +99,21 @@ application (ANPM). The following instructions describe the necessary steps.
 
    http://trac.netlabs.org/rpm/wiki/RpmInstall.
 
-2. Install the following packages needed by Firefox using either YUM or ANPM:
+   Note that you should skip this step if you already have ArcaOS installed,
+   because it already includes the RPM/YUM environment and the ANPM tool.
 
-   libstdc++6 nspr nss libicu pixman cairo pango fontconfig freetype libkai
-   libvpx libjpeg-turbo libpng zlib bzip2 hunspell libcx
+2. If you have an ArcaOS subscription, then simply install a package named
+   `firefox` using the ANPM GUI or by executing `yum install firefox` from the
+   command line. All Firefox dependencies will be downloaded and installed
+   (or updated) automatically.
 
-   If you use YUM, simply type `yum install <package_list>` on the command line
-   and press Enter. For ANPM, select "YUM -> Quick install..." from the menu,
-   copy the given package list into the entry field and press Enter. The
-   packages and all their dependencies will be downloaded and installed
-   automatically. Note that if some of these packages are already installed,
-   the install command will simply do nothing for them.
+   If you use a ZIP archive, you may unpack its contents to a directory of your
+   choice. Numerous Firefox dependencies are not installed in this case, so
+   you will have to install them manually using ANPM or `yum install PACKAGES`
+   followed by a `yum update`. The list of RPM packages required by Firefox is
+   contained in a file named RPM_REQUIREMENTS inside the ZIP archive.
 
-3. Update the packages that you may have already installed to their latest
-   versions (which may be required by the newest Mozilla application release)
-   by either executing `yum update` on the command line or selecting
-   "YUM -> Update all" from the menu in ARPM. This will automatically download
-   and install updates (including the updates to the dependent packages, if
-   necessary). Note that if some of the packages are already at their latest
-   versions, the update command will simply do nothing for them.
-
-4. Unzip the Mozilla application archive into any directory of your choice.
-   This will create a subdirectory with the same name as the program. For
-   example:
-
-   unzip firefox-38.8.0.en-US.os2.zip -d D:\Apps
-
-   This command will install Firefox in D:\Apps\firefox.
-
-   WARNING!!! If you already have a directory with the same name from an older
-   installation, rename it first (e.g. to 'firefox-old').  Do not let the new
-   version install on top of the old one.
-
-5. Optional. Choose a directory where the Mozilla applications will store their
+3. Optional. Choose a directory where the Mozilla applications will store their
    profile data, then add a line like this to CONFIG.SYS:
 
    SET MOZILLA_HOME=D:\Home
@@ -126,18 +123,13 @@ application (ANPM). The following instructions describe the necessary steps.
 
    By default, the `Mozilla` subdirectory is created in a directory specified
    in the HOME environment variable.
-   
+
    WARNING!!! Without `MOZILLA_HOME` or `HOME` environment variables, the
    `Mozilla` subdirectory will be created in the same directory as the program
    itself. This can make it very hard to upgrade to new versions without
    deleting your customized settings.
 
-6. Optional. Use mozinst to create application icons on the Desktop. Download
-   mozinit from:
-
-   http://hobbes.nmsu.edu/h-search.php?key=mozinst
-
-7. Optional. You may want to install some of the items listed in the "OS/2
+4. Optional. You may want to install some of the items listed in the "OS/2
    Add-ons" section below to improve the application's performance.
 
 
@@ -158,10 +150,10 @@ A REXX script is available to restore compatibility.
   - unzip it into your profile directory
   - make backups of places.sqlite and cookies.sqlite
 
-* To restore compatibilty BEFORE running an earlier version:
+* To restore compatibility BEFORE running an earlier version:
   - run the script from your profile directory.
 
-* To restore compatibilty AFTER running an earlier version
+* To restore compatibility AFTER running an earlier version
   (i.e. you forgot to run the script before):
   - look for 'places.sqlite.corrupt' and 'cookies.sqlite.corrupt' in your
     profile directory,   If they appear to be the right size, remove the
@@ -187,7 +179,7 @@ The solution for dll conflicts is "SET LIBPATHSTRICT=T".  There are several
 ways to set this:
 
 * modify your program object:
-    Path and file name: *
+    Path and filename: *
     Parameters:         /c set LIBPATHSTRICT=T & seamonkey.exe "%*"
     Working directory:  x:\mozilla.org\seamonkey
 
@@ -203,9 +195,9 @@ ways to set this:
     Now, change your program object start it rather than the original exe.
     (Use 'LK' instead of 'L' if you want the icon to show it's "in-use".)
 
-Note:  For best performance of most browser plugins, you may want
-       to omit LIBPATHSTRICT for your primary browser and only set
-       it for your other Mozilla apps.
+Note:  Starting with Firefox 45.9.0 GA, it is not necessary to set LIBPATHSTRICT
+       manually or using the Run! utility for it as this is done automatically
+       by firefox.exe when loading XUL.DLL and other Mozilla DLLs.
 
 
 ===============================================================================
@@ -225,7 +217,7 @@ Note:  For best performance of most browser plugins, you may want
     by WarpSans.  The app will use it by default if it's available.
     Many users prefer the bitmapped version as it looks cleaner at small
     point sizes.
-       http://www.altsan.org/creative/fonts/workplace/#wpsu
+        http://www.altsan.org/creative/fonts/workplace/#wpsu
 
 * RWS - WPS Integration
     With RWS, you can open downloads using their default WPS association
@@ -301,6 +293,12 @@ Very few users have any need for any of these:
     saving attachments or using a default WPS application as a helper
     application.
 
+* MOZ_DISABLE_PLUGIN_OOP=1
+    This disables OOP (out-of-process) mode for binary NP plugins. Note that this
+    is only intended to be used for testing purposes as having plugins run in the
+    browser process is insecure because a crash or a hang in a defective plugin
+    will crash and hang the whole browser session in such a case.
+
 The following enable additional logging:
 
 * MOZ_CONSOLE_LOG=1
@@ -364,7 +362,7 @@ turned off.
 
 Note that all printers using non-Postscript drivers (e.g. LASERJET, OMNI,
 IBMPCL5, etc.) are hidden from the application's Print dialog to avoid the
-confusion of always getting "An error occured while printing" message when
+confusion of always getting "An error occurred while printing" message when
 attempting to print to such a device. If there are no Postscript printers on
 your system (or no configured printers at all), you will see "No printers
 available" in the printer selection drop-down box in the Print dialog.
@@ -373,7 +371,7 @@ It is recommended to set up your printer as a CUPS printer rather than use the
 native Postscript driver, even when it's available, because in most cases using
 CUPS will result in better print-out quality. Note that by default any printer-
 specific features specified in the native printer job properties dialog are
-stripped out because CUPS may not recognize them. If you use a prnter with the
+stripped out because CUPS may not recognize them. If you use a printer with the
 native Postscript driver without CUPS, you may wish to disable such stripping.
 This can be done by setting the `print.os2.postscript.use_ibmnull` preference to
 `false` in the preference editor which can be opened by typing `about:config`
@@ -470,7 +468,7 @@ posted to other forums may not be seen by the developers.
     Restart the app in "safe mode" (use "/safe-mode" on the command line).
     If it appears to be stable in safe-mode, a plugin may be the cause.
     Disable all plugins, then restart normally.  If it remains stable,
-    reenable one plugin at a time until the problem returns.
+    re-enable one plugin at a time until the problem returns.
 
 * Program beeps several times then crashes
     The beeps simply indicate that Exceptq is installed and is creating
@@ -555,7 +553,7 @@ Main resources:
 * Mozilla for OS/2 Issue Tracker & Bug Reports
     https://github.com/bitwiseworks/mozilla-os2/issues
 
-Seamonkey and Thunderbird builds (not supported by bww bitwiseworks GmbH):
+Seamonkey and Thunderbird builds (not supported by bww bitwise works GmbH):
 
 * Comm-Central (SeaMonkey and Thunderbird) for OS/2
     https://bitbucket.org/dryeo
@@ -647,16 +645,16 @@ Additional information:
 -- Acknowledgements -----------------------------------------------------------
 ===============================================================================
 
-The Mozilla for eCS (OS/2) project is currently supported and maintained by the
-staff of bww bitwiseworks GmbH:
+The Mozilla for OS/2 and OS/2 based systems project is currently supported and
+maintained by the staff of bww bitwise works GmbH:
 
 - Dmitriy Kuminov (developer)
 - Silvan Scherrer (project manager)
 
-bww bitwiseworks GmbH would like to thank the following people for their
-prior work on Mozilla for eCS (OS/2). We might not share all your opinions,
-however we still appreciate your work, contributions and input (and will do
-so in the future):
+bww bitwise works GmbH would like to thank the following people for their
+prior work on Mozilla for OS/2 and OS/2 based systems. We might not share all
+your opinions, however we still appreciate your work, contributions and input
+(and will do so in the future):
 
 - Mensys BV
 - Mike Kaply

@@ -5,6 +5,72 @@ in the Mozilla product series from release to release.
 CHANGES
 
 
+Firefox 45.9.0 GA (2017-10-04)
+
+  - Update Firefox to latest version 45.9.0 ESR (including many upstream and
+    OS/2 fixes and improvements) and switch project status to GA (general
+    availability) due to reaching application stability suitable for use by
+    general public. About 40 distinct bugs were fixed for this release.
+
+  - Switch to RPM distribution and discontinue a separate ZIP distribution
+    (ZIP packages automatically generated from RPM packages are still
+    available).
+
+  - Make FFmpeg DLLs loadable again (45.5.0 Beta 8 regression).
+
+  - Fix crashes when changing mouse cursor shape.
+
+  - Fix delayed response/choppy window scrolling (45.5.0 Beta 8 regression).
+
+  - Fix command line parsing errors when handling path separators
+    (38.8.0 Beta 7 regression).
+
+  - Fix crashes when copy-pasting rich text from OpenOffice.
+
+  - Fix 100% CPU load from plugin-container.exe.
+
+  - Make binary NP plugins requiring proper process environment (e.g. Awget)
+    work.
+
+  - Make binary NP plugins that do custom painting (e.g. Flash) work in OOP
+    mode (for Flash this also requires a fixed Odin and a fresh Flash wrapper
+    build). Note that OOP (out-of-process) mode for plugins is always on
+    since version 45.
+
+  - Read binary NP plugin DLL properties w/o loading it for execution, which
+    improves security as of the main Firefox process by disallowing execution
+    of arbitrary code.
+
+  - Prevent possible doubled paint operations in browser windows.
+
+  - Make full-screen mode activated by F11 work (45.5.0 Beta 8 regression).
+
+  - Fix garbled national characters when using Firefox Sync with Windows,
+    Linux and macOS machines.
+
+  - Make printing from the internal PDF viewer work.
+
+  - Replace too generic "An error occurred while printing" error with "No
+    printers available" in the Print dialog when no printers are configured in
+    the system.
+
+  - Use the built-in PostScript generator when printing. This provides better
+    printing quality and also restricts the printer list in the Print dialog to
+    only PostScript printers, as other types of printers are not supported
+    by Firefox anyway.
+
+  - Support the HOME environment variable as a profile directory (used when
+    MOZILLA_HOME is absent).
+
+  - Support forward slashes and UNIXROOT paths (starting with `/@`) everywhere
+    in Firefox (including the values of HOME and MOZILLA_HOME environment
+    variables).
+
+  - Load binary NP plugins from a `/@unixroot/usr/mozilla/plugins` directory
+    (intended for installing plugins using RPM/YUM) in addition to
+    MOZ_PLUGIN_PATH.
+
+
 Firefox 45.5.0 Beta 8 (2017-05-19)
 
    - Update Firefox to latest version 45.5.0 ESR (including many fixes to
