@@ -1,5 +1,6 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
+"use strict";
 
 /**
  * Tests that when constructing FrameNodes, if optimization data is available,
@@ -13,7 +14,8 @@ function run_test() {
 
 add_task(function test() {
   let { ThreadNode } = require("devtools/client/performance/modules/logic/tree-model");
-  let root = getFrameNodePath(new ThreadNode(gThread, { startTime: 0, endTime: 30 }), "(root)");
+  let root = getFrameNodePath(new ThreadNode(gThread, { startTime: 0,
+                                                        endTime: 30 }), "(root)");
 
   let A = getFrameNodePath(root, "A");
   let B = getFrameNodePath(A, "B");
@@ -100,12 +102,12 @@ var gRawSite1 = {
     mirType: uniqStr("Object"),
     site: uniqStr("B (http://foo/bar:10)"),
     typeset: [{
-        keyedBy: uniqStr("constructor"),
-        name: uniqStr("Foo"),
-        location: uniqStr("B (http://foo/bar:10)")
+      keyedBy: uniqStr("constructor"),
+      name: uniqStr("Foo"),
+      location: uniqStr("B (http://foo/bar:10)")
     }, {
-        keyedBy: uniqStr("primitive"),
-        location: uniqStr("self-hosted")
+      keyedBy: uniqStr("primitive"),
+      location: uniqStr("self-hosted")
     }]
   }],
   attempts: {
@@ -140,7 +142,7 @@ var gRawSite2 = {
   }
 };
 
-function serialize (x) {
+function serialize(x) {
   return JSON.parse(JSON.stringify(x));
 }
 
@@ -150,25 +152,25 @@ gThread.frameTable.data.forEach((frame) => {
 
   let l = gThread.stringTable[frame[LOCATION_SLOT]];
   switch (l) {
-  case "A":
-    frame[OPTIMIZATIONS_SLOT] = serialize(gRawSite1);
-    break;
+    case "A":
+      frame[OPTIMIZATIONS_SLOT] = serialize(gRawSite1);
+      break;
   // Rename some of the location sites so we can register different
   // frames with different opt sites
-  case "B_LEAF_1":
-    frame[OPTIMIZATIONS_SLOT] = serialize(gRawSite2);
-    frame[LOCATION_SLOT] = uniqStr("B");
-    break;
-  case "B_LEAF_2":
-    frame[OPTIMIZATIONS_SLOT] = serialize(gRawSite1);
-    frame[LOCATION_SLOT] = uniqStr("B");
-    break;
-  case "B_NOTLEAF":
-    frame[OPTIMIZATIONS_SLOT] = serialize(gRawSite1);
-    frame[LOCATION_SLOT] = uniqStr("B");
-    break;
-  case "C":
-    frame[OPTIMIZATIONS_SLOT] = serialize(gRawSite1);
-    break;
+    case "B_LEAF_1":
+      frame[OPTIMIZATIONS_SLOT] = serialize(gRawSite2);
+      frame[LOCATION_SLOT] = uniqStr("B");
+      break;
+    case "B_LEAF_2":
+      frame[OPTIMIZATIONS_SLOT] = serialize(gRawSite1);
+      frame[LOCATION_SLOT] = uniqStr("B");
+      break;
+    case "B_NOTLEAF":
+      frame[OPTIMIZATIONS_SLOT] = serialize(gRawSite1);
+      frame[LOCATION_SLOT] = uniqStr("B");
+      break;
+    case "C":
+      frame[OPTIMIZATIONS_SLOT] = serialize(gRawSite1);
+      break;
   }
 });

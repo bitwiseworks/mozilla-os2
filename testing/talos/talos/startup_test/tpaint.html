@@ -2,6 +2,7 @@
 <meta charset='utf-8'>
 <script language="JavaScript" type="text/javascript" src="../scripts/MozillaFileLogger.js"></script>
 <script language="JavaScript" type="text/javascript" src="../scripts/Profiler.js"></script>
+<script language="JavaScript" type="text/javascript" src="chrome://talos-powers-content/content/TalosPowersContent.js"></script>
 <script language="JavaScript" type="text/javascript" src="../tests/quit.js"></script>
 <script>
 var OPENER_DELAY = 1000; // ms delay between tests
@@ -35,13 +36,20 @@ function scheduleNextWindow() {
     window.setTimeout(reportTimes, 0);
     return;
   }
+
+  TalosPowersContent.forceCCAndGC();
   window.setTimeout(openWindow, OPENER_DELAY);
 }
 
 function calcMedian( numbers ) {
-  numbers.sort( function (a,b){ return a-b; } );
-  var n = Math.floor( numbers.length / 2 );
-  return numbers.length % 2 ? numbers[n] : ( numbers[n-1] + numbers[n] ) / 2;
+  // Avoid changing the original array.
+  var sortedNumbers = Array.from(numbers);
+  sortedNumbers.sort( function (a,b){ return a-b; } );
+  var n = Math.floor( sortedNumbers.length / 2 );
+  if (sortedNumbers.length % 2) {
+    return sortedNumbers[n];
+  }
+  return ( sortedNumbers[n-1] + sortedNumbers[n] ) / 2;
 }
 
 function reportTimes() {

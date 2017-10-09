@@ -8,12 +8,16 @@
 
 #include "mozilla/MemoryReporting.h"
 #include "nsIURI.h"
+#include "nsIURIWithQuery.h"
 #include "nsISerializable.h"
 #include "nsString.h"
 #include "nsIClassInfo.h"
 #include "nsIMutable.h"
 #include "nsISizeOf.h"
 #include "nsIIPCSerializableURI.h"
+
+namespace mozilla {
+namespace net {
 
 #define NS_THIS_SIMPLEURI_IMPLEMENTATION_CID         \
 { /* 0b9bb0c2-fee6-470b-b9b9-9fd9462b5e19 */         \
@@ -23,12 +27,13 @@
     {0xb9, 0xb9, 0x9f, 0xd9, 0x46, 0x2b, 0x5e, 0x19} \
 }
 
-class nsSimpleURI : public nsIURI,
-                    public nsISerializable,
-                    public nsIClassInfo,
-                    public nsIMutable,
-                    public nsISizeOf,
-                    public nsIIPCSerializableURI
+class nsSimpleURI
+    : public nsIURIWithQuery
+    , public nsISerializable
+    , public nsIClassInfo
+    , public nsIMutable
+    , public nsISizeOf
+    , public nsIIPCSerializableURI
 {
 protected:
     virtual ~nsSimpleURI();
@@ -36,6 +41,7 @@ protected:
 public:
     NS_DECL_ISUPPORTS
     NS_DECL_NSIURI
+    NS_DECL_NSIURIWITHQUERY
     NS_DECL_NSISERIALIZABLE
     NS_DECL_NSICLASSINFO
     NS_DECL_NSIMUTABLE
@@ -52,14 +58,15 @@ public:
     // - nsJSURI: mBaseURI
     // - nsSimpleNestedURI: mInnerURI
     // - nsBlobURI: mPrincipal
-    virtual size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const override;
-    virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const override;
+    virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override;
+    virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override;
 
 protected:
     // enum used in a few places to specify how .ref attribute should be handled
     enum RefHandlingEnum {
         eIgnoreRef,
-        eHonorRef
+        eHonorRef,
+        eReplaceRef
     };
 
     // Helper to share code between Equals methods.
@@ -72,20 +79,32 @@ protected:
     // the passed-in other for QI to our CID.
     bool EqualsInternal(nsSimpleURI* otherUri, RefHandlingEnum refHandlingMode);
 
+    // Used by StartClone (and versions of StartClone in subclasses) to
+    // handle the ref in the right way for clones.
+    void SetRefOnClone(nsSimpleURI* url, RefHandlingEnum refHandlingMode,
+                       const nsACString& newRef);
+
     // NOTE: This takes the refHandlingMode as an argument because
     // nsSimpleNestedURI's specialized version needs to know how to clone
     // its inner URI.
-    virtual nsSimpleURI* StartClone(RefHandlingEnum refHandlingMode);
+    virtual nsSimpleURI* StartClone(RefHandlingEnum refHandlingMode,
+                                    const nsACString& newRef);
 
     // Helper to share code between Clone methods.
     virtual nsresult CloneInternal(RefHandlingEnum refHandlingMode,
+                                   const nsACString &newRef,
                                    nsIURI** clone);
     
     nsCString mScheme;
     nsCString mPath; // NOTE: mPath does not include ref, as an optimization
     nsCString mRef;  // so that URIs with different refs can share string data.
+    nsCString mQuery;  // so that URLs with different querys can share string data.
     bool mMutable;
     bool mIsRefValid; // To distinguish between empty-ref and no-ref.
+    bool mIsQueryValid; // To distinguish between empty-query and no-query.
 };
+
+} // namespace net
+} // namespace mozilla
 
 #endif // nsSimpleURI_h__

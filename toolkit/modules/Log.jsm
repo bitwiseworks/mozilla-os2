@@ -102,7 +102,7 @@ this.Log = {
         aObject.QueryInterface(Ci[i]);
         interfaces.push(i);
       }
-      catch(ex) {}
+      catch (ex) {}
     }
 
     return interfaces;
@@ -121,7 +121,7 @@ this.Log = {
           continue;
         properties.push(p + " = " + aObject[p]);
       }
-      catch(ex) {
+      catch (ex) {
         properties.push(p + " = " + ex);
       }
     }
@@ -350,7 +350,8 @@ Logger.prototype = {
       throw "An action is required when logging a structured message.";
     }
     if (!params) {
-      return this.log(this.level, undefined, {"action": action});
+      this.log(this.level, undefined, {"action": action});
+      return;
     }
     if (typeof(params) != "object") {
       throw "The params argument is required to be an object.";
@@ -575,6 +576,7 @@ BasicFormatter.prototype = {
       }
       return textParts.join(': ');
     }
+    return undefined;
   },
 
   format: function BF_format(message) {
@@ -634,7 +636,7 @@ StructuredFormatter.prototype = {
 function isError(aObj) {
   return (aObj && typeof(aObj) == 'object' && "name" in aObj && "message" in aObj &&
           "fileName" in aObj && "lineNumber" in aObj && "stack" in aObj);
-};
+}
 
 /*
  * Parameter Formatters
@@ -832,7 +834,7 @@ StorageStreamAppender.prototype = {
     }
     try {
       this.outputStream.writeString(formatted + "\n");
-    } catch(ex) {
+    } catch (ex) {
       if (ex.result == Cr.NS_BASE_STREAM_CLOSED) {
         // The underlying output stream is closed, so let's open a new one
         // and try again.
@@ -899,6 +901,7 @@ FileAppender.prototype = {
         if (this._file) {
           return this._file.write(array);
         }
+        return undefined;
       });
     }
   },
@@ -942,6 +945,7 @@ BoundedFileAppender.prototype = {
       this._removeFilePromise = null;
       this.doAppend(formatted);
     });
+    return undefined;
   },
 
   reset: function () {

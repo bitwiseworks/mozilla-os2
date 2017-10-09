@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2006 The Android Open Source Project
  *
@@ -6,16 +5,23 @@
  * found in the LICENSE file.
  */
 
-
 #ifndef SkXfermode_DEFINED
 #define SkXfermode_DEFINED
 
-#include "SkFlattenable.h"
+#include "SkBlendMode.h"
 #include "SkColor.h"
+#include "SkFlattenable.h"
 
-class GrEffect;
+class GrFragmentProcessor;
 class GrTexture;
+class GrXPFactory;
+class SkRasterPipeline;
 class SkString;
+
+struct SkArithmeticParams;
+
+struct SkPM4f;
+typedef SkPM4f (*SkXfermodeProc4f)(const SkPM4f& src, const SkPM4f& dst);
 
 /** \class SkXfermode
  *
@@ -30,8 +36,6 @@ class SkString;
  */
 class SK_API SkXfermode : public SkFlattenable {
 public:
-    SK_DECLARE_INST_COUNT(SkXfermode)
-
     virtual void xfer32(SkPMColor dst[], const SkPMColor src[], int count,
                         const SkAlpha aa[]) const;
     virtual void xfer16(uint16_t dst[], const SkPMColor src[], int count,
@@ -56,29 +60,6 @@ public:
         kCoeffCount
     };
 
-    /** If the xfermode can be expressed as an equation using the coefficients
-        in Coeff, then asCoeff() returns true, and sets (if not null) src and
-        dst accordingly.
-
-            result = src_coeff * src_color + dst_coeff * dst_color;
-
-        As examples, here are some of the porterduff coefficients
-
-        MODE        SRC_COEFF       DST_COEFF
-        clear       zero            zero
-        src         one             zero
-        dst         zero            one
-        srcover     one             isa
-        dstover     ida             one
-     */
-    virtual bool asCoeff(Coeff* src, Coeff* dst) const;
-
-    /**
-     *  The same as calling xfermode->asCoeff(..), except that this also checks
-     *  if the xfermode is NULL, and if so, treats it as kSrcOver_Mode.
-     */
-    static bool AsCoeff(const SkXfermode*, Coeff* src, Coeff* dst);
-
     /** List of predefined xfermodes.
         The algebra for the modes uses the following symbols:
         Sa, Sc  - source alpha and color
@@ -94,15 +75,15 @@ public:
         kClear_Mode,    //!< [0, 0]
         kSrc_Mode,      //!< [Sa, Sc]
         kDst_Mode,      //!< [Da, Dc]
-        kSrcOver_Mode,  //!< [Sa + Da - Sa*Da, Rc = Sc + (1 - Sa)*Dc]
-        kDstOver_Mode,  //!< [Sa + Da - Sa*Da, Rc = Dc + (1 - Da)*Sc]
+        kSrcOver_Mode,  //!< [Sa + Da * (1 - Sa), Sc + Dc * (1 - Sa)]
+        kDstOver_Mode,  //!< [Da + Sa * (1 - Da), Dc + Sc * (1 - Da)]
         kSrcIn_Mode,    //!< [Sa * Da, Sc * Da]
-        kDstIn_Mode,    //!< [Sa * Da, Sa * Dc]
+        kDstIn_Mode,    //!< [Da * Sa, Dc * Sa]
         kSrcOut_Mode,   //!< [Sa * (1 - Da), Sc * (1 - Da)]
         kDstOut_Mode,   //!< [Da * (1 - Sa), Dc * (1 - Sa)]
-        kSrcATop_Mode,  //!< [Da, Sc * Da + (1 - Sa) * Dc]
-        kDstATop_Mode,  //!< [Sa, Sa * Dc + Sc * (1 - Da)]
-        kXor_Mode,      //!< [Sa + Da - 2 * Sa * Da, Sc * (1 - Da) + (1 - Sa) * Dc]
+        kSrcATop_Mode,  //!< [Da, Sc * Da + Dc * (1 - Sa)]
+        kDstATop_Mode,  //!< [Sa, Dc * Sa + Sc * (1 - Da)]
+        kXor_Mode,      //!< [Sa + Da - 2 * Sa * Da, Sc * (1 - Da) + Dc * (1 - Sa)]
         kPlus_Mode,     //!< [Sa + Da, Sc + Dc]
         kModulate_Mode, // multiplies all components (= alpha and color)
 
@@ -134,6 +115,9 @@ public:
      * Gets the name of the Mode as a string.
      */
     static const char* ModeName(Mode);
+    static const char* ModeName(SkBlendMode mode) {
+        return ModeName(Mode(mode));
+    }
 
     /**
      *  If the xfermode is one of the modes in the Mode enum, then asMode()
@@ -147,6 +131,9 @@ public:
      *  if the xfermode is NULL, and if so, treats it as kSrcOver_Mode.
      */
     static bool AsMode(const SkXfermode*, Mode* mode);
+    static bool AsMode(const sk_sp<SkXfermode>& xfer, Mode* mode) {
+        return AsMode(xfer.get(), mode);
+    }
 
     /**
      *  Returns true if the xfermode claims to be the specified Mode. This works
@@ -159,22 +146,57 @@ public:
      *  }
      */
     static bool IsMode(const SkXfermode* xfer, Mode mode);
+    static bool IsMode(const sk_sp<SkXfermode>& xfer, Mode mode) {
+        return IsMode(xfer.get(), mode);
+    }
 
     /** Return an SkXfermode object for the specified mode.
      */
-    static SkXfermode* Create(Mode mode);
+    static sk_sp<SkXfermode> Make(Mode);
+#ifdef SK_SUPPORT_LEGACY_XFERMODE_PTR
+    static SkXfermode* Create(Mode mode) {
+        return Make(mode).release();
+    }
+    SK_ATTR_DEPRECATED("use AsMode(...)")
+    static bool IsMode(const SkXfermode* xfer, Mode* mode) {
+        return AsMode(xfer, mode);
+    }
+#endif
+
+    /**
+     *  Skia maintains global xfermode objects corresponding to each BlendMode. This returns a
+     *  ptr to that global xfermode (or null if the mode is srcover). Thus the caller may use
+     *  the returned ptr, but it should leave its refcnt untouched.
+     */
+    static SkXfermode* Peek(SkBlendMode mode) {
+        sk_sp<SkXfermode> xfer = Make(mode);
+        if (!xfer) {
+            SkASSERT(SkBlendMode::kSrcOver == mode);
+            return nullptr;
+        }
+        SkASSERT(!xfer->unique());
+        return xfer.get();
+    }
+
+    static sk_sp<SkXfermode> Make(SkBlendMode bm) {
+        return Make((Mode)bm);
+    }
+
+    SkBlendMode blend() const {
+        Mode mode;
+        SkAssertResult(this->asMode(&mode));
+        return (SkBlendMode)mode;
+    }
 
     /** Return a function pointer to a routine that applies the specified
         porter-duff transfer mode.
      */
     static SkXfermodeProc GetProc(Mode mode);
+    static SkXfermodeProc4f GetProc4f(Mode);
 
-    /** Return a function pointer to a routine that applies the specified
-        porter-duff transfer mode and srcColor to a 16bit device color. Note,
-        if the mode+srcColor might return a non-opaque color, then there is not
-        16bit proc, and this will return NULL.
-      */
-    static SkXfermodeProc16 GetProc16(Mode mode, SkColor srcColor);
+    virtual SkXfermodeProc4f getProc4f() const;
+
+    bool appendStages(SkRasterPipeline*) const;
 
     /**
      *  If the specified mode can be represented by a pair of Coeff, then return
@@ -184,50 +206,119 @@ public:
      */
     static bool ModeAsCoeff(Mode mode, Coeff* src, Coeff* dst);
 
-    SK_ATTR_DEPRECATED("use AsMode(...)")
-    static bool IsMode(const SkXfermode* xfer, Mode* mode) {
-        return AsMode(xfer, mode);
+    /**
+     * Returns whether or not the xfer mode can support treating coverage as alpha
+     */
+    virtual bool supportsCoverageAsAlpha() const;
+
+    /**
+     *  The same as calling xfermode->supportsCoverageAsAlpha(), except that this also checks if
+     *  the xfermode is NULL, and if so, treats it as kSrcOver_Mode.
+     */
+    static bool SupportsCoverageAsAlpha(const SkXfermode* xfer);
+    static bool SupportsCoverageAsAlpha(const sk_sp<SkXfermode>& xfer) {
+        return SupportsCoverageAsAlpha(xfer.get());
     }
 
-    /** A subclass may implement this factory function to work with the GPU backend. It is legal
-        to call this with all params NULL to simply test the return value. If effect is non-NULL
-        then the xfermode may optionally allocate an effect to return and the caller as *effect.
-        The caller will install it and own a ref to it. Since the xfermode may or may not assign
-        *effect, the caller should set *effect to NULL beforehand. background specifies the
-        texture to use as the background for compositing, and should be accessed in the effect's
-        fragment shader. If NULL, the effect should request access to destination color
-        (setWillReadDstColor()), and use that in the fragment shader (builder->dstColor()).
-     */
-    virtual bool asNewEffect(GrEffect** effect, GrTexture* background = NULL) const;
+    enum SrcColorOpacity {
+        // The src color is known to be opaque (alpha == 255)
+        kOpaque_SrcColorOpacity = 0,
+        // The src color is known to be fully transparent (color == 0)
+        kTransparentBlack_SrcColorOpacity = 1,
+        // The src alpha is known to be fully transparent (alpha == 0)
+        kTransparentAlpha_SrcColorOpacity = 2,
+        // The src color opacity is unknown
+        kUnknown_SrcColorOpacity = 3
+    };
 
-    /** Returns true if the xfermode can be expressed as coeffs (src, dst), or as an effect
-        (effect). This helper calls the asCoeff() and asNewEffect() virtuals. If the xfermode is
-        NULL, it is treated as kSrcOver_Mode. It is legal to call this with all params NULL to
-        simply test the return value.  effect, src, and dst must all be NULL or all non-NULL.
+    /**
+     * Returns whether or not the result of the draw with the xfer mode will be opaque or not. The
+     * input to this call is an enum describing known information about the opacity of the src color
+     * that will be given to the xfer mode.
      */
-    static bool AsNewEffectOrCoeff(SkXfermode*,
-                                   GrEffect** effect,
-                                   Coeff* src,
-                                   Coeff* dst,
-                                   GrTexture* background = NULL);
+    virtual bool isOpaque(SrcColorOpacity opacityType) const;
+
+    /**
+     *  The same as calling xfermode->isOpaque(...), except that this also checks if
+     *  the xfermode is NULL, and if so, treats it as kSrcOver_Mode.
+     */
+    static bool IsOpaque(const SkXfermode* xfer, SrcColorOpacity opacityType);
+    static bool IsOpaque(const sk_sp<SkXfermode>& xfer, SrcColorOpacity opacityType) {
+        return IsOpaque(xfer.get(), opacityType);
+    }
+    static bool IsOpaque(SkBlendMode, SrcColorOpacity);
+
+#if SK_SUPPORT_GPU
+    /** Used by the SkXfermodeImageFilter to blend two colors via a GrFragmentProcessor.
+        The input to the returned FP is the src color. The dst color is
+        provided by the dst param which becomes a child FP of the returned FP.
+        It is legal for the function to return a null output. This indicates that
+        the output of the blend is simply the src color.
+     */
+    virtual sk_sp<GrFragmentProcessor> makeFragmentProcessorForImageFilter(
+                                                            sk_sp<GrFragmentProcessor> dst) const;
+
+    /** A subclass must implement this factory function to work with the GPU backend.
+        The xfermode will return a factory for which the caller will get a ref. It is up
+        to the caller to install it. XferProcessors cannot use a background texture.
+      */
+    virtual sk_sp<GrXPFactory> asXPFactory() const;
+#endif
 
     SK_TO_STRING_PUREVIRT()
     SK_DECLARE_FLATTENABLE_REGISTRAR_GROUP()
     SK_DEFINE_FLATTENABLE_TYPE(SkXfermode)
 
+    enum D32Flags {
+        kSrcIsOpaque_D32Flag  = 1 << 0,
+        kSrcIsSingle_D32Flag  = 1 << 1,
+        kDstIsSRGB_D32Flag    = 1 << 2,
+    };
+    typedef void (*D32Proc)(const SkXfermode*, uint32_t dst[], const SkPM4f src[],
+                            int count, const SkAlpha coverage[]);
+    static D32Proc GetD32Proc(SkXfermode*, uint32_t flags);
+    static D32Proc GetD32Proc(const sk_sp<SkXfermode>& xfer, uint32_t flags) {
+        return GetD32Proc(xfer.get(), flags);
+    }
+
+    enum F16Flags {
+        kSrcIsOpaque_F16Flag  = 1 << 0,
+        kSrcIsSingle_F16Flag  = 1 << 1,
+    };
+    typedef void (*F16Proc)(const SkXfermode*, uint64_t dst[], const SkPM4f src[], int count,
+                            const SkAlpha coverage[]);
+    static F16Proc GetF16Proc(SkXfermode*, uint32_t flags);
+    static F16Proc GetF16Proc(const sk_sp<SkXfermode>& xfer, uint32_t flags) {
+        return GetF16Proc(xfer.get(), flags);
+    }
+
+    enum LCDFlags {
+        kSrcIsOpaque_LCDFlag    = 1 << 0,   // else src(s) may have alpha < 1
+        kSrcIsSingle_LCDFlag    = 1 << 1,   // else src[count]
+        kDstIsSRGB_LCDFlag      = 1 << 2,   // else l32 or f16
+    };
+    typedef void (*LCD32Proc)(uint32_t* dst, const SkPM4f* src, int count, const uint16_t lcd[]);
+    typedef void (*LCDF16Proc)(uint64_t* dst, const SkPM4f* src, int count, const uint16_t lcd[]);
+    static LCD32Proc GetLCD32Proc(uint32_t flags);
+    static LCDF16Proc GetLCDF16Proc(uint32_t) { return nullptr; }
+
+    virtual bool isArithmetic(SkArithmeticParams*) const { return false; }
+
 protected:
     SkXfermode() {}
-    explicit SkXfermode(SkReadBuffer& rb) : SkFlattenable(rb) {}
-
     /** The default implementation of xfer32/xfer16/xferA8 in turn call this
         method, 1 color at a time (upscaled to a SkPMColor). The default
-        implmentation of this method just returns dst. If performance is
+        implementation of this method just returns dst. If performance is
         important, your subclass should override xfer32/xfer16/xferA8 directly.
 
         This method will not be called directly by the client, so it need not
         be implemented if your subclass has overridden xfer32/xfer16/xferA8
     */
     virtual SkPMColor xferColor(SkPMColor src, SkPMColor dst) const;
+
+    virtual D32Proc onGetD32Proc(uint32_t flags) const;
+    virtual F16Proc onGetF16Proc(uint32_t flags) const;
+    virtual bool onAppendStages(SkRasterPipeline*) const;
 
 private:
     enum {

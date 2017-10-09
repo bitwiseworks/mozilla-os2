@@ -4,6 +4,8 @@
 
 "use strict";
 
+/* import-globals-from ../contentSearchUI.js */
+
 // The process of adding a new default snippet involves:
 //   * add a new entity to aboutHome.dtd
 //   * add a <span/> for it in aboutHome.xhtml
@@ -27,6 +29,10 @@ var searchText;
 var gInitialized = false;
 var gObserver = new MutationObserver(function (mutations) {
   for (let mutation of mutations) {
+    // The addition of the restore session button changes our width:
+    if (mutation.attributeName == "session") {
+      fitToWidth();
+    }
     if (mutation.attributeName == "snippetsVersion") {
       if (!gInitialized) {
         ensureSnippetsMapThen(loadSnippets);
@@ -41,6 +47,7 @@ window.addEventListener("pageshow", function () {
   // Delay search engine setup, cause browser.js::BrowserOnAboutPageLoad runs
   // later and may use asynchronous getters.
   window.gObserver.observe(document.documentElement, { attributes: true });
+  window.gObserver.observe(document.getElementById("launcher"), { attributes: true });
   fitToWidth();
   setupSearch();
   window.addEventListener("resize", fitToWidth);
@@ -152,8 +159,16 @@ function ensureSnippetsMapThen(aCallback)
     }
 
     let cache = new Map();
-    let cursorRequest = db.transaction(SNIPPETS_OBJECTSTORE_NAME)
-                          .objectStore(SNIPPETS_OBJECTSTORE_NAME).openCursor();
+    let cursorRequest;
+    try {
+      cursorRequest = db.transaction(SNIPPETS_OBJECTSTORE_NAME)
+                        .objectStore(SNIPPETS_OBJECTSTORE_NAME).openCursor();
+    } catch (ex) {
+      console.error(ex);
+      invokeCallbacks();
+      return;
+    }
+
     cursorRequest.onerror = function (event) {
       invokeCallbacks();
     }
@@ -205,6 +220,11 @@ var gContentSearchController;
 
 function setupSearch()
 {
+  // Set submit button label for when CSS background are disabled (e.g.
+  // high contrast mode).
+  document.getElementById("searchSubmit").value =
+    document.body.getAttribute("dir") == "ltr" ? "\u25B6" : "\u25C0";
+
   // The "autofocus" attribute doesn't focus the form element
   // immediately when the element is first drawn, so the
   // attribute is also used for styling when the page first loads.
@@ -260,13 +280,6 @@ function loadSnippets()
     // Try to update from network.
     let xhr = new XMLHttpRequest();
     xhr.timeout = 5000;
-    try {
-      xhr.open("GET", updateURL, true);
-    } catch (ex) {
-      showSnippets();
-      loadCompleted();
-      return;
-    }
     // Even if fetching should fail we don't want to spam the server, thus
     // set the last update time regardless its results.  Will retry tomorrow.
     gSnippetsMap.set("snippets-last-update", Date.now());
@@ -278,7 +291,14 @@ function loadSnippets()
       showSnippets();
       loadCompleted();
     };
-    xhr.send(null);
+    try {
+      xhr.open("GET", updateURL, true);
+      xhr.send(null);
+    } catch (ex) {
+      showSnippets();
+      loadCompleted();
+      return;
+    }
   } else {
     showSnippets();
     loadCompleted();

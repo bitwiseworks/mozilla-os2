@@ -9,9 +9,11 @@
 #include "MediaResource.h"
 #include "VideoUtils.h"
 #include "ImageContainer.h"
+#include "MediaPrefs.h"
 
 #include "nsPrintfCString.h"
 #include "mozilla/mozalloc.h"
+#include "mozilla/Mutex.h"
 #include <stdint.h>
 #include <algorithm>
 
@@ -23,13 +25,15 @@ namespace mozilla {
 //#define SEEK_LOGGING
 
 extern LazyLogModule gMediaDecoderLog;
-#define DECODER_LOG(x, ...) \
-  MOZ_LOG(gMediaDecoderLog, LogLevel::Debug, ("Decoder=%p " x, mDecoder, ##__VA_ARGS__))
 
-// Same workaround as MediaDecoderStateMachine.cpp.
-#define DECODER_WARN_HELPER(a, b) NS_WARNING b
-#define DECODER_WARN(x, ...) \
-  DECODER_WARN_HELPER(0, (nsPrintfCString("Decoder=%p " x, mDecoder, ##__VA_ARGS__).get()))
+// avoid redefined macro in unified build
+#undef FMT
+#undef DECODER_LOG
+#undef DECODER_WARN
+
+#define FMT(x, ...) "Decoder=%p " x, mDecoder, ##__VA_ARGS__
+#define DECODER_LOG(...) MOZ_LOG(gMediaDecoderLog, LogLevel::Debug,   (FMT(__VA_ARGS__)))
+#define DECODER_WARN(...) NS_WARNING(nsPrintfCString(FMT(__VA_ARGS__)).get())
 
 class VideoQueueMemoryFunctor : public nsDequeFunctor {
 public:
@@ -73,24 +77,20 @@ MediaDecoderReader::MediaDecoderReader(AbstractMediaDecoder* aDecoder)
   , mIgnoreAudioOutputFormat(false)
   , mHitAudioDecodeError(false)
   , mShutdown(false)
-  , mAudioDiscontinuity(false)
-  , mVideoDiscontinuity(false)
 {
   MOZ_COUNT_CTOR(MediaDecoderReader);
   MOZ_ASSERT(NS_IsMainThread());
-
-  if (mDecoder && mDecoder->DataArrivedEvent()) {
-    mDataArrivedListener = mDecoder->DataArrivedEvent()->Connect(
-      mTaskQueue, this, &MediaDecoderReader::NotifyDataArrived);
-  }
 }
 
 nsresult
 MediaDecoderReader::Init()
 {
+  if (mDecoder && mDecoder->DataArrivedEvent()) {
+    mDataArrivedListener = mDecoder->DataArrivedEvent()->Connect(
+      mTaskQueue, this, &MediaDecoderReader::NotifyDataArrived);
+  }
   // Dispatch initialization that needs to happen on that task queue.
-  nsCOMPtr<nsIRunnable> r = NS_NewRunnableMethod(this, &MediaDecoderReader::InitializationTask);
-  mTaskQueue->Dispatch(r.forget());
+  mTaskQueue->Dispatch(NewRunnableMethod(this, &MediaDecoderReader::InitializationTask));
   return InitInternal();
 }
 
@@ -138,25 +138,26 @@ size_t MediaDecoderReader::SizeOfAudioQueueInFrames()
   return mAudioQueue.GetSize();
 }
 
-nsresult MediaDecoderReader::ResetDecode()
+nsresult MediaDecoderReader::ResetDecode(TrackSet aTracks)
 {
-  VideoQueue().Reset();
-  AudioQueue().Reset();
+  if (aTracks.contains(TrackInfo::kVideoTrack)) {
+    VideoQueue().Reset();
+    mBaseVideoPromise.RejectIfExists(NS_ERROR_DOM_MEDIA_CANCELED, __func__);
+  }
 
-  mAudioDiscontinuity = true;
-  mVideoDiscontinuity = true;
-
-  mBaseAudioPromise.RejectIfExists(CANCELED, __func__);
-  mBaseVideoPromise.RejectIfExists(CANCELED, __func__);
+  if (aTracks.contains(TrackInfo::kAudioTrack)) {
+    AudioQueue().Reset();
+    mBaseAudioPromise.RejectIfExists(NS_ERROR_DOM_MEDIA_CANCELED, __func__);
+  }
 
   return NS_OK;
 }
 
-RefPtr<MediaDecoderReader::VideoDataPromise>
+RefPtr<MediaDecoderReader::MediaDataPromise>
 MediaDecoderReader::DecodeToFirstVideoData()
 {
   MOZ_ASSERT(OnTaskQueue());
-  typedef MediaDecoderReader::VideoDataPromise PromiseType;
+  typedef MediaDecoderReader::MediaDataPromise PromiseType;
   RefPtr<PromiseType::Private> p = new PromiseType::Private(__func__);
   RefPtr<MediaDecoderReader> self = this;
   InvokeUntil([self] () -> bool {
@@ -175,7 +176,7 @@ MediaDecoderReader::DecodeToFirstVideoData()
     p->Resolve(self->VideoQueue().PeekFront(), __func__);
   }, [p] () {
     // We don't have a way to differentiate EOS, error, and shutdown here. :-(
-    p->Reject(END_OF_STREAM, __func__);
+    p->Reject(NS_ERROR_DOM_MEDIA_END_OF_STREAM, __func__);
   });
 
   return p.forget();
@@ -188,6 +189,10 @@ MediaDecoderReader::UpdateBuffered()
   NS_ENSURE_TRUE_VOID(!mShutdown);
   mBuffered = GetBuffered();
 }
+
+void
+MediaDecoderReader::VisibilityChanged()
+{}
 
 media::TimeIntervals
 MediaDecoderReader::GetBuffered()
@@ -208,8 +213,6 @@ MediaDecoderReader::GetBuffered()
 RefPtr<MediaDecoderReader::MetadataPromise>
 MediaDecoderReader::AsyncReadMetadata()
 {
-  typedef ReadMetadataFailureReason Reason;
-
   MOZ_ASSERT(OnTaskQueue());
   DECODER_LOG("MediaDecoderReader::AsyncReadMetadata");
 
@@ -222,14 +225,14 @@ MediaDecoderReader::AsyncReadMetadata()
   // error.
   if (NS_FAILED(rv) || !metadata->mInfo.HasValidMedia()) {
     DECODER_WARN("ReadMetadata failed, rv=%x HasValidMedia=%d", rv, metadata->mInfo.HasValidMedia());
-    return MetadataPromise::CreateAndReject(Reason::METADATA_ERROR, __func__);
+    return MetadataPromise::CreateAndReject(NS_ERROR_DOM_MEDIA_METADATA_ERR, __func__);
   }
 
   // Success!
   return MetadataPromise::CreateAndResolve(metadata, __func__);
 }
 
-class ReRequestVideoWithSkipTask : public nsRunnable
+class ReRequestVideoWithSkipTask : public Runnable
 {
 public:
   ReRequestVideoWithSkipTask(MediaDecoderReader* aReader,
@@ -239,7 +242,7 @@ public:
   {
   }
 
-  NS_METHOD Run()
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(mReader->OnTaskQueue());
 
@@ -256,7 +259,7 @@ private:
   const int64_t mTimeThreshold;
 };
 
-class ReRequestAudioTask : public nsRunnable
+class ReRequestAudioTask : public Runnable
 {
 public:
   explicit ReRequestAudioTask(MediaDecoderReader* aReader)
@@ -264,7 +267,7 @@ public:
   {
   }
 
-  NS_METHOD Run()
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(mReader->OnTaskQueue());
 
@@ -280,11 +283,11 @@ private:
   RefPtr<MediaDecoderReader> mReader;
 };
 
-RefPtr<MediaDecoderReader::VideoDataPromise>
+RefPtr<MediaDecoderReader::MediaDataPromise>
 MediaDecoderReader::RequestVideoData(bool aSkipToNextKeyframe,
                                      int64_t aTimeThreshold)
 {
-  RefPtr<VideoDataPromise> p = mBaseVideoPromise.Ensure(__func__);
+  RefPtr<MediaDataPromise> p = mBaseVideoPromise.Ensure(__func__);
   bool skip = aSkipToNextKeyframe;
   while (VideoQueue().GetSize() == 0 &&
          !VideoQueue().IsFinished()) {
@@ -302,13 +305,9 @@ MediaDecoderReader::RequestVideoData(bool aSkipToNextKeyframe,
   }
   if (VideoQueue().GetSize() > 0) {
     RefPtr<VideoData> v = VideoQueue().PopFront();
-    if (v && mVideoDiscontinuity) {
-      v->mDiscontinuity = true;
-      mVideoDiscontinuity = false;
-    }
     mBaseVideoPromise.Resolve(v, __func__);
   } else if (VideoQueue().IsFinished()) {
-    mBaseVideoPromise.Reject(END_OF_STREAM, __func__);
+    mBaseVideoPromise.Reject(NS_ERROR_DOM_MEDIA_END_OF_STREAM, __func__);
   } else {
     MOZ_ASSERT(false, "Dropping this promise on the floor");
   }
@@ -316,10 +315,10 @@ MediaDecoderReader::RequestVideoData(bool aSkipToNextKeyframe,
   return p;
 }
 
-RefPtr<MediaDecoderReader::AudioDataPromise>
+RefPtr<MediaDecoderReader::MediaDataPromise>
 MediaDecoderReader::RequestAudioData()
 {
-  RefPtr<AudioDataPromise> p = mBaseAudioPromise.Ensure(__func__);
+  RefPtr<MediaDataPromise> p = mBaseAudioPromise.Ensure(__func__);
   while (AudioQueue().GetSize() == 0 &&
          !AudioQueue().IsFinished()) {
     if (!DecodeAudioData()) {
@@ -338,13 +337,11 @@ MediaDecoderReader::RequestAudioData()
   }
   if (AudioQueue().GetSize() > 0) {
     RefPtr<AudioData> a = AudioQueue().PopFront();
-    if (mAudioDiscontinuity) {
-      a->mDiscontinuity = true;
-      mAudioDiscontinuity = false;
-    }
     mBaseAudioPromise.Resolve(a, __func__);
   } else if (AudioQueue().IsFinished()) {
-    mBaseAudioPromise.Reject(mHitAudioDecodeError ? DECODE_ERROR : END_OF_STREAM, __func__);
+    mBaseAudioPromise.Reject(mHitAudioDecodeError
+                             ? NS_ERROR_DOM_MEDIA_FATAL_ERR
+                             : NS_ERROR_DOM_MEDIA_END_OF_STREAM, __func__);
     mHitAudioDecodeError = false;
   } else {
     MOZ_ASSERT(false, "Dropping this promise on the floor");
@@ -353,33 +350,23 @@ MediaDecoderReader::RequestAudioData()
   return p;
 }
 
-void
-MediaDecoderReader::BreakCycles()
-{
-  // Nothing left to do here these days. We keep this method around so that, if
-  // we need it, we don't have to make all of the subclass implementations call
-  // the superclass method again.
-}
-
 RefPtr<ShutdownPromise>
 MediaDecoderReader::Shutdown()
 {
   MOZ_ASSERT(OnTaskQueue());
   mShutdown = true;
 
-  mBaseAudioPromise.RejectIfExists(END_OF_STREAM, __func__);
-  mBaseVideoPromise.RejectIfExists(END_OF_STREAM, __func__);
+  mBaseAudioPromise.RejectIfExists(NS_ERROR_DOM_MEDIA_END_OF_STREAM, __func__);
+  mBaseVideoPromise.RejectIfExists(NS_ERROR_DOM_MEDIA_END_OF_STREAM, __func__);
 
   mDataArrivedListener.DisconnectIfExists();
 
-  ReleaseMediaResources();
+  ReleaseResources();
   mDuration.DisconnectIfConnected();
   mBuffered.DisconnectAll();
 
   // Shut down the watch manager before shutting down our task queue.
   mWatchManager.Shutdown();
-
-  RefPtr<ShutdownPromise> p;
 
   mDecoder = nullptr;
 
@@ -387,7 +374,3 @@ MediaDecoderReader::Shutdown()
 }
 
 } // namespace mozilla
-
-#undef DECODER_LOG
-#undef DECODER_WARN
-#undef DECODER_WARN_HELPER

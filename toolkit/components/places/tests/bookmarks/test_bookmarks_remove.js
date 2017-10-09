@@ -48,14 +48,15 @@ add_task(function* remove_roots_fail() {
                PlacesUtils.bookmarks.unfiledGuid,
                PlacesUtils.bookmarks.menuGuid,
                PlacesUtils.bookmarks.toolbarGuid,
-               PlacesUtils.bookmarks.tagsGuid];
+               PlacesUtils.bookmarks.tagsGuid,
+               PlacesUtils.bookmarks.mobileGuid];
   for (let guid of guids) {
     Assert.throws(() => PlacesUtils.bookmarks.remove(guid),
                   /It's not possible to remove Places root folders/);
   }
 });
 
-add_task(function* remove_normal_folder_undes_root_succeeds() {
+add_task(function* remove_normal_folder_under_root_succeeds() {
   let folder = yield PlacesUtils.bookmarks.insert({ parentGuid: PlacesUtils.bookmarks.rootGuid,
                                                     type: PlacesUtils.bookmarks.TYPE_FOLDER });
   checkBookmarkObject(folder);
@@ -98,10 +99,14 @@ add_task(function* remove_bookmark_orphans() {
 
   // Check there are no orphan annotations.
   let conn = yield PlacesUtils.promiseDBConnection();
-  let rows = yield conn.execute(`SELECT * FROM moz_items_annos`);
-  Assert.equal(rows.length, 0);
-  rows = yield conn.execute(`SELECT * FROM moz_anno_attributes`);
-  Assert.equal(rows.length, 0);
+  let annoAttrs = yield conn.execute(`SELECT id, name FROM moz_anno_attributes`);
+  // Bug 1306445 will eventually remove the mobile root anno.
+  Assert.equal(annoAttrs.length, 1);
+  Assert.equal(annoAttrs[0].getResultByName("name"), PlacesUtils.MOBILE_ROOT_ANNO);
+  let annos = rows = yield conn.execute(`SELECT item_id, anno_attribute_id FROM moz_items_annos`);
+  Assert.equal(annos.length, 1);
+  Assert.equal(annos[0].getResultByName("item_id"), PlacesUtils.mobileFolderId);
+  Assert.equal(annos[0].getResultByName("anno_attribute_id"), annoAttrs[0].getResultByName("id"));
 });
 
 add_task(function* remove_bookmark_empty_title() {
@@ -151,6 +156,7 @@ add_task(function* test_nested_contents_removed() {
   Assert.strictEqual((yield PlacesUtils.bookmarks.fetch(folder2.guid)), null);
   Assert.strictEqual((yield PlacesUtils.bookmarks.fetch(sep.guid)), null);
 });
+
 add_task(function* remove_folder_empty_title() {
   let bm1 = yield PlacesUtils.bookmarks.insert({ parentGuid: PlacesUtils.bookmarks.unfiledGuid,
                                                  type: PlacesUtils.bookmarks.TYPE_FOLDER,
@@ -180,6 +186,17 @@ add_task(function* remove_separator() {
   Assert.equal(bm2.type, PlacesUtils.bookmarks.TYPE_SEPARATOR);
   Assert.ok(!("url" in bm2));
   Assert.ok(!("title" in bm2));
+});
+
+add_task(function* test_nested_content_fails_when_not_allowed() {
+  let folder1 = yield PlacesUtils.bookmarks.insert({ parentGuid: PlacesUtils.bookmarks.unfiledGuid,
+                                                     type: PlacesUtils.bookmarks.TYPE_FOLDER,
+                                                     title: "a folder" });
+  yield PlacesUtils.bookmarks.insert({ parentGuid: folder1.guid,
+                                       type: PlacesUtils.bookmarks.TYPE_FOLDER,
+                                       title: "a folder" });
+  yield Assert.rejects(PlacesUtils.bookmarks.remove(folder1, {preventRemovalOfNonEmptyFolders: true}),
+                       /Cannot remove a non-empty folder./);
 });
 
 function run_test() {

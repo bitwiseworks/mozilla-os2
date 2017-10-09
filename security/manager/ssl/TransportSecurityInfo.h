@@ -4,11 +4,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef _MOZILLA_PSM_TRANSPORTSECURITYINFO_H
-#define _MOZILLA_PSM_TRANSPORTSECURITYINFO_H
+#ifndef TransportSecurityInfo_h
+#define TransportSecurityInfo_h
 
 #include "ScopedNSSTypes.h"
 #include "certt.h"
+#include "mozilla/BasePrincipal.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/RefPtr.h"
 #include "nsDataHashtable.h"
@@ -62,6 +63,11 @@ public:
   nsresult GetPort(int32_t *aPort);
   nsresult SetPort(int32_t aPort);
 
+  const NeckoOriginAttributes& GetOriginAttributes() const {
+    return mOriginAttributes;
+  }
+  nsresult SetOriginAttributes(const NeckoOriginAttributes& aOriginAttributes);
+
   PRErrorCode GetErrorCode() const;
   
   void GetErrorLogMessage(PRErrorCode errorCode,
@@ -70,13 +76,13 @@ public:
   
   void SetCanceled(PRErrorCode errorCode,
                    ::mozilla::psm::SSLErrorMessageType errorMessageType);
-  
+
   /* Set SSL Status values */
   nsresult SetSSLStatus(nsSSLStatus *aSSLStatus);
   nsSSLStatus* SSLStatus() { return mSSLStatus; }
   void SetStatusErrorBits(nsNSSCertificate* cert, uint32_t collected_errors);
 
-  nsresult SetFailedCertChain(ScopedCERTCertList& certList);
+  nsresult SetFailedCertChain(UniqueCERTCertList certList);
 
 private:
   mutable ::mozilla::Mutex mMutex;
@@ -100,6 +106,7 @@ private:
 
   int32_t mPort;
   nsXPIDLCString mHostName;
+  NeckoOriginAttributes mOriginAttributes;
 
   /* SSL Status */
   RefPtr<nsSSLStatus> mSSLStatus;
@@ -161,4 +168,4 @@ private:
 { 0x16786594, 0x0296, 0x4471, \
     { 0x80, 0x96, 0x8f, 0x84, 0x49, 0x7c, 0xa4, 0x28 } }
 
-#endif /* _MOZILLA_PSM_TRANSPORTSECURITYINFO_H */
+#endif // TransportSecurityInfo_h

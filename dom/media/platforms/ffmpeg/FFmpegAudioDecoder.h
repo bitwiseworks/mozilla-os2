@@ -7,6 +7,7 @@
 #ifndef __FFmpegAACDecoder_h__
 #define __FFmpegAACDecoder_h__
 
+#include "FFmpegLibWrapper.h"
 #include "FFmpegDataDecoder.h"
 
 namespace mozilla
@@ -20,18 +21,22 @@ template <>
 class FFmpegAudioDecoder<LIBAV_VER> : public FFmpegDataDecoder<LIBAV_VER>
 {
 public:
-  FFmpegAudioDecoder(FlushableTaskQueue* aTaskQueue,
+  FFmpegAudioDecoder(FFmpegLibWrapper* aLib, TaskQueue* aTaskQueue,
                      MediaDataDecoderCallback* aCallback,
                      const AudioInfo& aConfig);
   virtual ~FFmpegAudioDecoder();
 
   RefPtr<InitPromise> Init() override;
-  nsresult Input(MediaRawData* aSample) override;
-  void ProcessDrain() override;
+  void InitCodecContext() override;
   static AVCodecID GetCodecId(const nsACString& aMimeType);
+  const char* GetDescriptionName() const override
+  {
+    return "ffmpeg audio decoder";
+  }
 
 private:
-  void DecodePacket(MediaRawData* aSample);
+  MediaResult DoDecode(MediaRawData* aSample) override;
+  void ProcessDrain() override;
 };
 
 } // namespace mozilla

@@ -21,6 +21,7 @@ interface HTMLLinkElement : HTMLElement {
            attribute DOMString? crossOrigin;
   [SetterThrows, Pure]
            attribute DOMString rel;
+  [PutForwards=value]
   readonly attribute DOMTokenList relList;
   [SetterThrows, Pure]
            attribute DOMString media;
@@ -28,7 +29,9 @@ interface HTMLLinkElement : HTMLElement {
            attribute DOMString hreflang;
   [SetterThrows, Pure]
            attribute DOMString type;
-  [PutForwards=value] readonly attribute DOMSettableTokenList sizes;
+  [SetterThrows, Pure, Pref="network.http.enablePerElementReferrer"]
+           attribute DOMString referrerPolicy;
+  [PutForwards=value] readonly attribute DOMTokenList sizes;
 };
 HTMLLinkElement implements LinkStyle;
 

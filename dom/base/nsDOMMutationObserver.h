@@ -8,13 +8,13 @@
 #define nsDOMMutationObserver_h
 
 #include "mozilla/Attributes.h"
+#include "mozilla/Move.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsPIDOMWindow.h"
 #include "nsIScriptContext.h"
 #include "nsStubAnimationObserver.h"
 #include "nsCOMArray.h"
 #include "nsTArray.h"
-#include "nsAutoPtr.h"
 #include "nsIVariant.h"
 #include "nsContentList.h"
 #include "mozilla/dom/Element.h"
@@ -218,11 +218,11 @@ public:
   }
 
   nsCOMArray<nsIAtom>& AttributeFilter() { return mAttributeFilter; }
-  void SetAttributeFilter(nsCOMArray<nsIAtom>& aFilter)
+  void SetAttributeFilter(nsCOMArray<nsIAtom>&& aFilter)
   {
     NS_ASSERTION(!mParent, "Shouldn't have parent");
     mAttributeFilter.Clear();
-    mAttributeFilter.AppendObjects(aFilter);
+    mAttributeFilter = mozilla::Move(aFilter);
   }
 
   void AddClone(nsMutationReceiverBase* aClone)
@@ -465,7 +465,7 @@ class nsDOMMutationObserver final : public nsISupports,
                                     public nsWrapperCache
 {
 public:
-  nsDOMMutationObserver(already_AddRefed<nsPIDOMWindow>&& aOwner,
+  nsDOMMutationObserver(already_AddRefed<nsPIDOMWindowInner>&& aOwner,
                         mozilla::dom::MutationCallback& aCb,
                         bool aChrome)
   : mOwner(aOwner), mLastPendingMutation(nullptr), mPendingMutationCount(0),
@@ -599,13 +599,13 @@ protected:
   static void AddCurrentlyHandlingObserver(nsDOMMutationObserver* aObserver,
                                            uint32_t aMutationLevel);
 
-  nsCOMPtr<nsPIDOMWindow>                            mOwner;
+  nsCOMPtr<nsPIDOMWindowInner>                       mOwner;
 
   nsCOMArray<nsMutationReceiver>                     mReceivers;
   nsClassHashtable<nsISupportsHashKey,
                    nsCOMArray<nsMutationReceiver> >  mTransientReceivers;
   // MutationRecords which are being constructed.
-  nsAutoTArray<nsDOMMutationRecord*, 4>              mCurrentMutations;
+  AutoTArray<nsDOMMutationRecord*, 4>              mCurrentMutations;
   // MutationRecords which will be handed to the callback at the end of
   // the microtask.
   RefPtr<nsDOMMutationRecord>                      mFirstPendingMutation;
@@ -621,11 +621,11 @@ protected:
   uint64_t                                           mId;
 
   static uint64_t                                    sCount;
-  static nsAutoTArray<RefPtr<nsDOMMutationObserver>, 4>* sScheduledMutationObservers;
+  static AutoTArray<RefPtr<nsDOMMutationObserver>, 4>* sScheduledMutationObservers;
   static nsDOMMutationObserver*                      sCurrentObserver;
 
   static uint32_t                                    sMutationLevel;
-  static nsAutoTArray<nsAutoTArray<RefPtr<nsDOMMutationObserver>, 4>, 4>*
+  static AutoTArray<AutoTArray<RefPtr<nsDOMMutationObserver>, 4>, 4>*
                                                      sCurrentlyHandlingObservers;
 };
 
@@ -740,7 +740,7 @@ private:
   
   static nsAutoMutationBatch* sCurrentBatch;
   nsAutoMutationBatch* mPreviousBatch;
-  nsAutoTArray<BatchObserver, 2> mObservers;
+  AutoTArray<BatchObserver, 2> mObservers;
   nsTArray<nsCOMPtr<nsIContent> > mRemovedNodes;
   nsTArray<nsCOMPtr<nsIContent> > mAddedNodes;
   nsINode* mBatchTarget;
@@ -907,10 +907,12 @@ private:
   };
 
   static nsAutoAnimationMutationBatch* sCurrentBatch;
-  nsAutoTArray<nsDOMMutationObserver*, 2> mObservers;
+  AutoTArray<nsDOMMutationObserver*, 2> mObservers;
   typedef nsTArray<Entry> EntryArray;
   nsClassHashtable<nsPtrHashKey<nsINode>, EntryArray> mEntryTable;
   // List of nodes referred to by mEntryTable so we can sort them
+  // For a specific pseudo element, we use its parent element as the
+  // batch target, so they will be put in the same EntryArray.
   nsTArray<nsINode*> mBatchTargets;
 };
 

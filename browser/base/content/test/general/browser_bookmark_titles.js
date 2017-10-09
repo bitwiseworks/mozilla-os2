@@ -29,7 +29,7 @@ add_task(function* () {
         let [uri, title] = tests[i];
 
         let promiseLoaded = promisePageLoaded(browser);
-        content.location = uri;
+        BrowserTestUtils.loadURI(browser, uri);
         yield promiseLoaded;
         yield checkBookmark(uri, title);
     }
@@ -53,12 +53,14 @@ add_task(function* () {
     let [uri, title] = tests[0];
 
     let promiseLoaded = promisePageLoaded(browser);
-    content.location = uri;
+    BrowserTestUtils.loadURI(browser, uri);
     yield promiseLoaded;
 
     // The offline mode test is only good if the page failed to load.
-    is(content.document.documentURI.substring(0, 14), 'about:neterror',
-        "Offline mode successfully simulated network outage.");
+    yield ContentTask.spawn(browser, null, function() {
+      is(content.document.documentURI.substring(0, 14), 'about:neterror',
+          "Offline mode successfully simulated network outage.");
+    });
     yield checkBookmark(uri, title);
 
     gBrowser.removeCurrentTab();
@@ -86,16 +88,11 @@ function* checkBookmark(uri, expected_title) {
 // custom page load listener.
 function promisePageLoaded(browser)
 {
-  return new Promise(resolve => {
-    browser.addEventListener("DOMContentLoaded", function pageLoaded(event) {
-      browser.removeEventListener("DOMContentLoaded", pageLoaded, true);
-
-      if (event.originalTarget != browser.contentDocument ||
-          event.target.location.href == "about:blank") {
-          info("skipping spurious load event");
-          return;
-      }
-      resolve();
-    }, true);
+  return ContentTask.spawn(browser, null, function* () {
+    yield ContentTaskUtils.waitForEvent(this, "DOMContentLoaded", true,
+        (event) => {
+          return event.originalTarget === content.document &&
+                 event.target.location.href !== "about:blank"
+        });
   });
 }

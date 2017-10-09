@@ -10,6 +10,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/EventForwards.h"
+#include "mozilla/UniquePtr.h"
 #include "nsIObjectFrame.h"
 #include "nsFrame.h"
 #include "nsRegion.h"
@@ -26,6 +27,8 @@
 #undef GetBinaryType
 #undef RemoveDirectory
 #undef LoadIcon
+#undef LoadImage
+#undef GetObject
 #endif
 
 class nsPresContext;
@@ -42,13 +45,11 @@ class LayerManager;
 } // namespace layers
 } // namespace mozilla
 
-typedef nsFrame nsPluginFrameSuper;
-
 class PluginFrameDidCompositeObserver;
 
-class nsPluginFrame : public nsPluginFrameSuper,
-                      public nsIObjectFrame,
-                      public nsIReflowCallback
+class nsPluginFrame : public nsFrame
+                    , public nsIObjectFrame
+                    , public nsIReflowCallback
 {
 public:
   typedef mozilla::LayerState LayerState;
@@ -73,11 +74,11 @@ public:
   virtual nscoord GetMinISize(nsRenderingContext *aRenderingContext) override;
   virtual nscoord GetPrefISize(nsRenderingContext *aRenderingContext) override;
   virtual void Reflow(nsPresContext* aPresContext,
-                      nsHTMLReflowMetrics& aDesiredSize,
-                      const nsHTMLReflowState& aReflowState,
+                      ReflowOutput& aDesiredSize,
+                      const ReflowInput& aReflowInput,
                       nsReflowStatus& aStatus) override;
   virtual void DidReflow(nsPresContext* aPresContext,
-                         const nsHTMLReflowState* aReflowState,
+                         const ReflowInput* aReflowInput,
                          nsDidReflowStatus aStatus) override;
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                 const nsRect&           aDirtyRect,
@@ -91,7 +92,8 @@ public:
 
   virtual bool IsFrameOfType(uint32_t aFlags) const override
   {
-    return nsPluginFrameSuper::IsFrameOfType(aFlags & ~(nsIFrame::eReplaced));
+    return nsFrame::IsFrameOfType(aFlags &
+      ~(nsIFrame::eReplaced | nsIFrame::eReplacedSizing));
   }
 
   virtual bool NeedsView() override { return true; }
@@ -104,7 +106,7 @@ public:
 
   virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext) override;
 
-  NS_METHOD GetPluginInstance(nsNPAPIPluginInstance** aPluginInstance) override;
+  NS_IMETHOD GetPluginInstance(nsNPAPIPluginInstance** aPluginInstance) override;
 
   virtual void SetIsDocumentActive(bool aIsActive) override;
 
@@ -192,7 +194,12 @@ public:
    */
   static void EndSwapDocShells(nsISupports* aSupports, void*);
 
-  nsIWidget* GetWidget() override { return mInnerView ? mWidget : nullptr; }
+  nsIWidget* GetWidget() override {
+    if (!mInnerView) {
+      return nullptr;
+    }
+    return mWidget;
+  }
 
   /**
    * Adjust the plugin's idea of its size, using aSize as its new size.
@@ -206,11 +213,6 @@ public:
   nsresult CallSetWindow(bool aCheckIsHidden = true);
 
   void SetInstanceOwner(nsPluginInstanceOwner* aOwner);
-
-  /**
-   * Helper for hiding windowed plugins during async scroll operations.
-   */
-  void SetScrollVisibility(bool aState);
 
   /**
    * HandleWheelEventAsDefaultAction() handles eWheel event as default action.
@@ -232,8 +234,8 @@ protected:
   // NOTE:  This frame class does not inherit from |nsLeafFrame|, so
   // this is not a virtual method implementation.
   void GetDesiredSize(nsPresContext* aPresContext,
-                      const nsHTMLReflowState& aReflowState,
-                      nsHTMLReflowMetrics& aDesiredSize);
+                      const ReflowInput& aReflowInput,
+                      ReflowOutput& aDesiredSize);
 
   bool IsFocusable(int32_t *aTabIndex = nullptr, 
                    bool aWithMouse = false) override;
@@ -290,7 +292,7 @@ private:
     return region;
   }
 
-  class PluginEventNotifier : public nsRunnable {
+  class PluginEventNotifier : public mozilla::Runnable {
   public:
     explicit PluginEventNotifier(const nsString &aEventType) : 
       mEventType(aEventType) {}
@@ -330,11 +332,7 @@ private:
   // updates.
   RefPtr<nsRootPresContext> mRootPresContextRegisteredWith;
 
-  nsAutoPtr<PluginFrameDidCompositeObserver> mDidCompositeObserver;
-
-  // Tracks windowed plugin visibility during scroll operations. See
-  // SetScrollVisibility.
-  bool mIsHiddenDueToScroll;
+  mozilla::UniquePtr<PluginFrameDidCompositeObserver> mDidCompositeObserver;
 };
 
 class nsDisplayPlugin : public nsDisplayItem {

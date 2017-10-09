@@ -22,6 +22,10 @@
 #include "winsock2.h"
 #endif
 
+#ifndef AF_LOCAL
+#define AF_LOCAL 1  // used for named pipe
+#endif
+
 #define IPv6ADDR_IS_LOOPBACK(a) \
   (((a)->u32[0] == 0)     &&    \
    ((a)->u32[1] == 0)     &&    \
@@ -103,14 +107,16 @@ union NetAddr {
     IPv6Addr ip;                    /* the actual 128 bits of address */
     uint32_t scope_id;              /* set of interfaces for a scope */
   } inet6;
-#if defined(XP_UNIX)
-  struct {                          /* Unix domain socket address */
+#if defined(XP_UNIX) || defined(XP_WIN)
+  struct {                          /* Unix domain socket or
+                                       Windows Named Pipes address */
     uint16_t family;                /* address family (AF_UNIX) */
     char path[104];                 /* null-terminated pathname */
   } local;
 #endif
-  // introduced to support nsTArray<NetAddr> (for DNSRequestParent.cpp)
+  // introduced to support nsTArray<NetAddr> comparisons and sorting
   bool operator == (const NetAddr& other) const;
+  bool operator < (const NetAddr &other) const;
 };
 
 // This class wraps a NetAddr union to provide C++ linked list

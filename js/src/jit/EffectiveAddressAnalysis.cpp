@@ -5,6 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "jit/EffectiveAddressAnalysis.h"
+#include "jit/IonAnalysis.h"
 #include "jit/MIR.h"
 #include "jit/MIRGraph.h"
 
@@ -14,24 +15,23 @@ using namespace jit;
 static void
 AnalyzeLsh(TempAllocator& alloc, MLsh* lsh)
 {
-    if (lsh->specialization() != MIRType_Int32)
+    if (lsh->specialization() != MIRType::Int32)
         return;
 
     if (lsh->isRecoveredOnBailout())
         return;
 
     MDefinition* index = lsh->lhs();
-    MOZ_ASSERT(index->type() == MIRType_Int32);
+    MOZ_ASSERT(index->type() == MIRType::Int32);
 
-    MDefinition* shift = lsh->rhs();
-    if (!shift->isConstantValue())
+    MConstant* shiftValue = lsh->rhs()->maybeConstantValue();
+    if (!shiftValue)
         return;
 
-    Value shiftValue = shift->constantValue();
-    if (!shiftValue.isInt32() || !IsShiftInScaleRange(shiftValue.toInt32()))
+    if (shiftValue->type() != MIRType::Int32 || !IsShiftInScaleRange(shiftValue->toInt32()))
         return;
 
-    Scale scale = ShiftToScale(shiftValue.toInt32());
+    Scale scale = ShiftToScale(shiftValue->toInt32());
 
     int32_t displacement = 0;
     MInstruction* last = lsh;
@@ -45,13 +45,13 @@ AnalyzeLsh(TempAllocator& alloc, MLsh* lsh)
             break;
 
         MAdd* add = use->consumer()->toDefinition()->toAdd();
-        if (add->specialization() != MIRType_Int32 || !add->isTruncated())
+        if (add->specialization() != MIRType::Int32 || !add->isTruncated())
             break;
 
         MDefinition* other = add->getOperand(1 - add->indexOf(*use));
 
-        if (other->isConstantValue()) {
-            displacement += other->constantValue().toInt32();
+        if (MConstant* otherConst = other->maybeConstantValue()) {
+            displacement += otherConst->toInt32();
         } else {
             if (base)
                 break;
@@ -80,11 +80,12 @@ AnalyzeLsh(TempAllocator& alloc, MLsh* lsh)
             return;
 
         MDefinition* other = bitAnd->getOperand(1 - bitAnd->indexOf(*use));
-        if (!other->isConstantValue() || !other->constantValue().isInt32())
+        MConstant* otherConst = other->maybeConstantValue();
+        if (!otherConst || otherConst->type() != MIRType::Int32)
             return;
 
         uint32_t bitsClearedByShift = elemSize - 1;
-        uint32_t bitsClearedByMask = ~uint32_t(other->constantValue().toInt32());
+        uint32_t bitsClearedByMask = ~uint32_t(otherConst->toInt32());
         if ((bitsClearedByShift & bitsClearedByMask) != bitsClearedByMask)
             return;
 
@@ -100,66 +101,138 @@ AnalyzeLsh(TempAllocator& alloc, MLsh* lsh)
     last->block()->insertAfter(last, eaddr);
 }
 
-template<typename MAsmJSHeapAccessType>
-bool
-EffectiveAddressAnalysis::tryAddDisplacement(MAsmJSHeapAccessType* ins, int32_t o)
+// Transform:
+//
+//   [AddI]
+//   addl       $9, %esi
+//   [LoadUnboxedScalar]
+//   movsd      0x0(%rbx,%rsi,8), %xmm4
+//
+// into:
+//
+//   [LoadUnboxedScalar]
+//   movsd      0x48(%rbx,%rsi,8), %xmm4
+//
+// This is possible when the AddI is only used by the LoadUnboxedScalar opcode.
+static void
+AnalyzeLoadUnboxedScalar(TempAllocator& alloc, MLoadUnboxedScalar* load)
 {
-    // Compute the new offset. Check for overflow and negative. In theory it
-    // ought to be possible to support negative offsets, but it'd require
-    // more elaborate bounds checking mechanisms than we currently have.
-    MOZ_ASSERT(ins->offset() >= 0);
-    int32_t newOffset = uint32_t(ins->offset()) + o;
-    if (newOffset < 0)
+    if (load->isRecoveredOnBailout())
+        return;
+
+    if (!load->getOperand(1)->isAdd())
+        return;
+
+    JitSpew(JitSpew_EAA, "analyze: %s%u", load->opName(), load->id());
+
+    MAdd* add = load->getOperand(1)->toAdd();
+
+    if (add->specialization() != MIRType::Int32 || !add->hasUses() ||
+        add->truncateKind() != MDefinition::TruncateKind::Truncate)
+    {
+        return;
+    }
+
+    MDefinition* lhs = add->lhs();
+    MDefinition* rhs = add->rhs();
+    MDefinition* constant = nullptr;
+    MDefinition* node = nullptr;
+
+    if (lhs->isConstant()) {
+        constant = lhs;
+        node = rhs;
+    } else if (rhs->isConstant()) {
+        constant = rhs;
+        node = lhs;
+    } else
+        return;
+
+    MOZ_ASSERT(constant->type() == MIRType::Int32);
+
+    size_t storageSize = Scalar::byteSize(load->storageType());
+    int32_t c1 = load->offsetAdjustment();
+    int32_t c2 = 0;
+    if (!SafeMul(constant->maybeConstantValue()->toInt32(), storageSize, &c2))
+        return;
+
+    int32_t offset = 0;
+    if (!SafeAdd(c1, c2, &offset))
+        return;
+
+    JitSpew(JitSpew_EAA, "set offset: %d + %d = %d on: %s%u", c1, c2, offset,
+            load->opName(), load->id());
+    load->setOffsetAdjustment(offset);
+    load->replaceOperand(1, node);
+
+    if (!add->hasLiveDefUses() && DeadIfUnused(add) && add->canRecoverOnBailout()) {
+        JitSpew(JitSpew_EAA, "mark as recovered on bailout: %s%u",
+                add->opName(), add->id());
+        add->setRecoveredOnBailoutUnchecked();
+    }
+}
+
+template<typename AsmJSMemoryAccess>
+bool
+EffectiveAddressAnalysis::tryAddDisplacement(AsmJSMemoryAccess* ins, int32_t o)
+{
+#ifdef WASM_HUGE_MEMORY
+    // Compute the new offset. Check for overflow.
+    uint32_t oldOffset = ins->offset();
+    uint32_t newOffset = oldOffset + o;
+    if (o < 0 ? (newOffset >= oldOffset) : (newOffset < oldOffset))
         return false;
 
-    // Compute the new offset to the end of the access. Check for overflow
-    // and negative here also.
-    int32_t newEnd = uint32_t(newOffset) + ins->byteSize();
-    if (newEnd < 0)
-        return false;
-    MOZ_ASSERT(uint32_t(newEnd) >= uint32_t(newOffset));
-
-    // Determine the range of valid offsets which can be folded into this
-    // instruction and check whether our computed offset is within that range.
-    size_t range = mir_->foldableOffsetRange(ins);
-    if (size_t(newEnd) > range)
+    // The offset must ultimately be written into the offset immediate of a load
+    // or store instruction so don't allow folding of the offset is bigger.
+    if (newOffset >= wasm::OffsetGuardLimit)
         return false;
 
     // Everything checks out. This is the new offset.
     ins->setOffset(newOffset);
     return true;
+#else
+    return false;
+#endif
 }
 
-template<typename MAsmJSHeapAccessType>
+template<typename AsmJSMemoryAccess>
 void
-EffectiveAddressAnalysis::analyzeAsmHeapAccess(MAsmJSHeapAccessType* ins)
+EffectiveAddressAnalysis::analyzeAsmJSHeapAccess(AsmJSMemoryAccess* ins)
 {
-    MDefinition* ptr = ins->ptr();
+    MDefinition* base = ins->base();
 
-    if (ptr->isConstantValue()) {
+    if (base->isConstant()) {
         // Look for heap[i] where i is a constant offset, and fold the offset.
         // By doing the folding now, we simplify the task of codegen; the offset
         // is always the address mode immediate. This also allows it to avoid
         // a situation where the sum of a constant pointer value and a non-zero
         // offset doesn't actually fit into the address mode immediate.
-        int32_t imm = ptr->constantValue().toInt32();
+        int32_t imm = base->toConstant()->toInt32();
         if (imm != 0 && tryAddDisplacement(ins, imm)) {
             MInstruction* zero = MConstant::New(graph_.alloc(), Int32Value(0));
             ins->block()->insertBefore(ins, zero);
-            ins->replacePtr(zero);
+            ins->replaceBase(zero);
         }
-    } else if (ptr->isAdd()) {
+
+        // If the index is within the minimum heap length, we can optimize
+        // away the bounds check.
+        if (imm >= 0) {
+            int32_t end = (uint32_t)imm + ins->byteSize();
+            if (end >= imm && (uint32_t)end <= mir_->minWasmHeapLength())
+                 ins->removeBoundsCheck();
+        }
+    } else if (base->isAdd()) {
         // Look for heap[a+i] where i is a constant offset, and fold the offset.
         // Alignment masks have already been moved out of the way by the
         // Alignment Mask Analysis pass.
-        MDefinition* op0 = ptr->toAdd()->getOperand(0);
-        MDefinition* op1 = ptr->toAdd()->getOperand(1);
-        if (op0->isConstantValue())
+        MDefinition* op0 = base->toAdd()->getOperand(0);
+        MDefinition* op1 = base->toAdd()->getOperand(1);
+        if (op0->isConstant())
             mozilla::Swap(op0, op1);
-        if (op1->isConstantValue()) {
-            int32_t imm = op1->constantValue().toInt32();
+        if (op1->isConstant()) {
+            int32_t imm = op1->toConstant()->toInt32();
             if (tryAddDisplacement(ins, imm))
-                ins->replacePtr(op0);
+                ins->replaceBase(op0);
         }
     }
 }
@@ -183,15 +256,21 @@ EffectiveAddressAnalysis::analyze()
 {
     for (ReversePostorderIterator block(graph_.rpoBegin()); block != graph_.rpoEnd(); block++) {
         for (MInstructionIterator i = block->begin(); i != block->end(); i++) {
+            if (!graph_.alloc().ensureBallast())
+                return false;
+
             // Note that we don't check for MAsmJSCompareExchangeHeap
             // or MAsmJSAtomicBinopHeap, because the backend and the OOB
-            // mechanism don't support non-zero offsets for them yet.
+            // mechanism don't support non-zero offsets for them yet
+            // (TODO bug 1254935).
             if (i->isLsh())
                 AnalyzeLsh(graph_.alloc(), i->toLsh());
+            else if (i->isLoadUnboxedScalar())
+                AnalyzeLoadUnboxedScalar(graph_.alloc(), i->toLoadUnboxedScalar());
             else if (i->isAsmJSLoadHeap())
-                analyzeAsmHeapAccess(i->toAsmJSLoadHeap());
+                analyzeAsmJSHeapAccess(i->toAsmJSLoadHeap());
             else if (i->isAsmJSStoreHeap())
-                analyzeAsmHeapAccess(i->toAsmJSStoreHeap());
+                analyzeAsmJSHeapAccess(i->toAsmJSStoreHeap());
         }
     }
     return true;

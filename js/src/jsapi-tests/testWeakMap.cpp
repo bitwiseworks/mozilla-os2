@@ -35,14 +35,14 @@ BEGIN_TEST(testWeakMap_basicOperations)
     CHECK(r == val);
     CHECK(checkSize(map, 1));
 
-    JS_GC(rt);
+    JS_GC(cx);
 
     CHECK(GetWeakMapEntry(cx, map, key, &r));
     CHECK(r == val);
     CHECK(checkSize(map, 1));
 
     key = nullptr;
-    JS_GC(rt);
+    JS_GC(cx);
 
     CHECK(checkSize(map, 0));
 
@@ -70,8 +70,8 @@ END_TEST(testWeakMap_basicOperations)
 
 BEGIN_TEST(testWeakMap_keyDelegates)
 {
-    JS_SetGCParameter(rt, JSGC_MODE, JSGC_MODE_INCREMENTAL);
-    JS_GC(rt);
+    JS_SetGCParameter(cx, JSGC_MODE, JSGC_MODE_INCREMENTAL);
+    JS_GC(cx);
     JS::RootedObject map(cx, JS::NewWeakMapObject(cx));
     CHECK(map);
 
@@ -98,8 +98,9 @@ BEGIN_TEST(testWeakMap_keyDelegates)
      */
     CHECK(newCCW(map, delegateRoot));
     js::SliceBudget budget(js::WorkBudget(1000000));
-    rt->gc.startDebugGC(GC_NORMAL, budget);
-    CHECK(!JS::IsIncrementalGCInProgress(rt));
+    cx->gc.startDebugGC(GC_NORMAL, budget);
+    while (JS::IsIncrementalGCInProgress(cx))
+        cx->gc.debugGCSlice(budget);
 #ifdef DEBUG
     CHECK(map->zone()->lastZoneGroupIndex() < delegateRoot->zone()->lastZoneGroupIndex());
 #endif
@@ -113,8 +114,9 @@ BEGIN_TEST(testWeakMap_keyDelegates)
     key = nullptr;
     CHECK(newCCW(map, delegateRoot));
     budget = js::SliceBudget(js::WorkBudget(100000));
-    rt->gc.startDebugGC(GC_NORMAL, budget);
-    CHECK(!JS::IsIncrementalGCInProgress(rt));
+    cx->gc.startDebugGC(GC_NORMAL, budget);
+    while (JS::IsIncrementalGCInProgress(cx))
+        cx->gc.debugGCSlice(budget);
     CHECK(checkSize(map, 1));
 
     /*
@@ -128,7 +130,7 @@ BEGIN_TEST(testWeakMap_keyDelegates)
     /* Check that when the delegate becomes unreachable the entry is removed. */
     delegateRoot = nullptr;
     keyDelegate = nullptr;
-    JS_GC(rt);
+    JS_GC(cx);
     CHECK(checkSize(map, 0));
 
     return true;
@@ -150,26 +152,16 @@ static JSObject* GetKeyDelegate(JSObject* obj)
 
 JSObject* newKey()
 {
+    static const js::ClassExtension keyClassExtension = {
+        GetKeyDelegate
+    };
+
     static const js::Class keyClass = {
-        "keyWithDelgate",
+        "keyWithDelegate",
         JSCLASS_HAS_PRIVATE | JSCLASS_HAS_RESERVED_SLOTS(1),
-        nullptr, /* addProperty */
-        nullptr, /* delProperty */
-        nullptr, /* getProperty */
-        nullptr, /* setProperty */
-        nullptr, /* enumerate */
-        nullptr, /* resolve */
-        nullptr, /* mayResolve */
-        nullptr, /* finalize */
-        nullptr, /* call */
-        nullptr, /* hasInstance */
-        nullptr, /* construct */
-        nullptr, /* trace */
+        JS_NULL_CLASS_OPS,
         JS_NULL_CLASS_SPEC,
-        {
-            false,
-            GetKeyDelegate
-        },
+        &keyClassExtension,
         JS_NULL_OBJECT_OPS
     };
 
@@ -199,14 +191,17 @@ JSObject* newCCW(JS::HandleObject sourceZone, JS::HandleObject destZone)
         if (!JS_WrapObject(cx, &object))
             return nullptr;
     }
+
+    // In order to test the SCC algorithm, we need the wrapper/wrappee to be
+    // tenured.
+    cx->gc.evictNursery();
+
     return object;
 }
 
 JSObject* newDelegate()
 {
-    static const js::Class delegateClass = {
-        "delegate",
-        JSCLASS_GLOBAL_FLAGS | JSCLASS_HAS_RESERVED_SLOTS(1),
+    static const js::ClassOps delegateClassOps = {
         nullptr, /* addProperty */
         nullptr, /* delProperty */
         nullptr, /* getProperty */
@@ -219,23 +214,32 @@ JSObject* newDelegate()
         nullptr, /* hasInstance */
         nullptr, /* construct */
         JS_GlobalObjectTraceHook,
+    };
+
+    static const js::ClassExtension delegateClassExtension = {
+        nullptr,
+        DelegateObjectMoved
+    };
+
+    static const js::Class delegateClass = {
+        "delegate",
+        JSCLASS_GLOBAL_FLAGS | JSCLASS_HAS_RESERVED_SLOTS(1),
+        &delegateClassOps,
         JS_NULL_CLASS_SPEC,
-        {
-            false,
-            nullptr,
-            DelegateObjectMoved
-        },
+        &delegateClassExtension,
         JS_NULL_OBJECT_OPS
     };
 
     /* Create the global object. */
     JS::CompartmentOptions options;
-    options.setVersion(JSVERSION_LATEST);
-    JS::RootedObject global(cx);
-    global = JS_NewGlobalObject(cx, Jsvalify(&delegateClass), nullptr, JS::FireOnNewGlobalHook,
-                                options);
-    JS_SetReservedSlot(global, 0, JS::Int32Value(42));
+    options.behaviors().setVersion(JSVERSION_LATEST);
 
+    JS::RootedObject global(cx, JS_NewGlobalObject(cx, Jsvalify(&delegateClass), nullptr,
+                                                   JS::FireOnNewGlobalHook, options));
+    if (!global)
+        return nullptr;
+
+    JS_SetReservedSlot(global, 0, JS::Int32Value(42));
     return global;
 }
 

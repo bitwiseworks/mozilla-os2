@@ -44,8 +44,8 @@ private:
 
   nsresult TeeSegment(const char* aBuf, uint32_t aCount);
 
-  static NS_METHOD WriteSegmentFun(nsIInputStream*, void*, const char*,
-                                   uint32_t, uint32_t, uint32_t*);
+  static nsresult WriteSegmentFun(nsIInputStream*, void*, const char*,
+                                  uint32_t, uint32_t, uint32_t*);
 
 private:
   nsCOMPtr<nsIInputStream>  mSource;
@@ -57,7 +57,7 @@ private:
   bool                      mSinkIsValid; // False if TeeWriteEvent fails
 };
 
-class nsInputStreamTeeWriteEvent : public nsRunnable
+class nsInputStreamTeeWriteEvent : public Runnable
 {
 public:
   // aTee's lock is held across construction of this object
@@ -77,7 +77,7 @@ public:
     mTee = aTee;
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     if (!mBuf) {
       NS_WARNING("nsInputStreamTeeWriteEvent::Run() "
@@ -179,7 +179,7 @@ nsInputStreamTee::TeeSegment(const char* aBuf, uint32_t aCount)
         NS_WARNING("Write failed (non-fatal)");
         // catch possible misuse of the input stream tee
         NS_ASSERTION(rv != NS_BASE_STREAM_WOULD_BLOCK, "sink must be a blocking stream");
-        mSink = 0;
+        mSink = nullptr;
         break;
       }
       totalBytesWritten += bytesWritten;
@@ -190,7 +190,7 @@ nsInputStreamTee::TeeSegment(const char* aBuf, uint32_t aCount)
   }
 }
 
-NS_METHOD
+nsresult
 nsInputStreamTee::WriteSegmentFun(nsIInputStream* aIn, void* aClosure,
                                   const char* aFromSegment, uint32_t aOffset,
                                   uint32_t aCount, uint32_t* aWriteCount)
@@ -217,8 +217,8 @@ nsInputStreamTee::Close()
     return NS_ERROR_NOT_INITIALIZED;
   }
   nsresult rv = mSource->Close();
-  mSource = 0;
-  mSink = 0;
+  mSource = nullptr;
+  mSink = nullptr;
   return rv;
 }
 

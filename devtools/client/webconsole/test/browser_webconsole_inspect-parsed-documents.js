@@ -1,6 +1,7 @@
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
-   http://creativecommons.org/publicdomain/zero/1.0/ */
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 // Test that dynamically created (HTML|XML|SVG)Documents can be inspected by
 // clicking on the object in console (bug 1035198).
@@ -20,7 +21,7 @@ const TEST_CASES = [
   },
   {
     input: '(new DOMParser()).parseFromString("<svg></svg>", "image/svg+xml")',
-    output: "SVGDocument",
+    output: "XMLDocument",
     inspectable: true,
   },
 ];

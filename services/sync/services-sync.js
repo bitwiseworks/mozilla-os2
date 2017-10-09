@@ -24,27 +24,19 @@ pref("services.sync.scheduler.sync11.singleDeviceInterval", 86400); // 1 day
 
 pref("services.sync.errorhandler.networkFailureReportTimeout", 1209600); // 2 weeks
 
-// A "master" pref for Sync being enabled. Will be set to false if the sync
-// customization UI finds all our builtin engines disabled (and addons are
-// free to force this to true if they have their own engine)
-pref("services.sync.enabled", true);
-// Our engines.
 pref("services.sync.engine.addons", true);
 pref("services.sync.engine.bookmarks", true);
 pref("services.sync.engine.history", true);
 pref("services.sync.engine.passwords", true);
 pref("services.sync.engine.prefs", true);
 pref("services.sync.engine.tabs", true);
-pref("services.sync.engine.tabs.filteredUrls", "^(about:.*|chrome://weave/.*|wyciwyg:.*|file:.*)$");
+pref("services.sync.engine.tabs.filteredUrls", "^(about:.*|chrome://weave/.*|wyciwyg:.*|file:.*|blob:.*)$");
 
 pref("services.sync.jpake.serverURL", "https://setup.services.mozilla.com/");
 pref("services.sync.jpake.pollInterval", 1000);
 pref("services.sync.jpake.firstMsgMaxTries", 300); // 5 minutes
 pref("services.sync.jpake.lastMsgMaxTries", 300);  // 5 minutes
 pref("services.sync.jpake.maxTries", 10);
-
-// Allow add-ons to be synced from non-trusted sources.
-pref("services.sync.addons.ignoreRepositoryChecking", false);
 
 // If true, add-on sync ignores changes to the user-enabled flag. This
 // allows people to have the same set of add-ons installed across all
@@ -76,6 +68,7 @@ pref("services.sync.log.logger.engine.passwords", "Debug");
 pref("services.sync.log.logger.engine.prefs", "Debug");
 pref("services.sync.log.logger.engine.tabs", "Debug");
 pref("services.sync.log.logger.engine.addons", "Debug");
+pref("services.sync.log.logger.engine.extension-storage", "Debug");
 pref("services.sync.log.logger.engine.apps", "Debug");
 pref("services.sync.log.logger.identity", "Debug");
 pref("services.sync.log.logger.userapi", "Debug");
@@ -83,3 +76,20 @@ pref("services.sync.log.cryptoDebug", false);
 
 pref("services.sync.fxa.termsURL", "https://accounts.firefox.com/legal/terms");
 pref("services.sync.fxa.privacyURL", "https://accounts.firefox.com/legal/privacy");
+
+pref("services.sync.telemetry.submissionInterval", 43200); // 12 hours in seconds
+pref("services.sync.telemetry.maxPayloadCount", 500);
+
+// Note that services.sync.validation.enabled is located in browser/app/profile/firefox.js
+
+// We consider validation this frequently. After considering validation, even
+// if we don't end up validating, we won't try again unless this much time has passed.
+pref("services.sync.validation.interval", 86400); // 24 hours in seconds
+
+// We only run validation `services.sync.validation.percentageChance` percent of
+// the time, even if it's been the right amount of time since the last validation,
+// and you meet the maxRecord checks.
+pref("services.sync.validation.percentageChance", 10);
+
+// We won't validate an engine if it has more than this many records on the server.
+pref("services.sync.validation.maxRecords", 100);

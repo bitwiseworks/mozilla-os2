@@ -25,7 +25,8 @@ public:
   NS_DECL_NSIPROPERTIES
   NS_DECL_NSIPERSISTENTPROPERTIES
 
-  static nsresult Create(nsISupports* aOuter, REFNSIID aIID, void** aResult);
+  static MOZ_MUST_USE nsresult
+  Create(nsISupports* aOuter, REFNSIID aIID, void** aResult);
 
 private:
   ~nsPersistentProperties();
@@ -53,7 +54,7 @@ public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIPROPERTYELEMENT
 
-  static NS_METHOD Create(nsISupports* aOuter, REFNSIID aIID, void** aResult);
+  static nsresult Create(nsISupports* aOuter, REFNSIID aIID, void** aResult);
 
 private:
   ~nsPropertyElement() {}

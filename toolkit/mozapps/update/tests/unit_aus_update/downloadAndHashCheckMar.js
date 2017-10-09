@@ -17,15 +17,12 @@ function run_test() {
   debugDump("testing mar download and mar hash verification");
 
   Services.prefs.setBoolPref(PREF_APP_UPDATE_STAGING_ENABLED, false);
-  // The HTTP server is only used for the mar file downloads since it is slow
   start_httpserver();
-  setUpdateURLOverride(gURLData + "update.xml");
-  // The mock XMLHttpRequest is MUCH faster
-  overrideXHR(callHandleEvent);
+  setUpdateURL(gURLData + gHTTPHandlerPath);
   standardInit();
   // Only perform the non hash check tests when mar signing is enabled since the
   // update service doesn't perform hash checks when mar signing is enabled.
-  if (IS_MAR_CHECKS_ENABLED) {
+  if (MOZ_VERIFY_MAR_SIGNATURE) {
     do_execute_soon(run_test_pt11);
   } else {
     do_execute_soon(run_test_pt1);
@@ -35,21 +32,6 @@ function run_test() {
 // The HttpServer must be stopped before calling do_test_finished
 function finish_test() {
   stop_httpserver(doTestFinish);
-}
-
-// Callback function used by the custom XMLHttpRequest implementation to
-// call the nsIDOMEventListener's handleEvent method for onload.
-function callHandleEvent(aXHR) {
-  aXHR.status = 400;
-  aXHR.responseText = gResponseBody;
-  try {
-    let parser = Cc["@mozilla.org/xmlextras/domparser;1"].
-                 createInstance(Ci.nsIDOMParser);
-    aXHR.responseXML = parser.parseFromString(gResponseBody, "application/xml");
-  } catch(e) {
-  }
-  let e = { target: aXHR };
-  aXHR.onload(e);
 }
 
 // Helper function for testing mar downloads that have the correct size
@@ -80,44 +62,6 @@ function check_test_helper_pt1_1() {
 function check_test_helper_pt1_2() {
   Assert.equal(gStatusResult, gExpectedStatusResult,
                "the download status result" + MSG_SHOULD_EQUAL);
-  gAUS.removeDownloadListener(downloadListener);
-  gNextRunFunc();
-}
-
-// The following 3 functions are a workaround for GONK due to Bug 828858 and
-// can be removed after it is fixed and the callers are changed to use the
-// regular helper functions.
-function run_test_helper_bug828858_pt1(aMsg, aExpectedStatusResult, aNextRunFunc) {
-  gUpdates = null;
-  gUpdateCount = null;
-  gStatusResult = null;
-  gCheckFunc = check_test_helper_bug828858_pt1_1;
-  gNextRunFunc = aNextRunFunc;
-  gExpectedStatusResult = aExpectedStatusResult;
-  debugDump(aMsg, Components.stack.caller);
-  gUpdateChecker.checkForUpdates(updateCheckListener, true);
-}
-
-function check_test_helper_bug828858_pt1_1() {
-  Assert.equal(gUpdateCount, 1,
-               "the update count" + MSG_SHOULD_EQUAL);
-  gCheckFunc = check_test_helper_bug828858_pt1_2;
-  let bestUpdate = gAUS.selectUpdate(gUpdates, gUpdateCount);
-  let state = gAUS.downloadUpdate(bestUpdate, false);
-  if (state == STATE_NONE || state == STATE_FAILED) {
-    do_throw("nsIApplicationUpdateService:downloadUpdate returned " + state);
-  }
-  gAUS.addDownloadListener(downloadListener);
-}
-
-function check_test_helper_bug828858_pt1_2() {
-  if (gStatusResult == Cr.NS_ERROR_CONTENT_CORRUPTED) {
-    Assert.ok(true,
-              "the status result should equal NS_ERROR_CONTENT_CORRUPTED");
-  } else {
-    Assert.equal(gStatusResult, gExpectedStatusResult,
-                 "the download status result" + MSG_SHOULD_EQUAL);
-  }
   gAUS.removeDownloadListener(downloadListener);
   gNextRunFunc();
 }
@@ -212,17 +156,6 @@ function run_test_pt11() {
 function run_test_pt12() {
   const arbitraryFileSize = 1024000;
   setResponseBody("MD5", MD5_HASH_SIMPLE_MAR, arbitraryFileSize);
-  if (IS_TOOLKIT_GONK) {
-    // There seems to be a race on the web server side when the patchFile is
-    // stored on the SDCard. Sometimes, the webserver will serve up an error
-    // 416 and the contents of the file, and sometimes it will serve up an error
-    // 200 and no contents. This can cause either NS_ERROR_UNEXPECTED or
-    // NS_ERROR_CONTENT_CORRUPTED.
-    // Bug 828858 was filed to follow up on this issue.
-    run_test_helper_bug828858_pt1("mar download with a valid MD5 hash but invalid file size",
-                                  Cr.NS_ERROR_UNEXPECTED, finish_test);
-  } else {
-    run_test_helper_pt1("mar download with a valid MD5 hash but invalid file size",
-                        Cr.NS_ERROR_UNEXPECTED, finish_test);
-  }
+  run_test_helper_pt1("mar download with a valid MD5 hash but invalid file size",
+                      Cr.NS_ERROR_UNEXPECTED, finish_test);
 }

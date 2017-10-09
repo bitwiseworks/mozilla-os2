@@ -6,6 +6,7 @@
 
 //#define __INCREMENTAL 1
 
+#include "mozilla/Attributes.h"
 #include "mozilla/DebugOnly.h"
 
 #include "nsScanner.h"
@@ -21,9 +22,6 @@
 #include "mozilla/dom/EncodingUtils.h"
 
 using mozilla::dom::EncodingUtils;
-
-// We replace NUL characters with this character.
-static char16_t sInvalid = UCS2_REPLACEMENT_CHAR;
 
 nsReadEndCondition::nsReadEndCondition(const char16_t* aTerminateChars) :
   mChars(aTerminateChars), mFilter(char16_t(~0)) // All bits set
@@ -58,8 +56,6 @@ nsScanner::nsScanner(const nsAString& anHTMLString)
   MOZ_COUNT_CTOR(nsScanner);
 
   mSlidingBuffer = nullptr;
-  mCountRemaining = 0;
-  mFirstNonWhitespacePosition = -1;
   if (AppendToBuffer(anHTMLString)) {
     mSlidingBuffer->BeginReading(mCurrentPosition);
   } else {
@@ -69,10 +65,8 @@ nsScanner::nsScanner(const nsAString& anHTMLString)
   }
   mMarkPosition = mCurrentPosition;
   mIncremental = false;
-  mUnicodeDecoder = 0;
+  mUnicodeDecoder = nullptr;
   mCharsetSource = kCharsetUninitialized;
-  mHasInvalidCharacter = false;
-  mReplacementCharacter = char16_t(0x0);
 }
 
 /**
@@ -98,13 +92,9 @@ nsScanner::nsScanner(nsString& aFilename, bool aCreateStream)
   mEndPosition = mCurrentPosition;
 
   mIncremental = true;
-  mFirstNonWhitespacePosition = -1;
-  mCountRemaining = 0;
 
-  mUnicodeDecoder = 0;
+  mUnicodeDecoder = nullptr;
   mCharsetSource = kCharsetUninitialized;
-  mHasInvalidCharacter = false;
-  mReplacementCharacter = char16_t(0x0);
   // XML defaults to UTF-8 and about:blank is UTF-8, too.
   SetDocumentCharset(NS_LITERAL_CSTRING("UTF-8"), kCharsetFromDocTypeDefault);
 }
@@ -162,7 +152,6 @@ nsScanner::~nsScanner() {
  */
 void nsScanner::RewindToMark(void){
   if (mSlidingBuffer) {
-    mCountRemaining += (Distance(mMarkPosition, mCurrentPosition));
     mCurrentPosition = mMarkPosition;
   }
 }
@@ -209,8 +198,6 @@ bool nsScanner::UngetReadable(const nsAString& aBuffer) {
   mSlidingBuffer->BeginReading(mCurrentPosition); // Insertion invalidated our iterators
   mSlidingBuffer->EndReading(mEndPosition);
  
-  uint32_t length = aBuffer.Length();
-  mCountRemaining += length; // Ref. bug 117441
   return true;
 }
 
@@ -234,8 +221,7 @@ nsresult nsScanner::Append(const nsAString& aBuffer) {
  *  @param   
  *  @return  
  */
-nsresult nsScanner::Append(const char* aBuffer, uint32_t aLen,
-                           nsIRequest *aRequest)
+nsresult nsScanner::Append(const char* aBuffer, uint32_t aLen)
 {
   nsresult res = NS_OK;
   if (mUnicodeDecoder) {
@@ -252,7 +238,6 @@ nsresult nsScanner::Append(const char* aBuffer, uint32_t aLen,
 
     int32_t totalChars = 0;
     int32_t unicharLength = unicharBufLen;
-    int32_t errorPos = -1;
 
     do {
       int32_t srcLength = aLen;
@@ -272,12 +257,10 @@ nsresult nsScanner::Append(const char* aBuffer, uint32_t aLen,
           break;
         }
 
-        if (mReplacementCharacter == 0x0 && errorPos == -1) {
-          errorPos = totalChars;
-        }
-        unichars[unicharLength++] = mReplacementCharacter == 0x0 ?
-                                    mUnicodeDecoder->GetCharacterForUnMapped() :
-                                    mReplacementCharacter;
+        // Since about:blank is empty, this line runs only for XML. Use a
+        // character that's illegal in XML instead of U+FFFD in order to make
+        // expat flag the error.
+        unichars[unicharLength++] = 0xFFFF;
 
         unichars = unichars + unicharLength;
         unicharLength = unicharBufLen - (++totalChars);
@@ -301,7 +284,7 @@ nsresult nsScanner::Append(const char* aBuffer, uint32_t aLen,
     // since it doesn't reflect on our success or failure
     // - Ref. bug 87110
     res = NS_OK; 
-    if (!AppendToBuffer(buffer, aRequest, errorPos))
+    if (!AppendToBuffer(buffer))
       res = NS_ERROR_OUT_OF_MEMORY;
   }
   else {
@@ -326,758 +309,10 @@ nsresult nsScanner::GetChar(char16_t& aChar) {
   }
 
   aChar = *mCurrentPosition++;
-  --mCountRemaining;
 
   return NS_OK;
 }
 
-
-/**
- *  peek ahead to consume next char from scanner's internal
- *  input buffer
- *  
- *  @update  gess 3/25/98
- *  @param   
- *  @return  
- */
-nsresult nsScanner::Peek(char16_t& aChar, uint32_t aOffset) {
-  aChar = 0;
-
-  if (!mSlidingBuffer || mCurrentPosition == mEndPosition) {
-    return kEOF;
-  }
-
-  if (aOffset > 0) {
-    if (mCountRemaining <= aOffset)
-      return kEOF;
-
-    nsScannerIterator pos = mCurrentPosition;
-    pos.advance(aOffset);
-    aChar=*pos;
-  }
-  else {
-    aChar=*mCurrentPosition;
-  }
-
-  return NS_OK;
-}
-
-nsresult nsScanner::Peek(nsAString& aStr, int32_t aNumChars, int32_t aOffset)
-{
-  if (!mSlidingBuffer || mCurrentPosition == mEndPosition) {
-    return kEOF;
-  }
-
-  nsScannerIterator start, end;
-
-  start = mCurrentPosition;
-
-  if ((int32_t)mCountRemaining <= aOffset) {
-    return kEOF;
-  }
-
-  if (aOffset > 0) {
-    start.advance(aOffset);
-  }
-
-  if (mCountRemaining < uint32_t(aNumChars + aOffset)) {
-    end = mEndPosition;
-  }
-  else {
-    end = start;
-    end.advance(aNumChars);
-  }
-
-  if (!CopyUnicodeTo(start, end, aStr)) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-
-  return NS_OK;
-}
-
-
-/**
- *  Skip whitespace on scanner input stream
- *  
- *  @update  gess 3/25/98
- *  @param   
- *  @return  error status
- */
-nsresult nsScanner::SkipWhitespace(int32_t& aNewlinesSkipped) {
-
-  if (!mSlidingBuffer) {
-    return kEOF;
-  }
-
-  char16_t theChar = 0;
-  nsresult  result = Peek(theChar);
-  
-  if (NS_FAILED(result)) {
-    return result;
-  }
-  
-  nsScannerIterator current = mCurrentPosition;
-  bool      done = false;
-  bool      skipped = false;
-  
-  while (!done && current != mEndPosition) {
-    switch(theChar) {
-      case '\n':
-      case '\r': ++aNewlinesSkipped;
-      case ' ' :
-      case '\t':
-        {
-          skipped = true;
-          char16_t thePrevChar = theChar;
-          theChar = (++current != mEndPosition) ? *current : '\0';
-          if ((thePrevChar == '\r' && theChar == '\n') ||
-              (thePrevChar == '\n' && theChar == '\r')) {
-            theChar = (++current != mEndPosition) ? *current : '\0'; // CRLF == LFCR => LF
-          }
-        }
-        break;
-      default:
-        done = true;
-        break;
-    }
-  }
-
-  if (skipped) {
-    SetPosition(current);
-    if (current == mEndPosition) {
-      result = kEOF;
-    }
-  }
-
-  return result;
-}
-
-/**
- *  Skip over chars as long as they equal given char
- *  
- *  @update  gess 3/25/98
- *  @param   
- *  @return  error code
- */
-nsresult nsScanner::SkipOver(char16_t aSkipChar){
-
-  if (!mSlidingBuffer) {
-    return kEOF;
-  }
-
-  char16_t ch=0;
-  nsresult   result=NS_OK;
-
-  while(NS_OK==result) {
-    result=Peek(ch);
-    if(NS_OK == result) {
-      if(ch!=aSkipChar) {
-        break;
-      }
-      GetChar(ch);
-    } 
-    else break;
-  } //while
-  return result;
-
-}
-
-#if 0
-void DoErrTest(nsString& aString) {
-  int32_t pos=aString.FindChar(0);
-  if(kNotFound<pos) {
-    if(aString.Length()-1!=pos) {
-    }
-  }
-}
-
-void DoErrTest(nsCString& aString) {
-  int32_t pos=aString.FindChar(0);
-  if(kNotFound<pos) {
-    if(aString.Length()-1!=pos) {
-    }
-  }
-}
-#endif
-
-/**
- *  Consume characters until you run into space, a '<', a '>', or a '/'.
- *  
- *  @param   aString - receives new data from stream
- *  @return  error code
- */
-nsresult nsScanner::ReadTagIdentifier(nsScannerSharedSubstring& aString) {
-
-  if (!mSlidingBuffer) {
-    return kEOF;
-  }
-
-  char16_t         theChar=0;
-  nsresult          result=Peek(theChar);
-  nsScannerIterator current, end;
-  bool              found=false;  
-  
-  current = mCurrentPosition;
-  end = mEndPosition;
-
-  // Loop until we find an illegal character. Everything is then appended
-  // later.
-  while(current != end && !found) {
-    theChar=*current;
-
-    switch(theChar) {
-      case '\n':
-      case '\r':
-      case ' ' :
-      case '\t':
-      case '\v':
-      case '\f':
-      case '<':
-      case '>':
-      case '/':
-        found = true;
-        break;
-
-      case '\0':
-        ReplaceCharacter(current, sInvalid);
-        break;
-
-      default:
-        break;
-    }
-
-    if (!found) {
-      ++current;
-    }
-  }
-
-  // Don't bother appending nothing.
-  if (current != mCurrentPosition) {
-    if (!AppendUnicodeTo(mCurrentPosition, current, aString)) {
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
-  }
-
-  SetPosition(current);  
-  if (current == end) {
-    result = kEOF;
-  }
-
-  //DoErrTest(aString);
-
-  return result;
-}
-
-/**
- *  Consume characters until you run into a char that's not valid in an
- *  entity name
- *  
- *  @param   aString - receives new data from stream
- *  @return  error code
- */
-nsresult nsScanner::ReadEntityIdentifier(nsString& aString) {
-
-  if (!mSlidingBuffer) {
-    return kEOF;
-  }
-
-  char16_t         theChar=0;
-  nsresult          result=Peek(theChar);
-  nsScannerIterator origin, current, end;
-  bool              found=false;  
-
-  origin = mCurrentPosition;
-  current = mCurrentPosition;
-  end = mEndPosition;
-
-  while(current != end) {
- 
-    theChar=*current;
-    if(theChar) {
-      found=false;
-      switch(theChar) {
-        case '_':
-        case '-':
-        case '.':
-          // Don't allow ':' in entity names.  See bug 23791
-          found = true;
-          break;
-        default:
-          found = ('a'<=theChar && theChar<='z') ||
-                  ('A'<=theChar && theChar<='Z') ||
-                  ('0'<=theChar && theChar<='9');
-          break;
-      }
-
-      if(!found) {
-        if (!AppendUnicodeTo(mCurrentPosition, current, aString)) {
-          return NS_ERROR_OUT_OF_MEMORY;
-        }
-        break;
-      }
-    }
-    ++current;
-  }
-  
-  SetPosition(current);
-  if (current == end) {
-    if (!AppendUnicodeTo(origin, current, aString)) {
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
-    return kEOF;
-  }
-
-  //DoErrTest(aString);
-
-  return result;
-}
-
-/**
- *  Consume digits 
- *  
- *  @param   aString - should contain digits
- *  @return  error code
- */
-nsresult nsScanner::ReadNumber(nsString& aString,int32_t aBase) {
-
-  if (!mSlidingBuffer) {
-    return kEOF;
-  }
-
-  NS_ASSERTION(aBase == 10 || aBase == 16,"base value not supported");
-
-  char16_t         theChar=0;
-  nsresult          result=Peek(theChar);
-  nsScannerIterator origin, current, end;
-
-  origin = mCurrentPosition;
-  current = origin;
-  end = mEndPosition;
-
-  bool done = false;
-  while(current != end) {
-    theChar=*current;
-    if(theChar) {
-      done = (theChar < '0' || theChar > '9') && 
-             ((aBase == 16)? (theChar < 'A' || theChar > 'F') &&
-                             (theChar < 'a' || theChar > 'f')
-                             :true);
-      if(done) {
-        if (!AppendUnicodeTo(origin, current, aString)) {
-          return NS_ERROR_OUT_OF_MEMORY;
-        }
-        break;
-      }
-    }
-    ++current;
-  }
-
-  SetPosition(current);
-  if (current == end) {
-    if (!AppendUnicodeTo(origin, current, aString)) {
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
-    return kEOF;
-  }
-
-  //DoErrTest(aString);
-
-  return result;
-}
-
-/**
- *  Consume characters until you find the terminal char
- *  
- *  @update  gess 3/25/98
- *  @param   aString receives new data from stream
- *  @param   addTerminal tells us whether to append terminal to aString
- *  @return  error code
- */
-nsresult nsScanner::ReadWhitespace(nsScannerSharedSubstring& aString,
-                                   int32_t& aNewlinesSkipped,
-                                   bool& aHaveCR) {
-
-  aHaveCR = false;
-
-  if (!mSlidingBuffer) {
-    return kEOF;
-  }
-
-  char16_t theChar = 0;
-  nsresult  result = Peek(theChar);
-  
-  if (NS_FAILED(result)) {
-    return result;
-  }
-  
-  nsScannerIterator origin, current, end;
-  bool done = false;  
-
-  origin = mCurrentPosition;
-  current = origin;
-  end = mEndPosition;
-
-  bool haveCR = false;
-
-  while(!done && current != end) {
-    switch(theChar) {
-      case '\n':
-      case '\r':
-        {
-          ++aNewlinesSkipped;
-          char16_t thePrevChar = theChar;
-          theChar = (++current != end) ? *current : '\0';
-          if ((thePrevChar == '\r' && theChar == '\n') ||
-              (thePrevChar == '\n' && theChar == '\r')) {
-            theChar = (++current != end) ? *current : '\0'; // CRLF == LFCR => LF
-            haveCR = true;
-          } else if (thePrevChar == '\r') {
-            // Lone CR becomes CRLF; callers should know to remove extra CRs
-            if (!AppendUnicodeTo(origin, current, aString)) {
-              return NS_ERROR_OUT_OF_MEMORY;
-            }
-            aString.writable().Append(char16_t('\n'));
-            origin = current;
-            haveCR = true;
-          }
-        }
-        break;
-      case ' ' :
-      case '\t':
-        theChar = (++current != end) ? *current : '\0';
-        break;
-      default:
-        done = true;
-        if (!AppendUnicodeTo(origin, current, aString)) {
-          return NS_ERROR_OUT_OF_MEMORY;
-        }
-        break;
-    }
-  }
-
-  SetPosition(current);
-  if (current == end) {
-    if (!AppendUnicodeTo(origin, current, aString)) {
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
-    result = kEOF;
-  }
-
-  aHaveCR = haveCR;
-  return result;
-}
-
-//XXXbz callers of this have to manage their lone '\r' themselves if they want
-//it to work.  Good thing they're all in view-source and it deals.
-nsresult nsScanner::ReadWhitespace(nsScannerIterator& aStart, 
-                                   nsScannerIterator& aEnd,
-                                   int32_t& aNewlinesSkipped) {
-
-  if (!mSlidingBuffer) {
-    return kEOF;
-  }
-
-  char16_t theChar = 0;
-  nsresult  result = Peek(theChar);
-  
-  if (NS_FAILED(result)) {
-    return result;
-  }
-  
-  nsScannerIterator origin, current, end;
-  bool done = false;  
-
-  origin = mCurrentPosition;
-  current = origin;
-  end = mEndPosition;
-
-  while(!done && current != end) {
-    switch(theChar) {
-      case '\n':
-      case '\r': ++aNewlinesSkipped;
-      case ' ' :
-      case '\t':
-        {
-          char16_t thePrevChar = theChar;
-          theChar = (++current != end) ? *current : '\0';
-          if ((thePrevChar == '\r' && theChar == '\n') ||
-              (thePrevChar == '\n' && theChar == '\r')) {
-            theChar = (++current != end) ? *current : '\0'; // CRLF == LFCR => LF
-          }
-        }
-        break;
-      default:
-        done = true;
-        aStart = origin;
-        aEnd = current;
-        break;
-    }
-  }
-
-  SetPosition(current);
-  if (current == end) {
-    aStart = origin;
-    aEnd = current;
-    result = kEOF;
-  }
-
-  return result;
-}
-
-/**
- *  Consume characters until you encounter one contained in given
- *  input set.
- *  
- *  @update  gess 3/25/98
- *  @param   aString will contain the result of this method
- *  @param   aTerminalSet is an ordered string that contains
- *           the set of INVALID characters
- *  @return  error code
- */
-nsresult nsScanner::ReadUntil(nsAString& aString,
-                              const nsReadEndCondition& aEndCondition,
-                              bool addTerminal)
-{  
-  if (!mSlidingBuffer) {
-    return kEOF;
-  }
-
-  nsScannerIterator origin, current;
-  const char16_t* setstart = aEndCondition.mChars;
-  const char16_t* setcurrent;
-
-  origin = mCurrentPosition;
-  current = origin;
-
-  char16_t         theChar=0;
-  nsresult          result=Peek(theChar);
-
-  if (NS_FAILED(result)) {
-    return result;
-  }
-  
-  while (current != mEndPosition) {
-    theChar = *current;
-    if (theChar == '\0') {
-      ReplaceCharacter(current, sInvalid);
-      theChar = sInvalid;
-    }
-
-    // Filter out completely wrong characters
-    // Check if all bits are in the required area
-    if(!(theChar & aEndCondition.mFilter)) {
-      // They were. Do a thorough check.
-
-      setcurrent = setstart;
-      while (*setcurrent) {
-        if (*setcurrent == theChar) {
-          if(addTerminal)
-            ++current;
-          if (!AppendUnicodeTo(origin, current, aString)) {
-            return NS_ERROR_OUT_OF_MEMORY;
-          }
-          SetPosition(current);
-
-          //DoErrTest(aString);
-
-          return NS_OK;
-        }
-        ++setcurrent;
-      }
-    }
-    
-    ++current;
-  }
-
-  // If we are here, we didn't find any terminator in the string and
-  // current = mEndPosition
-  SetPosition(current);
-  if (!AppendUnicodeTo(origin, current, aString)) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-  return kEOF;
-}
-
-nsresult nsScanner::ReadUntil(nsScannerSharedSubstring& aString,
-                              const nsReadEndCondition& aEndCondition,
-                              bool addTerminal)
-{  
-  if (!mSlidingBuffer) {
-    return kEOF;
-  }
-
-  nsScannerIterator origin, current;
-  const char16_t* setstart = aEndCondition.mChars;
-  const char16_t* setcurrent;
-
-  origin = mCurrentPosition;
-  current = origin;
-
-  char16_t         theChar=0;
-  nsresult          result=Peek(theChar);
-
-  if (NS_FAILED(result)) {
-    return result;
-  }
-  
-  while (current != mEndPosition) {
-    theChar = *current;
-    if (theChar == '\0') {
-      ReplaceCharacter(current, sInvalid);
-      theChar = sInvalid;
-    }
-
-    // Filter out completely wrong characters
-    // Check if all bits are in the required area
-    if(!(theChar & aEndCondition.mFilter)) {
-      // They were. Do a thorough check.
-
-      setcurrent = setstart;
-      while (*setcurrent) {
-        if (*setcurrent == theChar) {
-          if(addTerminal)
-            ++current;
-          if (!AppendUnicodeTo(origin, current, aString)) {
-            return NS_ERROR_OUT_OF_MEMORY;
-          }
-          SetPosition(current);
-
-          //DoErrTest(aString);
-
-          return NS_OK;
-        }
-        ++setcurrent;
-      }
-    }
-    
-    ++current;
-  }
-
-  // If we are here, we didn't find any terminator in the string and
-  // current = mEndPosition
-  SetPosition(current);
-  if (!AppendUnicodeTo(origin, current, aString)) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-  return kEOF;
-}
-
-nsresult nsScanner::ReadUntil(nsScannerIterator& aStart, 
-                              nsScannerIterator& aEnd,
-                              const nsReadEndCondition &aEndCondition,
-                              bool addTerminal)
-{
-  if (!mSlidingBuffer) {
-    return kEOF;
-  }
-
-  nsScannerIterator origin, current;
-  const char16_t* setstart = aEndCondition.mChars;
-  const char16_t* setcurrent;
-
-  origin = mCurrentPosition;
-  current = origin;
-
-  char16_t         theChar=0;
-  nsresult          result=Peek(theChar);
-  
-  if (NS_FAILED(result)) {
-    aStart = aEnd = current;
-    return result;
-  }
-  
-  while (current != mEndPosition) {
-    theChar = *current;
-    if (theChar == '\0') {
-      ReplaceCharacter(current, sInvalid);
-      theChar = sInvalid;
-    }
-
-    // Filter out completely wrong characters
-    // Check if all bits are in the required area
-    if(!(theChar & aEndCondition.mFilter)) {
-      // They were. Do a thorough check.
-      setcurrent = setstart;
-      while (*setcurrent) {
-        if (*setcurrent == theChar) {
-          if(addTerminal)
-            ++current;
-          aStart = origin;
-          aEnd = current;
-          SetPosition(current);
-
-          return NS_OK;
-        }
-        ++setcurrent;
-      }
-    }
-
-    ++current;
-  }
-
-  // If we are here, we didn't find any terminator in the string and
-  // current = mEndPosition
-  SetPosition(current);
-  aStart = origin;
-  aEnd = current;
-  return kEOF;
-}
-
-/**
- *  Consumes chars until you see the given terminalChar
- *  
- *  @update  gess 3/25/98
- *  @param   
- *  @return  error code
- */
-nsresult nsScanner::ReadUntil(nsAString& aString,
-                              char16_t aTerminalChar,
-                              bool addTerminal)
-{
-  if (!mSlidingBuffer) {
-    return kEOF;
-  }
-
-  nsScannerIterator origin, current;
-
-  origin = mCurrentPosition;
-  current = origin;
-
-  char16_t theChar;
-  nsresult result = Peek(theChar);
-
-  if (NS_FAILED(result)) {
-    return result;
-  }
-
-  while (current != mEndPosition) {
-    theChar = *current;
-    if (theChar == '\0') {
-      ReplaceCharacter(current, sInvalid);
-      theChar = sInvalid;
-    }
-
-    if (aTerminalChar == theChar) {
-      if(addTerminal)
-        ++current;
-      if (!AppendUnicodeTo(origin, current, aString)) {
-        return NS_ERROR_OUT_OF_MEMORY;
-      }
-      SetPosition(current);
-      return NS_OK;
-    }
-    ++current;
-  }
-
-  // If we are here, we didn't find any terminator in the string and
-  // current = mEndPosition
-  if (!AppendUnicodeTo(origin, current, aString)) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-  SetPosition(current);
-  return kEOF;
-
-}
 
 void nsScanner::BindSubstring(nsScannerSubstring& aSubstring, const nsScannerIterator& aStart, const nsScannerIterator& aEnd)
 {
@@ -1094,25 +329,9 @@ void nsScanner::EndReading(nsScannerIterator& aPosition)
   aPosition = mEndPosition;
 }
  
-void nsScanner::SetPosition(nsScannerIterator& aPosition, bool aTerminate, bool aReverse)
+void nsScanner::SetPosition(nsScannerIterator& aPosition, bool aTerminate)
 {
   if (mSlidingBuffer) {
-#ifdef DEBUG
-    uint32_t origRemaining = mCountRemaining;
-#endif
-
-    if (aReverse) {
-      mCountRemaining += (Distance(aPosition, mCurrentPosition));
-    }
-    else {
-      mCountRemaining -= (Distance(mCurrentPosition, aPosition));
-    }
-
-    NS_ASSERTION((mCountRemaining >= origRemaining && aReverse) ||
-                 (mCountRemaining <= origRemaining && !aReverse),
-                 "Improper use of nsScanner::SetPosition. Make sure to set the"
-                 " aReverse parameter correctly");
-
     mCurrentPosition = aPosition;
     if (aTerminate && (mCurrentPosition == mEndPosition)) {
       mMarkPosition = mCurrentPosition;
@@ -1121,19 +340,8 @@ void nsScanner::SetPosition(nsScannerIterator& aPosition, bool aTerminate, bool 
   }
 }
 
-void nsScanner::ReplaceCharacter(nsScannerIterator& aPosition,
-                                 char16_t aChar)
+bool nsScanner::AppendToBuffer(nsScannerString::Buffer* aBuf)
 {
-  if (mSlidingBuffer) {
-    mSlidingBuffer->ReplaceCharacter(aPosition, aChar);
-  }
-}
-
-bool nsScanner::AppendToBuffer(nsScannerString::Buffer* aBuf,
-                                 nsIRequest *aRequest,
-                                 int32_t aErrorPos)
-{
-  uint32_t countRemaining = mCountRemaining;
   if (!mSlidingBuffer) {
     mSlidingBuffer = new nsScannerString(aBuf);
     if (!mSlidingBuffer)
@@ -1141,7 +349,6 @@ bool nsScanner::AppendToBuffer(nsScannerString::Buffer* aBuf,
     mSlidingBuffer->BeginReading(mCurrentPosition);
     mMarkPosition = mCurrentPosition;
     mSlidingBuffer->EndReading(mEndPosition);
-    mCountRemaining = aBuf->DataLength();
   }
   else {
     mSlidingBuffer->AppendBuffer(aBuf);
@@ -1149,29 +356,8 @@ bool nsScanner::AppendToBuffer(nsScannerString::Buffer* aBuf,
       mSlidingBuffer->BeginReading(mCurrentPosition);
     }
     mSlidingBuffer->EndReading(mEndPosition);
-    mCountRemaining += aBuf->DataLength();
   }
 
-  if (aErrorPos != -1 && !mHasInvalidCharacter) {
-    mHasInvalidCharacter = true;
-    mFirstInvalidPosition = mCurrentPosition;
-    mFirstInvalidPosition.advance(countRemaining + aErrorPos);
-  }
-
-  if (mFirstNonWhitespacePosition == -1) {
-    nsScannerIterator iter(mCurrentPosition);
-    nsScannerIterator end(mEndPosition);
-
-    while (iter != end) {
-      if (!nsCRT::IsAsciiSpace(*iter)) {
-        mFirstNonWhitespacePosition = Distance(mCurrentPosition, iter);
-
-        break;
-      }
-
-      ++iter;
-    }
-  }
   return true;
 }
 
@@ -1221,13 +407,3 @@ void nsScanner::SelfTest(void) {
 #ifdef _DEBUG
 #endif
 }
-
-void nsScanner::OverrideReplacementCharacter(char16_t aReplacementCharacter)
-{
-  mReplacementCharacter = aReplacementCharacter;
-
-  if (mHasInvalidCharacter) {
-    ReplaceCharacter(mFirstInvalidPosition, mReplacementCharacter);
-  }
-}
-

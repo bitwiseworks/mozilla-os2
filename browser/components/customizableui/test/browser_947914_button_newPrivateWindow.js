@@ -4,7 +4,7 @@
 
 "use strict";
 
-add_task(function() {
+add_task(function*() {
   info("Check private browsing button existence and functionality");
 
   yield PanelUI.show();
@@ -39,7 +39,7 @@ add_task(function() {
     yield promiseWindowClosed(privateWindow);
     info("The new private window was closed");
   }
-  catch(e) {
+  catch (e) {
     ok(false, "The new private browser window was not properly handled");
   }
   finally {

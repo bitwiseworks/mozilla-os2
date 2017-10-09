@@ -31,10 +31,11 @@ NS_IMPL_CI_INTERFACE_GETTER(nsSystemPrincipal,
 
 #define SYSTEM_PRINCIPAL_SPEC "[System Principal]"
 
-void
+nsresult
 nsSystemPrincipal::GetScriptLocation(nsACString &aStr)
 {
     aStr.AssignLiteral(SYSTEM_PRINCIPAL_SPEC);
+    return NS_OK;
 }
 
 ///////////////////////////////////////
@@ -72,8 +73,18 @@ nsSystemPrincipal::GetCsp(nsIContentSecurityPolicy** aCsp)
 NS_IMETHODIMP
 nsSystemPrincipal::SetCsp(nsIContentSecurityPolicy* aCsp)
 {
+  // Never destroy an existing CSP on the principal.
+  // This method should only be called in rare cases.
+
+  return NS_ERROR_FAILURE;
+}
+
+NS_IMETHODIMP
+nsSystemPrincipal::EnsureCSP(nsIDOMDocument* aDocument,
+                             nsIContentSecurityPolicy** aCSP)
+{
   // CSP on a system principal makes no sense
-  return NS_OK;
+  return NS_ERROR_FAILURE;
 }
 
 NS_IMETHODIMP
@@ -84,7 +95,8 @@ nsSystemPrincipal::GetPreloadCsp(nsIContentSecurityPolicy** aPreloadCSP)
 }
 
 NS_IMETHODIMP
-nsSystemPrincipal::SetPreloadCsp(nsIContentSecurityPolicy* aPreloadCSP)
+nsSystemPrincipal::EnsurePreloadCSP(nsIDOMDocument* aDocument,
+                                    nsIContentSecurityPolicy** aPreloadCSP)
 {
   // CSP on a system principal makes no sense
   return NS_OK;

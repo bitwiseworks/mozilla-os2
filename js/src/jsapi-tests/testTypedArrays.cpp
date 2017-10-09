@@ -5,6 +5,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "jscompartment.h"
 #include "jsfriendapi.h"
 
 #include "jsapi-tests/tests.h"
@@ -53,7 +54,6 @@ BEGIN_TEST(testTypedArrays)
         TestArrayFromBuffer<JS_NewFloat32ArrayWithBuffer, JS_NewFloat32ArrayFromArray, float, false, JS_GetFloat32ArrayData>(cx) &&
         TestArrayFromBuffer<JS_NewFloat64ArrayWithBuffer, JS_NewFloat64ArrayFromArray, double, false, JS_GetFloat64ArrayData>(cx);
 
-#ifdef ENABLE_SHARED_ARRAY_BUFFER
     ok = ok &&
         TestArrayFromBuffer<JS_NewInt8ArrayWithBuffer, JS_NewInt8ArrayFromArray, int8_t, true, JS_GetInt8ArrayData>(cx) &&
         TestArrayFromBuffer<JS_NewUint8ArrayWithBuffer, JS_NewUint8ArrayFromArray, uint8_t, true, JS_GetUint8ArrayData>(cx) &&
@@ -64,7 +64,6 @@ BEGIN_TEST(testTypedArrays)
         TestArrayFromBuffer<JS_NewUint32ArrayWithBuffer, JS_NewUint32ArrayFromArray, uint32_t, true, JS_GetUint32ArrayData>(cx) &&
         TestArrayFromBuffer<JS_NewFloat32ArrayWithBuffer, JS_NewFloat32ArrayFromArray, float, true, JS_GetFloat32ArrayData>(cx) &&
         TestArrayFromBuffer<JS_NewFloat64ArrayWithBuffer, JS_NewFloat64ArrayFromArray, double, true, JS_GetFloat64ArrayData>(cx);
-#endif // ENABLE_SHARED_ARRAY_BUFFER
 
     return ok;
 }
@@ -116,6 +115,9 @@ template<JSObject* CreateWithBuffer(JSContext*, JS::HandleObject, uint32_t, int3
 bool
 TestArrayFromBuffer(JSContext* cx)
 {
+    if (Shared && !cx->compartment()->creationOptions().getSharedMemoryAndAtomicsEnabled())
+        return true;
+
     size_t elts = 8;
     size_t nbytes = elts * sizeof(Element);
     RootedObject buffer(cx, Shared ? JS_NewSharedArrayBuffer(cx, nbytes)
@@ -172,7 +174,7 @@ TestArrayFromBuffer(JSContext* cx)
 
     // Make sure all 3 views reflect the same buffer at the expected locations
     JS::RootedValue v(cx, JS::Int32Value(39));
-    JS_SetElement(cx, array, 0, v);
+    CHECK(JS_SetElement(cx, array, 0, v));
     JS::RootedValue v2(cx);
     CHECK(JS_GetElement(cx, array, 0, &v2));
     CHECK_SAME(v, v2);
@@ -188,7 +190,7 @@ TestArrayFromBuffer(JSContext* cx)
     }
 
     v.setInt32(40);
-    JS_SetElement(cx, array, elts / 2, v);
+    CHECK(JS_SetElement(cx, array, elts / 2, v));
     CHECK(JS_GetElement(cx, array, elts / 2, &v2));
     CHECK_SAME(v, v2);
     CHECK(JS_GetElement(cx, ofsArray, 0, &v2));
@@ -203,7 +205,7 @@ TestArrayFromBuffer(JSContext* cx)
     }
 
     v.setInt32(41);
-    JS_SetElement(cx, array, elts - 1, v);
+    CHECK(JS_SetElement(cx, array, elts - 1, v));
     CHECK(JS_GetElement(cx, array, elts - 1, &v2));
     CHECK_SAME(v, v2);
     CHECK(JS_GetElement(cx, ofsArray, elts / 2 - 1, &v2));
@@ -224,7 +226,7 @@ TestArrayFromBuffer(JSContext* cx)
 
     /* The copy should not see changes in the original */
     v2.setInt32(42);
-    JS_SetElement(cx, array, 0, v2);
+    CHECK(JS_SetElement(cx, array, 0, v2));
     CHECK(JS_GetElement(cx, copy, 0, &v2));
     CHECK_SAME(v2, v); /* v is still the original value from 'array' */
 

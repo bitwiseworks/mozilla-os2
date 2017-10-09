@@ -10,31 +10,26 @@ import java.util.EnumSet;
 import java.util.List;
 
 import org.mozilla.gecko.GeckoProfile;
+import org.mozilla.gecko.annotation.RobocopTarget;
 import org.mozilla.gecko.db.BrowserContract.ExpirePriority;
 import org.mozilla.gecko.distribution.Distribution;
-import org.mozilla.gecko.favicons.decoders.LoadFaviconResult;
+import org.mozilla.gecko.icons.decoders.LoadFaviconResult;
 
+import android.content.ContentProviderClient;
 import android.content.ContentProviderOperation;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.database.ContentObserver;
 import android.database.Cursor;
 import android.graphics.drawable.BitmapDrawable;
+import android.support.v4.content.CursorLoader;
 
 /**
  * Interface for interactions with all databases. If you want an instance
  * that implements this, you should go through GeckoProfile. E.g.,
- * <code>GeckoProfile.get(context).getDB()</code>.
- *
- * GeckoProfile itself will construct an appropriate subclass using
- * a factory that the containing application can set with
- * {@link GeckoProfile#setBrowserDBFactory(BrowserDB.Factory)}.
+ * <code>BrowserDB.from(context)</code>.
  */
-public interface BrowserDB {
-    public interface Factory {
-        public BrowserDB get(String profileName, File profileDir);
-    }
-
+public abstract class BrowserDB {
     public static enum FilterFlags {
         EXCLUDE_PINNED_SITES
     }
@@ -42,7 +37,7 @@ public interface BrowserDB {
     public abstract Searches getSearches();
     public abstract TabsAccessor getTabsAccessor();
     public abstract URLMetadata getURLMetadata();
-    public abstract ReadingListAccessor getReadingListAccessor();
+    @RobocopTarget public abstract UrlAnnotations getUrlAnnotations();
 
     /**
      * Add default bookmarks to the database.
@@ -73,15 +68,12 @@ public interface BrowserDB {
     /**
      * @return a cursor over top sites (high-ranking bookmarks and history).
      * Can return <code>null</code>.
+     * Returns no more than <code>limit</code> results.
+     * Suggested sites will be limited to being within the first <code>suggestedRangeLimit</code> results.
      */
-    public abstract Cursor getTopSites(ContentResolver cr, int limit);
+    public abstract Cursor getTopSites(ContentResolver cr, int suggestedRangeLimit, int limit);
 
-    /**
-     * @return a cursor over top sites (high-ranking bookmarks and history).
-     * Can return <code>null</code>.
-     * Returns no more than <code>maxLimit</code> results.
-     */
-    public abstract Cursor getTopSites(ContentResolver cr, int minLimit, int maxLimit);
+    public abstract CursorLoader getActivityStreamTopSites(Context context, int limit);
 
     public abstract void updateVisitedHistory(ContentResolver cr, String uri);
 
@@ -96,6 +88,8 @@ public interface BrowserDB {
      * Can return <code>null</code>.
      */
     public abstract Cursor getRecentHistory(ContentResolver cr, int limit);
+
+    public abstract Cursor getHistoryForURL(ContentResolver cr, String uri);
 
     public abstract Cursor getRecentHistoryBetweenTime(ContentResolver cr, int historyLimit, long start, long end);
 
@@ -113,14 +107,20 @@ public interface BrowserDB {
     public abstract boolean isBookmark(ContentResolver cr, String uri);
     public abstract boolean addBookmark(ContentResolver cr, String title, String uri);
     public abstract Cursor getBookmarkForUrl(ContentResolver cr, String url);
+    public abstract Cursor getBookmarksForPartialUrl(ContentResolver cr, String partialUrl);
     public abstract void removeBookmarksWithURL(ContentResolver cr, String uri);
     public abstract void registerBookmarkObserver(ContentResolver cr, ContentObserver observer);
     public abstract void updateBookmark(ContentResolver cr, int id, String uri, String title, String keyword);
+    public abstract boolean hasBookmarkWithGuid(ContentResolver cr, String guid);
 
+    public abstract boolean insertPageMetadata(ContentProviderClient contentProviderClient, String pageUrl, boolean hasImage, String metadataJSON);
+    public abstract int deletePageMetadata(ContentProviderClient contentProviderClient, String pageUrl);
     /**
      * Can return <code>null</code>.
      */
     public abstract Cursor getBookmarksInFolder(ContentResolver cr, long folderId);
+
+    public abstract int getBookmarkCountForFolder(ContentResolver cr, long folderId);
 
     /**
      * Get the favicon from the database, if any, associated with the given favicon URL. (That is,
@@ -129,14 +129,12 @@ public interface BrowserDB {
      * @param faviconURL The URL of the favicon to fetch from the database.
      * @return The decoded Bitmap from the database, if any. null if none is stored.
      */
-    public abstract LoadFaviconResult getFaviconForUrl(ContentResolver cr, String faviconURL);
+    public abstract LoadFaviconResult getFaviconForUrl(Context context, ContentResolver cr, String faviconURL);
 
     /**
      * Try to find a usable favicon URL in the history or bookmarks table.
      */
     public abstract String getFaviconURLFromPageURL(ContentResolver cr, String uri);
-
-    public abstract void updateFaviconForUrl(ContentResolver cr, String pageUri, byte[] encodedFavicon, String faviconUri);
 
     public abstract byte[] getThumbnailForUrl(ContentResolver cr, String uri);
     public abstract void updateThumbnailForUrl(ContentResolver cr, String uri, BitmapDrawable thumbnail);
@@ -163,18 +161,45 @@ public interface BrowserDB {
             String title, String guid, long parent, long added, long modified,
             long position, String keyword, int type);
 
-    public abstract void updateFaviconInBatch(ContentResolver cr,
-            Collection<ContentProviderOperation> operations, String url,
-            String faviconUrl, String faviconGuid, byte[] data);
-
-
-    public abstract Cursor getPinnedSites(ContentResolver cr, int limit);
     public abstract void pinSite(ContentResolver cr, String url, String title, int position);
     public abstract void unpinSite(ContentResolver cr, int position);
 
     public abstract boolean hideSuggestedSite(String url);
     public abstract void setSuggestedSites(SuggestedSites suggestedSites);
+    public abstract SuggestedSites getSuggestedSites();
     public abstract boolean hasSuggestedImageUrl(String url);
     public abstract String getSuggestedImageUrlForUrl(String url);
     public abstract int getSuggestedBackgroundColorForUrl(String url);
+
+    /**
+     * Obtain a set of links for highlights from bookmarks and history.
+     *
+     * @param context The context to load the cursor.
+     * @param limit Maximum number of results to return.
+     */
+    public abstract CursorLoader getHighlights(Context context, int limit);
+
+    /**
+     * Block a page from the highlights list.
+     *
+     * @param url The page URL. Only pages exactly matching this URL will be blocked.
+     */
+    public abstract void blockActivityStreamSite(ContentResolver cr, String url);
+
+    public static BrowserDB from(final Context context) {
+        return from(GeckoProfile.get(context));
+    }
+
+    public static BrowserDB from(final GeckoProfile profile) {
+        synchronized (profile.getLock()) {
+            BrowserDB db = (BrowserDB) profile.getData();
+            if (db != null) {
+                return db;
+            }
+
+            db = new LocalBrowserDB(profile.getName());
+            profile.setData(db);
+            return db;
+        }
+    }
 }

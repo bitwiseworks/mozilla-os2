@@ -29,12 +29,13 @@
 
 #include "nsITransport.h"
 #include "nsISocketTransport.h"
-
+#include "nsIDocShell.h"
 #include "nsIDOMDocument.h"
 #include "nsIDocument.h"
 #include "nsPresContext.h"
 #include "nsIAsyncVerifyRedirectCallback.h"
 
+using mozilla::DebugOnly;
 using mozilla::LogLevel;
 
 static NS_DEFINE_CID(kThisImplCID, NS_THIS_DOCLOADER_IMPL_CID);
@@ -42,15 +43,15 @@ static NS_DEFINE_CID(kThisImplCID, NS_THIS_DOCLOADER_IMPL_CID);
 //
 // Log module for nsIDocumentLoader logging...
 //
-// To enable logging (see prlog.h for full details):
+// To enable logging (see mozilla/Logging.h for full details):
 //
-//    set NSPR_LOG_MODULES=DocLoader:5
-//    set NSPR_LOG_FILE=nspr.log
+//    set MOZ_LOG=DocLoader:5
+//    set MOZ_LOG_FILE=debug.log
 //
 // this enables LogLevel::Debug level information and places all output in
-// the file nspr.log
+// the file 'debug.log'.
 //
-PRLogModuleInfo* gDocLoaderLog = nullptr;
+mozilla::LazyLogModule gDocLoaderLog("DocLoader");
 
 
 #if defined(DEBUG)
@@ -115,10 +116,6 @@ nsDocLoader::nsDocLoader()
     mDontFlushLayout(false),
     mIsFlushingLayout(false)
 {
-  if (nullptr == gDocLoaderLog) {
-      gDocLoaderLog = PR_NewLogModule("DocLoader");
-  }
-
   ClearInternalProgress();
 
   MOZ_LOG(gDocLoaderLog, LogLevel::Debug,
@@ -349,7 +346,8 @@ nsDocLoader::Destroy()
   // Remove the document loader from the parent list of loaders...
   if (mParent)
   {
-    mParent->RemoveChildLoader(this);
+    DebugOnly<nsresult> rv = mParent->RemoveChildLoader(this);
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "RemoveChildLoader failed");
   }
 
   // Release all the information about network requests...
@@ -358,7 +356,7 @@ nsDocLoader::Destroy()
   mListenerInfoList.Clear();
   mListenerInfoList.Compact();
 
-  mDocumentRequest = 0;
+  mDocumentRequest = nullptr;
 
   if (mLoadGroup)
     mLoadGroup->SetGroupObserver(nullptr);
@@ -380,7 +378,9 @@ nsDocLoader::DestroyChildren()
     if (loader) {
       // This is a safe cast, as we only put nsDocLoader objects into the
       // array
-      static_cast<nsDocLoader*>(loader)->SetDocLoaderParent(nullptr);
+      DebugOnly<nsresult> rv =
+        static_cast<nsDocLoader*>(loader)->SetDocLoaderParent(nullptr);
+      NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "SetDocLoaderParent failed");
     }
   }
   mChildList.Clear();
@@ -602,7 +602,14 @@ nsDocLoader::OnStopRequest(nsIRequest *aRequest,
   // load.  This will handle removing the request from our hashtable as needed.
   //
   if (mIsLoadingDocument) {
-    DocLoaderIsEmpty(true);
+    nsCOMPtr<nsIDocShell> ds = do_QueryInterface(static_cast<nsIRequestObserver*>(this));
+    bool doNotFlushLayout = false;
+    if (ds) {
+      // Don't do unexpected layout flushes while we're in process of restoring
+      // a document from the bfcache.
+      ds->GetRestoringDocument(&doNotFlushLayout);
+    }
+    DocLoaderIsEmpty(!doNotFlushLayout);
   }
 
   return NS_OK;
@@ -613,7 +620,7 @@ nsresult nsDocLoader::RemoveChildLoader(nsDocLoader* aChild)
 {
   nsresult rv = mChildList.RemoveElement(aChild) ? NS_OK : NS_ERROR_FAILURE;
   if (NS_SUCCEEDED(rv)) {
-    aChild->SetDocLoaderParent(nullptr);
+    rv = aChild->SetDocLoaderParent(nullptr);
   }
   return rv;
 }
@@ -622,7 +629,7 @@ nsresult nsDocLoader::AddChildLoader(nsDocLoader* aChild)
 {
   nsresult rv = mChildList.AppendElement(aChild) ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
   if (NS_SUCCEEDED(rv)) {
-    aChild->SetDocLoaderParent(this);
+    rv = aChild->SetDocLoaderParent(this);
   }
   return rv;
 }
@@ -653,6 +660,7 @@ void nsDocLoader::DocLoaderIsEmpty(bool aFlushLayout)
     }
 
     NS_ASSERTION(!mIsFlushingLayout, "Someone screwed up");
+    NS_ASSERTION(mDocumentRequest, "No Document Request!");
 
     // The load group for this DocumentLoader is idle.  Flush if we need to.
     if (aFlushLayout && !mDontFlushLayout) {
@@ -679,7 +687,9 @@ void nsDocLoader::DocLoaderIsEmpty(bool aFlushLayout)
 
     // And now check whether we're really busy; that might have changed with
     // the layout flush.
-    if (!IsBusy()) {
+    // Note, mDocumentRequest can be null if the flushing above re-entered this
+    // method.
+    if (!IsBusy() && mDocumentRequest) {
       // Clear out our request info hash, now that our load really is done and
       // we don't need it anymore to CalculateMaxProgress().
       ClearInternalProgress();
@@ -689,8 +699,7 @@ void nsDocLoader::DocLoaderIsEmpty(bool aFlushLayout)
 
       nsCOMPtr<nsIRequest> docRequest = mDocumentRequest;
 
-      NS_ASSERTION(mDocumentRequest, "No Document Request!");
-      mDocumentRequest = 0;
+      mDocumentRequest = nullptr;
       mIsLoadingDocument = false;
 
       // Update the progress status state - the document is done
@@ -872,7 +881,7 @@ nsDocLoader::RemoveProgressListener(nsIWebProgressListener *aListener)
 }
 
 NS_IMETHODIMP
-nsDocLoader::GetDOMWindow(nsIDOMWindow **aResult)
+nsDocLoader::GetDOMWindow(mozIDOMWindowProxy **aResult)
 {
   return CallGetInterface(this, aResult);
 }
@@ -882,11 +891,11 @@ nsDocLoader::GetDOMWindowID(uint64_t *aResult)
 {
   *aResult = 0;
 
-  nsCOMPtr<nsIDOMWindow> window;
+  nsCOMPtr<mozIDOMWindowProxy> window;
   nsresult rv = GetDOMWindow(getter_AddRefs(window));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<nsPIDOMWindow> piwindow = do_QueryInterface(window);
+  nsCOMPtr<nsPIDOMWindowOuter> piwindow = nsPIDOMWindowOuter::From(window);
   NS_ENSURE_STATE(piwindow);
 
   MOZ_ASSERT(piwindow->IsOuterWindow());
@@ -899,13 +908,13 @@ nsDocLoader::GetIsTopLevel(bool *aResult)
 {
   *aResult = false;
 
-  nsCOMPtr<nsIDOMWindow> window;
+  nsCOMPtr<mozIDOMWindowProxy> window;
   GetDOMWindow(getter_AddRefs(window));
   if (window) {
-    nsCOMPtr<nsPIDOMWindow> piwindow = do_QueryInterface(window);
+    nsCOMPtr<nsPIDOMWindowOuter> piwindow = nsPIDOMWindowOuter::From(window);
     NS_ENSURE_STATE(piwindow);
 
-    nsCOMPtr<nsPIDOMWindow> topWindow = piwindow->GetTop();
+    nsCOMPtr<nsPIDOMWindowOuter> topWindow = piwindow->GetTop();
     *aResult = piwindow == topWindow;
   }
 
@@ -933,7 +942,6 @@ int64_t nsDocLoader::GetMaxTotalProgress()
   int64_t newMaxTotal = 0;
 
   uint32_t count = mChildList.Length();
-  nsCOMPtr<nsIWebProgress> webProgress;
   for (uint32_t i=0; i < count; i++)
   {
     int64_t individualProgress = 0;

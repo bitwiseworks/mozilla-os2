@@ -7,6 +7,12 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/TypeTraits.h"
 
+#define TEST_CV_QUALIFIERS(test, type, ...) \
+  test(type, __VA_ARGS__) \
+  test(const type, __VA_ARGS__) \
+  test(volatile type, __VA_ARGS__) \
+  test(const volatile type, __VA_ARGS__)
+
 using mozilla::AddLvalueReference;
 using mozilla::AddPointer;
 using mozilla::AddRvalueReference;
@@ -25,6 +31,7 @@ using mozilla::IsRvalueReference;
 using mozilla::IsSame;
 using mozilla::IsSigned;
 using mozilla::IsUnsigned;
+using mozilla::IsDestructible;
 using mozilla::MakeSigned;
 using mozilla::MakeUnsigned;
 using mozilla::RemoveExtent;
@@ -136,6 +143,77 @@ static_assert(IsReference<int&>::value,
               "int& is a reference");
 static_assert(IsReference<int&&>::value,
               "int&& is a reference");
+
+namespace CPlusPlus11IsMemberPointer {
+
+using mozilla::IsMemberPointer;
+
+struct S {};
+union U {};
+
+#define ASSERT_IS_MEMBER_POINTER(type, msg) \
+  static_assert(IsMemberPointer<type>::value, #type msg);
+#define TEST_IS_MEMBER_POINTER(type) \
+  TEST_CV_QUALIFIERS(ASSERT_IS_MEMBER_POINTER, type, \
+                     " is a member pointer type")
+
+TEST_IS_MEMBER_POINTER(int S::*)
+TEST_IS_MEMBER_POINTER(int U::*)
+
+#undef TEST_IS_MEMBER_POINTER
+#undef ASSERT_IS_MEMBER_POINTER
+
+#define ASSERT_IS_NOT_MEMBER_POINTER(type, msg) \
+  static_assert(!IsMemberPointer<type>::value, #type msg);
+#define TEST_IS_NOT_MEMBER_POINTER(type) \
+  TEST_CV_QUALIFIERS(ASSERT_IS_NOT_MEMBER_POINTER, type, \
+                     " is not a member pointer type")
+
+TEST_IS_NOT_MEMBER_POINTER(int*)
+
+#undef TEST_IS_NOT_MEMBER_POINTER
+#undef ASSERT_IS_NOT_MEMBER_POINTER
+
+} // CPlusPlus11IsMemberPointer
+
+namespace CPlusPlus11IsScalar {
+
+using mozilla::IsScalar;
+
+enum E {};
+enum class EC {};
+class C {};
+struct S {};
+union U {};
+
+#define ASSERT_IS_SCALAR(type, msg) \
+  static_assert(IsScalar<type>::value, #type msg);
+#define TEST_IS_SCALAR(type) \
+  TEST_CV_QUALIFIERS(ASSERT_IS_SCALAR, type, " is a scalar type")
+
+TEST_IS_SCALAR(int)
+TEST_IS_SCALAR(float)
+TEST_IS_SCALAR(E)
+TEST_IS_SCALAR(EC)
+TEST_IS_SCALAR(S*)
+TEST_IS_SCALAR(int S::*)
+
+#undef TEST_IS_SCALAR
+#undef ASSERT_IS_SCALAR
+
+#define ASSERT_IS_NOT_SCALAR(type, msg) \
+  static_assert(!IsScalar<type>::value, #type msg);
+#define TEST_IS_NOT_SCALAR(type) \
+  TEST_CV_QUALIFIERS(ASSERT_IS_NOT_SCALAR, type, " is not a scalar type")
+
+TEST_IS_NOT_SCALAR(C)
+TEST_IS_NOT_SCALAR(S)
+TEST_IS_NOT_SCALAR(U)
+
+#undef TEST_IS_NOT_SCALAR
+#undef ASSERT_IS_NOT_SCALAR
+
+} // CPlusPlus11IsScalar
 
 struct S1 {};
 union U1 { int mX; };
@@ -274,6 +352,27 @@ static_assert(!IsSigned<NotIntConstructible>::value,
               "non-arithmetic types are not signed");
 static_assert(!IsUnsigned<NotIntConstructible>::value,
               "non-arithmetic types are not unsigned");
+
+class PublicDestructible
+{
+public:
+  ~PublicDestructible();
+};
+class PrivateDestructible
+{
+private:
+  ~PrivateDestructible();
+};
+class TrivialDestructible
+{
+};
+
+static_assert(IsDestructible<PublicDestructible>::value,
+              "public destructible class is destructible");
+static_assert(!IsDestructible<PrivateDestructible>::value,
+              "private destructible class is not destructible");
+static_assert(IsDestructible<TrivialDestructible>::value,
+              "trivial destructible class is destructible");
 
 namespace CPlusPlus11IsBaseOf {
 

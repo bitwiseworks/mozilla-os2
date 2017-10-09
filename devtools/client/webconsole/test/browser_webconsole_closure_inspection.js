@@ -1,7 +1,7 @@
-/*
- * Any copyright is dedicated to the Public Domain.
- * http://creativecommons.org/publicdomain/zero/1.0/
- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
+/* Any copyright is dedicated to the Public Domain.
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 // Check that inspecting a closure in the variables view sidebar works when
 // execution is paused.
@@ -13,17 +13,16 @@ const TEST_URI = "http://example.com/browser/devtools/client/webconsole/" +
 
 var gWebConsole, gJSTerm, gVariablesView;
 
+// Force the old debugger UI since it's directly used (see Bug 1301705)
+Services.prefs.setBoolPref("devtools.debugger.new-debugger-frontend", false);
+registerCleanupFunction(function* () {
+  Services.prefs.clearUserPref("devtools.debugger.new-debugger-frontend");
+});
+
 function test() {
   registerCleanupFunction(() => {
     gWebConsole = gJSTerm = gVariablesView = null;
   });
-
-  function resumeDebugger(toolbox, panelWin, deferred) {
-    panelWin.gThreadClient.addOneTimeListener("resumed", () => {
-      ok(true, "Debugger resumed");
-      deferred.resolve({ toolbox: toolbox, panelWin: panelWin });
-    });
-  }
 
   function fetchScopes(hud, toolbox, panelWin, deferred) {
     panelWin.once(panelWin.EVENTS.FETCHED_SCOPES, () => {
@@ -37,16 +36,13 @@ function test() {
     openConsole().then((hud) => {
       openDebugger().then(({ toolbox, panelWin }) => {
         let deferred = promise.defer();
-        resumeDebugger(toolbox, panelWin, deferred);
-
-        return deferred.promise;
-      }).then(({ toolbox, panelWin }) => {
-        let deferred = promise.defer();
         fetchScopes(hud, toolbox, panelWin, deferred);
 
-        let button = content.document.querySelector("button");
-        ok(button, "button element found");
-        EventUtils.synthesizeMouseAtCenter(button, {}, content);
+        ContentTask.spawn(gBrowser.selectedBrowser, {}, function* () {
+          let button = content.document.querySelector("button");
+          ok(button, "button element found");
+          button.click();
+        });
 
         return deferred.promise;
       });
@@ -100,5 +96,5 @@ function onExpandClosure(results) {
 
   gVariablesView.window.focus();
   gJSTerm.once("sidebar-closed", finishTest);
-  EventUtils.synthesizeKey("VK_ESCAPE", {});
+  EventUtils.synthesizeKey("VK_ESCAPE", {}, gVariablesView.window);
 }

@@ -16,7 +16,7 @@
 #include "nsTArray.h"
 
 #define SERVICEWORKERREGISTRAR_FILE "serviceworker.txt"
-#define SERVICEWORKERREGISTRAR_VERSION "2"
+#define SERVICEWORKERREGISTRAR_VERSION "4"
 #define SERVICEWORKERREGISTRAR_TERMINATOR "#"
 #define SERVICEWORKERREGISTRAR_TRUE "true"
 #define SERVICEWORKERREGISTRAR_FALSE "false"
@@ -66,6 +66,8 @@ protected:
   nsresult WriteData();
   void DeleteData();
 
+  void RegisterServiceWorkerInternal(const ServiceWorkerRegistrationData& aData);
+
   ServiceWorkerRegistrar();
   virtual ~ServiceWorkerRegistrar();
 
@@ -77,18 +79,20 @@ private:
   void ShutdownCompleted();
   void MaybeScheduleShutdownCompleted();
 
+  bool IsSupportedVersion(const nsACString& aVersion) const;
+
   mozilla::Monitor mMonitor;
 
 protected:
-  // mData and mDataLoaded are protected by mMonitor.
+  // protected by mMonitor.
+  nsCOMPtr<nsIFile> mProfileDir;
   nsTArray<ServiceWorkerRegistrationData> mData;
   bool mDataLoaded;
 
+  // PBackground thread only
   bool mShuttingDown;
   bool* mShutdownCompleteFlag;
   uint32_t mRunnableCounter;
-
-  nsCOMPtr<nsIFile> mProfileDir;
 };
 
 } // namespace dom

@@ -116,7 +116,7 @@ nsButtonBoxFrame::HandleEvent(nsPresContext* aPresContext,
       if (!keyEvent) {
         break;
       }
-      if (NS_VK_SPACE == keyEvent->keyCode) {
+      if (NS_VK_SPACE == keyEvent->mKeyCode) {
         EventStateManager* esm = aPresContext->EventStateManager();
         // :hover:active state
         esm->SetContentState(mContent, NS_EVENT_STATE_HOVER);
@@ -133,10 +133,10 @@ nsButtonBoxFrame::HandleEvent(nsPresContext* aPresContext,
       if (!keyEvent) {
         break;
       }
-      if (NS_VK_RETURN == keyEvent->keyCode) {
+      if (NS_VK_RETURN == keyEvent->mKeyCode) {
         nsCOMPtr<nsIDOMXULButtonElement> buttonEl(do_QueryInterface(mContent));
         if (buttonEl) {
-          MouseClicked(aPresContext, aEvent);
+          MouseClicked(aEvent);
           *aEventStatus = nsEventStatus_eConsumeNoDefault;
         }
       }
@@ -149,7 +149,7 @@ nsButtonBoxFrame::HandleEvent(nsPresContext* aPresContext,
       if (!keyEvent) {
         break;
       }
-      if (NS_VK_SPACE == keyEvent->keyCode) {
+      if (NS_VK_SPACE == keyEvent->mKeyCode) {
         mIsHandlingKeyEvent = false;
         // only activate on keyup if we're already in the :hover:active state
         NS_ASSERTION(mContent->IsElement(), "How do we have a non-element?");
@@ -160,7 +160,7 @@ nsButtonBoxFrame::HandleEvent(nsPresContext* aPresContext,
           EventStateManager* esm = aPresContext->EventStateManager();
           esm->SetContentState(nullptr, NS_EVENT_STATE_ACTIVE);
           esm->SetContentState(nullptr, NS_EVENT_STATE_HOVER);
-          MouseClicked(aPresContext, aEvent);
+          MouseClicked(aEvent);
         }
       }
       break;
@@ -169,7 +169,7 @@ nsButtonBoxFrame::HandleEvent(nsPresContext* aPresContext,
     case eMouseClick: {
       WidgetMouseEvent* mouseEvent = aEvent->AsMouseEvent();
       if (mouseEvent->IsLeftClickEvent()) {
-        MouseClicked(aPresContext, mouseEvent);
+        MouseClicked(mouseEvent);
       }
       break;
     }
@@ -223,7 +223,7 @@ nsButtonBoxFrame::DoMouseClick(WidgetGUIEvent* aEvent, bool aTrustEvent)
   if (shell) {
     nsContentUtils::DispatchXULCommand(mContent,
                                        aEvent ?
-                                         aEvent->mFlags.mIsTrusted : aTrustEvent,
+                                         aEvent->IsTrusted() : aTrustEvent,
                                        nullptr, shell,
                                        isControl, isAlt, isShift, isMeta);
   }

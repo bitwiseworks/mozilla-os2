@@ -1,9 +1,9 @@
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
-/*
- * Tests that errors about insecure passwords are logged
- * to the web console
- */
+
+ // Tests that errors about insecure passwords are logged to the web console.
 
 "use strict";
 
@@ -19,10 +19,10 @@ const INSECURE_FORM_ACTION_MSG = "Password fields present in a form with an " +
 const INSECURE_IFRAME_MSG = "Password fields present on an insecure " +
                  "(http://) iframe. This is a security risk that allows " +
                  "user login credentials to be stolen.";
-const INSECURE_PASSWORDS_URI = "https://developer.mozilla.org/docs/Security/" +
-                 "InsecurePasswords";
+const INSECURE_PASSWORDS_URI = "https://developer.mozilla.org/docs/Web/" +
+                               "Security/Insecure_passwords" + DOCS_GA_PARAMS;
 
-var test = asyncTest(function* () {
+add_task(function* () {
   yield loadTab(TEST_URI);
 
   let hud = yield openConsole();

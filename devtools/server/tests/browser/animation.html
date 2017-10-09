@@ -17,7 +17,7 @@
     border-radius: 50%;
     background: red;
 
-    animation: move 2s infinite;
+    animation: move 200s infinite;
   }
 
   .multiple-animations {
@@ -28,7 +28,10 @@
     border-radius: 50%;
     background: #eee;
 
-    animation: move 2s infinite, glow 1s 5;
+    animation: move 200s infinite , glow 100s 5;
+    animation-timing-function: ease-out;
+    animation-direction: reverse;
+    animation-fill-mode: both;
   }
 
   .transition {
@@ -39,7 +42,7 @@
     border-radius: 50%;
     background: #f06;
 
-    transition: width 5s;
+    transition: width 500s ease-out;
   }
   .transition.get-round {
     width: 200px;
@@ -75,7 +78,7 @@
     border-radius: 50%;
     background: rebeccapurple;
 
-    animation: move 2s 5s infinite;
+    animation: move 200s 5s infinite;
   }
 
   .delayed-transition {
@@ -86,7 +89,7 @@
     border-radius: 50%;
     background: black;
 
-    transition: width 5s 3s;
+    transition: width 500s 3s;
   }
   .delayed-transition.get-round {
     width: 200px;
@@ -111,7 +114,7 @@
     border-radius: 50%;
     background: blue;
 
-    animation: move .5s, glow 1s 2s infinite, grow 3s 1s 100;
+    animation: move .5s, glow 100s 2s infinite, grow 300s 1s 100;
   }
 
   .all-transitions {

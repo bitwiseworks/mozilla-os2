@@ -6,22 +6,18 @@
 
 #include "mozilla/Preferences.h"
 #include "MediaDecoderStateMachine.h"
-#include "MediaFormatReader.h"
 #include "WebMDemuxer.h"
-#include "WebMReader.h"
 #include "WebMDecoder.h"
 #include "VideoUtils.h"
+#include "nsContentTypeParser.h"
 
 namespace mozilla {
 
 MediaDecoderStateMachine* WebMDecoder::CreateStateMachine()
 {
-  bool useFormatDecoder =
-    Preferences::GetBool("media.format-reader.webm", true);
-  RefPtr<MediaDecoderReader> reader = useFormatDecoder ?
-      static_cast<MediaDecoderReader*>(new MediaFormatReader(this, new WebMDemuxer(GetResource()), GetVideoFrameContainer())) :
-      new WebMReader(this);
-  return new MediaDecoderStateMachine(this, reader);
+  mReader =
+    new MediaFormatReader(this, new WebMDemuxer(GetResource()), GetVideoFrameContainer());
+  return new MediaDecoderStateMachine(this, mReader);
 }
 
 /* static */
@@ -73,6 +69,30 @@ WebMDecoder::CanHandleMediaType(const nsACString& aMIMETypeExcludingCodecs,
     return false;
   }
   return true;
+}
+
+/* static */ bool
+WebMDecoder::CanHandleMediaType(const nsAString& aContentType)
+{
+  nsContentTypeParser parser(aContentType);
+  nsAutoString mimeType;
+  nsresult rv = parser.GetType(mimeType);
+  if (NS_FAILED(rv)) {
+    return false;
+  }
+  nsString codecs;
+  parser.GetParameter("codecs", codecs);
+
+  return CanHandleMediaType(NS_ConvertUTF16toUTF8(mimeType),
+                            codecs);
+}
+
+void
+WebMDecoder::GetMozDebugReaderData(nsAString& aString)
+{
+  if (mReader) {
+    mReader->GetMozDebugReaderData(aString);
+  }
 }
 
 } // namespace mozilla

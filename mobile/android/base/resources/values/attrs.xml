@@ -25,9 +25,6 @@
         <!-- Style for MenuItemActionBar when shown in SecondaryActionBar -->
         <attr name="menuItemSecondaryActionBarStyle" format="reference"/>
 
-        <!-- Style for MenuItemSwitcherLayout's ShareActionButton -->
-        <attr name="menuItemShareActionButtonStyle" format="reference"/>
-
         <!-- Default style for the BookmarksListView -->
         <attr name="bookmarksListViewStyle" format="reference" />
 
@@ -96,14 +93,6 @@
         <attr name="android:layout"/>
     </declare-styleable>
 
-    <declare-styleable name="TextSelectionHandle">
-        <attr name="handleType">
-            <flag name="start" value="0x01" />
-            <flag name="middle" value="0x02" />
-            <flag name="end" value="0x03" />
-        </attr>
-    </declare-styleable>
-
     <declare-styleable name="PrivateBrowsing">
         <attr name="state_private" format="boolean"/>
     </declare-styleable>
@@ -134,15 +123,6 @@
         <!-- The background color we should be fading over. Useful because the
              background is full alpha and we need to copy the background underneath. -->
         <attr name="fadeBackgroundColor" format="dimension"/>
-    </declare-styleable>
-
-    <declare-styleable name="BookmarkFolderView">
-        <attr name="state_open" format="boolean"/>
-    </declare-styleable>
-
-    <declare-styleable name="GeckoView">
-        <attr name="url" format="string"/>
-        <attr name="doinit" format="boolean"/>
     </declare-styleable>
 
     <declare-styleable name="IconTabWidget">
@@ -182,13 +162,10 @@
         <attr name="ellipsizeAtLine" format="integer"/>
     </declare-styleable>
 
-    <declare-styleable name="FloatingHintEditText">
-        <attr name="floatingHintEditTextStyle" format="reference" />
-    </declare-styleable>
-
     <declare-styleable name="FaviconView">
         <attr name="dominantBorderEnabled" format="boolean" />
         <attr name="overrideScaleType" format="boolean" />
+        <attr name="enableRoundCorners" format="boolean"/>
     </declare-styleable>
 
     <declare-styleable name="OverlayDialogButton">

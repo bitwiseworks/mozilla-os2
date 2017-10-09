@@ -27,6 +27,8 @@ class ServiceWorkerManagerParent final : public PServiceWorkerManagerParent
   friend class mozilla::ipc::BackgroundParentImpl;
 
 public:
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(ServiceWorkerManagerParent)
+
   uint64_t ID() const
   {
     return mID;

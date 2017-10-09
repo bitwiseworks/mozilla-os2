@@ -9,6 +9,9 @@
 
 #include "compiler/translator/LoopInfo.h"
 
+namespace sh
+{
+
 // This class detects for-loops that needs to be unrolled.
 // Currently we support two unroll conditions:
 //   1) kForLoopWithIntegerIndex: unroll if the index type is integer.
@@ -24,11 +27,12 @@ class ForLoopUnrollMarker : public TIntermTraverser
         kSamplerArrayIndex
     };
 
-    ForLoopUnrollMarker(UnrollCondition condition)
+    ForLoopUnrollMarker(UnrollCondition condition, bool hasRunLoopValidation)
         : TIntermTraverser(true, false, false),
           mUnrollCondition(condition),
           mSamplerArrayIndexIsFloatLoopIndex(false),
-          mVisitSamplerArrayIndexNodeInsideLoop(false)
+          mVisitSamplerArrayIndexNodeInsideLoop(false),
+          mHasRunLoopValidation(hasRunLoopValidation)
     {
     }
 
@@ -46,6 +50,9 @@ class ForLoopUnrollMarker : public TIntermTraverser
     TLoopStack mLoopStack;
     bool mSamplerArrayIndexIsFloatLoopIndex;
     bool mVisitSamplerArrayIndexNodeInsideLoop;
+    bool mHasRunLoopValidation;
 };
+
+}  // namespace sh
 
 #endif // COMPILER_TRANSLATOR_FORLOOPUNROLL_H_

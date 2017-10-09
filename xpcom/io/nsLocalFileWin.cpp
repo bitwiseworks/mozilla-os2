@@ -6,6 +6,7 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/DebugOnly.h"
+#include "mozilla/UniquePtrExtensions.h"
 #include "mozilla/WindowsVersion.h"
 
 #include "nsCOMPtr.h"
@@ -53,6 +54,12 @@
 #include "nsThreadUtils.h"
 #include "nsXULAppAPI.h"
 
+#include "nsIWindowMediator.h"
+#include "mozIDOMWindow.h"
+#include "nsPIDOMWindow.h"
+#include "nsIWidget.h"
+#include "mozilla/WidgetUtils.h"
+
 using namespace mozilla;
 
 #define CHECK_mWorkingPath()                    \
@@ -74,11 +81,38 @@ using namespace mozilla;
 #define DRIVE_REMOTE 4
 #endif
 
+static HWND
+GetMostRecentNavigatorHWND()
+{
+  nsresult rv;
+  nsCOMPtr<nsIWindowMediator> winMediator(
+      do_GetService(NS_WINDOWMEDIATOR_CONTRACTID, &rv));
+  if (NS_FAILED(rv)) {
+    return nullptr;
+  }
+
+  nsCOMPtr<mozIDOMWindowProxy> navWin;
+  rv = winMediator->GetMostRecentWindow(u"navigator:browser",
+                                        getter_AddRefs(navWin));
+  if (NS_FAILED(rv) || !navWin) {
+    return nullptr;
+  }
+
+  nsPIDOMWindowOuter* win = nsPIDOMWindowOuter::From(navWin);
+  nsCOMPtr<nsIWidget> widget = widget::WidgetUtils::DOMWindowToWidget(win);
+  if (!widget) {
+    return nullptr;
+  }
+
+  return reinterpret_cast<HWND>(widget->GetNativeData(NS_NATIVE_WINDOW));
+}
+
+
 /**
  * A runnable to dispatch back to the main thread when
- * AsyncLocalFileWinOperation completes.
+ * AsyncRevealOperation completes.
 */
-class AsyncLocalFileWinDone : public nsRunnable
+class AsyncLocalFileWinDone : public Runnable
 {
 public:
   AsyncLocalFileWinDone() :
@@ -88,7 +122,7 @@ public:
     MOZ_ASSERT(!NS_IsMainThread());
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     // This event shuts down the worker thread and so must be main thread.
     MOZ_ASSERT(NS_IsMainThread());
@@ -107,37 +141,28 @@ private:
  * A runnable to dispatch from the main thread when an async operation should
  * be performed.
 */
-class AsyncLocalFileWinOperation : public nsRunnable
+class AsyncRevealOperation : public Runnable
 {
 public:
-  enum FileOp { RevealOp, LaunchOp };
-
-  AsyncLocalFileWinOperation(AsyncLocalFileWinOperation::FileOp aOperation,
-                             const nsAString& aResolvedPath) :
-    mOperation(aOperation),
-    mResolvedPath(aResolvedPath)
+  explicit AsyncRevealOperation(const nsAString& aResolvedPath)
+    : mResolvedPath(aResolvedPath)
   {
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(!NS_IsMainThread(),
-               "AsyncLocalFileWinOperation should not be run on the main thread!");
+               "AsyncRevealOperation should not be run on the main thread!");
 
-    CoInitialize(nullptr);
-    switch (mOperation) {
-      case RevealOp: {
-        Reveal();
-      }
-      break;
-      case LaunchOp: {
-        Launch();
-      }
-      break;
+    bool doCoUninitialize = SUCCEEDED(
+      CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE));
+    Reveal();
+    if (doCoUninitialize) {
+      CoUninitialize();
     }
-    CoUninitialize();
 
-    // Send the result back to the main thread so that it can shutdown
+    // Send the result back to the main thread so that this thread can be
+    // cleanly shut down
     nsCOMPtr<nsIRunnable> resultrunnable = new AsyncLocalFileWinDone();
     NS_DispatchToMainThread(resultrunnable);
     return NS_OK;
@@ -155,13 +180,12 @@ private:
     HRESULT hr;
     if (attributes & FILE_ATTRIBUTE_DIRECTORY) {
       // We have a directory so we should open the directory itself.
-      ITEMIDLIST* dir =
-        static_cast<ITEMIDLIST*>(ILCreateFromPathW(mResolvedPath.get()));
+      LPITEMIDLIST dir = ILCreateFromPathW(mResolvedPath.get());
       if (!dir) {
         return NS_ERROR_FAILURE;
       }
 
-      const ITEMIDLIST* selection[] = { dir };
+      LPCITEMIDLIST selection[] = { dir };
       UINT count = ArrayLength(selection);
 
       //Perform the open of the directory.
@@ -179,21 +203,19 @@ private:
       PathRemoveFileSpecW(parentDirectoryPath);
 
       // We have a file so we should open the parent directory.
-      ITEMIDLIST* dir =
-        static_cast<ITEMIDLIST*>(ILCreateFromPathW(parentDirectoryPath));
+      LPITEMIDLIST dir = ILCreateFromPathW(parentDirectoryPath);
       if (!dir) {
         return NS_ERROR_FAILURE;
       }
 
       // Set the item in the directory to select to the file we want to reveal.
-      ITEMIDLIST* item =
-        static_cast<ITEMIDLIST*>(ILCreateFromPathW(mResolvedPath.get()));
+      LPITEMIDLIST item = ILCreateFromPathW(mResolvedPath.get());
       if (!item) {
         CoTaskMemFree(dir);
         return NS_ERROR_FAILURE;
       }
 
-      const ITEMIDLIST* selection[] = { item };
+      LPCITEMIDLIST selection[] = { item };
       UINT count = ArrayLength(selection);
 
       //Perform the selection of the file.
@@ -205,82 +227,6 @@ private:
 
     return SUCCEEDED(hr) ? NS_OK : NS_ERROR_FAILURE;
   }
-
-  // Launches the default shell operation for the file path
-  nsresult Launch()
-  {
-    // use the app registry name to launch a shell execute....
-    SHELLEXECUTEINFOW seinfo;
-    memset(&seinfo, 0, sizeof(seinfo));
-    seinfo.cbSize = sizeof(SHELLEXECUTEINFOW);
-    seinfo.hwnd   = nullptr;
-    seinfo.lpVerb = nullptr;
-    seinfo.lpFile = mResolvedPath.get();
-    seinfo.lpParameters =  nullptr;
-    seinfo.lpDirectory  = nullptr;
-    seinfo.nShow  = SW_SHOWNORMAL;
-
-    // Use the directory of the file we're launching as the working
-    // directory.  That way if we have a self extracting EXE it won't
-    // suggest to extract to the install directory.
-    WCHAR workingDirectory[MAX_PATH + 1] = { L'\0' };
-    wcsncpy(workingDirectory,  mResolvedPath.get(), MAX_PATH);
-    if (PathRemoveFileSpecW(workingDirectory)) {
-      seinfo.lpDirectory = workingDirectory;
-    } else {
-      NS_WARNING("Could not set working directory for launched file.");
-    }
-
-    if (ShellExecuteExW(&seinfo)) {
-      return NS_OK;
-    }
-    DWORD r = GetLastError();
-    // if the file has no association, we launch windows'
-    // "what do you want to do" dialog
-    if (r == SE_ERR_NOASSOC) {
-      nsAutoString shellArg;
-      shellArg.AssignLiteral(MOZ_UTF16("shell32.dll,OpenAs_RunDLL "));
-      shellArg.Append(mResolvedPath);
-      seinfo.lpFile = L"RUNDLL32.EXE";
-      seinfo.lpParameters = shellArg.get();
-      if (ShellExecuteExW(&seinfo)) {
-        return NS_OK;
-      }
-      r = GetLastError();
-    }
-    if (r < 32) {
-      switch (r) {
-        case 0:
-        case SE_ERR_OOM:
-          return NS_ERROR_OUT_OF_MEMORY;
-        case ERROR_FILE_NOT_FOUND:
-          return NS_ERROR_FILE_NOT_FOUND;
-        case ERROR_PATH_NOT_FOUND:
-          return NS_ERROR_FILE_UNRECOGNIZED_PATH;
-        case ERROR_BAD_FORMAT:
-          return NS_ERROR_FILE_CORRUPTED;
-        case SE_ERR_ACCESSDENIED:
-          return NS_ERROR_FILE_ACCESS_DENIED;
-        case SE_ERR_ASSOCINCOMPLETE:
-        case SE_ERR_NOASSOC:
-          return NS_ERROR_UNEXPECTED;
-        case SE_ERR_DDEBUSY:
-        case SE_ERR_DDEFAIL:
-        case SE_ERR_DDETIMEOUT:
-          return NS_ERROR_NOT_AVAILABLE;
-        case SE_ERR_DLLNOTFOUND:
-          return NS_ERROR_FAILURE;
-        case SE_ERR_SHARE:
-          return NS_ERROR_FILE_IS_LOCKED;
-        default:
-          return NS_ERROR_FILE_EXECUTION_FAILED;
-      }
-    }
-    return NS_OK;
-  }
-
-  // Stores the operation that will be performed on the thread
-  AsyncLocalFileWinOperation::FileOp mOperation;
 
   // Stores the path to perform the operation on
   nsString mResolvedPath;
@@ -481,6 +427,7 @@ ConvertWinError(DWORD aWinErr)
     case ERROR_FILE_NOT_FOUND:
     case ERROR_PATH_NOT_FOUND:
     case ERROR_INVALID_DRIVE:
+    case ERROR_NOT_READY:
       rv = NS_ERROR_FILE_NOT_FOUND;
       break;
     case ERROR_ACCESS_DENIED:
@@ -694,7 +641,7 @@ FileTimeToPRTime(const FILETIME* aFiletime, PRTime* aPrtm)
   const PRTime _pr_filetime_offset = 116444736000000000i64;
 #endif
 
-  PR_ASSERT(sizeof(FILETIME) == sizeof(PRTime));
+  MOZ_ASSERT(sizeof(FILETIME) == sizeof(PRTime));
   ::CopyMemory(aPrtm, aFiletime, sizeof(PRTime));
 #ifdef __GNUC__
   *aPrtm = (*aPrtm - _pr_filetime_offset) / 10LL;
@@ -710,7 +657,7 @@ GetFileInfo(const nsAFlatString& aName, PRFileInfo64* aInfo)
 {
   WIN32_FILE_ATTRIBUTE_DATA fileData;
 
-  if (aName.IsEmpty() || aName.FindCharInSet(MOZ_UTF16("?*")) != kNotFound) {
+  if (aName.IsEmpty() || aName.FindCharInSet(u"?*") != kNotFound) {
     return NS_ERROR_INVALID_ARG;
   }
 
@@ -807,7 +754,6 @@ ReadDir(nsDir* aDir, PRDirFlags aFlags, nsString& aName)
     }
 
     const wchar_t* fileName;
-    nsString tmp;
     fileName = (aDir)->data.cFileName;
 
     if ((aFlags & PR_SKIP_DOT) &&
@@ -825,11 +771,7 @@ ReadDir(nsDir* aDir, PRDirFlags aFlags, nsString& aName)
       continue;
     }
 
-    if (fileName == tmp.get()) {
-      aName = tmp;
-    } else {
-      aName = fileName;
-    }
+    aName = fileName;
     return NS_OK;
   }
 
@@ -1245,6 +1187,128 @@ nsLocalFile::InitWithPath(const nsAString& aFilePath)
 
   return NS_OK;
 
+}
+
+// Strip a handler command string of its quotes and parameters.
+static void
+CleanupHandlerPath(nsString& aPath)
+{
+  // Example command strings passed into this routine:
+
+  // 1) C:\Program Files\Company\some.exe -foo -bar
+  // 2) C:\Program Files\Company\some.dll
+  // 3) C:\Windows\some.dll,-foo -bar
+  // 4) C:\Windows\some.cpl,-foo -bar
+
+  int32_t lastCommaPos = aPath.RFindChar(',');
+  if (lastCommaPos != kNotFound)
+    aPath.Truncate(lastCommaPos);
+
+  aPath.Append(' ');
+
+  // case insensitive
+  uint32_t index = aPath.Find(".exe ", true);
+  if (index == kNotFound)
+    index = aPath.Find(".dll ", true);
+  if (index == kNotFound)
+    index = aPath.Find(".cpl ", true);
+
+  if (index != kNotFound)
+    aPath.Truncate(index + 4);
+  aPath.Trim(" ", true, true);
+}
+
+// Strip the windows host process bootstrap executable rundll32.exe
+// from a handler's command string if it exists.
+static void
+StripRundll32(nsString& aCommandString)
+{
+  // Example rundll formats:
+  // C:\Windows\System32\rundll32.exe "path to dll"
+  // rundll32.exe "path to dll"
+  // C:\Windows\System32\rundll32.exe "path to dll", var var
+  // rundll32.exe "path to dll", var var
+
+  NS_NAMED_LITERAL_STRING(rundllSegment, "rundll32.exe ");
+  NS_NAMED_LITERAL_STRING(rundllSegmentShort, "rundll32 ");
+
+  // case insensitive
+  int32_t strLen = rundllSegment.Length();
+  int32_t index = aCommandString.Find(rundllSegment, true);
+  if (index == kNotFound) {
+    strLen = rundllSegmentShort.Length();
+    index = aCommandString.Find(rundllSegmentShort, true);
+  }
+
+  if (index != kNotFound) {
+    uint32_t rundllSegmentLength = index + strLen;
+    aCommandString.Cut(0, rundllSegmentLength);
+  }
+}
+
+// Returns the fully qualified path to an application handler based on
+// a parameterized command string. Note this routine should not be used
+// to launch the associated application as it strips parameters and
+// rundll.exe from the string. Designed for retrieving display information
+// on a particular handler.
+/* static */ bool
+nsLocalFile::CleanupCmdHandlerPath(nsAString& aCommandHandler)
+{
+  nsAutoString handlerCommand(aCommandHandler);
+
+  // Straight command path:
+  //
+  // %SystemRoot%\system32\NOTEPAD.EXE var
+  // "C:\Program Files\iTunes\iTunes.exe" var var
+  // C:\Program Files\iTunes\iTunes.exe var var
+  //
+  // Example rundll handlers:
+  //
+  // rundll32.exe "%ProgramFiles%\Win...ery\PhotoViewer.dll", var var
+  // rundll32.exe "%ProgramFiles%\Windows Photo Gallery\PhotoViewer.dll"
+  // C:\Windows\System32\rundll32.exe "path to dll", var var
+  // %SystemRoot%\System32\rundll32.exe "%ProgramFiles%\Win...ery\Photo
+  //    Viewer.dll", var var
+
+  // Expand environment variables so we have full path strings.
+  uint32_t bufLength = ::ExpandEnvironmentStringsW(handlerCommand.get(),
+                                                   L"", 0);
+  if (bufLength == 0) // Error
+    return false;
+
+  auto destination = mozilla::MakeUniqueFallible<wchar_t[]>(bufLength);
+  if (!destination)
+    return false;
+  if (!::ExpandEnvironmentStringsW(handlerCommand.get(), destination.get(),
+                                   bufLength))
+    return false;
+
+  handlerCommand.Assign(destination.get());
+
+  // Remove quotes around paths
+  handlerCommand.StripChars("\"");
+
+  // Strip windows host process bootstrap so we can get to the actual
+  // handler.
+  StripRundll32(handlerCommand);
+
+  // Trim any command parameters so that we have a native path we can
+  // initialize a local file with.
+  CleanupHandlerPath(handlerCommand);
+
+  aCommandHandler.Assign(handlerCommand);
+  return true;
+}
+
+
+NS_IMETHODIMP
+nsLocalFile::InitWithCommandLine(const nsAString& aCommandLine)
+{
+  nsAutoString commandLine(aCommandLine);
+  if (!CleanupCmdHandlerPath(commandLine)) {
+    return NS_ERROR_FILE_UNRECOGNIZED_PATH;
+  }
+  return InitWithPath(commandLine);
 }
 
 NS_IMETHODIMP
@@ -3317,9 +3381,7 @@ nsLocalFile::Reveal()
     return rv;
   }
 
-  nsCOMPtr<nsIRunnable> runnable =
-    new AsyncLocalFileWinOperation(AsyncLocalFileWinOperation::RevealOp,
-                                   mResolvedPath);
+  nsCOMPtr<nsIRunnable> runnable = new AsyncRevealOperation(mResolvedPath);
 
   // After the dispatch, the result runnable will shut down the worker
   // thread, so we can let it go.
@@ -3339,21 +3401,74 @@ nsLocalFile::Launch()
     return rv;
   }
 
-  // To create a new thread, get the thread manager
-  nsCOMPtr<nsIThreadManager> tm = do_GetService(NS_THREADMANAGER_CONTRACTID);
-  nsCOMPtr<nsIThread> mythread;
-  rv = tm->NewThread(0, 0, getter_AddRefs(mythread));
-  if (NS_FAILED(rv)) {
-    return rv;
+  // use the app registry name to launch a shell execute....
+  SHELLEXECUTEINFOW seinfo;
+  memset(&seinfo, 0, sizeof(seinfo));
+  seinfo.cbSize = sizeof(SHELLEXECUTEINFOW);
+  seinfo.fMask = SEE_MASK_ASYNCOK;
+  seinfo.hwnd = GetMostRecentNavigatorHWND();
+  seinfo.lpVerb = nullptr;
+  seinfo.lpFile = mResolvedPath.get();
+  seinfo.lpParameters = nullptr;
+  seinfo.lpDirectory = nullptr;
+  seinfo.nShow = SW_SHOWNORMAL;
+
+  // Use the directory of the file we're launching as the working
+  // directory. That way if we have a self extracting EXE it won't
+  // suggest to extract to the install directory.
+  WCHAR workingDirectory[MAX_PATH + 1] = { L'\0' };
+  wcsncpy(workingDirectory, mResolvedPath.get(), MAX_PATH);
+  if (PathRemoveFileSpecW(workingDirectory)) {
+    seinfo.lpDirectory = workingDirectory;
+  } else {
+    NS_WARNING("Could not set working directory for launched file.");
   }
 
-  nsCOMPtr<nsIRunnable> runnable =
-    new AsyncLocalFileWinOperation(AsyncLocalFileWinOperation::LaunchOp,
-                                   mResolvedPath);
-
-  // After the dispatch, the result runnable will shut down the worker
-  // thread, so we can let it go.
-  mythread->Dispatch(runnable, NS_DISPATCH_NORMAL);
+  if (ShellExecuteExW(&seinfo)) {
+    return NS_OK;
+  }
+  DWORD r = GetLastError();
+  // if the file has no association, we launch windows'
+  // "what do you want to do" dialog
+  if (r == SE_ERR_NOASSOC) {
+    nsAutoString shellArg;
+    shellArg.AssignLiteral(u"shell32.dll,OpenAs_RunDLL ");
+    shellArg.Append(mResolvedPath);
+    seinfo.lpFile = L"RUNDLL32.EXE";
+    seinfo.lpParameters = shellArg.get();
+    if (ShellExecuteExW(&seinfo)) {
+      return NS_OK;
+    }
+    r = GetLastError();
+  }
+  if (r < 32) {
+    switch (r) {
+      case 0:
+      case SE_ERR_OOM:
+        return NS_ERROR_OUT_OF_MEMORY;
+      case ERROR_FILE_NOT_FOUND:
+        return NS_ERROR_FILE_NOT_FOUND;
+      case ERROR_PATH_NOT_FOUND:
+        return NS_ERROR_FILE_UNRECOGNIZED_PATH;
+      case ERROR_BAD_FORMAT:
+        return NS_ERROR_FILE_CORRUPTED;
+      case SE_ERR_ACCESSDENIED:
+        return NS_ERROR_FILE_ACCESS_DENIED;
+      case SE_ERR_ASSOCINCOMPLETE:
+      case SE_ERR_NOASSOC:
+        return NS_ERROR_UNEXPECTED;
+      case SE_ERR_DDEBUSY:
+      case SE_ERR_DDEFAIL:
+      case SE_ERR_DDETIMEOUT:
+        return NS_ERROR_NOT_AVAILABLE;
+      case SE_ERR_DLLNOTFOUND:
+        return NS_ERROR_FAILURE;
+      case SE_ERR_SHARE:
+        return NS_ERROR_FILE_IS_LOCKED;
+      default:
+        return NS_ERROR_FILE_EXECUTION_FAILED;
+    }
+  }
   return NS_OK;
 }
 

@@ -14,19 +14,21 @@ Cu.import('resource://gre/modules/Preferences.jsm');
 Cu.import('resource://gre/modules/PlacesUtils.jsm');
 Cu.import('resource://gre/modules/ObjectUtils.jsm');
 
+XPCOMUtils.defineLazyModuleGetter(this, 'PlacesTestUtils',
+                                  'resource://testing-common/PlacesTestUtils.jsm');
+XPCOMUtils.defineLazyServiceGetter(this, 'PushServiceComponent',
+                                   '@mozilla.org/push/Service;1', 'nsIPushService');
+
 const serviceExports = Cu.import('resource://gre/modules/PushService.jsm', {});
 const servicePrefs = new Preferences('dom.push.');
 
-XPCOMUtils.defineLazyServiceGetter(
-  this,
-  "PushNotificationService",
-  "@mozilla.org/push/NotificationService;1",
-  "nsIPushNotificationService"
-);
-
-const DEFAULT_TIMEOUT = 5000;
-
 const WEBSOCKET_CLOSE_GOING_AWAY = 1001;
+
+const MS_IN_ONE_DAY = 24 * 60 * 60 * 1000;
+
+var isParent = Cc['@mozilla.org/xre/runtime;1']
+                 .getService(Ci.nsIXULRuntime).processType ==
+                 Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT;
 
 // Stop and clean up after the PushService.
 Services.obs.addObserver(function observe(subject, topic, data) {
@@ -65,25 +67,6 @@ function after(times, func) {
 }
 
 /**
- * Updates the places database.
- *
- * @param {mozIPlaceInfo} place A place record to insert.
- * @returns {Promise} A promise that fulfills when the database is updated.
- */
-function addVisit(place) {
-  return new Promise((resolve, reject) => {
-    if (typeof place.uri == 'string') {
-      place.uri = Services.io.newURI(place.uri, null, null);
-    }
-    PlacesUtils.asyncHistory.updatePlaces(place, {
-      handleCompletion: resolve,
-      handleError: reject,
-      handleResult() {},
-    });
-  });
-}
-
-/**
  * Defers one or more callbacks until the next turn of the event loop. Multiple
  * callbacks are executed in order.
  *
@@ -113,31 +96,6 @@ function promiseObserverNotification(topic, matchFunc) {
       resolve({subject, data});
     }, topic, false);
   });
-}
-
-/**
- * Waits for a promise to settle. Returns a rejected promise if the promise
- * is not resolved or rejected within the given delay.
- *
- * @param {Promise} promise The pending promise.
- * @param {Number} delay The time to wait before rejecting the promise.
- * @param {String} [message] The rejection message if the promise times out.
- * @returns {Promise} A promise that settles with the value of the pending
- *  promise, or rejects if the pending promise times out.
- */
-function waitForPromise(promise, delay, message = 'Timed out waiting on promise') {
-  let timeoutDefer = Promise.defer();
-  let id = setTimeout(() => timeoutDefer.reject(new Error(message)), delay);
-  return Promise.race([
-    promise.then(value => {
-      clearTimeout(id);
-      return value;
-    }, error => {
-      clearTimeout(id);
-      throw error;
-    }),
-    timeoutDefer.promise
-  ]);
 }
 
 /**
@@ -172,23 +130,6 @@ function makeStub(target, stubs) {
 }
 
 /**
- * Disables `push` and `pushsubscriptionchange` service worker events for the
- * given scopes. These events cause crashes in xpcshell, so we disable them
- * for testing nsIPushNotificationService.
- *
- * @param {String[]} scopes A list of scope URLs.
- */
-function disableServiceWorkerEvents(...scopes) {
-  for (let scope of scopes) {
-    Services.perms.add(
-      Services.io.newURI(scope, null, null),
-      'desktop-notification',
-      Ci.nsIPermissionManager.DENY_ACTION
-    );
-  }
-}
-
-/**
  * Sets default PushService preferences. All pref names are prefixed with
  * `dom.push.`; any additional preferences will override the defaults.
  *
@@ -201,29 +142,17 @@ function setPrefs(prefs = {}) {
     'connection.enabled': true,
     userAgentID: '',
     enabled: true,
-    // Disable adaptive pings and UDP wake-up by default; these are
-    // tested separately.
-    'adaptive.enabled': false,
-    'udp.wakeupEnabled': false,
-    // Defaults taken from /b2g/app/b2g.js.
+    // Defaults taken from /modules/libpref/init/all.js.
     requestTimeout: 10000,
     retryBaseInterval: 5000,
     pingInterval: 30 * 60 * 1000,
-    'pingInterval.default': 3 * 60 * 1000,
-    'pingInterval.mobile': 3 * 60 * 1000,
-    'pingInterval.wifi': 3 * 60 * 1000,
-    'adaptive.lastGoodPingInterval': 3 * 60 * 1000,
-    'adaptive.lastGoodPingInterval.mobile': 3 * 60 * 1000,
-    'adaptive.lastGoodPingInterval.wifi': 3 * 60 * 1000,
-    'adaptive.gap': 60000,
-    'adaptive.upperLimit': 29 * 60 * 1000,
     // Misc. defaults.
-    'adaptive.mobile': '',
     'http2.maxRetries': 2,
     'http2.retryInterval': 500,
     'http2.reset_retry_count_after_ms': 60000,
     maxQuotaPerSubscription: 16,
     quotaUpdateDelay: 3000,
+    'testing.notifyWorkers': false,
   }, prefs);
   for (let pref in defaultPrefs) {
     servicePrefs.set(pref, defaultPrefs[pref]);
@@ -367,8 +296,7 @@ MockWebSocket.prototype = {
 
   /**
    * Closes the server end of the connection, calling onServerClose()
-   * followed by onStop(). Used to test abrupt connection termination
-   * and UDP wake-up.
+   * followed by onStop(). Used to test abrupt connection termination.
    *
    * @param {Number} [statusCode] The WebSocket connection close code.
    * @param {String} [reason] The connection close reason.
@@ -388,54 +316,148 @@ MockWebSocket.prototype = {
   },
 };
 
-/**
- * Creates an object that exposes the same interface as NetworkInfo, used
- * to simulate network status changes on Desktop. All methods returns empty
- * carrier data.
- */
-function MockDesktopNetworkInfo() {}
-
-MockDesktopNetworkInfo.prototype = {
-  getNetworkInformation() {
-    return {mcc: '', mnc: '', ip: ''};
-  },
-
-  getNetworkState(callback) {
-    callback({mcc: '', mnc: '', ip: '', netid: ''});
-  },
-
-  getNetworkStateChangeEventName() {
-    return 'network:offline-status-changed';
+var setUpServiceInParent = Task.async(function* (service, db) {
+  if (!isParent) {
+    return;
   }
-};
 
-/**
- * Creates an object that exposes the same interface as NetworkInfo, used
- * to simulate network status changes on B2G.
- *
- * @param {String} [info.mcc] The mobile country code.
- * @param {String} [info.mnc] The mobile network code.
- * @param {String} [info.ip] The carrier IP address.
- * @param {String} [info.netid] The resolved network ID for UDP wake-up.
- */
-function MockMobileNetworkInfo(info = {}) {
-  this._info = info;
+  let userAgentID = 'ce704e41-cb77-4206-b07b-5bf47114791b';
+  setPrefs({
+    userAgentID: userAgentID,
+  });
+
+  yield db.put({
+    channelID: '6e2814e1-5f84-489e-b542-855cc1311f09',
+    pushEndpoint: 'https://example.org/push/get',
+    scope: 'https://example.com/get/ok',
+    originAttributes: '',
+    version: 1,
+    pushCount: 10,
+    lastPush: 1438360548322,
+    quota: 16,
+  });
+  yield db.put({
+    channelID: '3a414737-2fd0-44c0-af05-7efc172475fc',
+    pushEndpoint: 'https://example.org/push/unsub',
+    scope: 'https://example.com/unsub/ok',
+    originAttributes: '',
+    version: 2,
+    pushCount: 10,
+    lastPush: 1438360848322,
+    quota: 4,
+  });
+  yield db.put({
+    channelID: 'ca3054e8-b59b-4ea0-9c23-4a3c518f3161',
+    pushEndpoint: 'https://example.org/push/stale',
+    scope: 'https://example.com/unsub/fail',
+    originAttributes: '',
+    version: 3,
+    pushCount: 10,
+    lastPush: 1438362348322,
+    quota: 1,
+  });
+
+  service.init({
+    serverURI: 'wss://push.example.org/',
+    db: makeStub(db, {
+      put(prev, record) {
+        if (record.scope == 'https://example.com/sub/fail') {
+          return Promise.reject('synergies not aligned');
+        }
+        return prev.call(this, record);
+      },
+      delete: function(prev, channelID) {
+        if (channelID == 'ca3054e8-b59b-4ea0-9c23-4a3c518f3161') {
+          return Promise.reject('splines not reticulated');
+        }
+        return prev.call(this, channelID);
+      },
+      getByIdentifiers(prev, identifiers) {
+        if (identifiers.scope == 'https://example.com/get/fail') {
+          return Promise.reject('qualia unsynchronized');
+        }
+        return prev.call(this, identifiers);
+      },
+    }),
+    makeWebSocket(uri) {
+      return new MockWebSocket(uri, {
+        onHello(request) {
+          this.serverSendMsg(JSON.stringify({
+            messageType: 'hello',
+            uaid: userAgentID,
+            status: 200,
+          }));
+        },
+        onRegister(request) {
+          if (request.key) {
+            let appServerKey = new Uint8Array(
+              ChromeUtils.base64URLDecode(request.key, {
+                padding: "require",
+              })
+            );
+            equal(appServerKey.length, 65, 'Wrong app server key length');
+            equal(appServerKey[0], 4, 'Wrong app server key format');
+          }
+          this.serverSendMsg(JSON.stringify({
+            messageType: 'register',
+            uaid: userAgentID,
+            channelID: request.channelID,
+            status: 200,
+            pushEndpoint: 'https://example.org/push/' + request.channelID,
+          }));
+        },
+        onUnregister(request) {
+          this.serverSendMsg(JSON.stringify({
+            messageType: 'unregister',
+            channelID: request.channelID,
+            status: 200,
+          }));
+        },
+      });
+    },
+  });
+});
+
+var tearDownServiceInParent = Task.async(function* (db) {
+  if (!isParent) {
+    return;
+  }
+
+  let record = yield db.getByIdentifiers({
+    scope: 'https://example.com/sub/ok',
+    originAttributes: '',
+  });
+  ok(record.pushEndpoint.startsWith('https://example.org/push'),
+    'Wrong push endpoint in subscription record');
+
+  record = yield db.getByIdentifiers({
+    scope: 'https://example.net/scope/1',
+    originAttributes: ChromeUtils.originAttributesToSuffix(
+      { appId: 1, inIsolatedMozBrowser: true }),
+  });
+  ok(record.pushEndpoint.startsWith('https://example.org/push'),
+    'Wrong push endpoint in app record');
+
+  record = yield db.getByKeyID('3a414737-2fd0-44c0-af05-7efc172475fc');
+  ok(!record, 'Unsubscribed record should not exist');
+});
+
+function putTestRecord(db, keyID, scope, quota) {
+  return db.put({
+    channelID: keyID,
+    pushEndpoint: 'https://example.org/push/' + keyID,
+    scope: scope,
+    pushCount: 0,
+    lastPush: 0,
+    version: null,
+    originAttributes: '',
+    quota: quota,
+    systemRecord: quota == Infinity,
+  });
 }
 
-MockMobileNetworkInfo.prototype = {
-  _info: null,
-
-  getNetworkInformation() {
-    let {mcc, mnc, ip} = this._info;
-    return {mcc, mnc, ip};
-  },
-
-  getNetworkState(callback) {
-    let {mcc, mnc, ip, netid} = this._info;
-    callback({mcc, mnc, ip, netid});
-  },
-
-  getNetworkStateChangeEventName() {
-    return 'network-active-changed';
-  }
-};
+function getAllKeyIDs(db) {
+  return db.getAllKeyIDs().then(records =>
+    records.map(record => record.keyID).sort(compareAscending)
+  );
+}

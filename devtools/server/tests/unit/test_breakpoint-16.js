@@ -16,7 +16,7 @@ function run_test()
     run_test_with_server(WorkerDebuggerServer, do_test_finished);
   });
   do_test_pending();
-};
+}
 
 function run_test_with_server(aServer, aCallback)
 {
@@ -24,13 +24,13 @@ function run_test_with_server(aServer, aCallback)
   initTestDebuggerServer(aServer);
   gDebuggee = addTestGlobal("test-breakpoints", aServer);
   gClient = new DebuggerClient(aServer.connectPipe());
-  gClient.connect(function () {
+  gClient.connect().then(function () {
     attachTestTabAndResume(gClient,
                            "test-breakpoints",
                            function (aResponse, aTabClient, aThreadClient) {
-      gThreadClient = aThreadClient;
-      test_column_breakpoint();
-    });
+                             gThreadClient = aThreadClient;
+                             test_column_breakpoint();
+                           });
   });
 }
 
@@ -61,7 +61,7 @@ function test_column_breakpoint()
         if (++timesBreakpointHit === 3) {
           gThreadClient.removeListener("paused", onPaused);
           bpClient.remove(function (aResponse) {
-            gThreadClient.resume(() => gClient.close(gCallback));
+            gThreadClient.resume(() => gClient.close().then(gCallback));
           });
         } else {
           gThreadClient.resume();

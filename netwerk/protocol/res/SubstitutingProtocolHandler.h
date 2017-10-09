@@ -18,6 +18,7 @@
 class nsIIOService;
 
 namespace mozilla {
+namespace net {
 
 //
 // Base class for resource://-like substitution protocols.
@@ -36,13 +37,13 @@ public:
 
   bool HasSubstitution(const nsACString& aRoot) const { return mSubstitutions.Get(aRoot, nullptr); }
 
-  void CollectSubstitutions(InfallibleTArray<SubstitutionMapping>& aResources);
+  nsresult CollectSubstitutions(InfallibleTArray<SubstitutionMapping>& aResources);
 
 protected:
   virtual ~SubstitutingProtocolHandler() {}
   void ConstructInternal();
 
-  void SendSubstitution(const nsACString& aRoot, nsIURI* aBaseURI);
+  nsresult SendSubstitution(const nsACString& aRoot, nsIURI* aBaseURI);
 
   // Override this in the subclass to try additional lookups after checking
   // mSubstitutions.
@@ -54,7 +55,10 @@ protected:
 
   // Override this in the subclass to check for special case when resolving URIs
   // _before_ checking substitutions.
-  virtual bool ResolveSpecialCases(const nsACString& aHost, const nsACString& aPath, nsACString& aResult)
+  virtual bool ResolveSpecialCases(const nsACString& aHost,
+                                   const nsACString& aPath,
+                                   const nsACString& aPathname,
+                                   nsACString& aResult)
   {
     return false;
   }
@@ -97,6 +101,7 @@ public:
   NS_IMETHOD GetClassIDNoAlloc(nsCID *aCID);
 };
 
+} // namespace net
 } // namespace mozilla
 
 #endif /* SubstitutingProtocolHandler_h___ */

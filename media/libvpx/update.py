@@ -598,8 +598,16 @@ def apply_patches():
     os.system("patch -p3 < clamp_abs_lvl_seg.patch")
     # Bug 1224361 - Clamp QIndex also in abs-value mode.
     os.system("patch -p3 < clamp-abs-QIndex.patch")
+    # Bug 1233983 - Make libvpx build with clang-cl
+    os.system("patch -p3 < clang-cl.patch")
+    # Bug 1224371 - Cast uint8_t to uint32_t before shift
+    os.system("patch -p3 < cast-char-to-uint-before-shift.patch")
+    # Bug 1237848 - Check lookahead ctx
+    os.system("patch -p3 < 1237848-check-lookahead-ctx.patch")
     # Bug 1263384 - Check input frame resolution
     os.system("patch -p3 < input_frame_validation.patch")
+    # Bug 1315288 - Check input frame resolution for vp9
+    os.system("patch -p3 < input_frame_validation_vp9.patch")
 
 def update_readme(commit):
     with open('README_MOZILLA') as f:

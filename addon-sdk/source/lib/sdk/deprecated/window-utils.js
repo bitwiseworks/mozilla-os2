@@ -10,7 +10,7 @@ module.metadata = {
 const { Cc, Ci } = require('chrome');
 const events = require('../system/events');
 const { getInnerId, getOuterId, windows, isDocumentLoaded, isBrowser,
-        getMostRecentBrowserWindow, getMostRecentWindow } = require('../window/utils');
+        getMostRecentBrowserWindow, getToplevelWindow, getMostRecentWindow } = require('../window/utils');
 const { deprecateFunction } = require('../util/deprecate');
 const { ignoreWindow } = require('sdk/private-browsing/utils');
 const { isPrivateBrowsingSupported } = require('../self');
@@ -62,7 +62,6 @@ function WindowTracker(delegate) {
    }
 
   this._delegate = delegate;
-  this._loadingWindows = [];
 
   for (let window of getWindows())
     this._regWindow(window);
@@ -81,17 +80,12 @@ WindowTracker.prototype = {
     if (ignoreWindow(window))
       return;
 
-    this._loadingWindows.push(window);
     window.addEventListener('load', this, true);
   },
 
   _unregLoadingWindow: function _unregLoadingWindow(window) {
-    var index = this._loadingWindows.indexOf(window);
-
-    if (index != -1) {
-      this._loadingWindows.splice(index, 1);
-      window.removeEventListener('load', this, true);
-    }
+    // This may have no effect if we ignored the window in _regLoadingWindow().
+    window.removeEventListener('load', this, true);
   },
 
   _regWindow: function _regWindow(window) {
@@ -127,7 +121,7 @@ WindowTracker.prototype = {
       if (event.type == 'load' && event.target) {
         var window = event.target.defaultView;
         if (window)
-          this._regWindow(window);
+          this._regWindow(getToplevelWindow(window));
       }
     }
     catch(e) {
@@ -136,7 +130,7 @@ WindowTracker.prototype = {
   },
 
   _onToplevelWindowReady: function _onToplevelWindowReady({subject}) {
-    let window = subject;
+    let window = getToplevelWindow(subject);
     // ignore private windows if they are not supported
     if (ignoreWindow(window))
       return;

@@ -12,6 +12,8 @@ Components.utils.import("resource://gre/modules/Services.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "Deprecated",
                                   "resource://gre/modules/Deprecated.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "AppConstants",
+                                  "resource://gre/modules/AppConstants.jsm");
 
 const DB_VERSION = 4;
 const DAY_IN_MS  = 86400000; // 1 day in milliseconds
@@ -301,7 +303,7 @@ FormHistory.prototype = {
 
     entryExists : function entryExists(name, value) {
         this.log("entryExists for " + name + "=" + value);
-        let [id, guid] = this.getExistingEntryID(name, value);
+        let [id] = this.getExistingEntryID(name, value);
         this.log("entryExists: id=" + id);
         return (id != -1);
     },
@@ -406,7 +408,7 @@ FormHistory.prototype = {
 
 
     observe : function observe(subject, topic, data) {
-        switch(topic) {
+        switch (topic) {
         case "nsPref:changed":
             this.updatePrefs();
             break;
@@ -546,7 +548,6 @@ FormHistory.prototype = {
         this.enabled        = Services.prefs.getBoolPref("browser.formfill.enable");
     },
 
-//**************************************************************************//
     // Database Creation & Access
 
     /*

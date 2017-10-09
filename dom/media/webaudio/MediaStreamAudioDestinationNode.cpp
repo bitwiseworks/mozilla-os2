@@ -10,10 +10,60 @@
 #include "AudioNodeEngine.h"
 #include "AudioNodeStream.h"
 #include "DOMMediaStream.h"
+#include "MediaStreamTrack.h"
 #include "TrackUnionStream.h"
 
 namespace mozilla {
 namespace dom {
+
+class AudioDestinationTrackSource :
+  public MediaStreamTrackSource
+{
+public:
+  NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(AudioDestinationTrackSource,
+                                           MediaStreamTrackSource)
+
+  AudioDestinationTrackSource(MediaStreamAudioDestinationNode* aNode,
+                              nsIPrincipal* aPrincipal)
+    : MediaStreamTrackSource(aPrincipal, nsString())
+    , mNode(aNode)
+  {
+  }
+
+  void Destroy() override
+  {
+    if (mNode) {
+      mNode->DestroyMediaStream();
+      mNode = nullptr;
+    }
+  }
+
+  MediaSourceEnum GetMediaSource() const override
+  {
+    return MediaSourceEnum::AudioCapture;
+  }
+
+  void Stop() override
+  {
+    Destroy();
+  }
+
+private:
+  virtual ~AudioDestinationTrackSource() {}
+
+  RefPtr<MediaStreamAudioDestinationNode> mNode;
+};
+
+NS_IMPL_ADDREF_INHERITED(AudioDestinationTrackSource,
+                         MediaStreamTrackSource)
+NS_IMPL_RELEASE_INHERITED(AudioDestinationTrackSource,
+                          MediaStreamTrackSource)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(AudioDestinationTrackSource)
+NS_INTERFACE_MAP_END_INHERITING(MediaStreamTrackSource)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(AudioDestinationTrackSource,
+                                   MediaStreamTrackSource,
+                                   mNode)
 
 NS_IMPL_CYCLE_COLLECTION_INHERITED(MediaStreamAudioDestinationNode, AudioNode, mDOMStream)
 
@@ -29,24 +79,27 @@ MediaStreamAudioDestinationNode::MediaStreamAudioDestinationNode(AudioContext* a
               ChannelCountMode::Explicit,
               ChannelInterpretation::Speakers)
   , mDOMStream(
-      DOMAudioNodeMediaStream::CreateTrackUnionStream(GetOwner(),
-                                                      this,
-                                                      aContext->Graph()))
+      DOMAudioNodeMediaStream::CreateTrackUnionStreamAsInput(GetOwner(),
+                                                             this,
+                                                             aContext->Graph()))
 {
   // Ensure an audio track with the correct ID is exposed to JS
-  mDOMStream->CreateOwnDOMTrack(AudioNodeStream::AUDIO_TRACK, MediaSegment::AUDIO);
+  nsIDocument* doc = aContext->GetParentObject()->GetExtantDoc();
+  RefPtr<MediaStreamTrackSource> source =
+    new AudioDestinationTrackSource(this, doc->NodePrincipal());
+  RefPtr<MediaStreamTrack> track =
+    mDOMStream->CreateDOMTrack(AudioNodeStream::AUDIO_TRACK,
+                               MediaSegment::AUDIO, source,
+                               MediaTrackConstraints());
+  mDOMStream->AddTrackInternal(track);
 
   ProcessedMediaStream* outputStream = mDOMStream->GetInputStream()->AsProcessedStream();
   MOZ_ASSERT(!!outputStream);
   AudioNodeEngine* engine = new AudioNodeEngine(this);
   mStream = AudioNodeStream::Create(aContext, engine,
-                                    AudioNodeStream::EXTERNAL_OUTPUT);
+                                    AudioNodeStream::EXTERNAL_OUTPUT,
+                                    aContext->Graph());
   mPort = outputStream->AllocateInputPort(mStream, AudioNodeStream::AUDIO_TRACK);
-
-  nsIDocument* doc = aContext->GetParentObject()->GetExtantDoc();
-  if (doc) {
-    mDOMStream->CombineWithPrincipal(doc->NodePrincipal());
-  }
 }
 
 MediaStreamAudioDestinationNode::~MediaStreamAudioDestinationNode()

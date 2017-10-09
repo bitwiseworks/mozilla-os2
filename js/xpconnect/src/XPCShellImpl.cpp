@@ -10,6 +10,7 @@
 #include "jsprf.h"
 #include "mozilla/ChaosMode.h"
 #include "mozilla/dom/ScriptSettings.h"
+#include "mozilla/Preferences.h"
 #include "nsServiceManagerUtils.h"
 #include "nsComponentManagerUtils.h"
 #include "nsIXPConnect.h"
@@ -24,7 +25,6 @@
 #include "nsCOMArray.h"
 #include "nsDirectoryServiceUtils.h"
 #include "nsCOMPtr.h"
-#include "nsAutoPtr.h"
 #include "nsJSPrincipals.h"
 #include "xpcpublic.h"
 #include "xpcprivate.h"
@@ -42,7 +42,11 @@
 #endif
 
 #ifdef XP_WIN
+#include "mozilla/widget/AudioSession.h"
 #include <windows.h>
+#if defined(MOZ_SANDBOX)
+#include "SandboxBroker.h"
+#endif
 #endif
 
 // all this crap is needed to do the interactive shell stuff
@@ -97,6 +101,20 @@ private:
     nsCOMPtr<nsIFile> mAppFile;
 };
 
+#ifdef XP_WIN
+class MOZ_STACK_CLASS AutoAudioSession
+{
+public:
+    AutoAudioSession() {
+        widget::StartAudioSession();
+    }
+
+    ~AutoAudioSession() {
+        widget::StopAudioSession();
+    }
+};
+#endif
+
 static const char kXPConnectServiceContractID[] = "@mozilla.org/js/xpc/XPConnect;1";
 
 #define EXITCODE_RUNTIME_ERROR 3
@@ -119,7 +137,7 @@ GetLocationProperty(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     if (!args.thisv().isObject()) {
-        JS_ReportError(cx, "Unexpected this value for GetLocationProperty");
+        JS_ReportErrorASCII(cx, "Unexpected this value for GetLocationProperty");
         return false;
     }
 #if !defined(XP_WIN) && !defined(XP_UNIX)
@@ -227,7 +245,7 @@ ReadLine(JSContext* cx, unsigned argc, Value* vp)
         if (!str)
             return false;
     } else {
-        str = JS_GetEmptyString(JS_GetRuntime(cx));
+        str = JS_GetEmptyString(cx);
     }
 
     /* Get a line from the infile */
@@ -326,7 +344,7 @@ Load(JSContext* cx, unsigned argc, Value* vp)
         return false;
 
     if (!JS_IsGlobalObject(obj)) {
-        JS_ReportError(cx, "Trying to load() into a non-global object");
+        JS_ReportErrorASCII(cx, "Trying to load() into a non-global object");
         return false;
     }
 
@@ -340,8 +358,11 @@ Load(JSContext* cx, unsigned argc, Value* vp)
             return false;
         FILE* file = fopen(filename.ptr(), "r");
         if (!file) {
-            JS_ReportError(cx, "cannot open file '%s' for reading",
-                           filename.ptr());
+            filename.clear();
+            if (!filename.encodeUtf8(cx, str))
+                return false;
+            JS_ReportErrorUTF8(cx, "cannot open file '%s' for reading",
+                               filename.ptr());
             return false;
         }
         JS::CompileOptions options(cx);
@@ -412,11 +433,9 @@ static bool
 GC(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
-    JSRuntime* rt = JS_GetRuntime(cx);
-    JS_GC(rt);
-#ifdef JS_GCMETER
-    js_DumpGCStats(rt, stdout);
-#endif
+
+    JS_GC(cx);
+
     args.rval().setUndefined();
     return true;
 }
@@ -442,23 +461,23 @@ SendCommand(JSContext* cx, unsigned argc, Value* vp)
     CallArgs args = CallArgsFromVp(argc, vp);
 
     if (args.length() == 0) {
-        JS_ReportError(cx, "Function takes at least one argument!");
+        JS_ReportErrorASCII(cx, "Function takes at least one argument!");
         return false;
     }
 
     RootedString str(cx, ToString(cx, args[0]));
     if (!str) {
-        JS_ReportError(cx, "Could not convert argument 1 to string!");
+        JS_ReportErrorASCII(cx, "Could not convert argument 1 to string!");
         return false;
     }
 
     if (args.length() > 1 && JS_TypeOfValue(cx, args[1]) != JSTYPE_FUNCTION) {
-        JS_ReportError(cx, "Could not convert argument 2 to function!");
+        JS_ReportErrorASCII(cx, "Could not convert argument 2 to function!");
         return false;
     }
 
     if (!XRE_SendTestShellCommand(cx, str, args.length() > 1 ? args[1].address() : nullptr)) {
-        JS_ReportError(cx, "Couldn't send command!");
+        JS_ReportErrorASCII(cx, "Couldn't send command!");
         return false;
     }
 
@@ -470,46 +489,48 @@ static bool
 Options(JSContext* cx, unsigned argc, Value* vp)
 {
     JS::CallArgs args = CallArgsFromVp(argc, vp);
-    RuntimeOptions oldRuntimeOptions = RuntimeOptionsRef(cx);
+    ContextOptions oldContextOptions = ContextOptionsRef(cx);
 
+    RootedString str(cx);
+    JSAutoByteString opt;
     for (unsigned i = 0; i < args.length(); ++i) {
-        JSString* str = ToString(cx, args[i]);
+        str = ToString(cx, args[i]);
         if (!str)
             return false;
 
-        JSAutoByteString opt(cx, str);
-        if (!opt)
+        opt.clear();
+        if (!opt.encodeUtf8(cx, str))
             return false;
 
         if (strcmp(opt.ptr(), "strict") == 0)
-            RuntimeOptionsRef(cx).toggleExtraWarnings();
+            ContextOptionsRef(cx).toggleExtraWarnings();
         else if (strcmp(opt.ptr(), "werror") == 0)
-            RuntimeOptionsRef(cx).toggleWerror();
+            ContextOptionsRef(cx).toggleWerror();
         else if (strcmp(opt.ptr(), "strict_mode") == 0)
-            RuntimeOptionsRef(cx).toggleStrictMode();
+            ContextOptionsRef(cx).toggleStrictMode();
         else {
-            JS_ReportError(cx, "unknown option name '%s'. The valid names are "
-                           "strict, werror, and strict_mode.", opt.ptr());
+            JS_ReportErrorUTF8(cx, "unknown option name '%s'. The valid names are "
+                               "strict, werror, and strict_mode.", opt.ptr());
             return false;
         }
     }
 
     char* names = nullptr;
-    if (oldRuntimeOptions.extraWarnings()) {
+    if (oldContextOptions.extraWarnings()) {
         names = JS_sprintf_append(names, "%s", "strict");
         if (!names) {
             JS_ReportOutOfMemory(cx);
             return false;
         }
     }
-    if (oldRuntimeOptions.werror()) {
+    if (oldContextOptions.werror()) {
         names = JS_sprintf_append(names, "%s%s", names ? "," : "", "werror");
         if (!names) {
             JS_ReportOutOfMemory(cx);
             return false;
         }
     }
-    if (names && oldRuntimeOptions.strictMode()) {
+    if (names && oldContextOptions.strictMode()) {
         names = JS_sprintf_append(names, "%s%s", names ? "," : "", "strict_mode");
         if (!names) {
             JS_ReportOutOfMemory(cx);
@@ -517,7 +538,7 @@ Options(JSContext* cx, unsigned argc, Value* vp)
         }
     }
 
-    JSString* str = JS_NewStringCopyZ(cx, names);
+    str = JS_NewStringCopyZ(cx, names);
     free(names);
     if (!str)
         return false;
@@ -526,33 +547,13 @@ Options(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
-static bool
-Atob(JSContext* cx, unsigned argc, Value* vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-    if (!args.length())
-        return true;
-
-    return xpc::Base64Decode(cx, args[0], args.rval());
-}
-
-static bool
-Btoa(JSContext* cx, unsigned argc, Value* vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-    if (!args.length())
-        return true;
-
-  return xpc::Base64Encode(cx, args[0], args.rval());
-}
-
-static PersistentRootedValue sScriptedInterruptCallback;
+static PersistentRootedValue *sScriptedInterruptCallback = nullptr;
 
 static bool
 XPCShellInterruptCallback(JSContext* cx)
 {
-    MOZ_ASSERT(sScriptedInterruptCallback.initialized());
-    RootedValue callback(cx, sScriptedInterruptCallback);
+    MOZ_ASSERT(sScriptedInterruptCallback->initialized());
+    RootedValue callback(cx, *sScriptedInterruptCallback);
 
     // If no interrupt callback was set by script, no-op.
     if (callback.isUndefined())
@@ -574,28 +575,28 @@ XPCShellInterruptCallback(JSContext* cx)
 static bool
 SetInterruptCallback(JSContext* cx, unsigned argc, Value* vp)
 {
-    MOZ_ASSERT(sScriptedInterruptCallback.initialized());
+    MOZ_ASSERT(sScriptedInterruptCallback->initialized());
 
     // Sanity-check args.
     JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
     if (args.length() != 1) {
-        JS_ReportError(cx, "Wrong number of arguments");
+        JS_ReportErrorASCII(cx, "Wrong number of arguments");
         return false;
     }
 
     // Allow callers to remove the interrupt callback by passing undefined.
     if (args[0].isUndefined()) {
-        sScriptedInterruptCallback = UndefinedValue();
+        *sScriptedInterruptCallback = UndefinedValue();
         return true;
     }
 
     // Otherwise, we should have a callable object.
     if (!args[0].isObject() || !JS::IsCallable(&args[0].toObject())) {
-        JS_ReportError(cx, "Argument must be callable");
+        JS_ReportErrorASCII(cx, "Argument must be callable");
         return false;
     }
 
-    sScriptedInterruptCallback = args[0];
+    *sScriptedInterruptCallback = args[0];
 
     return true;
 }
@@ -606,7 +607,7 @@ SimulateActivityCallback(JSContext* cx, unsigned argc, Value* vp)
     // Sanity-check args.
     JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
     if (args.length() != 1 || !args[0].isBoolean()) {
-        JS_ReportError(cx, "Wrong number of arguments");
+        JS_ReportErrorASCII(cx, "Wrong number of arguments");
         return false;
     }
     xpc::SimulateActivityCallback(args[0].toBoolean());
@@ -618,11 +619,11 @@ RegisterAppManifest(JSContext* cx, unsigned argc, Value* vp)
 {
     JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
     if (args.length() != 1) {
-        JS_ReportError(cx, "Wrong number of arguments");
+        JS_ReportErrorASCII(cx, "Wrong number of arguments");
         return false;
     }
     if (!args[0].isObject()) {
-        JS_ReportError(cx, "Expected object as argument 1 to registerAppManifest");
+        JS_ReportErrorASCII(cx, "Expected object as argument 1 to registerAppManifest");
         return false;
     }
 
@@ -656,8 +657,8 @@ static const JSFunctionSpec glob_functions[] = {
 #endif
     JS_FS("options",         Options,        0,0),
     JS_FS("sendCommand",     SendCommand,    1,0),
-    JS_FS("atob",            Atob,           1,0),
-    JS_FS("btoa",            Btoa,           1,0),
+    JS_FS("atob",            xpc::Atob,      1,0),
+    JS_FS("btoa",            xpc::Btoa,      1,0),
     JS_FS("setInterruptCallback", SetInterruptCallback, 1,0),
     JS_FS("simulateActivityCallback", SimulateActivityCallback, 1,0),
     JS_FS("registerAppManifest", RegisterAppManifest, 1, 0),
@@ -670,8 +671,8 @@ env_setProperty(JSContext* cx, HandleObject obj, HandleId id, MutableHandleValue
 {
 /* XXX porting may be easy, but these don't seem to supply setenv by default */
 #if !defined SOLARIS
-    JSString* valstr;
-    JS::Rooted<JSString*> idstr(cx);
+    RootedString valstr(cx);
+    RootedString idstr(cx);
     int rv;
 
     RootedValue idval(cx);
@@ -711,7 +712,13 @@ env_setProperty(JSContext* cx, HandleObject obj, HandleId id, MutableHandleValue
     rv = setenv(name.ptr(), value.ptr(), 1);
 #endif
     if (rv < 0) {
-        JS_ReportError(cx, "can't set envariable %s to %s", name.ptr(), value.ptr());
+        name.clear();
+        value.clear();
+        if (!name.encodeUtf8(cx, idstr))
+            return false;
+        if (!value.encodeUtf8(cx, valstr))
+            return false;
+        JS_ReportErrorUTF8(cx, "can't set envariable %s to %s", name.ptr(), value.ptr());
         return false;
     }
     vp.setString(valstr);
@@ -776,10 +783,14 @@ env_resolve(JSContext* cx, HandleObject obj, HandleId id, bool* resolvedp)
     return true;
 }
 
-static const JSClass env_class = {
-    "environment", JSCLASS_HAS_PRIVATE,
+static const JSClassOps env_classOps = {
     nullptr, nullptr, nullptr, env_setProperty,
     env_enumerate, env_resolve
+};
+
+static const JSClass env_class = {
+    "environment", JSCLASS_HAS_PRIVATE,
+    &env_classOps
 };
 
 /***************************************************************************/
@@ -794,7 +805,7 @@ typedef enum JSShellErrNum {
 
 static const JSErrorFormatString jsShell_ErrorFormatString[JSShellErr_Limit] = {
 #define MSG_DEF(name, number, count, exception, format) \
-    { format, count } ,
+    { #name, format, count } ,
 #include "jsshell.msg"
 #undef MSG_DEF
 };
@@ -901,7 +912,7 @@ ProcessFile(AutoJSAPI& jsapi, const char* filename, FILE* file, bool forceTTY)
         } while (!JS_BufferIsCompilableUnit(cx, global, buffer, strlen(buffer)));
 
         if (!ProcessLine(jsapi, buffer, startline))
-            jsapi.ClearException(); // Errors from interactive processing are squelched.
+            jsapi.ReportException();
     } while (!hitEOF && !gQuitting);
 
     fprintf(gOutFile, "\n");
@@ -918,9 +929,13 @@ Process(AutoJSAPI& jsapi, const char* filename, bool forceTTY)
     } else {
         file = fopen(filename, "r");
         if (!file) {
-            JS_ReportErrorNumber(jsapi.cx(), my_GetErrorMessage, nullptr,
-                                 JSSMSG_CANT_OPEN,
-                                 filename, strerror(errno));
+            /*
+             * Use Latin1 variant here because the encoding of the return value
+             * of strerror function can be non-UTF-8.
+             */
+            JS_ReportErrorNumberLatin1(jsapi.cx(), my_GetErrorMessage, nullptr,
+                                       JSSMSG_CANT_OPEN,
+                                       filename, strerror(errno));
             gExitCode = EXITCODE_FILE_NOT_FOUND;
             return false;
         }
@@ -962,13 +977,15 @@ ProcessArgsForCompartment(JSContext* cx, char** argv, int argc)
                 return;
             break;
         case 'S':
-            RuntimeOptionsRef(cx).toggleWerror();
+            ContextOptionsRef(cx).toggleWerror();
+            MOZ_FALLTHROUGH; // because -S implies -s
         case 's':
-            RuntimeOptionsRef(cx).toggleExtraWarnings();
+            ContextOptionsRef(cx).toggleExtraWarnings();
             break;
         case 'I':
-            RuntimeOptionsRef(cx).toggleIon()
-                                 .toggleAsmJS();
+            ContextOptionsRef(cx).toggleIon()
+                                 .toggleAsmJS()
+                                 .toggleWasm();
             break;
         }
     }
@@ -1241,9 +1258,11 @@ GetCurrentWorkingDirectory(nsAString& workingDirectory)
 static JSSecurityCallbacks shellSecurityCallbacks;
 
 int
-XRE_XPCShellMain(int argc, char** argv, char** envp)
+XRE_XPCShellMain(int argc, char** argv, char** envp,
+                 const XREShellData* aShellData)
 {
-    JSRuntime* rt;
+    MOZ_ASSERT(aShellData);
+
     JSContext* cx;
     int result = 0;
     nsresult rv;
@@ -1408,21 +1427,21 @@ XRE_XPCShellMain(int argc, char** argv, char** envp)
             return 1;
         }
 
-        rt = xpc::GetJSRuntime();
-        if (!rt) {
-            printf("failed to get JSRuntime from XPConnect!\n");
-            return 1;
-        }
-
-        // Override the default XPConnect interrupt callback. We could store the
-        // old one and restore it before shutting down, but there's not really a
-        // reason to bother.
-        sScriptedInterruptCallback.init(rt, UndefinedValue());
-        JS_SetInterruptCallback(rt, XPCShellInterruptCallback);
+        // xpc::ErrorReport::LogToConsoleWithStack needs this to print errors
+        // to stderr.
+        Preferences::SetBool("browser.dom.window.dump.enabled", true);
 
         AutoJSAPI jsapi;
         jsapi.Init();
         cx = jsapi.cx();
+
+        // Override the default XPConnect interrupt callback. We could store the
+        // old one and restore it before shutting down, but there's not really a
+        // reason to bother.
+        sScriptedInterruptCallback = new PersistentRootedValue;
+        sScriptedInterruptCallback->init(cx, UndefinedValue());
+
+        JS_AddInterruptCallback(cx, XPCShellInterruptCallback);
 
         argc--;
         argv++;
@@ -1456,10 +1475,10 @@ XRE_XPCShellMain(int argc, char** argv, char** envp)
             }
         }
 
-        const JSSecurityCallbacks* scb = JS_GetSecurityCallbacks(rt);
+        const JSSecurityCallbacks* scb = JS_GetSecurityCallbacks(cx);
         MOZ_ASSERT(scb, "We are assuming that nsScriptSecurityManager::Init() has been run");
         shellSecurityCallbacks = *scb;
-        JS_SetSecurityCallbacks(rt, &shellSecurityCallbacks);
+        JS_SetSecurityCallbacks(cx, &shellSecurityCallbacks);
 
 #ifdef TEST_TranslateThis
         nsCOMPtr<nsIXPCFunctionThisTranslator>
@@ -1478,8 +1497,10 @@ XRE_XPCShellMain(int argc, char** argv, char** envp)
         // Make the default XPCShell global use a fresh zone (rather than the
         // System Zone) to improve cross-zone test coverage.
         JS::CompartmentOptions options;
-        options.setZone(JS::FreshZone)
-               .setVersion(JSVERSION_LATEST);
+        options.creationOptions().setZone(JS::FreshZone);
+        if (xpc::SharedMemoryEnabled())
+            options.creationOptions().setSharedMemoryAndAtomicsEnabled(true);
+        options.behaviors().setVersion(JSVERSION_LATEST);
         nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
         rv = xpc->InitClassesWithNewWrappedGlobal(cx,
                                                   static_cast<nsIGlobalObject*>(backstagePass),
@@ -1494,6 +1515,21 @@ XRE_XPCShellMain(int argc, char** argv, char** envp)
         gfxPrefs::GetSingleton();
         // Initialize e10s check on the main thread, if not already done
         BrowserTabsRemoteAutostart();
+#ifdef XP_WIN
+        // Plugin may require audio session if installed plugin can initialize
+        // asynchronized.
+        AutoAudioSession audioSession;
+
+#if defined(MOZ_SANDBOX)
+        // Required for sandboxed child processes.
+        if (aShellData->sandboxBrokerServices) {
+          SandboxBroker::Initialize(aShellData->sandboxBrokerServices);
+        } else {
+          NS_WARNING("Failed to initialize broker services, sandboxed "
+                     "processes will fail to start.");
+        }
+#endif
+#endif
 
         {
             JS::Rooted<JSObject*> glob(cx, holder->GetJSObject());
@@ -1504,7 +1540,7 @@ XRE_XPCShellMain(int argc, char** argv, char** envp)
             // Even if we're building in a configuration where source is
             // discarded, there's no reason to do that on XPCShell, and doing so
             // might break various automation scripts.
-            JS::CompartmentOptionsRef(glob).setDiscardSource(false);
+            JS::CompartmentBehaviorsRef(glob).setDiscardSource(false);
 
             backstagePass->SetGlobalObject(glob);
 
@@ -1542,9 +1578,8 @@ XRE_XPCShellMain(int argc, char** argv, char** envp)
                 AutoEntryScript aes(backstagePass, "xpcshell argument processing");
 
                 // If an exception is thrown, we'll set our return code
-                // appropriately, and then let the AutoJSAPI destructor report
+                // appropriately, and then let the AutoEntryScript destructor report
                 // the error to the console.
-                aes.TakeOwnershipOfErrorReporting();
                 if (!ProcessArgs(aes, argv, argc, &dirprovider)) {
                     if (gExitCode) {
                         result = gExitCode;
@@ -1556,12 +1591,12 @@ XRE_XPCShellMain(int argc, char** argv, char** envp)
                 }
             }
 
-            JS_DropPrincipals(rt, gJSPrincipals);
+            JS_DropPrincipals(cx, gJSPrincipals);
             JS_SetAllNonReservedSlotsToUndefined(cx, glob);
-            JS_SetAllNonReservedSlotsToUndefined(cx, JS_GlobalLexicalScope(glob));
-            JS_GC(rt);
+            JS_SetAllNonReservedSlotsToUndefined(cx, JS_GlobalLexicalEnvironment(glob));
+            JS_GC(cx);
         }
-        JS_GC(rt);
+        JS_GC(cx);
     } // this scopes the nsCOMPtrs
 
     if (!XRE_ShutdownTestShell())

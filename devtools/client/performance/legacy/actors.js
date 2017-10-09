@@ -3,25 +3,18 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const { Task } = require("resource://gre/modules/Task.jsm");
+const { Task } = require("devtools/shared/task");
 
-loader.lazyRequireGetter(this, "promise");
-loader.lazyRequireGetter(this, "EventEmitter",
-  "devtools/shared/event-emitter");
-loader.lazyRequireGetter(this, "Poller",
-  "devtools/client/shared/poller", true);
+const EventEmitter = require("devtools/shared/event-emitter");
+const { Poller } = require("devtools/client/shared/poller");
 
-loader.lazyRequireGetter(this, "CompatUtils",
-  "devtools/client/performance/legacy/compatibility");
-loader.lazyRequireGetter(this, "RecordingUtils",
-  "devtools/shared/performance/recording-utils");
-loader.lazyRequireGetter(this, "TimelineFront",
-  "devtools/server/actors/timeline", true);
-loader.lazyRequireGetter(this, "ProfilerFront",
-  "devtools/server/actors/profiler", true);
+const CompatUtils = require("devtools/client/performance/legacy/compatibility");
+const RecordingUtils = require("devtools/shared/performance/recording-utils");
+const { TimelineFront } = require("devtools/shared/fronts/timeline");
+const { ProfilerFront } = require("devtools/shared/fronts/profiler");
 
-// how often do we check the status of the profiler's circular buffer
-const PROFILER_CHECK_TIMER = 5000; // ms
+// How often do we check the status of the profiler's circular buffer in milliseconds.
+const PROFILER_CHECK_TIMER = 5000;
 
 const TIMELINE_ACTOR_METHODS = [
   "start", "stop",
@@ -35,11 +28,12 @@ const PROFILER_ACTOR_METHODS = [
 /**
  * Constructor for a facade around an underlying ProfilerFront.
  */
-function LegacyProfilerFront (target) {
+function LegacyProfilerFront(target) {
   this._target = target;
   this._onProfilerEvent = this._onProfilerEvent.bind(this);
   this._checkProfilerStatus = this._checkProfilerStatus.bind(this);
-  this._PROFILER_CHECK_TIMER = this._target.TEST_MOCK_PROFILER_CHECK_TIMER || PROFILER_CHECK_TIMER;
+  this._PROFILER_CHECK_TIMER = this._target.TEST_MOCK_PROFILER_CHECK_TIMER ||
+                               PROFILER_CHECK_TIMER;
 
   EventEmitter.decorate(this);
 }
@@ -48,7 +42,7 @@ LegacyProfilerFront.prototype = {
   EVENTS: ["console-api-profiler", "profiler-stopped"],
 
   // Connects to the targets underlying real ProfilerFront.
-  connect: Task.async(function*() {
+  connect: Task.async(function* () {
     let target = this._target;
     this._front = new ProfilerFront(target.client, target.form);
 
@@ -66,7 +60,7 @@ LegacyProfilerFront.prototype = {
   /**
    * Unregisters events for the underlying profiler actor.
    */
-  destroy: Task.async(function *() {
+  destroy: Task.async(function* () {
     if (this._poller) {
       yield this._poller.destroy();
     }
@@ -81,12 +75,13 @@ LegacyProfilerFront.prototype = {
    * @option {number?} bufferSize
    * @option {number?} sampleFrequency
    */
-  start: Task.async(function *(options={}) {
+  start: Task.async(function* (options = {}) {
     // Check for poller status even if the profiler is already active --
     // profiler can be activated via `console.profile` or another source, like
     // the Gecko Profiler.
     if (!this._poller) {
-      this._poller = new Poller(this._checkProfilerStatus, this._PROFILER_CHECK_TIMER, false);
+      this._poller = new Poller(this._checkProfilerStatus, this._PROFILER_CHECK_TIMER,
+                                false);
     }
     if (!this._poller.isPolling()) {
       this._poller.on();
@@ -96,7 +91,13 @@ LegacyProfilerFront.prototype = {
     // nsIPerformance module will be kept recording, because it's the same instance
     // for all targets and interacts with the whole platform, so we don't want
     // to affect other clients by stopping (or restarting) it.
-    let { isActive, currentTime, position, generation, totalSize } = yield this.getStatus();
+    let {
+      isActive,
+      currentTime,
+      position,
+      generation,
+      totalSize
+    } = yield this.getStatus();
 
     if (isActive) {
       return { startTime: currentTime, position, generation, totalSize };
@@ -106,12 +107,14 @@ LegacyProfilerFront.prototype = {
     // options for the nsIProfiler
     let profilerOptions = {
       entries: options.bufferSize,
-      interval: options.sampleFrequency ? (1000 / (options.sampleFrequency * 1000)) : void 0
+      interval: options.sampleFrequency
+                  ? (1000 / (options.sampleFrequency * 1000))
+                  : void 0
     };
 
     let startInfo = yield this.startProfiler(profilerOptions);
     let startTime = 0;
-    if ('currentTime' in startInfo) {
+    if ("currentTime" in startInfo) {
       startTime = startInfo.currentTime;
     }
 
@@ -123,19 +126,19 @@ LegacyProfilerFront.prototype = {
    * (stopProfiler does that), but notes that we no longer need to poll
    * for buffer status.
    */
-  stop: Task.async(function *() {
+  stop: Task.async(function* () {
     yield this._poller.off();
   }),
 
   /**
    * Wrapper around `profiler.isActive()` to take profiler status data and emit.
    */
-  getStatus: Task.async(function *() {
+  getStatus: Task.async(function* () {
     let data = yield (CompatUtils.callFrontMethod("isActive").call(this));
     // If no data, the last poll for `isActive()` was wrapping up, and the target.client
     // is now null, so we no longer have data, so just abort here.
     if (!data) {
-      return;
+      return undefined;
     }
 
     // If TEST_PROFILER_FILTER_STATUS defined (via array of fields), filter
@@ -157,16 +160,17 @@ LegacyProfilerFront.prototype = {
   /**
    * Returns profile data from now since `startTime`.
    */
-  getProfile: Task.async(function *(options) {
-    let profilerData = yield (CompatUtils.callFrontMethod("getProfile").call(this, options));
+  getProfile: Task.async(function* (options) {
+    let profilerData = yield (CompatUtils.callFrontMethod("getProfile")
+                                         .call(this, options));
     // If the backend is not deduped, dedupe it ourselves, as rest of the code
     // expects a deduped profile.
     if (profilerData.profile.meta.version === 2) {
       RecordingUtils.deflateProfile(profilerData.profile);
     }
 
-    // If the backend does not support filtering by start and endtime on platform (< Fx40),
-    // do it on the client (much slower).
+    // If the backend does not support filtering by start and endtime on
+    // platform (< Fx40), do it on the client (much slower).
     if (!this.traits.filterable) {
       RecordingUtils.filterSamples(profilerData.profile, options.startTime || 0);
     }
@@ -192,7 +196,7 @@ LegacyProfilerFront.prototype = {
     }
   },
 
-  _checkProfilerStatus: Task.async(function *() {
+  _checkProfilerStatus: Task.async(function* () {
     // Calling `getStatus()` will emit the "profiler-status" on its own
     yield this.getStatus();
   }),
@@ -203,7 +207,7 @@ LegacyProfilerFront.prototype = {
 /**
  * Constructor for a facade around an underlying TimelineFront.
  */
-function LegacyTimelineFront (target) {
+function LegacyTimelineFront(target) {
   this._target = target;
   EventEmitter.decorate(this);
 }
@@ -211,7 +215,7 @@ function LegacyTimelineFront (target) {
 LegacyTimelineFront.prototype = {
   EVENTS: ["markers", "frames", "ticks"],
 
-  connect: Task.async(function*() {
+  connect: Task.async(function* () {
     let supported = yield CompatUtils.timelineActorSupported(this._target);
     this._front = supported ?
                   new TimelineFront(this._target.client, this._target.form) :
@@ -231,7 +235,7 @@ LegacyTimelineFront.prototype = {
    * Override actor's destroy, so we can unregister listeners before
    * destroying the underlying actor.
    */
-  destroy: Task.async(function *() {
+  destroy: Task.async(function* () {
     this.EVENTS.forEach(type => this._front.off(type, this[`_on${type}`]));
     yield this._front.destroy();
   }),
@@ -248,8 +252,12 @@ LegacyTimelineFront.prototype = {
 };
 
 // Bind all the methods that directly proxy to the actor
-PROFILER_ACTOR_METHODS.forEach(m => LegacyProfilerFront.prototype[m] = CompatUtils.callFrontMethod(m));
-TIMELINE_ACTOR_METHODS.forEach(m => LegacyTimelineFront.prototype[m] = CompatUtils.callFrontMethod(m));
+PROFILER_ACTOR_METHODS.forEach(m => {
+  LegacyProfilerFront.prototype[m] = CompatUtils.callFrontMethod(m);
+});
+TIMELINE_ACTOR_METHODS.forEach(m => {
+  LegacyTimelineFront.prototype[m] = CompatUtils.callFrontMethod(m);
+});
 
 exports.LegacyProfilerFront = LegacyProfilerFront;
 exports.LegacyTimelineFront = LegacyTimelineFront;

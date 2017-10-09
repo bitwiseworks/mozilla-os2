@@ -12,6 +12,7 @@
 #include "nsCOMPtr.h"
 #include "nsError.h"
 #include "MediaDecoder.h"
+#include "MediaFormatReader.h"
 
 class nsIStreamListener;
 
@@ -36,21 +37,13 @@ class MediaSourceDecoder : public MediaDecoder
 public:
   explicit MediaSourceDecoder(dom::HTMLMediaElement* aElement);
 
-  virtual MediaDecoder* Clone(MediaDecoderOwner* aOwner) override;
-  virtual MediaDecoderStateMachine* CreateStateMachine() override;
-  virtual nsresult Load(nsIStreamListener**) override;
-  virtual media::TimeIntervals GetSeekable() override;
+  MediaDecoder* Clone(MediaDecoderOwner* aOwner) override;
+  MediaDecoderStateMachine* CreateStateMachine() override;
+  nsresult Load(nsIStreamListener**) override;
+  media::TimeIntervals GetSeekable() override;
   media::TimeIntervals GetBuffered() override;
 
-  // We can't do this in the constructor because we don't know what type of
-  // media we're dealing with by that point.
-  void NotifyDormantSupported(bool aSupported)
-  {
-    MOZ_ASSERT(NS_IsMainThread());
-    mDormantSupported = aSupported;
-  }
-
-  virtual RefPtr<ShutdownPromise> Shutdown() override;
+  void Shutdown() override;
 
   static already_AddRefed<MediaResource> CreateResource(nsIPrincipal* aPrincipal = nullptr);
 
@@ -60,11 +53,10 @@ public:
   void Ended(bool aEnded);
 
   // Return the duration of the video in seconds.
-  virtual double GetDuration() override;
+  double GetDuration() override;
 
   void SetInitialDuration(int64_t aDuration);
-  void SetMediaSourceDuration(double aDuration, MSRangeRemovalAction aAction);
-  double GetMediaSourceDuration();
+  void SetMediaSourceDuration(double aDuration);
 
   MediaSourceDemuxer* GetDemuxer()
   {
@@ -73,23 +65,30 @@ public:
 
   // Returns a string describing the state of the MediaSource internal
   // buffered data. Used for debugging purposes.
-  void GetMozDebugReaderData(nsAString& aString);
+  void GetMozDebugReaderData(nsAString& aString) override;
 
   void AddSizeOfResources(ResourceSizes* aSizes) override;
 
   MediaDecoderOwner::NextFrameStatus NextFrameBufferedStatus() override;
   bool CanPlayThrough() override;
 
+  void NotifyWaitingForKey() override;
+
+  MediaEventSource<void>* WaitingForKeyEvent() override;
+
 private:
   void DoSetMediaSourceDuration(double aDuration);
+  media::TimeInterval ClampIntervalToEnd(const media::TimeInterval& aInterval);
 
   // The owning MediaSource holds a strong reference to this decoder, and
   // calls Attach/DetachMediaSource on this decoder to set and clear
   // mMediaSource.
   dom::MediaSource* mMediaSource;
   RefPtr<MediaSourceDemuxer> mDemuxer;
+  RefPtr<MediaFormatReader> mReader;
+  MediaEventProducer<void> mWaitingForKeyEvent;
 
-  Atomic<bool> mEnded;
+  bool mEnded;
 };
 
 } // namespace mozilla

@@ -576,13 +576,13 @@ add_test(function() {
   });
 });
 
-// Test for Bug 601442 - extensions.getAddons.showPane need to be update 
+// Test for Bug 601442 - extensions.getAddons.showPane need to be update
 // for the new addon manager.
 function bug_601442_test_elements(visible) {
   open_manager("addons://list/extension", function(aWindow) {
     gManagerWindow = aWindow;
     gCategoryUtilities = new CategoryUtilities(gManagerWindow);
-    if(visible)
+    if (visible)
       ok(gCategoryUtilities.isTypeVisible("discover"), "Discover category should be visible");
     else
       ok(!gCategoryUtilities.isTypeVisible("discover"), "Discover category should not be visible");
@@ -590,7 +590,7 @@ function bug_601442_test_elements(visible) {
     gManagerWindow.loadView("addons://list/dictionary");
     wait_for_view_load(gManagerWindow, function(aManager) {
       var button = aManager.document.getElementById("discover-button-install");
-      if(visible)
+      if (visible)
         ok(!is_hidden(button), "Discover button should be visible!");
       else
         ok(is_hidden(button), "Discover button should not be visible!");
@@ -633,5 +633,19 @@ add_test(function() {
     is(gCategoryUtilities.selectedCategory, "extension", "Should be showing the extension view");
     close_manager(gManagerWindow, run_next_test);
     Services.prefs.clearUserPref(PREF_DISCOVER_ENABLED);
+  });
+});
+
+// Test for Bug 1219495 - should show placeholder content when offline
+add_test(function() {
+  // set a URL to cause an error
+  Services.prefs.setCharPref(PREF_DISCOVERURL, "https://nocert.example.com/");
+
+  open_manager("addons://discover/", function(aWindow) {
+    gManagerWindow = aWindow;
+
+    ok(isError(), "Should have shown the placeholder content");
+
+    close_manager(gManagerWindow, run_next_test);
   });
 });

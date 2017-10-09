@@ -1,18 +1,20 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 // Tests that the developer toolbar works properly
 
 const TEST_URI = TEST_URI_ROOT + "browser_toolbar_basic.html";
 
-add_task(function*() {
+add_task(function* () {
   info("Starting browser_toolbar_basic.js");
   yield addTab(TEST_URI);
 
   ok(!DeveloperToolbar.visible, "DeveloperToolbar is not visible in to start");
 
   let shown = oneTimeObserve(DeveloperToolbar.NOTIFICATIONS.SHOW);
-  document.getElementById("Tools:DevToolbar").doCommand();
+  document.getElementById("menu_devToolbar").doCommand();
   yield shown;
   ok(DeveloperToolbar.visible, "DeveloperToolbar is visible in checkOpen");
 
@@ -20,11 +22,11 @@ add_task(function*() {
   ok(close, "Close button exists");
 
   let toggleToolbox =
-    document.getElementById("devtoolsMenuBroadcaster_DevToolbox");
+    document.getElementById("menu_devToolbox");
   ok(!isChecked(toggleToolbox), "toggle toolbox button is not checked");
 
   let target = TargetFactory.forTab(gBrowser.selectedTab);
-  let toolbox = yield gDevTools.showToolbox(target, "inspector");
+  yield gDevTools.showToolbox(target, "inspector");
   ok(isChecked(toggleToolbox), "toggle toolbox button is checked");
 
   yield addTab("about:blank");
@@ -35,12 +37,12 @@ add_task(function*() {
   gBrowser.removeCurrentTab();
 
   let hidden = oneTimeObserve(DeveloperToolbar.NOTIFICATIONS.HIDE);
-  document.getElementById("Tools:DevToolbar").doCommand();
+  document.getElementById("menu_devToolbar").doCommand();
   yield hidden;
   ok(!DeveloperToolbar.visible, "DeveloperToolbar is not visible in hidden");
 
   shown = oneTimeObserve(DeveloperToolbar.NOTIFICATIONS.SHOW);
-  document.getElementById("Tools:DevToolbar").doCommand();
+  document.getElementById("menu_devToolbar").doCommand();
   yield shown;
   ok(DeveloperToolbar.visible, "DeveloperToolbar is visible in after open");
 

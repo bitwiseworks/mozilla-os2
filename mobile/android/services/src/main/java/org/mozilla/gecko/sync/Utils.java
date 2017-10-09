@@ -23,6 +23,7 @@ import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.concurrent.Executor;
 
 import org.json.simple.JSONArray;
 import org.mozilla.apache.commons.codec.binary.Base32;
@@ -34,9 +35,6 @@ import org.mozilla.gecko.sync.setup.Constants;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Bundle;
-import android.text.Spannable;
-import android.text.Spanned;
-import android.text.style.ClickableSpan;
 
 public class Utils {
 
@@ -74,13 +72,6 @@ public class Utils {
     int maxBytes = (int) Math.ceil(((double) r.bitLength()) / 8);
     BigInteger randInt = new BigInteger(generateRandomBytes(maxBytes));
     return randInt.mod(r);
-  }
-
-  /**
-   * Helper to reseed the shared secure random number generator.
-   */
-  public static void reseedSharedRandom() {
-    sharedSecureRandom.setSeed(sharedSecureRandom.generateSeed(8));
   }
 
   /**
@@ -432,14 +423,14 @@ public class Utils {
     ArrayList<String> toSkip = null;
     if (toSyncString != null) {
       try {
-        toSync = new ArrayList<String>(ExtendedJSONObject.parseJSONObject(toSyncString).keySet());
+        toSync = new ArrayList<String>(new ExtendedJSONObject(toSyncString).keySet());
       } catch (Exception e) {
         Logger.warn(LOG_TAG, "Got exception parsing stages to sync: '" + toSyncString + "'.", e);
       }
     }
     if (toSkipString != null) {
       try {
-        toSkip = new ArrayList<String>(ExtendedJSONObject.parseJSONObject(toSkipString).keySet());
+        toSkip = new ArrayList<String>(new ExtendedJSONObject(toSkipString).keySet());
       } catch (Exception e) {
         Logger.warn(LOG_TAG, "Got exception parsing stages to skip: '" + toSkipString + "'.", e);
       }
@@ -565,17 +556,6 @@ public class Utils {
     return in.replaceAll("[^@\\.]", "X");
   }
 
-  public static String nodeWeaveURL(String serverURL, String username) {
-    String userPart = username + "/node/weave";
-    if (serverURL == null) {
-      return SyncConstants.DEFAULT_AUTH_SERVER + "user/1.0/" + userPart;
-    }
-    if (!serverURL.endsWith("/")) {
-      serverURL = serverURL + "/";
-    }
-    return serverURL + "user/1.0/" + userPart;
-  }
-
   public static void throwIfNull(Object... objects) {
     for (Object object : objects) {
       if (object == null) {
@@ -584,57 +564,12 @@ public class Utils {
     }
   }
 
-  /**
-   * Gecko uses locale codes like "es-ES", whereas a Java {@link Locale}
-   * stringifies as "es_ES".
-   *
-   * This method approximates the Java 7 method <code>Locale#toLanguageTag()</code>.
-   * <p>
-   * <b>Warning:</b> all consumers of this method will need to be audited when
-   * we have active locale switching.
-   *
-   * @return a locale string suitable for passing to Gecko.
-   */
-  public static String getLanguageTag(final Locale locale) {
-    // If this were Java 7:
-    // return locale.toLanguageTag();
-
-    String language = locale.getLanguage();  // Can, but should never be, an empty string.
-    // Modernize certain language codes.
-    if (language.equals("iw")) {
-      language = "he";
-    } else if (language.equals("in")) {
-      language = "id";
-    } else if (language.equals("ji")) {
-      language = "yi";
-    }
-
-    String country = locale.getCountry();    // Can be an empty string.
-    if (country.equals("")) {
-      return language;
-    }
-    return language + "-" + country;
-  }
-
-  /**
-   * Make a span with a clickable chunk of text interpolated in.
-   *
-   * @param context Android context.
-   * @param messageId of string containing clickable chunk.
-   * @param clickableId of string to make clickable.
-   * @param clickableSpan to activate on click.
-   * @return Spannable.
-   */
-  public static Spannable interpolateClickableSpan(Context context, int messageId, int clickableId, ClickableSpan clickableSpan) {
-    // This horrible bit of special-casing is because we want this error message to
-    // contain a clickable, extra chunk of text, but we don't want to pollute
-    // the exception class with Android specifics.
-    final String clickablePart = context.getString(clickableId);
-    final String message = context.getString(messageId, clickablePart);
-    final int clickableStart = message.lastIndexOf(clickablePart);
-    final int clickableEnd = clickableStart + clickablePart.length();
-    final Spannable span = Spannable.Factory.getInstance().newSpannable(message);
-    span.setSpan(clickableSpan, clickableStart, clickableEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-    return span;
+  public static Executor newSynchronousExecutor() {
+    return new Executor() {
+      @Override
+      public void execute(Runnable runnable) {
+        runnable.run();
+      }
+    };
   }
 }

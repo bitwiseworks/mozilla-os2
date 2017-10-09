@@ -21,16 +21,26 @@ add_task(function*() {
   EventUtils.synthesizeKey("v", {});
   yield scrollPromise;
 
+  // Wait for one paint to ensure we've processed the previous key events and scrolling.
+  yield ContentTask.spawn(gBrowser.selectedBrowser, null, function* () {
+    return new Promise(
+      resolve => {
+        content.requestAnimationFrame(() => {
+          setTimeout(resolve, 0);
+        });
+      }
+    );
+  });
+
   // Finds the div in the red box.
   scrollPromise = promiseWaitForEvent(gBrowser, "scroll");
   EventUtils.synthesizeKey("g", { accelKey: true });
   yield scrollPromise;
 
-  let scrollLeftPos = yield ContentTask.spawn(gBrowser.selectedBrowser, { }, function* (arg) {
-    return content.document.getElementById("s").getBoundingClientRect().left;
+  yield ContentTask.spawn(gBrowser.selectedBrowser, null, function* () {
+    Assert.ok(content.document.getElementById("s").getBoundingClientRect().left >= 0,
+      "scroll should include find result");
   });
-
-  ok(scrollLeftPos >= 0, "scroll should include find result");
 
   // clear the find bar
   EventUtils.synthesizeKey("a", { accelKey: true });

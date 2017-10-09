@@ -8,6 +8,7 @@
 #ifndef SkPictureRecorder_DEFINED
 #define SkPictureRecorder_DEFINED
 
+#include "../private/SkMiniRecorder.h"
 #include "SkBBHFactory.h"
 #include "SkPicture.h"
 #include "SkRefCnt.h"
@@ -18,7 +19,9 @@ namespace android {
 };
 #endif
 
+class GrContext;
 class SkCanvas;
+class SkDrawable;
 class SkPictureRecord;
 class SkRecord;
 class SkRecorder;
@@ -28,42 +31,86 @@ public:
     SkPictureRecorder();
     ~SkPictureRecorder();
 
+    enum RecordFlags {
+        // If you call drawPicture() or drawDrawable() on the recording canvas, this flag forces
+        // that object to playback its contents immediately rather than reffing the object.
+        kPlaybackDrawPicture_RecordFlag     = 1 << 0,
+    };
+
+    enum FinishFlags {
+        kReturnNullForEmpty_FinishFlag  = 1 << 0,   // no draw-ops will return nullptr
+    };
+
     /** Returns the canvas that records the drawing commands.
-        @param width the base width for the picture, as if the recording
-                     canvas' bitmap had this width.
-        @param height the base width for the picture, as if the recording
-                     canvas' bitmap had this height.
+        @param bounds the cull rect used when recording this picture. Any drawing the falls outside
+                      of this rect is undefined, and may be drawn or it may not.
         @param bbhFactory factory to create desired acceleration structure
         @param recordFlags optional flags that control recording.
         @return the canvas.
     */
-    SkCanvas* beginRecording(int width, int height,
+    SkCanvas* beginRecording(const SkRect& bounds,
                              SkBBHFactory* bbhFactory = NULL,
                              uint32_t recordFlags = 0);
 
-    /** Same as beginRecording(), using a new faster backend. */
-    SkCanvas* EXPERIMENTAL_beginRecording(int width, int height,
-                                          SkBBHFactory* bbhFactory = NULL);
+    SkCanvas* beginRecording(SkScalar width, SkScalar height,
+                             SkBBHFactory* bbhFactory = NULL,
+                             uint32_t recordFlags = 0) {
+        return this->beginRecording(SkRect::MakeWH(width, height), bbhFactory, recordFlags);
+    }
 
     /** Returns the recording canvas if one is active, or NULL if recording is
         not active. This does not alter the refcnt on the canvas (if present).
     */
     SkCanvas* getRecordingCanvas();
 
-    /** Signal that the caller is done recording. This invalidates the canvas
-        returned by beginRecording/getRecordingCanvas, and returns the
-        created SkPicture. Note that the returned picture has its creation
-        ref which the caller must take ownership of.
-    */
-    SkPicture* endRecording();
+    /**
+     *  Signal that the caller is done recording. This invalidates the canvas returned by
+     *  beginRecording/getRecordingCanvas. Ownership of the object is passed to the caller, who
+     *  must call unref() when they are done using it.
+     *
+     *  The returned picture is immutable. If during recording drawables were added to the canvas,
+     *  these will have been "drawn" into a recording canvas, so that this resulting picture will
+     *  reflect their current state, but will not contain a live reference to the drawables
+     *  themselves.
+     */
+    sk_sp<SkPicture> finishRecordingAsPicture(uint32_t endFlags = 0);
 
-    /** Enable/disable all the picture recording optimizations (i.e.,
-        those in SkPictureRecord). It is mainly intended for testing the
-        existing optimizations (i.e., to actually have the pattern
-        appear in an .skp we have to disable the optimization). Call right
-        after 'beginRecording'.
-    */
-    void internalOnly_EnableOpts(bool enableOpts);
+    /**
+     *  Signal that the caller is done recording, and update the cull rect to use for bounding
+     *  box hierarchy (BBH) generation. The behavior is the same as calling
+     *  endRecordingAsPicture(), except that this method updates the cull rect initially passed
+     *  into beginRecording.
+     *  @param cullRect the new culling rectangle to use as the overall bound for BBH generation
+     *                  and subsequent culling operations.
+     *  @return the picture containing the recorded content.
+     */
+    sk_sp<SkPicture> finishRecordingAsPictureWithCull(const SkRect& cullRect,
+                                                      uint32_t endFlags = 0);
+
+    /**
+     *  Signal that the caller is done recording. This invalidates the canvas returned by
+     *  beginRecording/getRecordingCanvas. Ownership of the object is passed to the caller, who
+     *  must call unref() when they are done using it.
+     *
+     *  Unlike endRecordingAsPicture(), which returns an immutable picture, the returned drawable
+     *  may contain live references to other drawables (if they were added to the recording canvas)
+     *  and therefore this drawable will reflect the current state of those nested drawables anytime
+     *  it is drawn or a new picture is snapped from it (by calling drawable->newPictureSnapshot()).
+     */
+    sk_sp<SkDrawable> finishRecordingAsDrawable(uint32_t endFlags = 0);
+
+#ifdef SK_SUPPORT_LEGACY_PICTURE_PTR
+    SkPicture* SK_WARN_UNUSED_RESULT endRecordingAsPicture() {
+        return this->finishRecordingAsPicture().release();
+    }
+    SkPicture* SK_WARN_UNUSED_RESULT endRecordingAsPicture(const SkRect& cullRect) {
+        return this->finishRecordingAsPictureWithCull(cullRect).release();
+    }
+    SkDrawable* SK_WARN_UNUSED_RESULT endRecordingAsDrawable() {
+        return this->finishRecordingAsDrawable().release();
+    }
+    SkPicture* SK_WARN_UNUSED_RESULT endRecording() { return this->endRecordingAsPicture(); }
+#endif
 
 private:
     void reset();
@@ -77,15 +124,13 @@ private:
     friend class SkPictureRecorderReplayTester; // for unit testing
     void partialReplay(SkCanvas* canvas) const;
 
-    int fWidth;
-    int fHeight;
-
-    // One of these two canvases will be non-NULL.
-    SkAutoTUnref<SkPictureRecord> fPictureRecord;  // beginRecording()
-    SkAutoTUnref<SkRecorder>      fRecorder;       // EXPERIMENTAL_beginRecording()
-
-    // Used by EXPERIMENTAL_beginRecording().
-    SkAutoTDelete<SkRecord> fRecord;
+    bool                          fActivelyRecording;
+    uint32_t                      fFlags;
+    SkRect                        fCullRect;
+    SkAutoTUnref<SkBBoxHierarchy> fBBH;
+    SkAutoTUnref<SkRecorder>      fRecorder;
+    SkAutoTUnref<SkRecord>        fRecord;
+    SkMiniRecorder                fMiniRecorder;
 
     typedef SkNoncopyable INHERITED;
 };

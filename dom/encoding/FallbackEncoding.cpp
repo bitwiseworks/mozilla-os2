@@ -15,15 +15,15 @@
 namespace mozilla {
 namespace dom {
 
-static const char* localesFallbacks[][3] = {
+static const nsUConvProp localesFallbacks[] = {
 #include "localesfallbacks.properties.h"
 };
 
-static const char* domainsFallbacks[][3] = {
+static const nsUConvProp domainsFallbacks[] = {
 #include "domainsfallbacks.properties.h"
 };
 
-static const char* nonParticipatingDomains[][3] = {
+static const nsUConvProp nonParticipatingDomains[] = {
 #include "nonparticipatingdomains.properties.h"
 };
 
@@ -69,7 +69,7 @@ FallbackEncoding::Get(nsACString& aFallback)
   nsCOMPtr<nsIXULChromeRegistry> registry =
     mozilla::services::GetXULChromeRegistryService();
   if (registry) {
-    registry->GetSelectedLocale(NS_LITERAL_CSTRING("global"), locale);
+    registry->GetSelectedLocale(NS_LITERAL_CSTRING("global"), false, locale);
   }
 
   // Let's lower case the string just in case unofficial language packs

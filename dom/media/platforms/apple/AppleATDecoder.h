@@ -12,24 +12,30 @@
 #include "mozilla/ReentrantMonitor.h"
 #include "mozilla/Vector.h"
 #include "nsIThread.h"
+#include "AudioConverter.h"
 
 namespace mozilla {
 
-class FlushableTaskQueue;
+class TaskQueue;
 class MediaDataDecoderCallback;
 
 class AppleATDecoder : public MediaDataDecoder {
 public:
   AppleATDecoder(const AudioInfo& aConfig,
-                 FlushableTaskQueue* aVideoTaskQueue,
+                 TaskQueue* aTaskQueue,
                  MediaDataDecoderCallback* aCallback);
   virtual ~AppleATDecoder();
 
   RefPtr<InitPromise> Init() override;
-  nsresult Input(MediaRawData* aSample) override;
-  nsresult Flush() override;
-  nsresult Drain() override;
-  nsresult Shutdown() override;
+  void Input(MediaRawData* aSample) override;
+  void Flush() override;
+  void Drain() override;
+  void Shutdown() override;
+
+  const char* GetDescriptionName() const override
+  {
+    return "apple CoreMedia decoder";
+  }
 
   // Callbacks also need access to the config.
   const AudioInfo& mConfig;
@@ -41,22 +47,30 @@ public:
   bool mFileStreamError;
 
 private:
-  RefPtr<FlushableTaskQueue> mTaskQueue;
+  const RefPtr<TaskQueue> mTaskQueue;
   MediaDataDecoderCallback* mCallback;
   AudioConverterRef mConverter;
   AudioStreamBasicDescription mOutputFormat;
   UInt32 mFormatID;
   AudioFileStreamID mStream;
   nsTArray<RefPtr<MediaRawData>> mQueuedSamples;
+  UniquePtr<AudioConfig::ChannelLayout> mChannelLayout;
+  UniquePtr<AudioConverter> mAudioConverter;
+  Atomic<bool> mIsFlushing;
 
+  void ProcessFlush();
+  void ProcessShutdown();
   void SubmitSample(MediaRawData* aSample);
-  nsresult DecodeSample(MediaRawData* aSample);
-  nsresult GetInputAudioDescription(AudioStreamBasicDescription& aDesc,
-                                    const nsTArray<uint8_t>& aExtraData);
+  MediaResult DecodeSample(MediaRawData* aSample);
+  MediaResult GetInputAudioDescription(AudioStreamBasicDescription& aDesc,
+                                       const nsTArray<uint8_t>& aExtraData);
   // Setup AudioConverter once all information required has been gathered.
   // Will return NS_ERROR_NOT_INITIALIZED if more data is required.
-  nsresult SetupDecoder(MediaRawData* aSample);
+  MediaResult SetupDecoder(MediaRawData* aSample);
   nsresult GetImplicitAACMagicCookie(const MediaRawData* aSample);
+  nsresult SetupChannelLayout();
+  uint32_t mParsedFramesForAACMagicCookie;
+  bool mErrored;
 };
 
 } // namespace mozilla

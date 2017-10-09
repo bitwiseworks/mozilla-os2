@@ -17,16 +17,15 @@ class MOZ_NEEDS_NO_VTABLE_TYPE CheckNoVTable
 };
 CheckNoVTable<xptiTypelibGuts> gChecker;
 
-// static 
-xptiTypelibGuts* 
+// static
+xptiTypelibGuts*
 xptiTypelibGuts::Create(XPTHeader* aHeader)
 {
     NS_ASSERTION(aHeader, "bad param");
-    void* place = XPT_MALLOC(gXPTIStructArena,
-                             sizeof(xptiTypelibGuts) + 
-                             (sizeof(xptiInterfaceEntry*) *
-                              (aHeader->num_interfaces - 1)));
-    if(!place)
+    size_t n = sizeof(xptiTypelibGuts) +
+               sizeof(xptiInterfaceEntry*) * (aHeader->num_interfaces - 1);
+    void* place = XPT_CALLOC8(gXPTIStructArena, n);
+    if (!place)
         return nullptr;
     return new(place) xptiTypelibGuts(aHeader);
 }

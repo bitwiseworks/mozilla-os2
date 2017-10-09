@@ -27,6 +27,14 @@ var gEMEUIObserver = function(subject, topic, data) {
   }
 };
 
+var gDecoderDoctorObserver = function(subject, topic, data) {
+  let win = subject.top;
+  let mm = getMessageManagerForWindow(win);
+  if (mm) {
+    mm.sendAsyncMessage("DecoderDoctor:Notification", data);
+  }
+};
+
 function getMessageManagerForWindow(aContentWindow) {
   let ir = aContentWindow.QueryInterface(Ci.nsIInterfaceRequestor)
                          .getInterface(Ci.nsIDocShell)
@@ -35,9 +43,13 @@ function getMessageManagerForWindow(aContentWindow) {
   try {
     // If e10s is disabled, this throws NS_NOINTERFACE for closed tabs.
     return ir.getInterface(Ci.nsIContentFrameMessageManager);
-  } catch(e if e.result == Cr.NS_NOINTERFACE) {
-    return null;
+  } catch (e) {
+    if (e.result == Cr.NS_NOINTERFACE) {
+      return null;
+    }
+    throw e;
   }
 }
 
 Services.obs.addObserver(gEMEUIObserver, "mediakeys-request", false);
+Services.obs.addObserver(gDecoderDoctorObserver, "decoder-doctor-notification", false);

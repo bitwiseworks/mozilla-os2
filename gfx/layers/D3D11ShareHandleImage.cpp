@@ -25,10 +25,25 @@ D3D11ShareHandleImage::D3D11ShareHandleImage(const gfx::IntSize& aSize,
 }
 
 bool
-D3D11ShareHandleImage::AllocateTexture(D3D11RecycleAllocator* aAllocator)
+D3D11ShareHandleImage::AllocateTexture(D3D11RecycleAllocator* aAllocator, ID3D11Device* aDevice)
 {
-  mTextureClient = aAllocator->CreateOrRecycleClient(gfx::SurfaceFormat::B8G8R8A8, mSize);
-  return !!mTextureClient;
+  if (aAllocator) {
+    mTextureClient = aAllocator->CreateOrRecycleClient(gfx::SurfaceFormat::B8G8R8A8, mSize);
+    if (mTextureClient) {
+      mTexture = static_cast<D3D11TextureData*>(mTextureClient->GetInternalData())->GetD3D11Texture();
+      return true;
+    }
+    return false;
+  } else {
+    MOZ_ASSERT(aDevice);
+    CD3D11_TEXTURE2D_DESC newDesc(DXGI_FORMAT_B8G8R8A8_UNORM,
+                                  mSize.width, mSize.height, 1, 1,
+                                  D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE);
+    newDesc.MiscFlags = D3D11_RESOURCE_MISC_SHARED;
+
+    HRESULT hr = aDevice->CreateTexture2D(&newDesc, nullptr, getter_AddRefs(mTexture));
+    return SUCCEEDED(hr);
+  }
 }
 
 gfx::IntSize
@@ -38,7 +53,7 @@ D3D11ShareHandleImage::GetSize()
 }
 
 TextureClient*
-D3D11ShareHandleImage::GetTextureClient(CompositableClient* aClient)
+D3D11ShareHandleImage::GetTextureClient(KnowsCompositor* aForwarder)
 {
   return mTextureClient;
 }
@@ -54,17 +69,6 @@ D3D11ShareHandleImage::GetAsSourceSurface()
 
   RefPtr<ID3D11Device> device;
   texture->GetDevice(getter_AddRefs(device));
-
-  RefPtr<IDXGIKeyedMutex> keyedMutex;
-  if (FAILED(texture->QueryInterface(static_cast<IDXGIKeyedMutex**>(getter_AddRefs(keyedMutex))))) {
-    NS_WARNING("Failed to QueryInterface for IDXGIKeyedMutex, strange.");
-    return nullptr;
-  }
-
-  if (FAILED(keyedMutex->AcquireSync(0, 0))) {
-    NS_WARNING("Failed to acquire sync for keyedMutex, plugin failed to release?");
-    return nullptr;
-  }
 
   D3D11_TEXTURE2D_DESC desc;
   texture->GetDesc(&desc);
@@ -83,22 +87,19 @@ D3D11ShareHandleImage::GetAsSourceSurface()
 
   if (FAILED(hr)) {
     NS_WARNING("Failed to create 2D staging texture.");
-    keyedMutex->ReleaseSync(0);
     return nullptr;
   }
 
   RefPtr<ID3D11DeviceContext> context;
   device->GetImmediateContext(getter_AddRefs(context));
   if (!context) {
-    keyedMutex->ReleaseSync(0);
     return nullptr;
   }
 
   context->CopyResource(softTexture, texture);
-  keyedMutex->ReleaseSync(0);
 
   RefPtr<gfx::DataSourceSurface> surface =
-    gfx::Factory::CreateDataSourceSurface(mSize, gfx::SurfaceFormat::B8G8R8X8);
+    gfx::Factory::CreateDataSourceSurface(mSize, gfx::SurfaceFormat::B8G8R8A8);
   if (NS_WARN_IF(!surface)) {
     return nullptr;
   }
@@ -129,7 +130,7 @@ D3D11ShareHandleImage::GetAsSourceSurface()
 
 ID3D11Texture2D*
 D3D11ShareHandleImage::GetTexture() const {
-  return static_cast<D3D11TextureData*>(mTextureClient->GetInternalData())->GetD3D11Texture();
+  return mTexture;
 }
 
 already_AddRefed<TextureClient>
@@ -141,7 +142,7 @@ D3D11RecycleAllocator::Allocate(gfx::SurfaceFormat aFormat,
 {
   return CreateD3D11TextureClientWithDevice(aSize, aFormat,
                                             aTextureFlags, aAllocFlags,
-                                            mDevice, mSurfaceAllocator);
+                                            mDevice, mSurfaceAllocator->GetTextureForwarder());
 }
 
 already_AddRefed<TextureClient>
@@ -152,7 +153,8 @@ D3D11RecycleAllocator::CreateOrRecycleClient(gfx::SurfaceFormat aFormat,
     CreateOrRecycle(aFormat,
                     aSize,
                     BackendSelector::Content,
-                    layers::TextureFlags::DEFAULT);
+                    layers::TextureFlags::DEFAULT,
+                    TextureAllocationFlags::ALLOC_MANUAL_SYNCHRONIZATION);
   return textureClient.forget();
 }
 

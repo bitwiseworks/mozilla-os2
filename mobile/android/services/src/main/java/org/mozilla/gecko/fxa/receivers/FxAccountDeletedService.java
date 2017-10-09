@@ -4,22 +4,22 @@
 
 package org.mozilla.gecko.fxa.receivers;
 
-import java.util.concurrent.Executor;
+import android.app.IntentService;
+import android.content.Context;
+import android.content.Intent;
 
 import org.mozilla.gecko.background.common.log.Logger;
 import org.mozilla.gecko.background.fxa.oauth.FxAccountAbstractClient;
 import org.mozilla.gecko.background.fxa.oauth.FxAccountAbstractClientException.FxAccountAbstractClientRemoteException;
 import org.mozilla.gecko.background.fxa.oauth.FxAccountOAuthClient10;
 import org.mozilla.gecko.fxa.FxAccountConstants;
+import org.mozilla.gecko.fxa.authenticator.AndroidFxAccount;
 import org.mozilla.gecko.fxa.sync.FxAccountNotificationManager;
 import org.mozilla.gecko.fxa.sync.FxAccountSyncAdapter;
-import org.mozilla.gecko.sync.repositories.android.AndroidBrowserHistoryDataExtender;
 import org.mozilla.gecko.sync.repositories.android.ClientsDatabase;
 import org.mozilla.gecko.sync.repositories.android.FennecTabsRepository;
 
-import android.app.IntentService;
-import android.content.Context;
-import android.content.Intent;
+import java.util.concurrent.Executor;
 
 /**
  * A background service to clean up after a Firefox Account is deleted.
@@ -38,6 +38,11 @@ public class FxAccountDeletedService extends IntentService {
 
   @Override
   protected void onHandleIntent(final Intent intent) {
+    // We have an in-memory accounts cache which we use for a variety of tasks; it needs to be cleared.
+    // It should be fine to invalidate it before doing anything else, as the tasks below do not rely
+    // on this data.
+    AndroidFxAccount.invalidateCaches();
+
     // Intent can, in theory, be null. Bug 1025937.
     if (intent == null) {
       Logger.debug(LOG_TAG, "Short-circuiting on null intent.");
@@ -65,6 +70,17 @@ public class FxAccountDeletedService extends IntentService {
     }
 
 
+    // Fire up gecko and unsubscribe push
+    final Intent geckoIntent = new Intent();
+    geckoIntent.setAction("create-services");
+    geckoIntent.setClassName(context, "org.mozilla.gecko.GeckoService");
+    geckoIntent.putExtra("category", "android-push-service");
+    geckoIntent.putExtra("data", "android-fxa-unsubscribe");
+    final AndroidFxAccount fxAccount = AndroidFxAccount.fromContext(context);
+    geckoIntent.putExtra("org.mozilla.gecko.intent.PROFILE_NAME",
+            intent.getStringExtra(FxAccountConstants.ACCOUNT_DELETED_INTENT_ACCOUNT_PROFILE));
+    context.startService(geckoIntent);
+
     // Delete client database and non-local tabs.
     Logger.info(LOG_TAG, "Deleting the entire Fennec clients database and non-local tabs");
     FennecTabsRepository.deleteNonLocalClientsAndTabs(context);
@@ -85,22 +101,6 @@ public class FxAccountDeletedService extends IntentService {
       }
     } catch (Exception e) {
       Logger.warn(LOG_TAG, "Got exception deleting the Firefox Sync clients database; ignoring.", e);
-    }
-
-    // Clear Firefox Sync history data table.
-    try {
-      Logger.info(LOG_TAG, "Deleting the Firefox Sync extended history database.");
-      AndroidBrowserHistoryDataExtender historyDataExtender = null;
-      try {
-        historyDataExtender = new AndroidBrowserHistoryDataExtender(context);
-        historyDataExtender.wipe();
-      } finally {
-        if (historyDataExtender != null) {
-          historyDataExtender.close();
-        }
-      }
-    } catch (Exception e) {
-      Logger.warn(LOG_TAG, "Got exception deleting the Firefox Sync extended history database; ignoring.", e);
     }
 
     // Remove any displayed notifications.

@@ -13,7 +13,6 @@
 #include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/TypedArray.h"
-#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsHashKeys.h"
@@ -31,7 +30,7 @@ namespace WebCore {
   class PeriodicWave;
 } // namespace WebCore
 
-class nsPIDOMWindow;
+class nsPIDOMWindowInner;
 
 namespace mozilla {
 
@@ -53,13 +52,15 @@ class AudioNode;
 class BiquadFilterNode;
 class ChannelMergerNode;
 class ChannelSplitterNode;
+class ConstantSourceNode;
 class ConvolverNode;
 class DelayNode;
 class DynamicsCompressorNode;
 class GainNode;
-class HTMLMediaElement;
-class MediaElementAudioSourceNode;
 class GlobalObject;
+class HTMLMediaElement;
+class IIRFilterNode;
+class MediaElementAudioSourceNode;
 class MediaStreamAudioDestinationNode;
 class MediaStreamAudioSourceNode;
 class OscillatorNode;
@@ -68,6 +69,7 @@ class ScriptProcessorNode;
 class StereoPannerNode;
 class WaveShaperNode;
 class PeriodicWave;
+struct PeriodicWaveConstraints;
 class Promise;
 enum class OscillatorType : uint32_t;
 
@@ -91,7 +93,7 @@ private:
 
 /* This runnable allows the MSG to notify the main thread when audio is actually
  * flowing */
-class StateChangeTask final : public nsRunnable
+class StateChangeTask final : public Runnable
 {
 public:
   /* This constructor should be used when this event is sent from the main
@@ -116,7 +118,7 @@ enum class AudioContextOperation { Suspend, Resume, Close };
 class AudioContext final : public DOMEventTargetHelper,
                            public nsIMemoryReporter
 {
-  AudioContext(nsPIDOMWindow* aParentWindow,
+  AudioContext(nsPIDOMWindowInner* aParentWindow,
                bool aIsOffline,
                AudioChannel aChannel,
                uint32_t aNumberOfChannels = 0,
@@ -134,14 +136,14 @@ public:
                                            DOMEventTargetHelper)
   MOZ_DEFINE_MALLOC_SIZE_OF(MallocSizeOf)
 
-  nsPIDOMWindow* GetParentObject() const
+  nsPIDOMWindowInner* GetParentObject() const
   {
     return GetOwner();
   }
 
   void Shutdown(); // idempotent
 
-  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   using DOMEventTargetHelper::DispatchTrustedEvent;
 
@@ -199,9 +201,10 @@ public:
 
   already_AddRefed<AudioBufferSourceNode> CreateBufferSource(ErrorResult& aRv);
 
+  already_AddRefed<ConstantSourceNode> CreateConstantSource(ErrorResult& aRv);
+
   already_AddRefed<AudioBuffer>
-  CreateBuffer(JSContext* aJSContext, uint32_t aNumberOfChannels,
-               uint32_t aLength, float aSampleRate,
+  CreateBuffer(uint32_t aNumberOfChannels, uint32_t aLength, float aSampleRate,
                ErrorResult& aRv);
 
   already_AddRefed<MediaStreamAudioDestinationNode>
@@ -251,11 +254,17 @@ public:
   already_AddRefed<BiquadFilterNode>
   CreateBiquadFilter(ErrorResult& aRv);
 
+  already_AddRefed<IIRFilterNode>
+  CreateIIRFilter(const mozilla::dom::binding_detail::AutoSequence<double>& aFeedforward,
+                  const mozilla::dom::binding_detail::AutoSequence<double>& aFeedback,
+                  mozilla::ErrorResult& aRv);
+
   already_AddRefed<OscillatorNode>
   CreateOscillator(ErrorResult& aRv);
 
   already_AddRefed<PeriodicWave>
   CreatePeriodicWave(const Float32Array& aRealData, const Float32Array& aImagData,
+                     const PeriodicWaveConstraints& aConstraints,
                      ErrorResult& aRv);
 
   already_AddRefed<Promise>
@@ -267,6 +276,7 @@ public:
   // OfflineAudioContext methods
   already_AddRefed<Promise> StartRendering(ErrorResult& aRv);
   IMPL_EVENT_HANDLER(complete)
+  unsigned long Length();
 
   bool IsOffline() const { return mIsOffline; }
 
@@ -292,6 +302,8 @@ public:
 
   uint32_t MaxChannelCount() const;
 
+  uint32_t ActiveNodeCount() const;
+
   void Mute() const;
   void Unmute() const;
 
@@ -312,12 +324,12 @@ public:
   IMPL_EVENT_HANDLER(mozinterruptend)
 
 private:
+  void DisconnectFromWindow();
   void RemoveFromDecodeQueue(WebAudioDecodeJob* aDecodeJob);
   void ShutdownDecoder();
 
   size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
-  NS_IMETHOD CollectReports(nsIHandleReportCallback* aHandleReport,
-                            nsISupports* aData, bool aAnonymize) override;
+  NS_DECL_NSIMEMORYREPORTER
 
   friend struct ::mozilla::WebAudioDecodeJob;
 

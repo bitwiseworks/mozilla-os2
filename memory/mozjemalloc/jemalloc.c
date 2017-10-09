@@ -143,8 +143,14 @@
  * Use only one arena by default.  Mozilla does not currently make extensive
  * use of concurrent allocation, so the increased fragmentation associated with
  * multiple arenas is not warranted.
+ *
+ * When using the Servo style system, we do indeed make use of significant
+ * concurrent allocation, and the overhead matters. Bug 1291355 tracks
+ * investigating the fragmentation overhead of turning this on for users.
  */
-#define	MOZ_MEMORY_NARENAS_DEFAULT_ONE
+#ifndef MOZ_STYLO
+#define MOZ_MEMORY_NARENAS_DEFAULT_ONE
+#endif
 
 /*
  * Pass this set of options to jemalloc as its default. It does not override
@@ -238,7 +244,7 @@
 
 #ifndef NO_TLS
 static unsigned long tlsIndex = 0xffffffff;
-#endif 
+#endif
 
 #define	__thread
 #define	_pthread_self() __threadid()
@@ -536,7 +542,7 @@ static const bool isthreaded = true;
  */
 #define	CHUNK_2POW_DEFAULT	20
 /* Maximum number of dirty pages per arena. */
-#define	DIRTY_MAX_DEFAULT	(1U << 10)
+#define	DIRTY_MAX_DEFAULT	(1U << 8)
 
 /*
  * Maximum size of L1 cache line.  This is used to avoid cache line aliasing,
@@ -547,11 +553,12 @@ static const bool isthreaded = true;
 #define	CACHELINE		((size_t)(1U << CACHELINE_2POW))
 
 /*
- * Smallest size class to support.  On Linux and Mac, even malloc(1) must
- * reserve a word's worth of memory (see Mozilla bug 691003).
+ * Smallest size class to support.  On Windows the smallest allocation size
+ * must be 8 bytes on 32-bit, 16 bytes on 64-bit.  On Linux and Mac, even
+ * malloc(1) must reserve a word's worth of memory (see Mozilla bug 691003).
  */
 #ifdef MOZ_MEMORY_WINDOWS
-#define	TINY_MIN_2POW		1
+#define TINY_MIN_2POW           (sizeof(void*) == 8 ? 4 : 3)
 #else
 #define TINY_MIN_2POW           (sizeof(void*) == 8 ? 3 : 2)
 #endif
@@ -1089,7 +1096,7 @@ static const bool config_recycle = false;
  * controlling the malloc behavior are defined as compile-time constants
  * for best performance and cannot be altered at runtime.
  */
-#if !defined(__ia64__) && !defined(__sparc__) && !defined(__mips__)
+#if !defined(__ia64__) && !defined(__sparc__) && !defined(__mips__) && !defined(__aarch64__)
 #define MALLOC_STATIC_SIZES 1
 #endif
 
@@ -1103,7 +1110,7 @@ static const bool config_recycle = false;
 #if (defined(SOLARIS) || defined(__FreeBSD__)) && \
     (defined(__sparc) || defined(__sparcv9) || defined(__ia64))
 #define pagesize_2pow			((size_t) 13)
-#elif defined(__powerpc64__) || defined(__aarch64__)
+#elif defined(__powerpc64__)
 #define pagesize_2pow			((size_t) 16)
 #else
 #define pagesize_2pow			((size_t) 12)
@@ -1589,25 +1596,17 @@ MOZ_JEMALLOC_API
 void	(*_malloc_message)(const char *p1, const char *p2, const char *p3,
 	    const char *p4) = wrtmessage;
 
-#ifdef MALLOC_DEBUG
-#  define assert(e) do {						\
-	if (!(e)) {							\
-		char line_buf[UMAX2S_BUFSIZE];				\
-		_malloc_message(__FILE__, ":", umax2s(__LINE__, 10,	\
-		    line_buf), ": Failed assertion: ");			\
-		_malloc_message("\"", #e, "\"\n", "");			\
-		abort();						\
-	}								\
-} while (0)
-#else
-#define assert(e)
-#endif
-
 #include "mozilla/Assertions.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/TaggedAnonymousMemory.h"
 // Note: MozTaggedAnonymousMmap() could call an LD_PRELOADed mmap
 // instead of the one defined here; use only MozTagAnonymousMemory().
+
+#ifdef MALLOC_DEBUG
+#  define assert(e) MOZ_ASSERT(e)
+#else
+#  define assert(e)
+#endif
 
 #ifdef MOZ_MEMORY_ANDROID
 // Android's pthread.h does not declare pthread_atfork() until SDK 21.
@@ -1615,19 +1614,10 @@ extern MOZ_EXPORT
 int pthread_atfork(void (*)(void), void (*)(void), void(*)(void));
 #endif
 
-/* RELEASE_ASSERT calls jemalloc_crash() instead of calling MOZ_CRASH()
- * directly because we want crashing to add a frame to the stack.  This makes
- * it easier to find the failing assertion in crash stacks. */
-MOZ_NEVER_INLINE static void
-jemalloc_crash()
-{
-	MOZ_CRASH();
-}
-
 #if defined(MOZ_JEMALLOC_HARD_ASSERTS)
 #  define RELEASE_ASSERT(assertion) do {	\
 	if (!(assertion)) {			\
-		jemalloc_crash();		\
+		MOZ_CRASH_UNSAFE_OOL(#assertion);	\
 	}					\
 } while (0)
 #else
@@ -1703,6 +1693,9 @@ malloc_mutex_unlock(malloc_mutex_t *mutex)
 #endif
 }
 
+#if (defined(__GNUC__))
+__attribute__((unused))
+#  endif
 static bool
 malloc_spin_init(malloc_spinlock_t *lock)
 {
@@ -2416,10 +2409,10 @@ pages_map(void *addr, size_t size)
          * or the nearest available memory above that address, providing a near-guarantee
          * that those bits are clear. If they are not, we return NULL below to indicate
          * out-of-memory.
-         * 
-         * The addr is chosen as 0x0000070000000000, which still allows about 120TB of virtual 
+         *
+         * The addr is chosen as 0x0000070000000000, which still allows about 120TB of virtual
          * address space.
-         * 
+         *
          * See Bug 589735 for more information.
          */
 	bool check_placement = true;
@@ -2441,8 +2434,8 @@ pages_map(void *addr, size_t size)
 		ret = NULL;
 	}
 #if defined(__ia64__)
-        /* 
-         * If the allocated memory doesn't have its upper 17 bits clear, consider it 
+        /*
+         * If the allocated memory doesn't have its upper 17 bits clear, consider it
          * as out of memory.
         */
         else if ((long long)ret & 0xffff800000000000) {
@@ -5614,7 +5607,7 @@ malloc_init_hard(void)
 				"", "");
 		abort();
 	}
-#else	
+#else
 	pagesize = (size_t) result;
 	pagesize_mask = (size_t) result - 1;
 	pagesize_2pow = ffs((int)result) - 1;
@@ -6460,7 +6453,7 @@ MOZ_MEMORY_API void
 free_impl(void *ptr)
 {
 	size_t offset;
-	
+
 	DARWIN_ONLY((szone->free)(szone, ptr); return);
 
 	UTRACE(ptr, 0, 0);
@@ -6655,8 +6648,6 @@ jemalloc_stats_impl(jemalloc_stats_t *stats)
 		for (j = 0; j < ntbins + nqbins + nsbins; j++) {
 			arena_bin_t* bin = &arena->bins[j];
 			size_t bin_unused = 0;
-			const size_t run_header_size = sizeof(arena_run_t) +
-			    (sizeof(unsigned) * (bin->regs_mask_nelms - 1));
 
 			rb_foreach_begin(arena_chunk_map_t, link, &bin->runs, mapelm) {
 				run = (arena_run_t *)(mapelm->bits & ~pagesize_mask);
@@ -7174,8 +7165,8 @@ MOZ_MEMORY_API void *(*__memalign_hook)(size_t alignment, size_t size) = MEMALIG
  * we need to initialize the heap at the first opportunity we get.
  * DLL_PROCESS_ATTACH in DllMain is that opportunity.
  */
-BOOL APIENTRY DllMain(HINSTANCE hModule, 
-                      DWORD reason, 
+BOOL APIENTRY DllMain(HINSTANCE hModule,
+                      DWORD reason,
                       LPVOID lpReserved)
 {
   switch (reason) {
@@ -7186,7 +7177,7 @@ BOOL APIENTRY DllMain(HINSTANCE hModule,
       /* Initialize the heap */
       malloc_init_hard();
       break;
-    
+
     case DLL_PROCESS_DETACH:
       break;
 

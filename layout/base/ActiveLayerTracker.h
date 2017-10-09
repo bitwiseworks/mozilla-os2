@@ -5,11 +5,12 @@
 #ifndef ACTIVELAYERTRACKER_H_
 #define ACTIVELAYERTRACKER_H_
 
-#include "nsCSSProperty.h"
+#include "nsCSSPropertyID.h"
 
 class nsIFrame;
 class nsIContent;
 class nsDisplayListBuilder;
+class nsDOMCSSDeclaration;
 
 namespace mozilla {
 
@@ -37,7 +38,7 @@ public:
    * Any such marking will time out after a short period.
    * @param aProperty the property that has changed
    */
-  static void NotifyRestyle(nsIFrame* aFrame, nsCSSProperty aProperty);
+  static void NotifyRestyle(nsIFrame* aFrame, nsCSSPropertyID aProperty);
   /**
    * Notify aFrame's left/top/right/bottom properties as having (maybe)
    * changed due to a restyle, and therefore possibly wanting an active layer
@@ -47,38 +48,51 @@ public:
   /**
    * Mark aFrame as being known to have an animation of aProperty.
    * Any such marking will time out after a short period.
+   * aNewValue and aDOMCSSDecl are used to determine whether the property's
+   * value has changed.
    */
-  static void NotifyAnimated(nsIFrame* aFrame, nsCSSProperty aProperty);
+  static void NotifyAnimated(nsIFrame* aFrame, nsCSSPropertyID aProperty,
+                             const nsAString& aNewValue,
+                             nsDOMCSSDeclaration* aDOMCSSDecl);
   /**
    * Notify aFrame as being known to have an animation of aProperty through an
    * inline style modification during aScrollFrame's scroll event handler.
    */
-  static void NotifyAnimatedFromScrollHandler(nsIFrame* aFrame, nsCSSProperty aProperty,
+  static void NotifyAnimatedFromScrollHandler(nsIFrame* aFrame, nsCSSPropertyID aProperty,
                                               nsIFrame* aScrollFrame);
   /**
    * Notify that a property in the inline style rule of aFrame's element
    * has been modified.
    * This notification is incomplete --- not all modifications to inline
    * style will trigger this.
+   * aNewValue and aDOMCSSDecl are used to determine whether the property's
+   * value has changed.
    */
-  static void NotifyInlineStyleRuleModified(nsIFrame* aFrame, nsCSSProperty aProperty);
+  static void NotifyInlineStyleRuleModified(nsIFrame* aFrame, nsCSSPropertyID aProperty,
+                                            const nsAString& aNewValue,
+                                            nsDOMCSSDeclaration* aDOMCSSDecl);
   /**
    * Return true if aFrame's aProperty style should be considered as being animated
    * for pre-rendering.
    */
-  static bool IsStyleMaybeAnimated(nsIFrame* aFrame, nsCSSProperty aProperty);
+  static bool IsStyleMaybeAnimated(nsIFrame* aFrame, nsCSSPropertyID aProperty);
   /**
    * Return true if aFrame's aProperty style should be considered as being animated
    * for constructing active layers.
    */
   static bool IsStyleAnimated(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
-                              nsCSSProperty aProperty);
+                              nsCSSPropertyID aProperty);
   /**
    * Return true if any of aFrame's offset property styles should be considered
    * as being animated for constructing active layers.
    */
   static bool IsOffsetOrMarginStyleAnimated(nsIFrame* aFrame);
-
+  /**
+   * Return true if aFrame's background-position-x or background-position-y
+   * property is animated.
+   */
+  static bool IsBackgroundPositionAnimated(nsDisplayListBuilder* aBuilder,
+                                           nsIFrame* aFrame);
   /**
    * Return true if aFrame either has an animated scale now, or is likely to
    * have one in the future because it has a CSS animation or transition

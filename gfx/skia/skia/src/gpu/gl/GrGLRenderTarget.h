@@ -13,41 +13,28 @@
 #include "GrRenderTarget.h"
 #include "SkScalar.h"
 
-class GrGpuGL;
-class GrGLTexture;
-class GrGLTexID;
+class GrGLCaps;
+class GrGLGpu;
+class GrGLStencilAttachment;
 
 class GrGLRenderTarget : public GrRenderTarget {
-
 public:
     // set fTexFBOID to this value to indicate that it is multisampled but
     // Gr doesn't know how to resolve it.
     enum { kUnresolvableFBOID = 0 };
 
-    struct Desc {
-        GrGLuint         fRTFBOID;
-        GrGLuint         fTexFBOID;
-        GrGLuint         fMSColorRenderbufferID;
-        bool             fIsWrapped;
-        GrPixelConfig    fConfig;
-        int              fSampleCnt;
-        GrSurfaceOrigin  fOrigin;
-        bool             fCheckAllocation;
+    struct IDDesc {
+        GrGLuint                   fRTFBOID;
+        GrBackendObjectOwnership   fRTFBOOwnership;
+        GrGLuint                   fTexFBOID;
+        GrGLuint                   fMSColorRenderbufferID;
+        bool                       fIsMixedSampled;
     };
 
-    // creates a GrGLRenderTarget associated with a texture
-    GrGLRenderTarget(GrGpuGL*          gpu,
-                     const Desc&       desc,
-                     const GrGLIRect&  viewport,
-                     GrGLTexID*        texID,
-                     GrGLTexture*      texture);
-
-    // creates an independent GrGLRenderTarget
-    GrGLRenderTarget(GrGpuGL*          gpu,
-                     const Desc&       desc,
-                     const GrGLIRect&  viewport);
-
-    virtual ~GrGLRenderTarget() { this->release(); }
+    static GrGLRenderTarget* CreateWrapped(GrGLGpu*,
+                                           const GrSurfaceDesc&,
+                                           const IDDesc&,
+                                           int stencilBits);
 
     void setViewport(const GrGLIRect& rect) { fViewport = rect; }
     const GrGLIRect& getViewport() const { return fViewport; }
@@ -61,15 +48,8 @@ public:
     GrGLuint textureFBOID() const { return fTexFBOID; }
 
     // override of GrRenderTarget
-    virtual GrBackendObject getRenderTargetHandle() const {
-        return this->renderFBOID();
-    }
-    virtual GrBackendObject getRenderTargetResolvedHandle() const {
-        return this->textureFBOID();
-    }
-    virtual ResolveType getResolveType() const {
-
-        if (!this->isMultisampled() ||
+    ResolveType getResolveType() const override {
+        if (!this->isUnifiedMultisampled() ||
             fRTFBOID == fTexFBOID) {
             // catches FBO 0 and non MSAA case
             return kAutoResolves_ResolveType;
@@ -80,26 +60,55 @@ public:
         }
     }
 
+    GrBackendObject getRenderTargetHandle() const override { return fRTFBOID; }
+
+    bool canAttemptStencilAttachment() const override;
+
+    // GrGLRenderTarget overrides dumpMemoryStatistics so it can log its texture and renderbuffer
+    // components seperately.
+    void dumpMemoryStatistics(SkTraceMemoryDump* traceMemoryDump) const override;
+
 protected:
-    // override of GrResource
-    virtual void onAbandon() SK_OVERRIDE;
-    virtual void onRelease() SK_OVERRIDE;
+    // Constructor for subclasses.
+    GrGLRenderTarget(GrGLGpu*, const GrSurfaceDesc&, const IDDesc&);
+
+    void init(const GrSurfaceDesc&, const IDDesc&);
+
+    void onAbandon() override;
+    void onRelease() override;
+
+    // In protected because subclass GrGLTextureRenderTarget calls this version.
+    size_t onGpuMemorySize() const override;
 
 private:
-    GrGLuint      fRTFBOID;
-    GrGLuint      fTexFBOID;
+    // Constructor for instances wrapping backend objects.
+    GrGLRenderTarget(GrGLGpu*, const GrSurfaceDesc&, const IDDesc&, GrGLStencilAttachment*);
 
-    GrGLuint      fMSColorRenderbufferID;
+    static Flags ComputeFlags(const GrGLCaps&, const IDDesc&);
+
+    GrGLGpu* getGLGpu() const;
+    bool completeStencilAttachment() override;
+
+    // The total size of the resource (including all pixels) for a single sample.
+    size_t totalBytesPerSample() const;
+    int msaaSamples() const;
+    // The number total number of samples, including both MSAA and resolve texture samples.
+    int totalSamples() const;
+
+    GrGLuint    fRTFBOID;
+    GrGLuint    fTexFBOID;
+    GrGLuint    fMSColorRenderbufferID;
+
+    GrBackendObjectOwnership fRTFBOOwnership;
 
     // when we switch to this render target we want to set the viewport to
-    // only render to to content area (as opposed to the whole allocation) and
+    // only render to content area (as opposed to the whole allocation) and
     // we want the rendering to be at top left (GL has origin in bottom left)
-    GrGLIRect fViewport;
+    GrGLIRect   fViewport;
 
-    // non-NULL if this RT was created by Gr with an associated GrGLTexture.
-    SkAutoTUnref<GrGLTexID> fTexIDObj;
-
-    void init(const Desc& desc, const GrGLIRect& viewport, GrGLTexID* texID);
+    // onGpuMemorySize() needs to know the VRAM footprint of the FBO(s). However, abandon and
+    // release zero out the IDs and the cache needs to know the size even after those actions.
+    size_t      fGpuMemorySize;
 
     typedef GrRenderTarget INHERITED;
 };

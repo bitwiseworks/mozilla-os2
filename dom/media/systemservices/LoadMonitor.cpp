@@ -55,7 +55,7 @@
 #pragma comment(lib, "pdh.lib")
 #endif
 
-// NSPR_LOG_MODULES=LoadManager:5
+// MOZ_LOG=LoadManager:5
 #undef LOG
 #undef LOG_ENABLED
 #define LOG(args) MOZ_LOG(gLoadManagerLog, mozilla::LogLevel::Debug, args)
@@ -94,7 +94,7 @@ LoadMonitor::Observe(nsISupports* /* aSubject */,
   return NS_OK;
 }
 
-class LoadMonitorAddObserver : public nsRunnable
+class LoadMonitorAddObserver : public Runnable
 {
 public:
   explicit LoadMonitorAddObserver(RefPtr<LoadMonitor> loadMonitor)
@@ -102,7 +102,7 @@ public:
     mLoadMonitor = loadMonitor;
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     nsCOMPtr<nsIObserverService> observerService =
         mozilla::services::GetObserverService();
@@ -119,7 +119,7 @@ private:
   RefPtr<LoadMonitor> mLoadMonitor;
 };
 
-class LoadMonitorRemoveObserver : public nsRunnable
+class LoadMonitorRemoveObserver : public Runnable
 {
 public:
   explicit LoadMonitorRemoveObserver(RefPtr<LoadMonitor> loadMonitor)
@@ -127,7 +127,7 @@ public:
     mLoadMonitor = loadMonitor;
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     // remove xpcom shutdown observer
     nsCOMPtr<nsIObserverService> observerService =
@@ -532,7 +532,7 @@ nsresult RTCLoadInfo::UpdateProcessLoad() {
 
 // Note: This class can't be in the anonymous namespace, because then we can't
 // declare it as a friend of LoadMonitor.
-class LoadInfoCollectRunner : public nsRunnable
+class LoadInfoCollectRunner : public Runnable
 {
 public:
   LoadInfoCollectRunner(RefPtr<LoadMonitor> loadMonitor,
@@ -546,7 +546,7 @@ public:
     mLoadInfo = loadInfo;
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     if (NS_IsMainThread()) {
       if (mThread) {

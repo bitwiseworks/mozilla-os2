@@ -105,10 +105,10 @@ RemotePages.prototype = {
 
   // A message has been received from one of the pages
   portMessageReceived: function(message) {
-    this.listener.callListeners(message);
-
     if (message.name == "RemotePage:Unload")
       this.removeMessagePort(message.target);
+
+    this.listener.callListeners(message);
   },
 
   // A page has closed
@@ -344,7 +344,15 @@ ChromeMessagePort.prototype.message = function({ data: messagedata }) {
 };
 
 ChromeMessagePort.prototype.destroy = function() {
-  this._browser.removeEventListener("SwapDocShells", this.swapBrowsers, false);
+  try {
+    this._browser.removeEventListener(
+        "SwapDocShells", this.swapBrowsers, false);
+  }
+  catch (e) {
+    // It's possible the browser instance is already dead so we can just ignore
+    // this error.
+  }
+
   this._browser = null;
   Services.obs.removeObserver(this, "message-manager-disconnect");
   MessagePort.prototype.destroy.call(this);

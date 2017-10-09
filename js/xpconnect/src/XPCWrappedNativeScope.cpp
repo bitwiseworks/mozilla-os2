@@ -26,8 +26,10 @@ using namespace JS;
 
 XPCWrappedNativeScope* XPCWrappedNativeScope::gScopes = nullptr;
 XPCWrappedNativeScope* XPCWrappedNativeScope::gDyingScopes = nullptr;
+bool XPCWrappedNativeScope::gShutdownObserverInitialized = false;
 XPCWrappedNativeScope::InterpositionMap* XPCWrappedNativeScope::gInterpositionMap = nullptr;
 InterpositionWhitelistArray* XPCWrappedNativeScope::gInterpositionWhitelists = nullptr;
+XPCWrappedNativeScope::AddonSet* XPCWrappedNativeScope::gAllowCPOWAddonSet = nullptr;
 
 NS_IMPL_ISUPPORTS(XPCWrappedNativeScope::ClearInterpositionsObserver, nsIObserver)
 
@@ -50,6 +52,11 @@ XPCWrappedNativeScope::ClearInterpositionsObserver::Observe(nsISupports* subject
     if (gInterpositionWhitelists) {
         delete gInterpositionWhitelists;
         gInterpositionWhitelists = nullptr;
+    }
+
+    if (gAllowCPOWAddonSet) {
+        delete gAllowCPOWAddonSet;
+        gAllowCPOWAddonSet = nullptr;
     }
 
     nsContentUtils::UnregisterShutdownObserver(this);
@@ -156,6 +163,11 @@ XPCWrappedNativeScope::XPCWrappedNativeScope(JSContext* cx,
           }
         }
     }
+
+    if (addonId) {
+        // We forbid CPOWs unless they're specifically allowed.
+        priv->allowCPOWs = gAllowCPOWAddonSet ? gAllowCPOWAddonSet->has(addonId) : false;
+    }
 }
 
 // static
@@ -183,7 +195,7 @@ XPCWrappedNativeScope::GetComponentsJSObject(JS::MutableHandleObject obj)
     RootedValue val(cx);
     xpcObjectHelper helper(mComponents);
     bool ok = XPCConvert::NativeInterface2JSObject(&val, nullptr, helper,
-                                                   nullptr, nullptr, false,
+                                                   nullptr, false,
                                                    nullptr);
     if (NS_WARN_IF(!ok))
         return false;
@@ -225,7 +237,7 @@ XPCWrappedNativeScope::AttachComponentsObject(JSContext* aCx)
     if (c)
         attrs |= JSPROP_PERMANENT;
 
-    RootedId id(aCx, XPCJSRuntime::Get()->GetStringID(XPCJSRuntime::IDX_COMPONENTS));
+    RootedId id(aCx, XPCJSContext::Get()->GetStringID(XPCJSContext::IDX_COMPONENTS));
     return JS_DefinePropertyById(aCx, global, id, components, attrs);
 }
 
@@ -280,11 +292,12 @@ XPCWrappedNativeScope::EnsureContentXBLScope(JSContext* cx)
 
     // Use an nsExpandedPrincipal to create asymmetric security.
     nsIPrincipal* principal = GetPrincipal();
-    nsCOMPtr<nsIExpandedPrincipal> ep;
-    MOZ_ASSERT(!(ep = do_QueryInterface(principal)));
-    nsTArray< nsCOMPtr<nsIPrincipal> > principalAsArray(1);
+    MOZ_ASSERT(!nsContentUtils::IsExpandedPrincipal(principal));
+    nsTArray<nsCOMPtr<nsIPrincipal>> principalAsArray(1);
     principalAsArray.AppendElement(principal);
-    ep = new nsExpandedPrincipal(principalAsArray);
+    nsCOMPtr<nsIExpandedPrincipal> ep =
+        new nsExpandedPrincipal(principalAsArray,
+                                BasePrincipal::Cast(principal)->OriginAttributesRef());
 
     // Create the sandbox.
     RootedValue v(cx);
@@ -334,11 +347,12 @@ GetScopeForXBLExecution(JSContext* cx, HandleObject contentScope, JSAddonId* add
 
     JSAutoCompartment ac(cx, contentScope);
     XPCWrappedNativeScope* nativeScope = CompartmentPrivate::Get(contentScope)->scope;
+    bool isSystem = nsContentUtils::IsSystemPrincipal(nativeScope->GetPrincipal());
 
     RootedObject scope(cx);
     if (nativeScope->UseContentXBLScope())
         scope = nativeScope->EnsureContentXBLScope(cx);
-    else if (addonId && CompartmentPerAddon())
+    else if (addonId && CompartmentPerAddon() && isSystem)
         scope = nativeScope->EnsureAddonScope(cx, addonId);
     else
         scope = global;
@@ -361,6 +375,12 @@ UseContentXBLScope(JSCompartment* c)
 {
   XPCWrappedNativeScope* scope = CompartmentPrivate::Get(c)->scope;
   return scope && scope->UseContentXBLScope();
+}
+
+void
+ClearContentXBLScope(JSObject* global)
+{
+    CompartmentPrivate::Get(global)->scope->ClearContentXBLScope();
 }
 
 } /* namespace xpc */
@@ -456,18 +476,18 @@ XPCWrappedNativeScope::~XPCWrappedNativeScope()
     if (mXrayExpandos.initialized())
         mXrayExpandos.destroy();
 
-    JSRuntime* rt = XPCJSRuntime::Get()->Runtime();
-    mContentXBLScope.finalize(rt);
+    JSContext* cx = dom::danger::GetJSContext();
+    mContentXBLScope.finalize(cx);
     for (size_t i = 0; i < mAddonScopes.Length(); i++)
-        mAddonScopes[i].finalize(rt);
-    mGlobalJSObject.finalize(rt);
+        mAddonScopes[i].finalize(cx);
+    mGlobalJSObject.finalize(cx);
 }
 
 // static
 void
-XPCWrappedNativeScope::TraceWrappedNativesInAllScopes(JSTracer* trc, XPCJSRuntime* rt)
+XPCWrappedNativeScope::TraceWrappedNativesInAllScopes(JSTracer* trc, XPCJSContext* cx)
 {
-    // Do JS_CallTracer for all wrapped natives with external references, as
+    // Do JS::TraceEdge for all wrapped natives with external references, as
     // well as any DOM expando objects.
     for (XPCWrappedNativeScope* cur = gScopes; cur; cur = cur->mNext) {
         for (auto i = cur->mWrappedNativeMap->Iter(); !i.Done(); i.Next()) {
@@ -479,7 +499,7 @@ XPCWrappedNativeScope::TraceWrappedNativesInAllScopes(JSTracer* trc, XPCJSRuntim
 
         if (cur->mDOMExpandoSet) {
             for (DOMExpandoSet::Enum e(*cur->mDOMExpandoSet); !e.empty(); e.popFront())
-                JS_CallObjectTracer(trc, &e.mutableFront(), "DOM expando object");
+                JS::TraceEdge(trc, &e.mutableFront(), "DOM expando object");
         }
     }
 }
@@ -494,7 +514,7 @@ SuspectDOMExpandos(JSObject* obj, nsCycleCollectionNoteRootCallback& cb)
 
 // static
 void
-XPCWrappedNativeScope::SuspectAllWrappers(XPCJSRuntime* rt,
+XPCWrappedNativeScope::SuspectAllWrappers(XPCJSContext* cx,
                                           nsCycleCollectionNoteRootCallback& cb)
 {
     for (XPCWrappedNativeScope* cur = gScopes; cur; cur = cur->mNext) {
@@ -504,14 +524,14 @@ XPCWrappedNativeScope::SuspectAllWrappers(XPCJSRuntime* rt,
 
         if (cur->mDOMExpandoSet) {
             for (DOMExpandoSet::Range r = cur->mDOMExpandoSet->all(); !r.empty(); r.popFront())
-                SuspectDOMExpandos(r.front(), cb);
+                SuspectDOMExpandos(r.front().unbarrieredGet(), cb);
         }
     }
 }
 
 // static
 void
-XPCWrappedNativeScope::UpdateWeakPointersAfterGC(XPCJSRuntime* rt)
+XPCWrappedNativeScope::UpdateWeakPointersAfterGC(XPCJSContext* cx)
 {
     // If this is called from the finalization callback in JSGC_MARK_END then
     // JSGC_FINALIZE_END must always follow it calling
@@ -555,42 +575,6 @@ XPCWrappedNativeScope::UpdateWeakPointersAfterGC(XPCJSRuntime* rt)
         cur = next;
     }
 }
-
-// static
-void
-XPCWrappedNativeScope::MarkAllWrappedNativesAndProtos()
-{
-    for (XPCWrappedNativeScope* cur = gScopes; cur; cur = cur->mNext) {
-        for (auto i = cur->mWrappedNativeMap->Iter(); !i.Done(); i.Next()) {
-            auto entry = static_cast<Native2WrappedNativeMap::Entry*>(i.Get());
-            entry->value->Mark();
-        }
-        // We need to explicitly mark all the protos too because some protos may be
-        // alive in the hashtable but not currently in use by any wrapper
-        for (auto i = cur->mWrappedNativeProtoMap->Iter(); !i.Done(); i.Next()) {
-            auto entry = static_cast<ClassInfo2WrappedNativeProtoMap::Entry*>(i.Get());
-            entry->value->Mark();
-        }
-    }
-}
-
-#ifdef DEBUG
-// static
-void
-XPCWrappedNativeScope::ASSERT_NoInterfaceSetsAreMarked()
-{
-    for (XPCWrappedNativeScope* cur = gScopes; cur; cur = cur->mNext) {
-        for (auto i = cur->mWrappedNativeMap->Iter(); !i.Done(); i.Next()) {
-            auto entry = static_cast<Native2WrappedNativeMap::Entry*>(i.Get());
-            entry->value->ASSERT_SetsNotMarked();
-        }
-        for (auto i = cur->mWrappedNativeProtoMap->Iter(); !i.Done(); i.Next()) {
-            auto entry = static_cast<ClassInfo2WrappedNativeProtoMap::Entry*>(i.Get());
-            entry->value->ASSERT_SetNotMarked();
-        }
-    }
-}
-#endif
 
 // static
 void
@@ -700,11 +684,13 @@ XPCWrappedNativeScope::SetAddonInterposition(JSContext* cx,
 {
     if (!gInterpositionMap) {
         gInterpositionMap = new InterpositionMap();
-        gInterpositionMap->init();
+        bool ok = gInterpositionMap->init();
+        NS_ENSURE_TRUE(ok, false);
 
-        // Make sure to clear the map at shutdown.
-        // Note: this will take care of gInterpositionWhitelists too.
-        nsContentUtils::RegisterShutdownObserver(new ClearInterpositionsObserver());
+        if (!gShutdownObserverInitialized) {
+            gShutdownObserverInitialized = true;
+            nsContentUtils::RegisterShutdownObserver(new ClearInterpositionsObserver());
+        }
     }
     if (interp) {
         bool ok = gInterpositionMap->put(addonId, interp);
@@ -712,6 +698,30 @@ XPCWrappedNativeScope::SetAddonInterposition(JSContext* cx,
         UpdateInterpositionWhitelist(cx, interp);
     } else {
         gInterpositionMap->remove(addonId);
+    }
+    return true;
+}
+
+/* static */ bool
+XPCWrappedNativeScope::AllowCPOWsInAddon(JSContext* cx,
+                                         JSAddonId* addonId,
+                                         bool allow)
+{
+    if (!gAllowCPOWAddonSet) {
+        gAllowCPOWAddonSet = new AddonSet();
+        bool ok = gAllowCPOWAddonSet->init();
+        NS_ENSURE_TRUE(ok, false);
+
+        if (!gShutdownObserverInitialized) {
+            gShutdownObserverInitialized = true;
+            nsContentUtils::RegisterShutdownObserver(new ClearInterpositionsObserver());
+        }
+    }
+    if (allow) {
+        bool ok = gAllowCPOWAddonSet->put(addonId);
+        NS_ENSURE_TRUE(ok, false);
+    } else {
+        gAllowCPOWAddonSet->remove(addonId);
     }
     return true;
 }
@@ -756,18 +766,22 @@ XPCWrappedNativeScope::UpdateInterpositionWhitelist(JSContext* cx,
     MOZ_RELEASE_ASSERT(MAX_INTERPOSITION > gInterpositionWhitelists->Length() + 1);
     InterpositionWhitelistPair* newPair = gInterpositionWhitelists->AppendElement();
     newPair->interposition = interposition;
-    newPair->whitelist.init();
+    if (!newPair->whitelist.init()) {
+        JS_ReportOutOfMemory(cx);
+        return false;
+    }
+
     whitelist = &newPair->whitelist;
 
     RootedValue whitelistVal(cx);
     nsresult rv = interposition->GetWhitelist(&whitelistVal);
     if (NS_FAILED(rv)) {
-        JS_ReportError(cx, "Could not get the whitelist from the interposition.");
+        JS_ReportErrorASCII(cx, "Could not get the whitelist from the interposition.");
         return false;
     }
 
     if (!whitelistVal.isObject()) {
-        JS_ReportError(cx, "Whitelist must be an array.");
+        JS_ReportErrorASCII(cx, "Whitelist must be an array.");
         return false;
     }
 
@@ -778,7 +792,7 @@ XPCWrappedNativeScope::UpdateInterpositionWhitelist(JSContext* cx,
     RootedObject whitelistObj(cx, &whitelistVal.toObject());
     whitelistObj = js::UncheckedUnwrap(whitelistObj);
     if (!AccessCheck::isChrome(whitelistObj)) {
-        JS_ReportError(cx, "Whitelist must be from system scope.");
+        JS_ReportErrorASCII(cx, "Whitelist must be from system scope.");
         return false;
     }
 
@@ -790,7 +804,7 @@ XPCWrappedNativeScope::UpdateInterpositionWhitelist(JSContext* cx,
             return false;
 
         if (!isArray) {
-            JS_ReportError(cx, "Whitelist must be an array.");
+            JS_ReportErrorASCII(cx, "Whitelist must be an array.");
             return false;
         }
 
@@ -804,21 +818,24 @@ XPCWrappedNativeScope::UpdateInterpositionWhitelist(JSContext* cx,
                 return false;
 
             if (!idval.isString()) {
-                JS_ReportError(cx, "Whitelist must contain strings only.");
+                JS_ReportErrorASCII(cx, "Whitelist must contain strings only.");
                 return false;
             }
 
             RootedString str(cx, idval.toString());
             str = JS_AtomizeAndPinJSString(cx, str);
             if (!str) {
-                JS_ReportError(cx, "String internization failed.");
+                JS_ReportErrorASCII(cx, "String internization failed.");
                 return false;
             }
 
             // By internizing the id's we ensure that they won't get
             // GCed so we can use them as hash keys.
             jsid id = INTERNED_STRING_TO_JSID(cx, str);
-            whitelist->put(JSID_BITS(id));
+            if (!whitelist->put(JSID_BITS(id))) {
+                JS_ReportOutOfMemory(cx);
+                return false;
+            }
         }
     }
 

@@ -1,5 +1,3 @@
-/* -*- js-indent-level: 2; indent-tabs-mode: nil -*- */
-/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -8,23 +6,24 @@
 
 const {Cc, Ci, Cu} = require("chrome");
 
-var WebConsoleUtils = require("devtools/shared/webconsole/utils").Utils;
-var Heritage = require("sdk/core/heritage");
+var WebConsoleUtils = require("devtools/client/webconsole/utils").Utils;
+var { extend } = require("sdk/core/heritage");
 var {TargetFactory} = require("devtools/client/framework/target");
 var {Tools} = require("devtools/client/definitions");
+const { Task } = require("devtools/shared/task");
 var promise = require("promise");
+var Services = require("Services");
 
-loader.lazyGetter(this, "Telemetry", () => require("devtools/client/shared/telemetry"));
-loader.lazyGetter(this, "WebConsoleFrame", () => require("devtools/client/webconsole/webconsole").WebConsoleFrame);
-loader.lazyImporter(this, "gDevTools", "resource://devtools/client/framework/gDevTools.jsm");
-loader.lazyImporter(this, "Services", "resource://gre/modules/Services.jsm");
+loader.lazyRequireGetter(this, "Telemetry", "devtools/client/shared/telemetry");
+loader.lazyRequireGetter(this, "WebConsoleFrame", "devtools/client/webconsole/webconsole", true);
+loader.lazyRequireGetter(this, "gDevTools", "devtools/client/framework/devtools", true);
 loader.lazyRequireGetter(this, "DebuggerServer", "devtools/server/main", true);
 loader.lazyRequireGetter(this, "DebuggerClient", "devtools/shared/client/main", true);
-loader.lazyGetter(this, "showDoorhanger", () => require("devtools/client/shared/doorhanger").showDoorhanger);
-loader.lazyRequireGetter(this, "sourceUtils", "devtools/client/shared/source-utils");
+loader.lazyRequireGetter(this, "showDoorhanger", "devtools/client/shared/doorhanger", true);
+loader.lazyRequireGetter(this, "viewSource", "devtools/client/shared/view-source");
 
-const STRINGS_URI = "chrome://devtools/locale/webconsole.properties";
-var l10n = new WebConsoleUtils.l10n(STRINGS_URI);
+const STRINGS_URI = "devtools/client/locales/webconsole.properties";
+var l10n = new WebConsoleUtils.L10n(STRINGS_URI);
 
 const BROWSER_CONSOLE_WINDOW_FEATURES = "chrome,titlebar,toolbar,centerscreen,resizable,dialog=no";
 
@@ -33,8 +32,7 @@ const BROWSER_CONSOLE_FILTER_PREFS_PREFIX = "devtools.browserconsole.filter.";
 
 var gHudId = 0;
 
-///////////////////////////////////////////////////////////////////////////
-//// The HUD service
+// The HUD service
 
 function HUD_SERVICE()
 {
@@ -65,12 +63,12 @@ HUD_SERVICE.prototype =
   lastFinishedRequest: null,
 
   /**
-   * Firefox-specific current tab getter
+   * Get the current context, which is the main application window.
    *
    * @returns nsIDOMWindow
    */
   currentContext: function HS_currentContext() {
-    return Services.wm.getMostRecentWindow("navigator:browser");
+    return Services.wm.getMostRecentWindow(gDevTools.chromeWindowType);
   },
 
   /**
@@ -192,15 +190,13 @@ HUD_SERVICE.prototype =
       DebuggerServer.allowChromeProcess = true;
 
       let client = new DebuggerClient(DebuggerServer.connectPipe());
-      client.connect(() => {
-        client.getProcess().then(aResponse => {
+      return client.connect()
+        .then(() => client.getProcess())
+        .then(aResponse => {
           // Set chrome:false in order to attach to the target
           // (i.e. send an `attach` request to the chrome actor)
-          deferred.resolve({ form: aResponse.form, client: client, chrome: false });
-        }, deferred.reject);
-      });
-
-      return deferred.promise;
+          return { form: aResponse.form, client: client, chrome: false };
+        });
     }
 
     let target;
@@ -235,7 +231,7 @@ HUD_SERVICE.prototype =
         .then((aBrowserConsole) => {
           this._browserConsoleDefer.resolve(aBrowserConsole);
           this._browserConsoleDefer = null;
-        })
+        });
     }, console.error.bind(console));
 
     return this._browserConsoleDefer.promise;
@@ -297,7 +293,7 @@ function WebConsole(aTarget, aIframeWindow, aChromeWindow)
   this.browserWindow = this.chromeWindow.top;
 
   let element = this.browserWindow.document.documentElement;
-  if (element.getAttribute("windowtype") != "navigator:browser") {
+  if (element.getAttribute("windowtype") != gDevTools.chromeWindowType) {
     this.browserWindow = HUDService.currentContext();
   }
 
@@ -440,7 +436,7 @@ WebConsole.prototype = {
   viewSource: function WC_viewSource(aSourceURL, aSourceLine) {
     // Attempt to access view source via a browser first, which may display it in
     // a tab, if enabled.
-    let browserWin = Services.wm.getMostRecentWindow("navigator:browser");
+    let browserWin = Services.wm.getMostRecentWindow(gDevTools.chromeWindowType);
     if (browserWin && browserWin.BrowserViewSourceOfDocument) {
       return browserWin.BrowserViewSourceOfDocument({
         URL: aSourceURL,
@@ -491,7 +487,7 @@ WebConsole.prototype = {
     }
     toolbox.viewSourceInDebugger(aSourceURL, aSourceLine).then(() => {
       this.ui.emit("source-in-debugger-opened");
-    })
+    });
   },
 
   /**
@@ -502,7 +498,7 @@ WebConsole.prototype = {
    *        The URL of the file which corresponds to a Scratchpad id.
    */
   viewSourceInScratchpad: function WC_viewSourceInScratchpad(aSourceURL, aSourceLine) {
-    sourceUtils.viewSourceInScratchpad(aSourceURL, aSourceLine);
+    viewSource.viewSourceInScratchpad(aSourceURL, aSourceLine);
   },
 
   /**
@@ -525,18 +521,12 @@ WebConsole.prototype = {
       return null;
     }
     let panel = toolbox.getPanel("jsdebugger");
+
     if (!panel) {
       return null;
     }
-    let framesController = panel.panelWin.DebuggerController.StackFrames;
-    let thread = framesController.activeThread;
-    if (thread && thread.paused) {
-      return {
-        frames: thread.cachedFrames,
-        selected: framesController.currentFrameDepth,
-      };
-    }
-    return null;
+
+    return panel.getFrames();
   },
 
   /**
@@ -589,19 +579,20 @@ WebConsole.prototype = {
       }
     }
 
-    let onDestroy = function WC_onDestroyUI() {
-      try {
-        let tabWindow = this.target.isLocalTab ? this.target.window : null;
-        tabWindow && tabWindow.focus();
-      }
-      catch (ex) {
-        // Tab focus can fail if the tab or target is closed.
+    let onDestroy = Task.async(function* () {
+      if (!this._browserConsole) {
+        try {
+          yield this.target.activeTab.focus();
+        }
+        catch (ex) {
+          // Tab focus can fail if the tab or target is closed.
+        }
       }
 
       let id = WebConsoleUtils.supportsString(this.hudId);
       Services.obs.notifyObservers(id, "web-console-destroyed", null);
       this._destroyer.resolve(null);
-    }.bind(this);
+    }.bind(this));
 
     if (this.ui) {
       this.ui.destroy().then(onDestroy);
@@ -613,7 +604,6 @@ WebConsole.prototype = {
     return this._destroyer.promise;
   },
 };
-
 
 /**
  * A BrowserConsole instance is an interactive console initialized *per target*
@@ -638,8 +628,7 @@ function BrowserConsole()
   this._telemetry = new Telemetry();
 }
 
-BrowserConsole.prototype = Heritage.extend(WebConsole.prototype,
-{
+BrowserConsole.prototype = extend(WebConsole.prototype, {
   _browserConsole: true,
   _bc_init: null,
   _bc_destroyer: null,
@@ -670,9 +659,6 @@ BrowserConsole.prototype = Heritage.extend(WebConsole.prototype,
       this.destroy();
     };
     window.addEventListener("unload", onClose);
-
-    // Make sure Ctrl-W closes the Browser Console window.
-    window.document.getElementById("cmd_close").removeAttribute("disabled");
 
     this._telemetry.toolOpened("browserconsole");
 
@@ -706,7 +692,7 @@ BrowserConsole.prototype = Heritage.extend(WebConsole.prototype,
 
     let chromeWindow = this.chromeWindow;
     this.$destroy().then(() =>
-      this.target.client.close(() => {
+      this.target.client.close().then(() => {
         HUDService._browserConsoleID = null;
         chromeWindow.close();
         this._bc_destroyer.resolve(null);

@@ -4,7 +4,7 @@
 
 Components.utils.import("resource://gre/modules/Promise.jsm", this);
 
-var {AddonTestUtils} = Components.utils.import("resource://testing-common/AddonManagerTesting.jsm", {});
+var {AddonManagerTesting} = Components.utils.import("resource://testing-common/AddonManagerTesting.jsm", {});
 var {HttpServer} = Components.utils.import("resource://testing-common/httpd.js", {});
 
 var gManagerWindow;
@@ -28,7 +28,7 @@ function getExperimentAddons() {
 
 function getInstallItem() {
   let doc = gManagerWindow.document;
-  let view = doc.getElementById("view-port").selectedPanel;
+  let view = get_current_view(gManagerWindow);
   let list = doc.getElementById("addon-list");
 
   let node = list.firstChild;
@@ -98,6 +98,7 @@ add_task(function* initializeState() {
 
   registerCleanupFunction(() => {
     Services.prefs.clearUserPref("experiments.enabled");
+    Services.prefs.clearUserPref("toolkit.telemetry.enabled");
     if (gHttpServer) {
       gHttpServer.stop(() => {});
       if (gSavedManifestURI !== undefined) {
@@ -224,7 +225,12 @@ add_task(function* testOpenPreferences() {
   }, "advanced-pane-loaded", false);
 
   info("Loading preferences pane.");
-  EventUtils.synthesizeMouseAtCenter(btn, {}, gManagerWindow);
+  // We need to focus before synthesizing the mouse event (bug 1240052) as
+  // synthesizeMouseAtCenter currently only synthesizes the mouse in the child process.
+  // This can cause some subtle differences if the child isn't focused.
+  yield SimpleTest.promiseFocus();
+  yield BrowserTestUtils.synthesizeMouseAtCenter("#experiments-change-telemetry", {},
+                                                 gBrowser.selectedBrowser);
 
   yield deferred.promise;
 });
@@ -248,7 +254,7 @@ add_task(function* testButtonPresence() {
 
 // Remove the add-on we've been testing with.
 add_task(function* testCleanup() {
-  yield AddonTestUtils.uninstallAddonByID("test-experiment1@experiments.mozilla.org");
+  yield AddonManagerTesting.uninstallAddonByID("test-experiment1@experiments.mozilla.org");
   // Verify some conditions, just in case.
   let addons = yield getExperimentAddons();
   Assert.equal(addons.length, 0, "No experiment add-ons are installed.");
@@ -294,6 +300,7 @@ add_task(function* testActivateExperiment() {
   // We need to remove the cache file to help ensure consistent state.
   yield OS.File.remove(gExperiments._cacheFilePath);
 
+  Services.prefs.setBoolPref("toolkit.telemetry.enabled", true);
   Services.prefs.setBoolPref("experiments.enabled", true);
 
   info("Initializing experiments service.");
@@ -635,6 +642,8 @@ add_task(function* testCleanup() {
     yield OS.File.remove(gExperiments._cacheFilePath);
     yield gExperiments.uninit();
     yield gExperiments.init();
+
+    Services.prefs.clearUserPref("toolkit.telemetry.enabled");
   }
 
   // Check post-conditions.

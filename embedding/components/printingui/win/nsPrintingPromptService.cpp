@@ -23,9 +23,9 @@
 #include "nsIWebProgressListener.h"
 
 // XP Dialog includes
+#include "nsArray.h"
 #include "nsIDialogParamBlock.h"
 #include "nsISupportsUtils.h"
-#include "nsISupportsArray.h"
 
 // Includes need to locate the native Window
 #include "nsIWidget.h"
@@ -90,13 +90,13 @@ nsPrintingPromptService::Init()
 
 //-----------------------------------------------------------
 HWND
-nsPrintingPromptService::GetHWNDForDOMWindow(nsIDOMWindow *aWindow)
+nsPrintingPromptService::GetHWNDForDOMWindow(mozIDOMWindowProxy *aWindow)
 {
     nsCOMPtr<nsIWebBrowserChrome> chrome;
 
     // We might be embedded so check this path first
     if (mWatcher) {
-        nsCOMPtr<nsIDOMWindow> fosterParent;
+        nsCOMPtr<mozIDOMWindowProxy> fosterParent;
         if (!aWindow) 
         {   // it will be a dependent window. try to find a foster parent.
             mWatcher->GetActiveWindow(getter_AddRefs(fosterParent));
@@ -116,7 +116,7 @@ nsPrintingPromptService::GetHWNDForDOMWindow(nsIDOMWindow *aWindow)
     }
 
     // Now we might be the Browser so check this path
-    nsCOMPtr<nsPIDOMWindow> window(do_QueryInterface(aWindow));
+    nsCOMPtr<nsPIDOMWindowOuter> window = nsPIDOMWindowOuter::From(aWindow);
 
     nsCOMPtr<nsIDocShellTreeItem> treeItem =
         do_QueryInterface(window->GetDocShell());
@@ -142,11 +142,11 @@ nsPrintingPromptService::GetHWNDForDOMWindow(nsIDOMWindow *aWindow)
 
 
 ///////////////////////////////////////////////////////////////////////////////
-// nsIPrintingPrompt
+// nsIPrintingPromptService
 
 //-----------------------------------------------------------
 NS_IMETHODIMP 
-nsPrintingPromptService::ShowPrintDialog(nsIDOMWindow *parent, nsIWebBrowserPrint *webBrowserPrint, nsIPrintSettings *printSettings)
+nsPrintingPromptService::ShowPrintDialog(mozIDOMWindowProxy *parent, nsIWebBrowserPrint *webBrowserPrint, nsIPrintSettings *printSettings)
 {
     NS_ENSURE_ARG(parent);
 
@@ -158,7 +158,7 @@ nsPrintingPromptService::ShowPrintDialog(nsIDOMWindow *parent, nsIWebBrowserPrin
 
 
 NS_IMETHODIMP 
-nsPrintingPromptService::ShowProgress(nsIDOMWindow*            parent, 
+nsPrintingPromptService::ShowProgress(mozIDOMWindowProxy*      parent, 
                                       nsIWebBrowserPrint*      webBrowserPrint,    // ok to be null
                                       nsIPrintSettings*        printSettings,      // ok to be null
                                       nsIObserver*             openDialogObserver, // ok to be null
@@ -184,7 +184,7 @@ nsPrintingPromptService::ShowProgress(nsIDOMWindow*            parent,
 
     nsCOMPtr<nsIPrintProgressParams> prtProgressParams = new nsPrintProgressParams();
 
-    nsCOMPtr<nsIDOMWindow> parentWindow = parent;
+    nsCOMPtr<mozIDOMWindowProxy> parentWindow = parent;
 
     if (mWatcher && !parentWindow) {
         mWatcher->GetActiveWindow(getter_AddRefs(parentWindow));
@@ -203,7 +203,7 @@ nsPrintingPromptService::ShowProgress(nsIDOMWindow*            parent,
 }
 
 NS_IMETHODIMP 
-nsPrintingPromptService::ShowPageSetup(nsIDOMWindow *parent, nsIPrintSettings *printSettings, nsIObserver *aObs)
+nsPrintingPromptService::ShowPageSetup(mozIDOMWindowProxy *parent, nsIPrintSettings *printSettings, nsIObserver *aObs)
 {
     NS_ENSURE_ARG(printSettings);
 
@@ -228,7 +228,7 @@ nsPrintingPromptService::ShowPageSetup(nsIDOMWindow *parent, nsIPrintSettings *p
 }
 
 NS_IMETHODIMP 
-nsPrintingPromptService::ShowPrinterProperties(nsIDOMWindow *parent, const char16_t *printerName, nsIPrintSettings *printSettings)
+nsPrintingPromptService::ShowPrinterProperties(mozIDOMWindowProxy *parent, const char16_t *printerName, nsIPrintSettings *printSettings)
 {
     return NS_ERROR_NOT_IMPLEMENTED;
 }
@@ -236,7 +236,7 @@ nsPrintingPromptService::ShowPrinterProperties(nsIDOMWindow *parent, const char1
 //-----------------------------------------------------------
 // Helper to Fly XP Dialog
 nsresult
-nsPrintingPromptService::DoDialog(nsIDOMWindow *aParent,
+nsPrintingPromptService::DoDialog(mozIDOMWindowProxy *aParent,
                                   nsIDialogParamBlock *aParamBlock, 
                                   nsIPrintSettings* aPS,
                                   const char *aChromeURL)
@@ -248,39 +248,31 @@ nsPrintingPromptService::DoDialog(nsIDOMWindow *aParent,
     if (!mWatcher)
         return NS_ERROR_FAILURE;
 
-    nsresult rv = NS_OK;
-
     // get a parent, if at all possible
     // (though we'd rather this didn't fail, it's OK if it does. so there's
     // no failure or null check.)
-    nsCOMPtr<nsIDOMWindow> activeParent; // retain ownership for method lifetime
+    nsCOMPtr<mozIDOMWindowProxy> activeParent; // retain ownership for method lifetime
     if (!aParent) 
     {
         mWatcher->GetActiveWindow(getter_AddRefs(activeParent));
         aParent = activeParent;
     }
 
-    // create a nsISupportsArray of the parameters 
+    // create a nsIMutableArray of the parameters 
     // being passed to the window
-    nsCOMPtr<nsISupportsArray> array;
-    NS_NewISupportsArray(getter_AddRefs(array));
-    if (!array) return NS_ERROR_FAILURE;
+    nsCOMPtr<nsIMutableArray> array = nsArray::Create();
 
     nsCOMPtr<nsISupports> psSupports(do_QueryInterface(aPS));
     NS_ASSERTION(psSupports, "PrintSettings must be a supports");
-    array->AppendElement(psSupports);
+    array->AppendElement(psSupports, /*weak =*/ false);
 
     nsCOMPtr<nsISupports> blkSupps(do_QueryInterface(aParamBlock));
     NS_ASSERTION(blkSupps, "IOBlk must be a supports");
-    array->AppendElement(blkSupps);
+    array->AppendElement(blkSupps, /*weak =*/ false);
 
-    nsCOMPtr<nsISupports> arguments(do_QueryInterface(array));
-    NS_ASSERTION(array, "array must be a supports");
-
-
-    nsCOMPtr<nsIDOMWindow> dialog;
-    rv = mWatcher->OpenWindow(aParent, aChromeURL, "_blank",
-                              "centerscreen,chrome,modal,titlebar", arguments,
+    nsCOMPtr<mozIDOMWindowProxy> dialog;
+    nsresult rv = mWatcher->OpenWindow(aParent, aChromeURL, "_blank",
+                              "centerscreen,chrome,modal,titlebar", array,
                               getter_AddRefs(dialog));
 
     return rv;

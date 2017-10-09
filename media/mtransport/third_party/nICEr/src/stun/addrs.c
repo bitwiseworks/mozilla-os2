@@ -75,11 +75,14 @@ static char *RCSSTRING __UNUSED__="$Id: addrs.c,v 1.2 2008/04/28 18:21:30 ekr Ex
 
 #include "stun.h"
 #include "addrs.h"
+#include "nr_crypto.h"
+#include "util.h"
 
 #if defined(WIN32)
 
 #define WIN32_MAX_NUM_INTERFACES  20
 
+#define NR_MD5_HASH_LENGTH 16
 
 #define _NR_MAX_KEY_LENGTH 256
 #define _NR_MAX_NAME_LENGTH 512
@@ -146,66 +149,61 @@ abort:
 static int
 stun_get_win32_addrs(nr_local_addr addrs[], int maxaddrs, int *count)
 {
-    int r,_status;
+    int r, _status;
     PIP_ADAPTER_ADDRESSES AdapterAddresses = NULL, tmpAddress = NULL;
-    ULONG buflen;
-    char munged_ifname[IFNAMSIZ];
+    // recomended per https://msdn.microsoft.com/en-us/library/windows/desktop/aa365915(v=vs.85).aspx
+    static const ULONG initialBufLen = 15000;
+    ULONG buflen = initialBufLen;
+    char bin_hashed_ifname[NR_MD5_HASH_LENGTH];
+    char hex_hashed_ifname[MAXIFNAME];
     int n = 0;
 
     *count = 0;
 
     if (maxaddrs <= 0)
-      ABORT(R_INTERNAL);
+      ABORT(R_BAD_ARGS);
 
-    /* Call GetAdaptersAddresses() twice.  First, just to get the buf length */
+    /* According to MSDN (see above) we have try GetAdapterAddresses() multiple times */
+    for (n = 0; n < 5; n++) {
+      AdapterAddresses = (PIP_ADAPTER_ADDRESSES) RMALLOC(buflen);
+      if (AdapterAddresses == NULL) {
+        r_log(NR_LOG_STUN, LOG_ERR, "Error allocating buf for GetAdaptersAddresses()");
+        ABORT(R_NO_MEMORY);
+      }
 
-    buflen = 0;
-
-    r = GetAdaptersAddresses(AF_UNSPEC, 0, NULL, AdapterAddresses, &buflen);
-    if (r != ERROR_BUFFER_OVERFLOW) {
-      r_log(NR_LOG_STUN, LOG_ERR, "Error getting buf len from GetAdaptersAddresses()");
-      ABORT(R_INTERNAL);
+      r = GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER, NULL, AdapterAddresses, &buflen);
+      if (r == NO_ERROR) {
+        break;
+      }
+      r_log(NR_LOG_STUN, LOG_ERR, "GetAdaptersAddresses() returned error (%d)", r);
+      RFREE(AdapterAddresses);
+      AdapterAddresses = NULL;
     }
 
-    AdapterAddresses = (PIP_ADAPTER_ADDRESSES) RMALLOC(buflen);
-    if (AdapterAddresses == NULL) {
-      r_log(NR_LOG_STUN, LOG_ERR, "Error allocating buf for GetAdaptersAddresses()");
-      ABORT(R_NO_MEMORY);
-    }
-
-    /* for real, this time */
-
-    r = GetAdaptersAddresses(AF_UNSPEC, 0, NULL, AdapterAddresses, &buflen);
-    if (r != NO_ERROR) {
-      r_log(NR_LOG_STUN, LOG_ERR, "Error getting addresses from GetAdaptersAddresses()");
+    if (n >= 5) {
+      r_log(NR_LOG_STUN, LOG_ERR, "5 failures calling GetAdaptersAddresses()");
       ABORT(R_INTERNAL);
     }
+
+    n = 0;
 
     /* Loop through the adapters */
 
     for (tmpAddress = AdapterAddresses; tmpAddress != NULL; tmpAddress = tmpAddress->Next) {
-      char *c;
 
       if (tmpAddress->OperStatus != IfOperStatusUp)
         continue;
 
-      snprintf(munged_ifname, IFNAMSIZ, "%S%c", tmpAddress->FriendlyName, 0);
-      munged_ifname[IFNAMSIZ-1] = '\0';
-
-      /* replace spaces with underscores */
-      c = strchr(munged_ifname, ' ');
-      while (c != NULL) {
-        *c = '_';
-         c = strchr(munged_ifname, ' ');
-      }
-      c = strchr(munged_ifname, '.');
-      while (c != NULL) {
-        *c = '+';
-         c = strchr(munged_ifname, '.');
-      }
-
       if ((tmpAddress->IfIndex != 0) || (tmpAddress->Ipv6IfIndex != 0)) {
         IP_ADAPTER_UNICAST_ADDRESS *u = 0;
+
+        if(r=nr_crypto_md5((UCHAR *)tmpAddress->FriendlyName,
+                           wcslen(tmpAddress->FriendlyName) * sizeof(wchar_t),
+                           bin_hashed_ifname))
+          ABORT(r);
+        if(r=nr_bin2hex(bin_hashed_ifname, sizeof(bin_hashed_ifname),
+          hex_hashed_ifname))
+          ABORT(r);
 
         for (u = tmpAddress->FirstUnicastAddress; u != 0; u = u->Next) {
           SOCKET_ADDRESS *sa_addr = &u->Address;
@@ -216,14 +214,25 @@ stun_get_win32_addrs(nr_local_addr addrs[], int maxaddrs, int *count)
                 ABORT(r);
           }
           else {
-            r_log(NR_LOG_STUN, LOG_DEBUG, "Unrecognized sa_family for adapteraddress %s",munged_ifname);
+            r_log(NR_LOG_STUN, LOG_DEBUG, "Unrecognized sa_family for address on adapter %lu", tmpAddress->IfIndex);
             continue;
           }
 
-          strlcpy(addrs[n].addr.ifname, munged_ifname, sizeof(addrs[n].addr.ifname));
-          /* TODO: (Bug 895793) Getting interface properties for Windows */
-          addrs[n].interface.type = NR_INTERFACE_TYPE_UNKNOWN;
+          strlcpy(addrs[n].addr.ifname, hex_hashed_ifname, sizeof(addrs[n].addr.ifname));
+          if (tmpAddress->IfType == IF_TYPE_ETHERNET_CSMACD) {
+            addrs[n].interface.type = NR_INTERFACE_TYPE_WIRED;
+          } else if (tmpAddress->IfType == IF_TYPE_IEEE80211) {
+            /* Note: this only works for >= Win Vista */
+            addrs[n].interface.type = NR_INTERFACE_TYPE_WIFI;
+          } else {
+            addrs[n].interface.type = NR_INTERFACE_TYPE_UNKNOWN;
+          }
+#if (_WIN32_WINNT >= 0x0600)
+          /* Note: only >= Vista provide link speed information */
+          addrs[n].interface.estimated_speed = tmpAddress->TransmitLinkSpeed / 1000;
+#else
           addrs[n].interface.estimated_speed = 0;
+#endif
           if (++n >= maxaddrs)
             goto done;
         }
@@ -251,7 +260,10 @@ stun_getifaddrs(nr_local_addr addrs[], int maxaddrs, int *count)
   struct ifaddrs* if_addrs_head=NULL;
   struct ifaddrs* if_addr;
 
-  *count=0;
+  *count = 0;
+
+  if (maxaddrs <= 0)
+    ABORT(R_BAD_ARGS);
 
   if (getifaddrs(&if_addrs_head) == -1) {
     r_log(NR_LOG_STUN, LOG_ERR, "getifaddrs error e = %d", errno);
@@ -388,6 +400,7 @@ nr_stun_remove_duplicate_addrs(nr_local_addr addrs[], int remove_loopback, int r
 
     *count = n;
 
+    memset(addrs, 0, *count * sizeof(*addrs));
     /* copy temporary array into passed in/out array */
     for (i = 0; i < *count; ++i) {
         if ((r=nr_local_addr_copy(&addrs[i], &tmp[i])))
@@ -405,7 +418,7 @@ nr_stun_remove_duplicate_addrs(nr_local_addr addrs[], int remove_loopback, int r
 int
 nr_stun_get_addrs(nr_local_addr addrs[], int maxaddrs, int drop_loopback, int drop_link_local, int *count)
 {
-    int _status=0;
+    int r,_status=0;
     int i;
     char typestr[100];
 
@@ -415,14 +428,16 @@ nr_stun_get_addrs(nr_local_addr addrs[], int maxaddrs, int drop_loopback, int dr
     _status = stun_getifaddrs(addrs, maxaddrs, count);
 #endif
 
-    nr_stun_remove_duplicate_addrs(addrs, drop_loopback, drop_link_local, count);
+    if ((r=nr_stun_remove_duplicate_addrs(addrs, drop_loopback, drop_link_local, count)))
+      ABORT(r);
 
     for (i = 0; i < *count; ++i) {
-    nr_local_addr_fmt_info_string(addrs+i,typestr,sizeof(typestr));
-        r_log(NR_LOG_STUN, LOG_DEBUG, "Address %d: %s on %s, type: %s\n",
+      nr_local_addr_fmt_info_string(addrs+i,typestr,sizeof(typestr));
+      r_log(NR_LOG_STUN, LOG_DEBUG, "Address %d: %s on %s, type: %s\n",
             i,addrs[i].addr.as_string,addrs[i].addr.ifname,typestr);
     }
 
+abort:
     return _status;
 }
 

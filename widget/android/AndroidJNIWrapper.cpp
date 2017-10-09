@@ -17,11 +17,11 @@ extern "C" {
   jclass __jsjni_GetGlobalClassRef(const char *className);
 }
 
-class GetGlobalClassRefRunnable : public nsRunnable {
+class GetGlobalClassRefRunnable : public mozilla::Runnable {
   public:
     GetGlobalClassRefRunnable(const char *className, jclass *foundClass) :
         mClassName(className), mResult(foundClass) {}
-    NS_IMETHOD Run() {
+    NS_IMETHOD Run() override {
         *mResult = __jsjni_GetGlobalClassRef(mClassName);
         return NS_OK;
     }

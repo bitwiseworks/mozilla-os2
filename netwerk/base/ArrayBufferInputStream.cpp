@@ -96,7 +96,7 @@ ArrayBufferInputStream::ReadSegments(nsWriteSegmentFun writer, void *closure,
     }
 
     uint32_t written;
-    nsresult rv = writer(this, closure, &mArrayBuffer[0] + mPos, 0, count, &written);
+    nsresult rv = writer(this, closure, &mArrayBuffer[0] + mPos, *result, count, &written);
     if (NS_FAILED(rv)) {
       // InputStreams do not propagate errors to caller.
       return NS_OK;

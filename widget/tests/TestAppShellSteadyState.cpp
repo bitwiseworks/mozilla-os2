@@ -35,7 +35,7 @@ typedef void (*TestFunc)(nsIAppShell*);
 
 bool gStableStateEventHasRun = false;
 
-class ExitAppShellRunnable : public nsRunnable
+class ExitAppShellRunnable : public Runnable
 {
   nsCOMPtr<nsIAppShell> mAppShell;
 
@@ -45,17 +45,17 @@ public:
   { }
 
   NS_IMETHOD
-  Run()
+  Run() override
   {
     return mAppShell->Exit();
   }
 };
 
-class StableStateRunnable : public nsRunnable
+class StableStateRunnable : public Runnable
 {
 public:
   NS_IMETHOD
-  Run()
+  Run() override
   {
     if (gStableStateEventHasRun) {
       fail("StableStateRunnable already ran");
@@ -65,7 +65,7 @@ public:
   }
 };
 
-class CheckStableStateRunnable : public nsRunnable
+class CheckStableStateRunnable : public Runnable
 {
   bool mShouldHaveRun;
 
@@ -75,7 +75,7 @@ public:
   { }
 
   NS_IMETHOD
-  Run()
+  Run() override
   {
     if (mShouldHaveRun == gStableStateEventHasRun) {
       passed("StableStateRunnable state correct (%s)",
@@ -98,7 +98,7 @@ public:
   { }
 
   NS_IMETHOD
-  Run()
+  Run() override
   {
     CheckStableStateRunnable::Run();
 
@@ -112,7 +112,7 @@ public:
   }
 };
 
-class NextTestRunnable : public nsRunnable
+class NextTestRunnable : public Runnable
 {
   nsCOMPtr<nsIAppShell> mAppShell;
 
@@ -132,7 +132,7 @@ public:
   { }
 
   NS_IMETHOD
-  Run()
+  Run() override
   {
     ScheduleStableStateRunnable::Run();
 

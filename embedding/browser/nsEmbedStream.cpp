@@ -31,13 +31,13 @@ nsEmbedStream::InitOwner(nsIWebBrowser* aOwner)
   mOwner = aOwner;
 }
 
-NS_METHOD
+nsresult
 nsEmbedStream::Init(void)
 {
   return NS_OK;
 }
 
-NS_METHOD
+nsresult
 nsEmbedStream::OpenStream(nsIURI* aBaseURI, const nsACString& aContentType)
 {
   nsresult rv;
@@ -68,7 +68,7 @@ nsEmbedStream::OpenStream(nsIURI* aBaseURI, const nsACString& aContentType)
   return rv;
 }
 
-NS_METHOD
+nsresult
 nsEmbedStream::AppendToStream(const uint8_t* aData, uint32_t aLen)
 {
   nsresult rv;
@@ -86,7 +86,7 @@ nsEmbedStream::AppendToStream(const uint8_t* aData, uint32_t aLen)
   return rv;
 }
 
-NS_METHOD
+nsresult
 nsEmbedStream::CloseStream(void)
 {
   nsresult rv = NS_OK;
@@ -95,7 +95,7 @@ nsEmbedStream::CloseStream(void)
   // satisfied; this is exactly what we want to return.
   NS_ENSURE_STATE(mOutputStream);
   mOutputStream->Close();
-  mOutputStream = 0;
+  mOutputStream = nullptr;
 
   return rv;
 }

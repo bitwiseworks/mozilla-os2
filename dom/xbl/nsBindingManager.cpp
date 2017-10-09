@@ -6,6 +6,7 @@
 
 #include "nsBindingManager.h"
 
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsXBLService.h"
 #include "nsIInputStream.h"
@@ -38,7 +39,6 @@
 #include "nsWrapperCacheInlines.h"
 #include "nsIXPConnect.h"
 #include "nsDOMCID.h"
-#include "nsIDOMScriptObjectFactory.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsTHashtable.h"
 
@@ -49,7 +49,7 @@
 #include "nsThreadUtils.h"
 #include "mozilla/dom/NodeListBinding.h"
 #include "mozilla/dom/ScriptSettings.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -125,7 +125,7 @@ nsBindingManager::~nsBindingManager(void)
 }
 
 nsXBLBinding*
-nsBindingManager::GetBindingWithContent(nsIContent* aContent)
+nsBindingManager::GetBindingWithContent(const nsIContent* aContent)
 {
   nsXBLBinding* binding = aContent ? aContent->GetXBLBinding() : nullptr;
   return binding ? binding->GetBindingWithContent() : nullptr;
@@ -197,7 +197,8 @@ nsBindingManager::SetWrappedJS(nsIContent* aContent, nsIXPConnectWrappedJS* aWra
 
 void
 nsBindingManager::RemovedFromDocumentInternal(nsIContent* aContent,
-                                              nsIDocument* aOldDocument)
+                                              nsIDocument* aOldDocument,
+                                              DestructorHandling aDestructorHandling)
 {
   NS_PRECONDITION(aOldDocument != nullptr, "no old document");
 
@@ -208,7 +209,7 @@ nsBindingManager::RemovedFromDocumentInternal(nsIContent* aContent,
     // BindingDetached (which may invoke a XBL destructor) and
     // ChangeDocument, but we still want to clear out the binding
     // and insertion parent that may hold references.
-    if (!mDestroyed) {
+    if (!mDestroyed && aDestructorHandling == eRunDtor) {
       binding->PrototypeBinding()->BindingDetached(binding->GetBoundElement());
       binding->ChangeDocument(aOldDocument, nullptr);
     }
@@ -347,7 +348,7 @@ void
 nsBindingManager::PostProcessAttachedQueueEvent()
 {
   mProcessAttachedQueueEvent =
-    NS_NewRunnableMethod(this, &nsBindingManager::DoProcessAttachedQueue);
+    NewRunnableMethod(this, &nsBindingManager::DoProcessAttachedQueue);
   nsresult rv = NS_DispatchToCurrentThread(mProcessAttachedQueueEvent);
   if (NS_SUCCEEDED(rv) && mDocument) {
     mDocument->BlockOnload();
@@ -405,11 +406,8 @@ nsBindingManager::DoProcessAttachedQueue()
 }
 
 void
-nsBindingManager::ProcessAttachedQueue(uint32_t aSkipSize)
+nsBindingManager::ProcessAttachedQueueInternal(uint32_t aSkipSize)
 {
-  if (mProcessingAttachedStack || mAttachedStack.Length() <= aSkipSize)
-    return;
-
   mProcessingAttachedStack = true;
 
   // Excute constructors. Do this from high index to low
@@ -772,7 +770,7 @@ nsBindingManager::MediumFeaturesChanged(nsPresContext* aPresContext,
 }
 
 void
-nsBindingManager::AppendAllSheets(nsTArray<CSSStyleSheet*>& aArray)
+nsBindingManager::AppendAllSheets(nsTArray<StyleSheet*>& aArray)
 {
   if (!mBoundContentSet) {
     return;
@@ -1013,21 +1011,6 @@ nsBindingManager::Traverse(nsIContent *aContent,
     cb.NoteXPCOMChild(aContent);
     NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "[via binding manager] mWrapperTable value");
     cb.NoteXPCOMChild(value);
-  }
-}
-
-void
-nsBindingManager::BeginOutermostUpdate()
-{
-  mAttachedStackSizeOnOutermost = mAttachedStack.Length();
-}
-
-void
-nsBindingManager::EndOutermostUpdate()
-{
-  if (!mProcessingAttachedStack) {
-    ProcessAttachedQueue(mAttachedStackSizeOnOutermost);
-    mAttachedStackSizeOnOutermost = 0;
   }
 }
 

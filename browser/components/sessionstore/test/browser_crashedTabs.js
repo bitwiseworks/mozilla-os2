@@ -3,22 +3,23 @@
 
 "use strict";
 
-requestLongerTimeout(2);
+requestLongerTimeout(10);
 
 const PAGE_1 = "data:text/html,<html><body>A%20regular,%20everyday,%20normal%20page.";
 const PAGE_2 = "data:text/html,<html><body>Another%20regular,%20everyday,%20normal%20page.";
 
-// Turn off tab animations for testing
-Services.prefs.setBoolPref("browser.tabs.animate", false);
-registerCleanupFunction(() => {
-  Services.prefs.clearUserPref("browser.tabs.animate");
+// Turn off tab animations for testing and use a single content process
+// for these tests since we want to test tabs within the crashing process here.
+add_task(function* test_initialize() {
+  yield SpecialPowers.pushPrefEnv({
+    set: [
+      [ "dom.ipc.processCount", 1 ],
+      [ "browser.tabs.animate", false]
+  ] });
 });
 
 // Allow tabs to restore on demand so we can test pending states
 Services.prefs.clearUserPref("browser.sessionstore.restore_on_demand");
-
-// Running this test in ASAN is slow.
-requestLongerTimeout(2);
 
 function clickButton(browser, id) {
   info("Clicking " + id);
@@ -391,7 +392,8 @@ add_task(function* test_hide_restore_all_button() {
   let restoreAllButton = doc.getElementById("restoreAll");
   let restoreOneButton = doc.getElementById("restoreTab");
 
-  is(restoreAllButton.getAttribute("hidden"), "true", "Restore All button should be hidden");
+  let restoreAllStyles = window.getComputedStyle(restoreAllButton);
+  is(restoreAllStyles.display, "none", "Restore All button should be hidden");
   ok(restoreOneButton.classList.contains("primary"), "Restore Tab button should have the primary class");
 
   let newTab2 = gBrowser.addTab();
@@ -420,7 +422,8 @@ add_task(function* test_hide_restore_all_button() {
   restoreAllButton = doc.getElementById("restoreAll");
   restoreOneButton = doc.getElementById("restoreTab");
 
-  ok(!restoreAllButton.hasAttribute("hidden"), "Restore All button should not be hidden");
+  restoreAllStyles = window.getComputedStyle(restoreAllButton);
+  isnot(restoreAllStyles.display, "none", "Restore All button should not be hidden");
   ok(!(restoreOneButton.classList.contains("primary")), "Restore Tab button should not have the primary class");
 
   yield BrowserTestUtils.closeWindow(win2);

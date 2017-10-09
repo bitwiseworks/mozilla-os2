@@ -142,21 +142,13 @@ public:
   /// bitmap has been fully decoded.)
   bool HasTransparency() const { return mDoesHaveTransparency; }
 
-  /// Force transparency from outside. (Used by the ICO decoder.)
-  void SetHasTransparency()
-  {
-    mMayHaveTransparency = true;
-    mDoesHaveTransparency = true;
-  }
-
-  virtual void WriteInternal(const char* aBuffer,
-                             uint32_t aCount) override;
-  virtual void BeforeFinishInternal() override;
-  virtual void FinishInternal() override;
+  LexerResult DoDecode(SourceBufferIterator& aIterator,
+                       IResumable* aOnResume) override;
+  nsresult BeforeFinishInternal() override;
+  nsresult FinishInternal() override;
 
 private:
   friend class DecoderFactory;
-  friend class nsICODecoder;
 
   enum class State {
     FILE_HEADER,
@@ -165,18 +157,17 @@ private:
     BITFIELDS,
     COLOR_TABLE,
     GAP,
+    AFTER_GAP,
     PIXEL_ROW,
     RLE_SEGMENT,
     RLE_DELTA,
     RLE_ABSOLUTE
   };
 
-  // This is the constructor used by DecoderFactory.
+  // This is the constructor used for normal BMP images.
   explicit nsBMPDecoder(RasterImage* aImage);
 
-  // This is the constructor used by nsICODecoder.
-  // XXX(seth): nsICODecoder is temporarily an exception to the rule that
-  //            decoders should only be instantiated via DecoderFactory.
+  // This is the constructor used for BMP resources in ICO images.
   nsBMPDecoder(RasterImage* aImage, uint32_t aDataOffset);
 
   // Helper constructor called by the other two.
@@ -194,6 +185,7 @@ private:
   LexerTransition<State> ReadBitfields(const char* aData, size_t aLength);
   LexerTransition<State> ReadColorTable(const char* aData, size_t aLength);
   LexerTransition<State> SkipGap();
+  LexerTransition<State> AfterGap();
   LexerTransition<State> ReadPixelRow(const char* aData);
   LexerTransition<State> ReadRLESegment(const char* aData);
   LexerTransition<State> ReadRLEDelta(const char* aData);

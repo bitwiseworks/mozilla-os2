@@ -10,72 +10,35 @@
 #define GrGLTexture_DEFINED
 
 #include "GrGpu.h"
-#include "GrGLRenderTarget.h"
+#include "GrTexture.h"
+#include "GrGLUtil.h"
 
-/**
- * A ref counted tex id that deletes the texture in its destructor.
- */
-class GrGLTexID : public SkRefCnt {
-public:
-    SK_DECLARE_INST_COUNT(GrGLTexID)
+class GrGLGpu;
 
-    GrGLTexID(const GrGLInterface* gl, GrGLuint texID, bool isWrapped)
-        : fGL(gl)
-        , fTexID(texID)
-        , fIsWrapped(isWrapped) {
-    }
-
-    virtual ~GrGLTexID() {
-        if (0 != fTexID && !fIsWrapped) {
-            GR_GL_CALL(fGL, DeleteTextures(1, &fTexID));
-        }
-    }
-
-    void abandon() { fTexID = 0; }
-    GrGLuint id() const { return fTexID; }
-
-private:
-    const GrGLInterface* fGL;
-    GrGLuint             fTexID;
-    bool                 fIsWrapped;
-
-    typedef SkRefCnt INHERITED;
-};
-
-////////////////////////////////////////////////////////////////////////////////
-
-
-class GrGLTexture : public GrTextureImpl {
-
+class GrGLTexture : public GrTexture {
 public:
     struct TexParams {
         GrGLenum fMinFilter;
         GrGLenum fMagFilter;
         GrGLenum fWrapS;
         GrGLenum fWrapT;
+        GrGLenum fMaxMipMapLevel;
         GrGLenum fSwizzleRGBA[4];
+        GrGLenum fSRGBDecode;
         void invalidate() { memset(this, 0xff, sizeof(TexParams)); }
     };
 
-    struct Desc : public GrTextureDesc {
-        GrGLuint        fTextureID;
-        bool            fIsWrapped;
+    struct IDDesc {
+        GrGLTextureInfo             fInfo;
+        GrBackendObjectOwnership    fOwnership;
     };
+    GrGLTexture(GrGLGpu*, SkBudgeted, const GrSurfaceDesc&, const IDDesc&);
+    GrGLTexture(GrGLGpu*, SkBudgeted, const GrSurfaceDesc&, const IDDesc&,
+                bool wasMipMapDataProvided);
 
-    // creates a texture that is also an RT
-    GrGLTexture(GrGpuGL* gpu,
-                const Desc& textureDesc,
-                const GrGLRenderTarget::Desc& rtDesc);
+    GrBackendObject getTextureHandle() const override;
 
-    // creates a non-RT texture
-    GrGLTexture(GrGpuGL* gpu,
-                const Desc& textureDesc);
-
-    virtual ~GrGLTexture() { this->release(); }
-
-    virtual GrBackendObject getTextureHandle() const SK_OVERRIDE;
-
-    virtual void textureParamsModified() SK_OVERRIDE { fTexParams.invalidate(); }
+    void textureParamsModified() override { fTexParams.invalidate(); }
 
     // These functions are used to track the texture parameters associated with the texture.
     const TexParams& getCachedTexParams(GrGpu::ResetTimestamp* timestamp) const {
@@ -89,23 +52,35 @@ public:
         fTexParamsTimestamp = timestamp;
     }
 
-    GrGLuint textureID() const { return (NULL != fTexIDObj.get()) ? fTexIDObj->id() : 0; }
+    GrGLuint textureID() const { return fInfo.fID; }
 
+    GrGLenum target() const { return fInfo.fTarget; }
+
+    static GrGLTexture* CreateWrapped(GrGLGpu*, const GrSurfaceDesc&, const IDDesc&);
 protected:
-    // overrides of GrTexture
-    virtual void onAbandon() SK_OVERRIDE;
-    virtual void onRelease() SK_OVERRIDE;
+    // Constructor for subclasses.
+    GrGLTexture(GrGLGpu*, const GrSurfaceDesc&, const IDDesc&);
+
+    enum Wrapped { kWrapped };
+    // Constructor for instances wrapping backend objects.
+    GrGLTexture(GrGLGpu*, Wrapped, const GrSurfaceDesc&, const IDDesc&);
+
+    void init(const GrSurfaceDesc&, const IDDesc&);
+
+    void onAbandon() override;
+    void onRelease() override;
+    void setMemoryBacking(SkTraceMemoryDump* traceMemoryDump,
+                          const SkString& dumpName) const override;
 
 private:
     TexParams                       fTexParams;
     GrGpu::ResetTimestamp           fTexParamsTimestamp;
-    SkAutoTUnref<GrGLTexID>         fTexIDObj;
+    // Holds the texture target and ID. A pointer to this may be shared to external clients for
+    // direct interaction with the GL object.
+    GrGLTextureInfo                 fInfo;
+    GrBackendObjectOwnership        fTextureIDOwnership;
 
-    void init(GrGpuGL* gpu,
-              const Desc& textureDesc,
-              const GrGLRenderTarget::Desc* rtDesc);
-
-    typedef GrTextureImpl INHERITED;
+    typedef GrTexture INHERITED;
 };
 
 #endif

@@ -16,23 +16,12 @@ Cu.import("resource://services-crypto/utils.js");
 Cu.import("resource://gre/modules/FxAccountsCommon.js");
 Cu.import("resource://gre/modules/Credentials.jsm");
 
-const HOST = Services.prefs.getCharPref("identity.fxaccounts.auth.uri");
-
-const STATUS_CODE_TO_OTHER_ERRORS_LABEL = {
-  400: 0,
-  401: 1,
-  403: 2,
-  410: 3,
-  411: 4,
-  413: 5,
-  429: 6,
-  500: 7,
-};
+const HOST_PREF = "identity.fxaccounts.auth.uri";
 
 const SIGNIN = "/account/login";
 const SIGNUP = "/account/create";
 
-this.FxAccountsClient = function(host = HOST) {
+this.FxAccountsClient = function(host = Services.prefs.getCharPref(HOST_PREF)) {
   this.host = host;
 
   // The FxA auth server expects requests to certain endpoints to be authorized
@@ -103,7 +92,7 @@ this.FxAccountsClient.prototype = {
     return Credentials.setup(email, password).then((creds) => {
       let data = {
         authPW: CommonUtils.bytesAsHex(creds.authPW),
-        email: creds.emailUTF8,
+        email: email,
       };
       let keys = getKeys ? "?keys=true" : "";
 
@@ -195,6 +184,27 @@ this.FxAccountsClient.prototype = {
   },
 
   /**
+   * Check the status of a session given a session token
+   *
+   * @param sessionTokenHex
+   *        The session token encoded in hex
+   * @return Promise
+   *        Resolves with a boolean indicating if the session is still valid
+   */
+  sessionStatus: function (sessionTokenHex) {
+    return this._request("/session/status", "GET",
+      deriveHawkCredentials(sessionTokenHex, "sessionToken")).then(
+        () => Promise.resolve(true),
+        error => {
+          if (isInvalidTokenError(error)) {
+            return Promise.resolve(false);
+          }
+          throw error;
+        }
+      );
+  },
+
+  /**
    * Destroy the current session with the Firefox Account API server
    *
    * @param sessionTokenHex
@@ -204,7 +214,7 @@ this.FxAccountsClient.prototype = {
   signOut: function (sessionTokenHex, options = {}) {
     let path = "/session/destroy";
     if (options.service) {
-      path += "?service=" + options.service;
+      path += "?service=" + encodeURIComponent(options.service);
     }
     return this._request(path, "POST",
       deriveHawkCredentials(sessionTokenHex, "sessionToken"));
@@ -217,8 +227,13 @@ this.FxAccountsClient.prototype = {
    *        The current session token encoded in hex
    * @return Promise
    */
-  recoveryEmailStatus: function (sessionTokenHex) {
-    return this._request("/recovery_email/status", "GET",
+  recoveryEmailStatus: function (sessionTokenHex, options = {}) {
+    let path = "/recovery_email/status";
+    if (options.reason) {
+      path += "?reason=" + encodeURIComponent(options.reason);
+    }
+
+    return this._request(path, "GET",
       deriveHawkCredentials(sessionTokenHex, "sessionToken"));
   },
 
@@ -359,6 +374,172 @@ this.FxAccountsClient.prototype = {
     );
   },
 
+  /**
+   * Register a new device
+   *
+   * @method registerDevice
+   * @param  sessionTokenHex
+   *         Session token obtained from signIn
+   * @param  name
+   *         Device name
+   * @param  type
+   *         Device type (mobile|desktop)
+   * @param  [options]
+   *         Extra device options
+   * @param  [options.pushCallback]
+   *         `pushCallback` push endpoint callback
+   * @param  [options.pushPublicKey]
+   *         `pushPublicKey` push public key (URLSafe Base64 string)
+   * @param  [options.pushAuthKey]
+   *         `pushAuthKey` push auth secret (URLSafe Base64 string)
+   * @return Promise
+   *         Resolves to an object:
+   *         {
+   *           id: Device identifier
+   *           createdAt: Creation time (milliseconds since epoch)
+   *           name: Name of device
+   *           type: Type of device (mobile|desktop)
+   *         }
+   */
+  registerDevice(sessionTokenHex, name, type, options = {}) {
+    let path = "/account/device";
+
+    let creds = deriveHawkCredentials(sessionTokenHex, "sessionToken");
+    let body = { name, type };
+
+    if (options.pushCallback) {
+      body.pushCallback = options.pushCallback;
+    }
+    if (options.pushPublicKey && options.pushAuthKey) {
+      body.pushPublicKey = options.pushPublicKey;
+      body.pushAuthKey = options.pushAuthKey;
+    }
+
+    return this._request(path, "POST", creds, body);
+  },
+
+  /**
+   * Sends a message to other devices. Must conform with the push payload schema:
+   * https://github.com/mozilla/fxa-auth-server/blob/master/docs/pushpayloads.schema.json
+   *
+   * @method notifyDevice
+   * @param  sessionTokenHex
+   *         Session token obtained from signIn
+   * @param  deviceIds
+   *         Devices to send the message to
+   * @param  payload
+   *         Data to send with the message
+   * @return Promise
+   *         Resolves to an empty object:
+   *         {}
+   */
+  notifyDevices(sessionTokenHex, deviceIds, payload, TTL = 0) {
+    const body = {
+      to: deviceIds,
+      payload,
+      TTL
+    };
+    return this._request("/account/devices/notify", "POST",
+      deriveHawkCredentials(sessionTokenHex, "sessionToken"), body);
+  },
+
+  /**
+   * Update the session or name for an existing device
+   *
+   * @method updateDevice
+   * @param  sessionTokenHex
+   *         Session token obtained from signIn
+   * @param  id
+   *         Device identifier
+   * @param  name
+   *         Device name
+   * @param  [options]
+   *         Extra device options
+   * @param  [options.pushCallback]
+   *         `pushCallback` push endpoint callback
+   * @param  [options.pushPublicKey]
+   *         `pushPublicKey` push public key (URLSafe Base64 string)
+   * @param  [options.pushAuthKey]
+   *         `pushAuthKey` push auth secret (URLSafe Base64 string)
+   * @return Promise
+   *         Resolves to an object:
+   *         {
+   *           id: Device identifier
+   *           name: Device name
+   *         }
+   */
+  updateDevice(sessionTokenHex, id, name, options = {}) {
+    let path = "/account/device";
+
+    let creds = deriveHawkCredentials(sessionTokenHex, "sessionToken");
+    let body = { id, name };
+    if (options.pushCallback) {
+      body.pushCallback = options.pushCallback;
+    }
+    if (options.pushPublicKey && options.pushAuthKey) {
+      body.pushPublicKey = options.pushPublicKey;
+      body.pushAuthKey = options.pushAuthKey;
+    }
+
+    return this._request(path, "POST", creds, body);
+  },
+
+  /**
+   * Delete a device and its associated session token, signing the user
+   * out of the server.
+   *
+   * @method signOutAndDestroyDevice
+   * @param  sessionTokenHex
+   *         Session token obtained from signIn
+   * @param  id
+   *         Device identifier
+   * @param  [options]
+   *         Options object
+   * @param  [options.service]
+   *         `service` query parameter
+   * @return Promise
+   *         Resolves to an empty object:
+   *         {}
+   */
+  signOutAndDestroyDevice(sessionTokenHex, id, options = {}) {
+    let path = "/account/device/destroy";
+
+    if (options.service) {
+      path += "?service=" + encodeURIComponent(options.service);
+    }
+
+    let creds = deriveHawkCredentials(sessionTokenHex, "sessionToken");
+    let body = { id };
+
+    return this._request(path, "POST", creds, body);
+  },
+
+  /**
+   * Get a list of currently registered devices
+   *
+   * @method getDeviceList
+   * @param  sessionTokenHex
+   *         Session token obtained from signIn
+   * @return Promise
+   *         Resolves to an array of objects:
+   *         [
+   *           {
+   *             id: Device id
+   *             isCurrentDevice: Boolean indicating whether the item
+   *                              represents the current device
+   *             name: Device name
+   *             type: Device type (mobile|desktop)
+   *           },
+   *           ...
+   *         ]
+   */
+  getDeviceList(sessionTokenHex) {
+    let path = "/account/devices";
+    let creds = deriveHawkCredentials(sessionTokenHex, "sessionToken");
+
+    return this._request(path, "GET", creds, {});
+  },
+
   _clearBackoff: function() {
       this.backoffError = null;
   },
@@ -419,18 +600,6 @@ this.FxAccountsClient.prototype = {
             this,
             "fxaBackoffTimer"
            );
-        }
-        if (error.errno == ERRNO_UNVERIFIED_ACCOUNT) {
-          Services.telemetry.getKeyedHistogramById(
-            "FXA_UNVERIFIED_ACCOUNT_ERRORS").add(path);
-        } else if (isInvalidTokenError(error)) {
-          Services.telemetry.getKeyedHistogramById(
-            "FXA_HAWK_ERRORS").add(path);
-        } else if (error.code >= 500 || error.code in STATUS_CODE_TO_OTHER_ERRORS_LABEL) {
-          let label = STATUS_CODE_TO_OTHER_ERRORS_LABEL[
-            error.code >= 500 ? 500 : error.code];
-          Services.telemetry.getKeyedHistogramById(
-            "FXA_SERVER_ERRORS").add(path, label);
         }
         deferred.reject(error);
       }

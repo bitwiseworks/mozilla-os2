@@ -6,8 +6,8 @@
 #include "nsGfxButtonControlFrame.h"
 #include "nsIFormControl.h"
 #include "nsGkAtoms.h"
-#include "nsAutoPtr.h"
-#include "nsStyleSet.h"
+#include "mozilla/StyleSetHandle.h"
+#include "mozilla/StyleSetHandleInlines.h"
 #include "nsContentUtils.h"
 // MouseEvent suppression in PP
 #include "nsContentList.h"
@@ -90,7 +90,7 @@ nsGfxButtonControlFrame::CreateFrameFor(nsIContent*      aContent)
     nsPresContext* presContext = PresContext();
     RefPtr<nsStyleContext> textStyleContext;
     textStyleContext = presContext->StyleSet()->
-      ResolveStyleForNonElement(mStyleContext);
+      ResolveStyleForText(mTextContent, mStyleContext);
 
     newFrame = NS_NewTextFrame(presContext->PresShell(), textStyleContext);
     // initialize the text frame
@@ -229,8 +229,9 @@ nsGfxButtonControlFrame::HandleEvent(nsPresContext* aPresContext,
 
   // do we have user-input style?
   const nsStyleUserInterface* uiStyle = StyleUserInterface();
-  if (uiStyle->mUserInput == NS_STYLE_USER_INPUT_NONE || uiStyle->mUserInput == NS_STYLE_USER_INPUT_DISABLED)
+  if (uiStyle->mUserInput == StyleUserInput::None ||
+      uiStyle->mUserInput == StyleUserInput::Disabled) {
     return nsFrame::HandleEvent(aPresContext, aEvent, aEventStatus);
-  
+  }
   return NS_OK;
 }

@@ -22,6 +22,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "Prefetcher",
 XPCOMUtils.defineLazyModuleGetter(this, "CompatWarning",
                                   "resource://gre/modules/CompatWarning.jsm");
 
+Cu.permitCPOWsInScope(this);
+
 // Similar to Python. Returns dict[key] if it exists. Otherwise,
 // sets dict[key] to default_ and returns default_.
 function setDefault(dict, key, default_)
@@ -51,7 +53,7 @@ var NotificationTracker = {
   init: function() {
     let ppmm = Cc["@mozilla.org/parentprocessmessagemanager;1"]
                .getService(Ci.nsIMessageBroadcaster);
-    ppmm.addMessageListener("Addons:GetNotifications", this);
+    ppmm.initialProcessData.remoteAddonsNotificationPaths = this._paths;
   },
 
   add: function(path) {
@@ -79,12 +81,6 @@ var NotificationTracker = {
                .getService(Ci.nsIMessageBroadcaster);
     ppmm.broadcastAsyncMessage("Addons:ChangeNotification", {path: path, count: tracked._count});
   },
-
-  receiveMessage: function(msg) {
-    if (msg.name == "Addons:GetNotifications") {
-      return this._paths;
-    }
-  }
 };
 NotificationTracker.init();
 
@@ -132,8 +128,8 @@ var ContentPolicyParent = {
     switch (aMessage.name) {
       case "Addons:ContentPolicy:Run":
         return this.shouldLoad(aMessage.data, aMessage.objects);
-        break;
     }
+    return undefined;
   },
 
   shouldLoad: function(aData, aObjects) {
@@ -229,8 +225,8 @@ var AboutProtocolParent = {
         return this.getURIFlags(msg);
       case "Addons:AboutProtocol:OpenChannel":
         return this.openChannel(msg);
-        break;
     }
+    return undefined;
   },
 
   getURIFlags: function(msg) {
@@ -241,6 +237,7 @@ var AboutProtocolParent = {
       return module.getURIFlags(uri);
     } catch (e) {
       Cu.reportError(e);
+      return undefined;
     }
   },
 
@@ -254,12 +251,33 @@ var AboutProtocolParent = {
     }
 
     let uri = BrowserUtils.makeURI(msg.data.uri);
-    let contractID = msg.data.contractID;
-    let loadingPrincipal = msg.data.loadingPrincipal;
-    let securityFlags = msg.data.securityFlags;
-    let contentPolicyType = msg.data.contentPolicyType;
+    let channelParams;
+    if (msg.data.contentPolicyType === Ci.nsIContentPolicy.TYPE_DOCUMENT) {
+      // For TYPE_DOCUMENT loads, we cannot recreate the loadinfo here in the
+      // parent. In that case, treat this as a chrome (addon)-requested
+      // subload. When we use the data in the child, we'll load it into the
+      // correctly-principaled document.
+      channelParams = {
+        uri,
+        contractID: msg.data.contractID,
+        loadingPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+        securityFlags: Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
+        contentPolicyType: Ci.nsIContentPolicy.TYPE_OTHER
+      };
+    } else {
+      // We can recreate the loadinfo here in the parent for non TYPE_DOCUMENT
+      // loads.
+      channelParams = {
+        uri,
+        contractID: msg.data.contractID,
+        loadingPrincipal: msg.data.loadingPrincipal,
+        securityFlags: msg.data.securityFlags,
+        contentPolicyType: msg.data.contentPolicyType
+      };
+    }
+
     try {
-      let channel = NetUtil.newChannel({uri, loadingPrincipal, securityFlags, contentPolicyType});
+      let channel = NetUtil.newChannel(channelParams);
 
       // We're not allowed to set channel.notificationCallbacks to a
       // CPOW, since the setter for notificationCallbacks is in C++,
@@ -271,7 +289,7 @@ var AboutProtocolParent = {
       } else {
         channel.loadGroup = null;
       }
-      let stream = channel.open();
+      let stream = channel.open2();
       let data = NetUtil.readInputStreamToString(stream, stream.available(), {});
       return {
         data: data,
@@ -279,6 +297,7 @@ var AboutProtocolParent = {
       };
     } catch (e) {
       Cu.reportError(e);
+      return undefined;
     }
   },
 };
@@ -580,15 +599,16 @@ EventTargetParent.init();
 var filteringListeners = new WeakMap();
 function makeFilteringListener(eventType, listener)
 {
-  if (filteringListeners.has(listener)) {
-    return filteringListeners.get(listener);
-  }
-
   // Some events are actually targeted at the <browser> element
   // itself, so we only handle the ones where know that won't happen.
   let eventTypes = ["mousedown", "mouseup", "click"];
-  if (eventTypes.indexOf(eventType) == -1) {
+  if (!eventTypes.includes(eventType) || !listener ||
+      (typeof listener != "object" && typeof listener != "function")) {
     return listener;
+  }
+
+  if (filteringListeners.has(listener)) {
+    return filteringListeners.get(listener);
   }
 
   function filter(event) {
@@ -748,18 +768,16 @@ ComponentsUtilsInterposition.methods.Sandbox =
         array[i] = principals[i];
       }
       return SandboxParent.makeContentSandbox(addon, chromeGlobal, array, ...rest);
-    } else {
-      return Components.utils.Sandbox(principals, ...rest);
     }
+    return Components.utils.Sandbox(principals, ...rest);
   };
 
 ComponentsUtilsInterposition.methods.evalInSandbox =
   function(addon, target, code, sandbox, ...rest) {
     if (sandbox && Cu.isCrossProcessWrapper(sandbox)) {
       return SandboxParent.evalInSandbox(code, sandbox, ...rest);
-    } else {
-      return Components.utils.evalInSandbox(code, sandbox, ...rest);
     }
+    return Components.utils.evalInSandbox(code, sandbox, ...rest);
   };
 
 // This interposition handles cases where an add-on tries to import a
@@ -851,7 +869,7 @@ function getContentDocument(addon, browser)
     return doc;
   }
 
-  return browser.contentDocumentAsCPOW;
+  return browser.contentWindowAsCPOW.document;
 }
 
 function getSessionHistory(browser) {
@@ -861,7 +879,7 @@ function getSessionHistory(browser) {
     // We may not have any messages from this tab yet.
     return null;
   }
-  return remoteChromeGlobal.docShell.sessionHistory;
+  return remoteChromeGlobal.docShell.QueryInterface(Ci.nsIWebNavigation).sessionHistory;
 }
 
 RemoteBrowserElementInterposition.getters.contentDocument = function(addon, target) {

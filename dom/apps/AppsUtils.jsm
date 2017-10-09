@@ -16,9 +16,6 @@ Cu.import("resource://gre/modules/Promise.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
   "resource://gre/modules/FileUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "WebappOSUtils",
-  "resource://gre/modules/WebappOSUtils.jsm");
-
 XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
   "resource://gre/modules/NetUtil.jsm");
 
@@ -54,15 +51,6 @@ mozIApplication.prototype = {
     let perm = Services.perms.testExactPermissionFromPrincipal(this.principal,
                                                                aPermission);
     return (perm === Ci.nsIPermissionManager.ALLOW_ACTION);
-  },
-
-  hasWidgetPage: function(aPageURL) {
-    let uri = Services.io.newURI(aPageURL, null, null);
-    let filepath = AppsUtils.getFilePath(uri.path);
-    let eliminatedUri = Services.io.newURI(uri.prePath + filepath, null, null);
-    let equalCriterion = aUrl => Services.io.newURI(aUrl, null, null)
-                                            .equals(eliminatedUri);
-    return this.widgetPages.find(equalCriterion) !== undefined;
   },
 
   get principal() {
@@ -125,8 +113,6 @@ function _setAppProperties(aObj, aApp) {
   aObj.storeId = aApp.storeId || "";
   aObj.storeVersion = aApp.storeVersion || 0;
   aObj.role = aApp.role || "";
-  aObj.redirects = aApp.redirects;
-  aObj.widgetPages = aApp.widgetPages || [];
   aObj.kind = aApp.kind;
   aObj.enabled = aApp.enabled !== undefined ? aApp.enabled : true;
   aObj.sideloaded = aApp.sideloaded;
@@ -135,10 +121,6 @@ function _setAppProperties(aObj, aApp) {
     aApp.blockedStatus !== undefined ? aApp.blockedStatus
                                      : Ci.nsIBlocklistService.STATE_NOT_BLOCKED;
   aObj.blocklistId = aApp.blocklistId;
-#ifdef MOZ_B2GDROID
-  aObj.android_packagename = aApp.android_packagename;
-  aObj.android_classname = aApp.android_classname;
-#endif
 }
 
 this.AppsUtils = {
@@ -149,23 +131,20 @@ this.AppsUtils = {
     return obj;
   },
 
-  // Creates a nsILoadContext object with a given appId and isBrowser flag.
-  createLoadContext: function createLoadContext(aAppId, aIsBrowser) {
+  // Creates a nsILoadContext object with a given appId and inIsolatedMozBrowser
+  // flag.
+  createLoadContext: function createLoadContext(aAppId, aInIsolatedMozBrowser) {
     return {
        associatedWindow: null,
        topWindow : null,
        appId: aAppId,
-       isInBrowserElement: aIsBrowser,
+       isInIsolatedMozBrowserElement: aInIsolatedMozBrowser,
        originAttributes: {
          appId: aAppId,
-         inBrowser: aIsBrowser
+         inIsolatedMozBrowser: aInIsolatedMozBrowser
        },
        usePrivateBrowsing: false,
        isContent: false,
-
-       isAppOfType: function(appType) {
-         throw Cr.NS_ERROR_NOT_IMPLEMENTED;
-       },
 
        QueryInterface: XPCOMUtils.generateQI([Ci.nsILoadContext,
                                               Ci.nsIInterfaceRequestor,
@@ -226,7 +205,7 @@ this.AppsUtils = {
         deferred.resolve(file);
       }
     });
-    aRequestChannel.asyncOpen(listener, null);
+    aRequestChannel.asyncOpen2(listener);
 
     return deferred.promise;
   },
@@ -283,43 +262,6 @@ this.AppsUtils = {
     return Ci.nsIScriptSecurityManager.NO_APP_ID;
   },
 
-  getManifestCSPByLocalId: function getManifestCSPByLocalId(aApps, aLocalId) {
-    debug("getManifestCSPByLocalId " + aLocalId);
-    for (let id in aApps) {
-      let app = aApps[id];
-      if (app.localId == aLocalId) {
-        return ( app.csp || "" );
-      }
-    }
-
-    return "";
-  },
-
-  getDefaultCSPByLocalId: function(aApps, aLocalId) {
-    debug("getDefaultCSPByLocalId " + aLocalId);
-    for (let id in aApps) {
-      let app = aApps[id];
-      if (app.localId == aLocalId) {
-        // Use the app status to choose the right default CSP.
-        try {
-          switch (app.appStatus) {
-            case Ci.nsIPrincipal.APP_STATUS_CERTIFIED:
-              return Services.prefs.getCharPref("security.apps.certified.CSP.default");
-              break;
-            case Ci.nsIPrincipal.APP_STATUS_PRIVILEGED:
-              return Services.prefs.getCharPref("security.apps.privileged.CSP.default");
-              break;
-            case Ci.nsIPrincipal.APP_STATUS_INSTALLED:
-              return "";
-              break;
-          }
-        } catch(e) {}
-      }
-    }
-
-    return "default-src 'self'; object-src 'none'";
-  },
-
   getAppByLocalId: function getAppByLocalId(aApps, aLocalId) {
     debug("getAppByLocalId " + aLocalId);
     for (let id in aApps) {
@@ -342,6 +284,10 @@ this.AppsUtils = {
     }
 
     return "";
+  },
+
+  areAnyAppsInstalled: function(aApps) {
+    return Object.getOwnPropertyNames(aApps).length > 0;
   },
 
   getCoreAppsBasePath: function getCoreAppsBasePath() {
@@ -371,16 +317,7 @@ this.AppsUtils = {
 #endif
     debug(app.basePath + " isCoreApp: " + isCoreApp);
 
-    // Before bug 910473, this is a temporary workaround to get correct path
-    // from child process in mochitest.
-    let prefName = "dom.mozApps.auto_confirm_install";
-    if (Services.prefs.prefHasUserValue(prefName) &&
-        Services.prefs.getBoolPref(prefName)) {
-      return { "path": app.basePath + "/" + app.id,
-               "isCoreApp": isCoreApp };
-    }
-
-    return { "path": WebappOSUtils.getPackagePath(app),
+    return { "path": app.basePath + "/" + app.id,
              "isCoreApp": isCoreApp };
   },
 
@@ -624,35 +561,6 @@ this.AppsUtils = {
   },
 
   /**
-   * Determines if an update or a factory reset occured.
-   */
-  isFirstRun: function isFirstRun(aPrefBranch) {
-    let savedmstone = null;
-    try {
-      savedmstone = aPrefBranch.getCharPref("gecko.mstone");
-    } catch (e) {}
-
-    let mstone = Services.appinfo.platformVersion;
-
-    let savedBuildID = null;
-    try {
-      savedBuildID = aPrefBranch.getCharPref("gecko.buildID");
-    } catch (e) {}
-
-    let buildID = Services.appinfo.platformBuildID;
-
-    aPrefBranch.setCharPref("gecko.mstone", mstone);
-    aPrefBranch.setCharPref("gecko.buildID", buildID);
-
-    if ((mstone != savedmstone) || (buildID != savedBuildID)) {
-      aPrefBranch.setBoolPref("dom.apps.reset-permissions", false);
-      return true;
-    } else {
-      return false;
-    }
-  },
-
-  /**
    * Check if two manifests have the same set of properties and that the
    * values of these properties are the same, in each locale.
    * Manifests here are raw json ones.
@@ -787,7 +695,7 @@ this.AppsUtils = {
     }
 
     // Convert the binary hash data to a hex string.
-    return [toHexString(hash.charCodeAt(i)) for (i in hash)].join("");
+    return Array.from(hash, (c, i) => toHexString(hash.charCodeAt(i))).join("");
   },
 
   // Returns the hash for a JS object.
@@ -850,7 +758,7 @@ ManifestHelper.prototype = {
   _localeProp: function(aProp) {
     if (this._localeRoot[aProp] != undefined)
       return this._localeRoot[aProp];
-    return this._manifest[aProp];
+    return (aProp in this._manifest) ? this._manifest[aProp] : undefined;
   },
 
   get name() {
@@ -897,10 +805,6 @@ ManifestHelper.prototype = {
 
   get package_path() {
     return this._localeProp("package_path");
-  },
-
-  get widgetPages() {
-    return this._localeProp("widgetPages");
   },
 
   get size() {

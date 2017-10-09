@@ -3,29 +3,18 @@
 const searchbar = document.getElementById("searchbar");
 const textbox = searchbar._textbox;
 const searchPopup = document.getElementById("PopupSearchAutoComplete");
+const oneOffsContainer =
+  document.getAnonymousElementByAttribute(searchPopup, "anonid",
+                                          "search-one-off-buttons");
 
 const kValues = ["foo1", "foo2", "foo3"];
 const kUserValue = "foo";
-
-// Get an array of the one-off buttons.
-function getOneOffs() {
-  let oneOffs = [];
-  let oneOff = document.getAnonymousElementByAttribute(searchPopup, "anonid",
-                                                       "search-panel-one-offs");
-  for (oneOff = oneOff.firstChild; oneOff; oneOff = oneOff.nextSibling) {
-    if (oneOff.classList.contains("dummy"))
-      break;
-    oneOffs.push(oneOff);
-  }
-
-  return oneOffs;
-}
 
 function getOpenSearchItems() {
   let os = [];
 
   let addEngineList =
-    document.getAnonymousElementByAttribute(searchPopup, "anonid",
+    document.getAnonymousElementByAttribute(oneOffsContainer, "anonid",
                                             "add-engines");
   for (let item = addEngineList.firstChild; item; item = item.nextSibling)
     os.push(item);
@@ -381,20 +370,8 @@ add_task(function* test_tab_and_arrows() {
 });
 
 add_task(function* test_open_search() {
-  let tab = gBrowser.addTab();
-  gBrowser.selectedTab = tab;
-
-  let deferred = Promise.defer();
-  let browser = gBrowser.selectedBrowser;
-  browser.addEventListener("load", function onload() {
-    browser.removeEventListener("load", onload, true);
-    deferred.resolve();
-  }, true);
-
   let rootDir = getRootDirectory(gTestPath);
-  content.location = rootDir + "opensearch.html";
-
-  yield deferred.promise;
+  yield BrowserTestUtils.openNewForegroundTab(gBrowser, rootDir + "opensearch.html");
 
   let promise = promiseEvent(searchPopup, "popupshown");
   info("Opening search panel");

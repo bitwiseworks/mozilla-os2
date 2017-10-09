@@ -12,6 +12,8 @@
 
 namespace mozilla { namespace psm {
 
+typedef mozilla::pkix::Result Result;
+
 class OCSPVerificationTrustDomain : public mozilla::pkix::TrustDomain
 {
 public:
@@ -58,6 +60,9 @@ public:
                    mozilla::pkix::EndEntityOrCA endEntityOrCA,
                    mozilla::pkix::KeyPurposeId keyPurpose) override;
 
+  virtual Result NetscapeStepUpMatchesServerAuth(mozilla::pkix::Time notBefore,
+                                         /*out*/ bool& matches) override;
+
   virtual Result CheckRevocation(
                    mozilla::pkix::EndEntityOrCA endEntityOrCA,
                    const mozilla::pkix::CertID& certID,
@@ -69,6 +74,10 @@ public:
 
   virtual Result IsChainValid(const mozilla::pkix::DERArray& certChain,
                               mozilla::pkix::Time time) override;
+
+  virtual void NoteAuxiliaryExtension(
+                   mozilla::pkix::AuxiliaryExtension extension,
+                   mozilla::pkix::Input extensionData) override;
 
 private:
   NSSCertDBTrustDomain& mCertDBTrustDomain;

@@ -29,7 +29,6 @@
 #include "nsLayoutCID.h"
 #include "nsAttrAndChildArray.h"
 #include "nsGkAtoms.h"
-#include "nsAutoPtr.h"
 #include "nsStyledElement.h"
 #include "nsIFrameLoader.h"
 #include "nsFrameLoader.h"
@@ -54,6 +53,7 @@ class StyleRule;
 } // namespace css
 namespace dom {
 class BoxObject;
+class HTMLIFrameElement;
 } // namespace dom
 } // namespace mozilla
 
@@ -235,23 +235,20 @@ public:
 
     void Set(JSScript* aObject);
 
-    // It's safe to return a handle because we trace mScriptObject, no one ever
-    // uses the handle (or the script object) past the point at which the
-    // nsXULPrototypeScript dies, and we can't get memmoved so the
-    // &mScriptObject pointer can't go stale.
-    JS::Handle<JSScript*> GetScriptObject()
+    bool HasScriptObject()
     {
-        // Calling fromMarkedLocation() is safe because we trace mScriptObject in
-        // TraceScriptObject() and because its value is never changed after it has
-        // been set.
-        return JS::Handle<JSScript*>::fromMarkedLocation(mScriptObject.address());
+        // Conversion to bool doesn't trigger mScriptObject's read barrier.
+        return mScriptObject;
+    }
+
+    JSScript* GetScriptObject()
+    {
+        return mScriptObject;
     }
 
     void TraceScriptObject(JSTracer* aTrc)
     {
-        if (mScriptObject) {
-            JS_CallScriptTracer(aTrc, &mScriptObject, "active window XUL prototype script");
-        }
+        JS::TraceEdge(aTrc, &mScriptObject, "active window XUL prototype script");
     }
 
     void Trace(const TraceCallbacks& aCallbacks, void* aClosure)
@@ -343,6 +340,8 @@ class nsXULElement final : public nsStyledElement,
                            public nsIDOMXULElement
 {
 public:
+    using Element::Blur;
+    using Element::Focus;
     explicit nsXULElement(already_AddRefed<mozilla::dom::NodeInfo> aNodeInfo);
 
     static nsresult
@@ -411,9 +410,10 @@ public:
     virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const override;
     virtual mozilla::EventStates IntrinsicState() const override;
 
-    nsresult GetFrameLoader(nsIFrameLoader** aFrameLoader);
+    nsresult GetFrameLoaderXPCOM(nsIFrameLoader** aFrameLoader);
+    nsresult GetParentApplication(mozIApplication** aApplication);
+    void PresetOpenerWindow(mozIDOMWindowProxy* aWindow, ErrorResult& aRv);
     nsresult SetIsPrerendered();
-    nsresult SwapFrameLoaders(nsIFrameLoaderOwner* aOtherOwner);
 
     virtual void RecompileScriptEventListeners() override;
 
@@ -563,8 +563,6 @@ public:
     already_AddRefed<nsIRDFResource> GetResource(mozilla::ErrorResult& rv);
     nsIControllers* GetControllers(mozilla::ErrorResult& rv);
     already_AddRefed<mozilla::dom::BoxObject> GetBoxObject(mozilla::ErrorResult& rv);
-    void Focus(mozilla::ErrorResult& rv);
-    void Blur(mozilla::ErrorResult& rv);
     void Click(mozilla::ErrorResult& rv);
     // The XPCOM DoCommand never fails, so it's OK for us.
     already_AddRefed<nsINodeList>
@@ -577,7 +575,13 @@ public:
                                mozilla::ErrorResult& rv);
     // Style() inherited from nsStyledElement
     already_AddRefed<nsFrameLoader> GetFrameLoader();
-    void SwapFrameLoaders(nsXULElement& aOtherOwner, mozilla::ErrorResult& rv);
+    void InternalSetFrameLoader(nsIFrameLoader* aNewFrameLoader);
+    void SwapFrameLoaders(mozilla::dom::HTMLIFrameElement& aOtherLoaderOwner,
+                          mozilla::ErrorResult& rv);
+    void SwapFrameLoaders(nsXULElement& aOtherLoaderOwner,
+                          mozilla::ErrorResult& rv);
+    void SwapFrameLoaders(nsIFrameLoaderOwner* aOtherLoaderOwner,
+                          mozilla::ErrorResult& rv);
 
     nsINode* GetScopeChainParent() const override
     {
@@ -613,7 +617,7 @@ protected:
 
         void Traverse(nsCycleCollectionTraversalCallback &cb);
 
-        RefPtr<nsFrameLoader> mFrameLoader;
+        nsCOMPtr<nsISupports> mFrameLoaderOrOpener;
     };
 
     virtual nsINode::nsSlots* CreateSlots() override;
@@ -647,7 +651,7 @@ protected:
     virtual mozilla::EventListenerManager*
       GetEventListenerManagerForAttr(nsIAtom* aAttrName,
                                      bool* aDefer) override;
-  
+
     /**
      * Add a listener for the specified attribute, if appropriate.
      */
@@ -674,7 +678,7 @@ protected:
     // appropriate value.
     nsIControllers *Controllers() {
       nsDOMSlots* slots = GetExistingDOMSlots();
-      return slots ? slots->mControllers : nullptr; 
+      return slots ? slots->mControllers : nullptr;
     }
 
     void UnregisterAccessKey(const nsAString& aOldValue);

@@ -4,7 +4,7 @@
 'use strict';
 
 var {
-  Loader, main, unload, parseStack, generateMap, resolve, join,
+  Loader, main, unload, parseStack, resolve, join,
   Require, Module
 } = require('toolkit/loader');
 var { readURI } = require('sdk/net/url');
@@ -35,8 +35,8 @@ exports['test resolve'] = function (assert) {
   assert.equal(resolve('./utils/file.js', cuddlefish_id), 'sdk/loader/utils/file.js');
 
   assert.equal(resolve('..//index.js', './dir/c.js'), './index.js');
-  assert.equal(resolve('../../gre/modules/XPCOMUtils.jsm', 'resource://thing/utils/file.js'), 'resource://gre/modules/XPCOMUtils.jsm');
-  assert.equal(resolve('../../gre/modules/XPCOMUtils.jsm', 'chrome://thing/utils/file.js'), 'chrome://gre/modules/XPCOMUtils.jsm');
+  assert.equal(resolve('../modules/XPCOMUtils.jsm', 'resource://gre/utils/file.js'), 'resource://gre/modules/XPCOMUtils.jsm');
+  assert.equal(resolve('../modules/XPCOMUtils.jsm', 'chrome://gre/utils/file.js'), 'chrome://gre/modules/XPCOMUtils.jsm');
   assert.equal(resolve('../../a/b/c.json', 'file:///thing/utils/file.js'), 'file:///a/b/c.json');
 
   // Does not change absolute paths
@@ -351,9 +351,38 @@ exports['test console global by default'] = function (assert) {
 exports['test shared globals'] = function(assert) {
   let uri = root + '/fixtures/loader/cycles/';
   let loader = Loader({ paths: { '': uri }, sharedGlobal: true,
+                        sharedGlobalBlocklist: ['b'] });
+
+  let program = main(loader, 'main');
+
+  // As it is hard to verify what is the global of an object
+  // (due to wrappers) we check that we see the `foo` symbol
+  // being manually injected into the shared global object
+  loader.sharedGlobalSandbox.foo = true;
+
+  let m = loader.sandboxes[uri + 'main.js'];
+  let a = loader.sandboxes[uri + 'a.js'];
+  let b = loader.sandboxes[uri + 'b.js'];
+
+  assert.ok(Cu.getGlobalForObject(m).foo, "main is shared");
+  assert.ok(Cu.getGlobalForObject(a).foo, "a is shared");
+  assert.ok(!Cu.getGlobalForObject(b).foo, "b isn't shared");
+
+  unload(loader);
+}
+
+exports['test deprecated shared globals exception name'] = function(assert) {
+  let uri = root + '/fixtures/loader/cycles/';
+  let loader = Loader({ paths: { '': uri }, sharedGlobal: true,
                         sharedGlobalBlacklist: ['b'] });
 
   let program = main(loader, 'main');
+
+  assert.ok(loader.sharedGlobalBlocklist.includes("b"), "b should be in the blocklist");
+  assert.equal(loader.sharedGlobalBlocklist.length, loader.sharedGlobalBlacklist.length,
+               "both blocklists should have the same number of items.");
+  assert.equal(loader.sharedGlobalBlocklist.join(","), loader.sharedGlobalBlacklist.join(","),
+               "both blocklists should have the same items.");
 
   // As it is hard to verify what is the global of an object
   // (due to wrappers) we check that we see the `foo` symbol
@@ -572,7 +601,7 @@ exports['test user global'] = function(assert) {
 exports['test custom require caching'] = function(assert) {
   const loader = Loader({
     paths: { '': root + "/" },
-    require: (id, require) => {
+    requireHook: (id, require) => {
       // Just load it normally
       return require(id);
     }
@@ -594,7 +623,7 @@ exports['test caching when proxying a loader'] = function(assert) {
   const parentRequire = require;
   const loader = Loader({
     paths: { '': root + "/" },
-    require: (id, childRequire) => {
+    requireHook: (id, childRequire) => {
       if(id === 'gimmejson') {
         return childRequire('fixtures/loader/json/mutation.json')
       }

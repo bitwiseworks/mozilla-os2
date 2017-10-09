@@ -7,6 +7,7 @@
 #ifndef nsXBLPrototypeBinding_h__
 #define nsXBLPrototypeBinding_h__
 
+#include "nsAutoPtr.h"
 #include "nsClassHashtable.h"
 #include "nsCOMArray.h"
 #include "nsCOMPtr.h"
@@ -19,6 +20,7 @@
 #include "nsXBLPrototypeHandler.h"
 #include "nsXBLPrototypeResources.h"
 #include "mozilla/WeakPtr.h"
+#include "mozilla/StyleSheet.h"
 
 class nsIAtom;
 class nsIContent;
@@ -26,10 +28,6 @@ class nsIDocument;
 class nsXBLAttributeEntry;
 class nsXBLBinding;
 class nsXBLProtoImplField;
-
-namespace mozilla {
-class CSSStyleSheet;
-} // namespace mozilla
 
 // *********************************************************************/
 // The XBLPrototypeBinding class
@@ -122,13 +120,13 @@ public:
 
   void SetInitialAttributes(nsIContent* aBoundElement, nsIContent* aAnonymousContent);
 
-  void AppendStyleSheet(mozilla::CSSStyleSheet* aSheet);
-  void RemoveStyleSheet(mozilla::CSSStyleSheet* aSheet);
-  void InsertStyleSheetAt(size_t aIndex, mozilla::CSSStyleSheet* aSheet);
-  mozilla::CSSStyleSheet* StyleSheetAt(size_t aIndex) const;
+  void AppendStyleSheet(mozilla::StyleSheet* aSheet);
+  void RemoveStyleSheet(mozilla::StyleSheet* aSheet);
+  void InsertStyleSheetAt(size_t aIndex, mozilla::StyleSheet* aSheet);
+  mozilla::StyleSheet* StyleSheetAt(size_t aIndex) const;
   size_t SheetCount() const;
   bool HasStyleSheets() const;
-  void AppendStyleSheetsTo(nsTArray<mozilla::CSSStyleSheet*>& aResult) const;
+  void AppendStyleSheetsTo(nsTArray<mozilla::StyleSheet*>& aResult) const;
 
   nsIStyleRuleProcessor* GetRuleProcessor();
 

@@ -31,6 +31,7 @@ const int CBvLayerQuad = 10;
 // we don't use opacity with solid color shaders
 const int CBfLayerOpacity = 0;
 const int CBvColor = 0;
+const int CBmYuvColorMatrix = 1;
 
 enum DeviceManagerState {
   // The device and swap chain are OK.
@@ -132,17 +133,21 @@ private:
 class DeviceManagerD3D9 final
 {
 public:
-  DeviceManagerD3D9();
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(DeviceManagerD3D9)
 
   /**
-   * Initialises the device manager, the underlying device, and everything else
-   * the manager needs.
-   * Returns true if initialisation succeeds, false otherwise.
-   * Note that if initisalisation fails, you cannot try again - you must throw
-   * away the DeviceManagerD3D9 and create a new one.
+   * Setup or tear down static resources needed for D3D9.
    */
-  bool Init();
+  static void Init();
+  static void Shutdown();
+
+  /**
+   * Static accessors and helpers for accessing the global DeviceManagerD3D9
+   * instance.
+   */
+  static RefPtr<DeviceManagerD3D9> Get();
+  static RefPtr<IDirect3DDevice9> GetDevice();
+  static void OnDeviceManagerDestroy(DeviceManagerD3D9* aDeviceManager);
 
   /**
    * Sets up the render state for the device for layer rendering.
@@ -157,6 +162,8 @@ public:
   IDirect3DDevice9 *device() { return mDevice; }
 
   bool IsD3D9Ex() { return mDeviceEx; }
+
+  bool HasComponentAlpha() { return mHasComponentAlpha; }
 
   bool HasDynamicTextures() { return mHasDynamicTextures; }
 
@@ -216,7 +223,18 @@ public:
 private:
   friend class SwapChainD3D9;
 
+  DeviceManagerD3D9();
   ~DeviceManagerD3D9();
+
+  /**
+   * Initialises the device manager, the underlying device, and everything else
+   * the manager needs.
+   * Returns true if initialisation succeeds, false otherwise.
+   * Note that if initisalisation fails, you cannot try again - you must throw
+   * away the DeviceManagerD3D9 and create a new one.
+   */
+  bool Initialize();
+
   void DestroyDevice();
 
   /**
@@ -272,10 +290,8 @@ private:
 
   /* As above, but using a mask layer */
   RefPtr<IDirect3DVertexShader9> mLayerVSMask;
-  RefPtr<IDirect3DVertexShader9> mLayerVSMask3D;
   RefPtr<IDirect3DPixelShader9> mRGBPSMask;
   RefPtr<IDirect3DPixelShader9> mRGBAPSMask;
-  RefPtr<IDirect3DPixelShader9> mRGBAPSMask3D;
   RefPtr<IDirect3DPixelShader9> mComponentPass1PSMask;
   RefPtr<IDirect3DPixelShader9> mComponentPass2PSMask;
   RefPtr<IDirect3DPixelShader9> mYCbCrPSMask;
@@ -312,6 +328,9 @@ private:
    * rotation, but some older hardware doesn't support it.
    */
   D3DTEXTUREADDRESS mTextureAddressingMode;
+
+  /* If this device supports component alpha */
+  bool mHasComponentAlpha;
 
   /* If this device supports dynamic textures */
   bool mHasDynamicTextures;

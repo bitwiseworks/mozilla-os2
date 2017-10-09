@@ -1,12 +1,7 @@
-/* vim:set ts=2 sw=2 sts=2 et: */
-/* ***** BEGIN LICENSE BLOCK *****
- * Any copyright is dedicated to the Public Domain.
- * http://creativecommons.org/publicdomain/zero/1.0/
- *
- * Contributor(s):
- *  Patrick Walton <pcwalton@mozilla.com>
- *
- * ***** END LICENSE BLOCK ***** */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
+/* Any copyright is dedicated to the Public Domain.
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 "use strict";
 
@@ -19,14 +14,12 @@ function test() {
     const {tab} = yield loadTab(TEST_URI);
     const hud = yield openConsole(tab);
 
-    let button = content.document.querySelector("button");
-
     // On e10s, the exception is triggered in child process
     // and is ignored by test harness
     if (!Services.appinfo.browserTabsRemoteAutostart) {
       expectUncaughtException();
     }
-    EventUtils.sendMouseEvent({ type: "click" }, button, content);
+    BrowserTestUtils.synthesizeMouseAtCenter("button", {}, gBrowser.selectedBrowser);
 
     yield waitForMessages({
       webconsole: hud,

@@ -1,10 +1,24 @@
 # Debugger.Source
 
-A `Debugger.Source` instance represents a piece of JavaScript source
-code: its properties provide the source code itself as a string, and
-describe where it came from. Each [`Debugger.Script`][script] instance refers to
-the `Debugger.Source` instance holding the source code from which it was
-produced.
+A `Debugger.Source` instance represents either a piece of JavaScript source
+code or the serialized text of a block of WebAssembly code. The two cases are
+distinguished by the latter having its `introductionType` property always
+being `"wasm"` and the former having its `introductionType` property never
+being `"wasm"`.
+
+Each [`Debugger`][debugger-object] instance has a separate collection of
+`Debugger.Source` instances representing the source code that has been
+presented to the system.
+
+A debugger may place its own properties on `Debugger.Source` instances,
+to store metadata about particular pieces of source code.
+
+## Debugger.Source for JavaScript
+
+For a `Debugger.Source` instance representing a piece of JavaScript source
+code, its properties provide the source code itself as a string, and describe
+where it came from. Each [`Debugger.Script`][script] instance refers to the
+`Debugger.Source` instance holding the source code from which it was produced.
 
 If a single piece of source code contains both top-level code and
 function definitions, perhaps with nested functions, then the
@@ -27,50 +41,46 @@ JavaScript implementation may generate a fresh `Debugger.Source`
 instance to represent each presentation, or it may use a single
 `Debugger.Source` instance to represent them all.
 
-Each [`Debugger`][debugger-object] instance has a separate collection of `Debugger.Source`
-instances representing the source code that has been presented to the
-system.
+## Debugger.Source for WebAssembly
 
-A debugger may place its own properties on `Debugger.Source` instances,
-to store metadata about particular pieces of source code.
+For a `Debugger.Source` instance representing the serialized text of a block
+of WebAssembly code, its properties provide the serialized text as a string.
 
+Currently only entire modules evaluated via `new WebAssembly.Module` are
+represented. SpiderMonkey constructs exactly one `Debugger.Source` for each
+underlying WebAssembly module per [`Debugger`][debugger-object] instance.
+
+Please note at the time of this writing, support for WebAssembly is very
+preliminary. Many properties below return placeholder values.
+
+## Convention
+
+For descriptions of properties and methods below, if the behavior of the
+property or method differs between the instance referring to JavaScript source
+or to a block of WebAssembly code, the text will be split into two sections,
+headed by "**if the instance refers to JavaScript source**" and "**if the
+instance refers to WebAssembly code**", respectively. If the behavior does not
+differ, no such emphasized headings will appear.
 
 ## Accessor Properties of the Debugger.Source Prototype Object
 
 A `Debugger.Source` instance inherits the following accessor properties
 from its prototype:
 
-`canonicalId`
-:   A stable, unique identifier for the source referent. This identifier is
-    suitable for checking if two `Debugger.Source` instances originating from
-    different `Debugger` instances refer to the same source that was compiled by
-    SpiderMonkey. The `canonicalId` is reliable even when the source does not
-    have a URL, or shares the same URL as another source but has different
-    source text. It is more efficient to compare `canonicalId`s than to compare
-    source text character-by-character. The `canonicalId` is not suitable for
-    ordering comparisons such as "greater than" or "less than". It is not
-    suitable for checking the equality of sources across worker threads.
-
 `text`
-:   The JavaScript source code, as a string. The value satisfies the
-    `Program`, `FunctionDeclaration`, or `FunctionExpression` productions in
-    the ECMAScript standard.
+:   **If the instance refers to JavaScript source**, the JavaScript source
+    code, as a string. The value satisfies the `Program`,
+    `FunctionDeclaration`, or `FunctionExpression` productions in the
+    ECMAScript standard.
 
-`enclosingStart` <i>(future plan)</i>
-:   The position within the enclosing document at which this source's text
-    starts. This is a zero-based character offset. (The length of this
-    script within the enclosing document is `source.length`.)
-
-`lineCount` <i>(future plan)</i>
-:   The number of lines in the source code. If there are characters after
-    the last newline in the source code, those count as a final line;
-    otherwise, `lineCount` is equal to the number of newlines in the source
-    code.
+    **If the instance refers to WebAssembly code**, the serialized text
+    representation. The format is yet to be specified in the WebAssembly
+    standard. Currently, the text is an s-expression based syntax.
 
 `url`
-:   The URL from which this source was loaded, if this source was loaded
-    from a URL. Otherwise, this is `undefined`. Source may be loaded from a
-    URL in the following ways:
+:   **If the instance refers to JavaScript source**, the URL from which this
+    source was loaded, if this source was loaded from a URL. Otherwise, this
+    is `undefined`. Source may be loaded from a URL in the following ways:
 
     * The URL may appear as the `src` attribute of a `<script>` element
       in markup text.
@@ -85,12 +95,15 @@ from its prototype:
     `url` accessor on `Debugger.Source` instances for such sources should
     return `undefined`.)
 
+    **If the instance refers to WebAssembly code**, the URL of the script that
+    called `new WebAssembly.Module` with the string `"> wasm"` appended.
+
 `sourceMapURL`
-:   If this source was produced by a minimizer or translated from some other
-    language, and we know the URL of a <b>source map</b> document relating
-    the source positions in this source to the corresponding source
-    positions in the original source, then this property's value is that
-    URL. Otherwise, this is `null`.
+:   **If the instance refers to JavaScript source**, if this source was
+    produced by a minimizer or translated from some other language, and we
+    know the URL of a <b>source map</b> document relating the source positions
+    in this source to the corresponding source positions in the original
+    source, then this property's value is that URL. Otherwise, this is `null`.
 
     (On the web, the translator may provide the source map URL in a
     specially formatted comment in the JavaScript source code, or via a
@@ -100,6 +113,9 @@ from its prototype:
     setting it. All Debugger.Source objects referencing the same
     source will see the change. Setting an empty string has no affect
     and will not change existing value.
+
+    **If the instance refers to WebAssembly code**, `null`. Attempts to write
+    to this property throw a `TypeError`.
 
 `element`
 :   The [`Debugger.Object`][object] instance referring to the DOM element to which
@@ -132,8 +148,9 @@ from its prototype:
     that attribute, a string. Otherwise, this is `undefined`.
 
 `introductionType`
-:   A string indicating how this source code was introduced into the system.
-    This accessor returns one of the following values:
+:   **If the instance refers to JavaScript source**, a string indicating how
+    this source code was introduced into the system.  This accessor returns
+    one of the following values:
 
     * `"eval"`, for code passed to `eval`.
 
@@ -158,8 +175,11 @@ from its prototype:
     * `undefined`, if the implementation doesn't know how the code was
       introduced.
 
+    **If the instance refers to WebAssembly code**, `"wasm"`.
+
 `introductionScript`, `introductionOffset`
-:   If this source was introduced by calling a function from debuggee code, then
+:   **If the instance refers to JavaScript source**, and if this source was
+    introduced by calling a function from debuggee code, then
     `introductionScript` is the [`Debugger.Script`][script] instance referring
     to the script containing that call, and `introductionOffset` is the call's
     bytecode offset within that script. Otherwise, these are both `undefined`.
@@ -195,43 +215,6 @@ from its prototype:
     creator, and other multi-threaded debugging concerns, are out of scope for
     [`Debugger`][debugger-object].
 
-
-
-## Function Properties of the Debugger.Source Prototype Object
-
-<code>substring(<i>start</i>, [<i>end</i>])</code> <i>(future plan)</i>
-:   Return a substring of this instance's `source` property, starting at
-    <i>start</i> and extending to, but not including, <i>end</i>. If
-    <i>end</i> is `undefined`, the substring returned extends to the end of
-    the source.
-
-    Both indices are zero-based. If either is `NaN` or negative, it is
-    replaced with zero. If either is greater than the length of the source,
-    it is replaced with the length of the source. If <i>start</i> is larger
-    than <i>end</i>, they are swapped. (This is meant to be consistent with
-    the way `String.prototype.substring` interprets its arguments.)
-
-<code>lineToPosition(<i>line</i>)</code> <i>(future plan)</i>
-:   Return an object of the form
-    <code>{ line:<i>line</i>, start:<i>start</i>, length:<i>length</i> }</code>, where
-    <i>start</i> is the character index within `source` of the first
-    character of line number <i>line</i>, and <i>length</i> is the length of
-    that line in characters, including the final newline, if any. The first
-    line is numbered one. If <i>line</i> is negative or greater than the
-    number of lines in this `Debugger.Source` instance, then return `null`.
-
-<code>positionToLine(<i>start</i>)</code> <i>(future plan)</i>
-:   Return an object of the form
-    <code>{ line:<i>line</i>, start:<i>start</i>, length:<i>length</i> }</code>, where
-    <i>line</i> is the line number containing the character position
-    <i>start</i>, and <i>length</i> is the length of that line in
-    characters, including the final newline, if any. The first line is
-    numbered one. If <i>start</i> is negative or greater than the length of
-    the source code, then return `null`.
-
-<code>findScripts(<i>query</i>)</code> <i>(future plan)</i>
-:   Return an array of [`Debugger.Script`][script] instances for all debuggee scripts
-    matching <i>query</i> that are produced from this `Debugger.Source`
-    instance. Aside from the restriction to scripts produced from this
-    source, <i>query</i> is interpreted as for
-    `Debugger.prototype.findScripts`.
+    **If the instance refers to WebAssembly code**, `introductionScript` is
+    the [`Debugger.Script`][script] instance referring to the same underlying
+    WebAssembly module. `introductionOffset` is `undefined`.

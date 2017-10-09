@@ -60,7 +60,7 @@ private:
 
   // MediaDataDecoderCallback implementation.
   void Output(MediaData* aData) override;
-  void Error() override;
+  void Error(const MediaResult& aError) override;
   void InputExhausted() override;
   void DrainComplete() override;
   void ReleaseMediaResources() override;
@@ -81,6 +81,7 @@ private:
   typedef Pair<RefPtr<MediaData>, bool> MediaDataAndInputExhausted;
   std::deque<MediaDataAndInputExhausted> mDelayedOutput;
   RefPtr<MediaTimer> mDelayedOutputTimer;
+  MozPromiseRequestHolder<MediaTimerPromise> mDelayedOutputRequest;
   // If draining, a 'DrainComplete' will be sent after all delayed frames have
   // been output.
   bool mDraining;
@@ -99,18 +100,21 @@ class DecoderFuzzingWrapper : public MediaDataDecoder
 public:
   DecoderFuzzingWrapper(already_AddRefed<MediaDataDecoder> aDecoder,
                         already_AddRefed<DecoderCallbackFuzzingWrapper> aCallbackWrapper);
-  virtual ~DecoderFuzzingWrapper();
 
-private:
   // MediaDataDecoder implementation.
   RefPtr<InitPromise> Init() override;
-  nsresult Input(MediaRawData* aSample) override;
-  nsresult Flush() override;
-  nsresult Drain() override;
-  nsresult Shutdown() override;
+  void Input(MediaRawData* aSample) override;
+  void Flush() override;
+  void Drain() override;
+  void Shutdown() override;
   bool IsHardwareAccelerated(nsACString& aFailureReason) const override;
-  nsresult ConfigurationChanged(const TrackInfo& aConfig) override;
+  const char* GetDescriptionName() const override
+  {
+    return mDecoder->GetDescriptionName();
+  }
 
+private:
+  virtual ~DecoderFuzzingWrapper();
   RefPtr<MediaDataDecoder> mDecoder;
   RefPtr<DecoderCallbackFuzzingWrapper> mCallbackWrapper;
 };

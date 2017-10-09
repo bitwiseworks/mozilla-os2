@@ -5,14 +5,14 @@
 #ifndef BYTE_READER_H_
 #define BYTE_READER_H_
 
-#include "mozilla/Endian.h"
+#include "mozilla/EndianUtils.h"
 #include "mozilla/Vector.h"
 #include "nsTArray.h"
 #include "MediaData.h"
 
 namespace mp4_demuxer {
 
-class ByteReader
+class MOZ_RAII ByteReader
 {
 public:
   ByteReader() : mPtr(nullptr), mRemaining(0) {}
@@ -25,7 +25,7 @@ public:
   {
   }
   template<size_t S>
-  explicit ByteReader(const nsAutoTArray<uint8_t, S>& aData)
+  explicit ByteReader(const AutoTArray<uint8_t, S>& aData)
     : mPtr(aData.Elements()), mRemaining(aData.Length()), mLength(aData.Length())
   {
   }
@@ -48,17 +48,11 @@ public:
 
   ~ByteReader()
   {
-    NS_ASSERTION(!mRemaining, "Not all bytes have been processed");
   }
 
   size_t Offset()
   {
     return mLength - mRemaining;
-  }
-
-  // Make it explicit if we're not using the extra bytes.
-  void DiscardRemaining() {
-    mRemaining = 0;
   }
 
   size_t Remaining() const { return mRemaining; }
@@ -87,6 +81,16 @@ public:
     return mozilla::BigEndian::readUint16(ptr);
   }
 
+  int16_t ReadLE16()
+  {
+    auto ptr = Read(2);
+    if (!ptr) {
+      MOZ_ASSERT(false);
+      return 0;
+    }
+    return mozilla::LittleEndian::readInt16(ptr);
+  }
+
   uint32_t ReadU24()
   {
     auto ptr = Read(3);
@@ -100,6 +104,20 @@ public:
   uint32_t Read24()
   {
     return (uint32_t)ReadU24();
+  }
+
+  int32_t ReadLE24()
+  {
+    auto ptr = Read(3);
+    if (!ptr) {
+      MOZ_ASSERT(false);
+      return 0;
+    }
+    int32_t result = int32_t(ptr[2] << 16 | ptr[1] << 8 | ptr[0]);
+    if (result & 0x00800000u) {
+      result -= 0x1000000;
+    }
+    return result;
   }
 
   bool CanRead32() { return mRemaining >= 4; }
@@ -248,7 +266,6 @@ public:
   const uint8_t* Peek(size_t aCount)
   {
     if (aCount > mRemaining) {
-      MOZ_ASSERT(false);
       return nullptr;
     }
     return mPtr;
@@ -291,7 +308,7 @@ public:
   }
 
   template <typename T>
-  bool ReadArray(nsTArray<T>& aDest, size_t aLength)
+  MOZ_MUST_USE bool ReadArray(nsTArray<T>& aDest, size_t aLength)
   {
     auto ptr = Read(aLength * sizeof(T));
     if (!ptr) {
@@ -303,11 +320,30 @@ public:
     return true;
   }
 
+  template <typename T>
+  MOZ_MUST_USE bool ReadArray(FallibleTArray<T>& aDest, size_t aLength)
+  {
+    auto ptr = Read(aLength * sizeof(T));
+    if (!ptr) {
+      return false;
+    }
+
+    aDest.Clear();
+    if (!aDest.SetCapacity(aLength, mozilla::fallible)) {
+      return false;
+    }
+    MOZ_ALWAYS_TRUE(aDest.AppendElements(reinterpret_cast<const T*>(ptr),
+                                         aLength,
+                                         mozilla::fallible));
+    return true;
+  }
+
 private:
   const uint8_t* mPtr;
   size_t mRemaining;
   size_t mLength;
 };
-}
+
+} // namespace mp4_demuxer
 
 #endif

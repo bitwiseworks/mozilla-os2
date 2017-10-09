@@ -42,7 +42,7 @@ public:
                                                          DOMEventTargetHelper)
 
   // WrapperCache
-  nsPIDOMWindow* GetParentObject() const
+  nsPIDOMWindowInner* GetParentObject() const
   {
     return GetOwner();
   }
@@ -60,7 +60,6 @@ public:
   {
     NS_ASSERTION(mDone || mResult.isUndefined(),
                  "Result should be undefined when pending");
-    JS::ExposeValueToActiveJS(mResult);
     aRetval.set(mResult);
   }
 
@@ -85,7 +84,7 @@ public:
   void FireError(nsresult aError);
   void FireDetailedError(DOMError* aError);
 
-  explicit DOMRequest(nsPIDOMWindow* aWindow);
+  explicit DOMRequest(nsPIDOMWindowInner* aWindow);
   explicit DOMRequest(nsIGlobalObject* aGlobal);
 
 protected:

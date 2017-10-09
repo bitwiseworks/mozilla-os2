@@ -72,14 +72,14 @@ class nsXMLContentSerializer : public nsIContentSerializer {
   /**
    * Appends a char16_t character and increments the column position
    */
-  MOZ_WARN_UNUSED_RESULT
+  MOZ_MUST_USE
   bool AppendToString(const char16_t aChar,
                       nsAString& aOutputStr);
 
   /**
    * Appends a nsAString string and increments the column position
    */
-  MOZ_WARN_UNUSED_RESULT
+  MOZ_MUST_USE
   bool AppendToString(const nsAString& aStr,
                       nsAString& aOutputStr);
 
@@ -88,7 +88,7 @@ class nsXMLContentSerializer : public nsIContentSerializer {
    * by mLineBreak, except in the case of raw output.
    * It increments the column position.
    */
-  MOZ_WARN_UNUSED_RESULT
+  MOZ_MUST_USE
   bool AppendToStringConvertLF(const nsAString& aStr,
                                nsAString& aOutputStr);
 
@@ -96,7 +96,7 @@ class nsXMLContentSerializer : public nsIContentSerializer {
    * Appends a string by wrapping it when necessary.
    * It updates the column position.
    */
-  MOZ_WARN_UNUSED_RESULT
+  MOZ_MUST_USE
   bool AppendToStringWrapped(const nsASingleFragmentString& aStr,
                              nsAString& aOutputStr);
 
@@ -104,12 +104,12 @@ class nsXMLContentSerializer : public nsIContentSerializer {
    * Appends a string by formating and wrapping it when necessary
    * It updates the column position.
    */
-  MOZ_WARN_UNUSED_RESULT
+  MOZ_MUST_USE
   bool AppendToStringFormatedWrapped(const nsASingleFragmentString& aStr,
                                      nsAString& aOutputStr);
 
   // used by AppendToStringWrapped
-  MOZ_WARN_UNUSED_RESULT
+  MOZ_MUST_USE
   bool AppendWrapped_WhitespaceSequence(
           nsASingleFragmentString::const_char_iterator &aPos,
           const nsASingleFragmentString::const_char_iterator aEnd,
@@ -117,7 +117,7 @@ class nsXMLContentSerializer : public nsIContentSerializer {
           nsAString &aOutputStr);
 
   // used by AppendToStringFormatedWrapped
-  MOZ_WARN_UNUSED_RESULT
+  MOZ_MUST_USE
   bool AppendFormatedWrapped_WhitespaceSequence(
           nsASingleFragmentString::const_char_iterator &aPos,
           const nsASingleFragmentString::const_char_iterator aEnd,
@@ -126,7 +126,7 @@ class nsXMLContentSerializer : public nsIContentSerializer {
           nsAString &aOutputStr);
 
   // used by AppendToStringWrapped and AppendToStringFormatedWrapped
-  MOZ_WARN_UNUSED_RESULT
+  MOZ_MUST_USE
   bool AppendWrapped_NonWhitespaceSequence(
           nsASingleFragmentString::const_char_iterator &aPos,
           const nsASingleFragmentString::const_char_iterator aEnd,
@@ -139,7 +139,7 @@ class nsXMLContentSerializer : public nsIContentSerializer {
    * add mLineBreak to the string
    * It updates the column position and other flags.
    */
-  MOZ_WARN_UNUSED_RESULT
+  MOZ_MUST_USE
   bool AppendNewLineToString(nsAString& aOutputStr);
 
 
@@ -147,7 +147,7 @@ class nsXMLContentSerializer : public nsIContentSerializer {
    * Appends a string by translating entities
    * It doesn't increment the column position
    */
-  MOZ_WARN_UNUSED_RESULT
+  MOZ_MUST_USE
   virtual bool AppendAndTranslateEntities(const nsAString& aStr,
                                           nsAString& aOutputStr);
 
@@ -197,7 +197,7 @@ class nsXMLContentSerializer : public nsIContentSerializer {
                                      nsIContent *aOriginalElement,
                                      const nsAString& aTagNamespaceURI);
 
-  MOZ_WARN_UNUSED_RESULT
+  MOZ_MUST_USE
   virtual bool SerializeAttributes(nsIContent* aContent,
                                    nsIContent *aOriginalElement,
                                    nsAString& aTagPrefix,
@@ -207,7 +207,7 @@ class nsXMLContentSerializer : public nsIContentSerializer {
                                    uint32_t aSkipAttr,
                                    bool aAddNSAttr);
 
-  MOZ_WARN_UNUSED_RESULT
+  MOZ_MUST_USE
   bool SerializeAttr(const nsAString& aPrefix,
                      const nsAString& aName,
                      const nsAString& aValue,
@@ -233,21 +233,23 @@ class nsXMLContentSerializer : public nsIContentSerializer {
                                    nsresult& aResult);
 
   /**
-   * this method is responsible to finish the start tag,
-   * in particulary to append the "greater than" sign
+   * This method is responsible for appending the '>' at the end of the start
+   * tag, possibly preceded by '/' and maybe a ' ' before that too.
+   *
+   * aElement and aOriginalElement are the same as the corresponding arguments
+   * to AppendElementStart.
    */
-  MOZ_WARN_UNUSED_RESULT
-  virtual bool AppendEndOfElementStart(nsIContent *aOriginalElement,
-                                       nsIAtom * aName,
-                                       int32_t aNamespaceID,
-                                       nsAString& aStr);
+  MOZ_MUST_USE
+  bool AppendEndOfElementStart(mozilla::dom::Element* aEleemnt,
+                               mozilla::dom::Element* aOriginalElement,
+                               nsAString& aStr);
 
   /**
    * This method can be redefine to serialize additional things just after
    * after the serialization ot the start tag.
    * (called at the end of AppendElementStart)
    */
-  MOZ_WARN_UNUSED_RESULT
+  MOZ_MUST_USE
   virtual bool AfterElementStart(nsIContent* aContent,
                                  nsIContent* aOriginalElement,
                                  nsAString& aStr) { return true; };
@@ -260,9 +262,9 @@ class nsXMLContentSerializer : public nsIContentSerializer {
    * by setting aForceFormat to true.
    * @return boolean  true if the element can be output
    */
-  virtual bool CheckElementEnd(nsIContent * aContent,
-                                 bool & aForceFormat,
-                                 nsAString& aStr);
+  virtual bool CheckElementEnd(mozilla::dom::Element* aElement,
+                               bool& aForceFormat,
+                               nsAString& aStr);
 
   /**
    * This method can be redefine to serialize additional things just after
@@ -296,16 +298,16 @@ class nsXMLContentSerializer : public nsIContentSerializer {
    * add intendation. Call only in the case of formating and if the current
    * position is at 0. It updates the column position.
    */
-  MOZ_WARN_UNUSED_RESULT
+  MOZ_MUST_USE
   bool AppendIndentation(nsAString& aStr);
 
-  MOZ_WARN_UNUSED_RESULT
+  MOZ_MUST_USE
   bool IncrIndentation(nsIAtom* aName);
   void DecrIndentation(nsIAtom* aName);
 
   // Functions to check for newlines that needs to be added between nodes in
   // the root of a document. See mAddNewlineForRootNode
-  MOZ_WARN_UNUSED_RESULT
+  MOZ_MUST_USE
   bool MaybeAddNewlineForRootNode(nsAString& aStr);
   void MaybeFlagNewlineForRootNode(nsINode* aNode);
 
@@ -334,7 +336,7 @@ class nsXMLContentSerializer : public nsIContentSerializer {
   nsTArray<NameSpaceDecl> mNameSpaceStack;
 
   // nsIDocumentEncoder flags
-  uint32_t  mFlags;
+  MOZ_INIT_OUTSIDE_CTOR uint32_t  mFlags;
 
   // characters to use for line break
   nsString  mLineBreak;
@@ -346,20 +348,20 @@ class nsXMLContentSerializer : public nsIContentSerializer {
   uint32_t   mColPos;
 
   // true = pretty formating should be done (OutputFormated flag)
-  bool mDoFormat;
+  MOZ_INIT_OUTSIDE_CTOR bool mDoFormat;
 
   // true = no formatting,(OutputRaw flag)
   // no newline convertion and no rewrap long lines even if OutputWrap is set.
-  bool mDoRaw;
+  MOZ_INIT_OUTSIDE_CTOR bool mDoRaw;
 
   // true = wrapping should be done (OutputWrap flag)
-  bool mDoWrap;
+  MOZ_INIT_OUTSIDE_CTOR bool mDoWrap;
 
   // true = we can break lines (OutputDisallowLineBreaking flag)
-  bool mAllowLineBreaking;
+  MOZ_INIT_OUTSIDE_CTOR bool mAllowLineBreaking;
 
   // number of maximum column in a line, in the wrap mode
-  uint32_t   mMaxColumn;
+  MOZ_INIT_OUTSIDE_CTOR uint32_t   mMaxColumn;
 
   // current indent value
   nsString   mIndent;
@@ -395,7 +397,7 @@ class nsXMLContentSerializer : public nsIContentSerializer {
 
 private:
   // number of nested elements which have preformated content
-  int32_t       mPreLevel;
+  MOZ_INIT_OUTSIDE_CTOR int32_t mPreLevel;
 };
 
 nsresult

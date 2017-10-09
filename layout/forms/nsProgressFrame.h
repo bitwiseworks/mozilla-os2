@@ -11,9 +11,14 @@
 #include "nsIAnonymousContentCreator.h"
 #include "nsCOMPtr.h"
 
+namespace mozilla {
+enum class CSSPseudoElementType : uint8_t;
+} // namespace mozilla
+
 class nsProgressFrame : public nsContainerFrame,
                         public nsIAnonymousContentCreator
 {
+  typedef mozilla::CSSPseudoElementType CSSPseudoElementType;
   typedef mozilla::dom::Element Element;
 
 public:
@@ -31,9 +36,11 @@ public:
                                 const nsDisplayListSet& aLists) override;
 
   virtual void Reflow(nsPresContext*           aCX,
-                      nsHTMLReflowMetrics&     aDesiredSize,
-                      const nsHTMLReflowState& aReflowState,
+                      ReflowOutput&     aDesiredSize,
+                      const ReflowInput& aReflowInput,
                       nsReflowStatus&          aStatus) override;
+
+  virtual nsIAtom* GetType() const override;
 
 #ifdef DEBUG_FRAME_DUMP
   virtual nsresult GetFrameName(nsAString& aResult) const override {
@@ -53,14 +60,14 @@ public:
                                     int32_t  aModType) override;
 
   virtual mozilla::LogicalSize
-  ComputeAutoSize(nsRenderingContext *aRenderingContext,
-                  mozilla::WritingMode aWritingMode,
+  ComputeAutoSize(nsRenderingContext*         aRenderingContext,
+                  mozilla::WritingMode        aWM,
                   const mozilla::LogicalSize& aCBSize,
-                  nscoord aAvailableISize,
+                  nscoord                     aAvailableISize,
                   const mozilla::LogicalSize& aMargin,
                   const mozilla::LogicalSize& aBorder,
                   const mozilla::LogicalSize& aPadding,
-                  bool aShrinkWrap) override;
+                  ComputeSizeFlags            aFlags) override;
 
   virtual nscoord GetMinISize(nsRenderingContext *aRenderingContext) override;
   virtual nscoord GetPrefISize(nsRenderingContext *aRenderingContext) override;
@@ -76,14 +83,14 @@ public:
    */
   bool ShouldUseNativeStyle() const;
 
-  virtual Element* GetPseudoElement(nsCSSPseudoElements::Type aType) override;
+  virtual Element* GetPseudoElement(CSSPseudoElementType aType) override;
 
 protected:
-  // Helper function which reflow the anonymous div frame.
-  void ReflowBarFrame(nsIFrame*                aBarFrame,
-                      nsPresContext*           aPresContext,
-                      const nsHTMLReflowState& aReflowState,
-                      nsReflowStatus&          aStatus);
+  // Helper function to reflow a child frame.
+  void ReflowChildFrame(nsIFrame*          aChild,
+                        nsPresContext*     aPresContext,
+                        const ReflowInput& aReflowInput,
+                        nsReflowStatus&    aStatus);
 
   /**
    * The div used to show the progress bar.
@@ -93,4 +100,3 @@ protected:
 };
 
 #endif
-

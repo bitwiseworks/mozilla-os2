@@ -104,6 +104,9 @@ public interface TelemetryContract {
         // Stop holding a resource (reader, bookmark, etc) for viewing later.
         UNSAVE("unsave.1"),
 
+        // When the user performs actions on the in-content network error page.
+        NETERROR("neterror.1"),
+
         // VALUES BELOW THIS LINE ARE EXCLUSIVE TO TESTING.
         _TEST1("_test_event_1.1"),
         _TEST2("_test_event_2.1"),
@@ -148,6 +151,9 @@ public interface TelemetryContract {
         // Action triggered from a dialog.
         DIALOG("dialog"),
 
+        // Action triggered from a doorhanger popup prompt.
+        DOORHANGER("doorhanger"),
+
         // Action triggered from a view grid item, like a thumbnail.
         GRID_ITEM("griditem"),
 
@@ -179,6 +185,9 @@ public interface TelemetryContract {
         // Action triggered from one of a series of views, such as ViewPager.
         PANEL("panel"),
 
+        // Action triggered by a background service / automatic system making a decision.
+        SERVICE("service"),
+
         // Action triggered from a settings screen.
         SETTINGS("settings"),
 
@@ -187,6 +196,9 @@ public interface TelemetryContract {
 
         // Action triggered from a suggestion provided to the user.
         SUGGESTION("suggestion"),
+
+        // Action triggered from an OS system action.
+        SYSTEM("system"),
 
         // Action triggered from a SuperToast.
         // Note: Only used in JavaScript for now, but here for completeness.

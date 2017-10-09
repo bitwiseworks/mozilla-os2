@@ -20,8 +20,8 @@ struct JSContext;
 class JSObject;
 
 namespace mozilla {
+class DeclarationBlock;
 namespace css {
-class Declaration;
 class Loader;
 class Rule;
 } // namespace css
@@ -119,8 +119,8 @@ protected:
     // AttributeWillChange.
     eOperation_RemoveProperty
   };
-  virtual mozilla::css::Declaration* GetCSSDeclaration(Operation aOperation) = 0;
-  virtual nsresult SetCSSDeclaration(mozilla::css::Declaration* aDecl) = 0;
+  virtual mozilla::DeclarationBlock* GetCSSDeclaration(Operation aOperation) = 0;
+  virtual nsresult SetCSSDeclaration(mozilla::DeclarationBlock* aDecl) = 0;
   // Document that we must call BeginUpdate/EndUpdate on around the
   // calls to SetCSSDeclaration and the style rule mutation that leads
   // to it.
@@ -156,19 +156,16 @@ protected:
   static void GetCSSParsingEnvironmentForRule(mozilla::css::Rule* aRule,
                                               CSSParsingEnvironment& aCSSParseEnv);
 
-  nsresult ParsePropertyValue(const nsCSSProperty aPropID,
+  nsresult ParsePropertyValue(const nsCSSPropertyID aPropID,
                               const nsAString& aPropValue,
                               bool aIsImportant);
 
-  // Prop-id based version of RemoveProperty.  Note that this does not
-  // return the old value; it just does a straight removal.
-  nsresult RemoveProperty(const nsCSSProperty aPropID);
-
-  void GetCustomPropertyValue(const nsAString& aPropertyName, nsAString& aValue);
-  nsresult RemoveCustomProperty(const nsAString& aPropertyName);
   nsresult ParseCustomPropertyValue(const nsAString& aPropertyName,
                                     const nsAString& aPropValue,
                                     bool aIsImportant);
+
+  nsresult RemovePropertyInternal(nsCSSPropertyID aPropID);
+  nsresult RemovePropertyInternal(const nsAString& aProperty);
 
 protected:
   virtual ~nsDOMCSSDeclaration();

@@ -11,17 +11,12 @@
 #include "keyhi.h"
 #include "nsError.h"
 #include "pk11pub.h"
-#include "prprf.h"
 #include "sechash.h"
 #include "ssl.h"
 
-namespace mozilla {
+#include "mozilla/Sprintf.h"
 
-DtlsIdentity::~DtlsIdentity() {
-  if (cert_) {
-    CERT_DestroyCertificate(cert_);
-  }
-}
+namespace mozilla {
 
 RefPtr<DtlsIdentity> DtlsIdentity::Generate() {
   ScopedPK11SlotInfo slot(PK11_GetInternalSlot());
@@ -39,7 +34,7 @@ RefPtr<DtlsIdentity> DtlsIdentity::Generate() {
   std::string name;
   char chunk[3];
   for (size_t i = 0; i < sizeof(random_name); ++i) {
-    PR_snprintf(chunk, sizeof(chunk), "%.2x", random_name[i]);
+    SprintfLiteral(chunk, "%.2x", random_name[i]);
     name += chunk;
   }
 
@@ -163,13 +158,13 @@ nsresult DtlsIdentity::ComputeFingerprint(const std::string algorithm,
                                           uint8_t *digest,
                                           size_t size,
                                           size_t *digest_length) const {
-  const CERTCertificate* c = cert();
+  const UniqueCERTCertificate& c = cert();
   MOZ_ASSERT(c);
 
   return ComputeFingerprint(c, algorithm, digest, size, digest_length);
 }
 
-nsresult DtlsIdentity::ComputeFingerprint(const CERTCertificate *cert,
+nsresult DtlsIdentity::ComputeFingerprint(const UniqueCERTCertificate& cert,
                                           const std::string algorithm,
                                           uint8_t *digest,
                                           size_t size,

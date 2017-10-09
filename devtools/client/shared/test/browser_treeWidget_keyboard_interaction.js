@@ -2,16 +2,16 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 // Tests that keyboard interaction works fine with the tree widget
 
-const TEST_URI = "data:text/html;charset=utf-8,<head><link rel='stylesheet' " +
-  "type='text/css' href='chrome://devtools/skin/common.css'><link " +
-  "rel='stylesheet' type='text/css' href='chrome://devtools/skin/widg" +
+const TEST_URI = "data:text/html;charset=utf-8,<head>" +
+  "<link rel='stylesheet' type='text/css' href='chrome://devtools/skin/widg" +
   "ets.css'></head><body><div></div><span></span></body>";
 const {TreeWidget} = require("devtools/client/shared/widgets/TreeWidget");
-const Promise = require("promise");
 
-add_task(function*() {
+add_task(function* () {
   yield addTab("about:blank");
   let [host, win, doc] = yield createHost("bottom", TEST_URI);
 
@@ -90,7 +90,7 @@ function* testKeyboardInteraction(tree, win) {
 
   info("clicking on first top level item");
   let node = tree.root.children.firstChild.firstChild;
-  event = Promise.defer();
+  event = defer();
   tree.once("select", pass);
   click(node);
   yield event.promise;
@@ -100,7 +100,7 @@ function* testKeyboardInteraction(tree, win) {
   ok(!node.hasAttribute("expanded"), "Node is not expanded");
 
   info("Pressing down key to select next item");
-  event = Promise.defer();
+  event = defer();
   tree.once("select", pass);
   EventUtils.sendKey("DOWN", win);
   let [name, data, attachment] = yield event.promise;
@@ -111,7 +111,7 @@ function* testKeyboardInteraction(tree, win) {
   ok(node.hasAttribute("expanded"), "Node is expanded now");
 
   info("Pressing down key again to select next item");
-  event = Promise.defer();
+  event = defer();
   tree.once("select", pass);
   EventUtils.sendKey("DOWN", win);
   [name, data, attachment] = yield event.promise;
@@ -120,7 +120,7 @@ function* testKeyboardInteraction(tree, win) {
   is(data[1], "level2", "Correct second level");
 
   info("Pressing down key again to select next item");
-  event = Promise.defer();
+  event = defer();
   tree.once("select", pass);
   EventUtils.sendKey("DOWN", win);
   [name, data, attachment] = yield event.promise;
@@ -130,7 +130,7 @@ function* testKeyboardInteraction(tree, win) {
   is(data[2], "level3", "Correct third level");
 
   info("Pressing down key again to select next item");
-  event = Promise.defer();
+  event = defer();
   tree.once("select", pass);
   EventUtils.sendKey("DOWN", win);
   [name, data, attachment] = yield event.promise;
@@ -146,7 +146,7 @@ function* testKeyboardInteraction(tree, win) {
     executeSoon(() => event.resolve(null));
   });
   info("Pressing left key to collapse the item");
-  event = Promise.defer();
+  event = defer();
   node = tree._selectedLabel;
   ok(node.hasAttribute("expanded"), "Item is expanded before left keypress");
   EventUtils.sendKey("LEFT", win);
@@ -158,7 +158,7 @@ function* testKeyboardInteraction(tree, win) {
 
   info("Pressing left key on collapsed item to select previous");
   tree.once("select", pass);
-  event = Promise.defer();
+  event = defer();
   // parent node should have no effect of this keypress
   node = tree.root.children.firstChild.nextSibling.firstChild;
   ok(node.hasAttribute("expanded"), "Parent is expanded");
@@ -173,7 +173,7 @@ function* testKeyboardInteraction(tree, win) {
   // pressing down again
 
   info("Pressing down key to select next item");
-  event = Promise.defer();
+  event = defer();
   tree.once("select", pass);
   EventUtils.sendKey("DOWN", win);
   [name, data, attachment] = yield event.promise;
@@ -188,7 +188,7 @@ function* testKeyboardInteraction(tree, win) {
     executeSoon(() => event.resolve(null));
   });
   info("Pressing left key to collapse the item");
-  event = Promise.defer();
+  event = defer();
   node = tree._selectedLabel;
   ok(node.hasAttribute("expanded"), "Item is expanded before left keypress");
   EventUtils.sendKey("LEFT", win);
@@ -202,7 +202,7 @@ function* testKeyboardInteraction(tree, win) {
     executeSoon(() => event.resolve(null));
   });
   info("Pressing right key to expend the collapsed item");
-  event = Promise.defer();
+  event = defer();
   node = tree._selectedLabel;
   ok(!node.hasAttribute("expanded"), "Item is collapsed before right keypress");
   EventUtils.sendKey("RIGHT", win);
@@ -214,7 +214,7 @@ function* testKeyboardInteraction(tree, win) {
   tree.selectedItem = ["level1.1", "level2", "level3"];
   node = tree._selectedLabel;
   // pressing down again should not change selection
-  event = Promise.defer();
+  event = defer();
   tree.root.children.addEventListener("keypress", function onClick() {
     tree.root.children.removeEventListener("keypress", onClick);
     executeSoon(() => event.resolve(null));

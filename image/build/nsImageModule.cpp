@@ -13,6 +13,7 @@
 #include "ImageFactory.h"
 #include "ShutdownTracker.h"
 #include "SurfaceCache.h"
+#include "SurfacePipe.h"
 
 #include "gfxPrefs.h"
 #include "imgLoader.h"
@@ -28,6 +29,8 @@
 // objects that just require generic constructors
 using namespace mozilla::image;
 
+// XXX We would like to get rid of the imgLoader factory constructor.  See the
+// comment documenting the imgLoader constructor.
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(imgLoader, Init)
 NS_GENERIC_FACTORY_CONSTRUCTOR(imgRequestProxy)
 NS_GENERIC_FACTORY_CONSTRUCTOR(imgTools)
@@ -77,6 +80,7 @@ static const mozilla::Module::CategoryEntry kImageCategories[] = {
   { "Gecko-Content-Viewers", IMAGE_BMP_MS, "@mozilla.org/content/document-loader-factory;1" },
   { "Gecko-Content-Viewers", IMAGE_ICON_MS, "@mozilla.org/content/document-loader-factory;1" },
   { "Gecko-Content-Viewers", IMAGE_PNG, "@mozilla.org/content/document-loader-factory;1" },
+  { "Gecko-Content-Viewers", IMAGE_APNG, "@mozilla.org/content/document-loader-factory;1" },
   { "Gecko-Content-Viewers", IMAGE_X_PNG, "@mozilla.org/content/document-loader-factory;1" },
   { "content-sniffing-services", "@mozilla.org/image/loader;1", "@mozilla.org/image/loader;1" },
   { nullptr }
@@ -84,9 +88,14 @@ static const mozilla::Module::CategoryEntry kImageCategories[] = {
 
 static bool sInitialized = false;
 nsresult
-mozilla::image::InitModule()
+mozilla::image::EnsureModuleInitialized()
 {
   MOZ_ASSERT(NS_IsMainThread());
+
+  if (sInitialized) {
+    return NS_OK;
+  }
+
   // Make sure the preferences are initialized
   gfxPrefs::GetSingleton();
 
@@ -94,6 +103,7 @@ mozilla::image::InitModule()
   mozilla::image::ImageFactory::Initialize();
   mozilla::image::DecodePool::Initialize();
   mozilla::image::SurfaceCache::Initialize();
+  mozilla::image::SurfacePipe::Initialize();
   imgLoader::GlobalInit();
   sInitialized = true;
   return NS_OK;
@@ -116,7 +126,7 @@ static const mozilla::Module kImageModule = {
   kImageContracts,
   kImageCategories,
   nullptr,
-  mozilla::image::InitModule,
+  mozilla::image::EnsureModuleInitialized,
   // We need to be careful about shutdown ordering to avoid intermittent crashes
   // when hashtable enumeration decides to destroy modules in an unfortunate
   // order. So our shutdown is invoked explicitly during layout module shutdown.

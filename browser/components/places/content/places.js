@@ -79,7 +79,6 @@ var PlacesOrganizer = {
             break;
           default:
             throw new Error("Invalid container type found: " + container);
-            break;
         }
         PlacesUtils.asContainer(this._places.selectedNode).containerOpen = true;
       }
@@ -411,14 +410,17 @@ var PlacesOrganizer = {
   populateRestoreMenu: function PO_populateRestoreMenu() {
     let restorePopup = document.getElementById("fileRestorePopup");
 
-    let dateSvc = Cc["@mozilla.org/intl/scriptabledateformat;1"].
-                  getService(Ci.nsIScriptableDateFormat);
+    const locale = Cc["@mozilla.org/chrome/chrome-registry;1"]
+                   .getService(Ci.nsIXULChromeRegistry)
+                   .getSelectedLocale("global", true);
+    const dtOptions = { year: 'numeric', month: 'long', day: 'numeric' };
+    let dateFormatter = new Intl.DateTimeFormat(locale, dtOptions);
 
     // Remove existing menu items.  Last item is the restoreFromFile item.
     while (restorePopup.childNodes.length > 1)
       restorePopup.removeChild(restorePopup.firstChild);
 
-    Task.spawn(function() {
+    Task.spawn(function* () {
       let backupFiles = yield PlacesBackups.getBackupFiles();
       if (backupFiles.length == 0)
         return;
@@ -444,13 +446,7 @@ var PlacesOrganizer = {
         let backupDate = PlacesBackups.getDateForFile(backupFiles[i]);
         let m = restorePopup.insertBefore(document.createElement("menuitem"),
                                           document.getElementById("restoreFromFile"));
-        m.setAttribute("label",
-                       dateSvc.FormatDate("",
-                                          Ci.nsIScriptableDateFormat.dateFormatLong,
-                                          backupDate.getFullYear(),
-                                          backupDate.getMonth() + 1,
-                                          backupDate.getDate()) +
-                                          sizeInfo);
+        m.setAttribute("label", dateFormatter.format(backupDate) + sizeInfo);
         m.setAttribute("value", OS.Path.basename(backupFiles[i]));
         m.setAttribute("oncommand",
                        "PlacesOrganizer.onRestoreMenuItemClick(this);");
@@ -465,18 +461,16 @@ var PlacesOrganizer = {
   /**
    * Called when a menuitem is selected from the restore menu.
    */
-  onRestoreMenuItemClick: function PO_onRestoreMenuItemClick(aMenuItem) {
-    Task.spawn(function() {
-      let backupName = aMenuItem.getAttribute("value");
-      let backupFilePaths = yield PlacesBackups.getBackupFiles();
-      for (let backupFilePath of backupFilePaths) {
-        if (OS.Path.basename(backupFilePath) == backupName) {
-          PlacesOrganizer.restoreBookmarksFromFile(backupFilePath);
-          break;
-        }
+  onRestoreMenuItemClick: Task.async(function* (aMenuItem) {
+    let backupName = aMenuItem.getAttribute("value");
+    let backupFilePaths = yield PlacesBackups.getBackupFiles();
+    for (let backupFilePath of backupFilePaths) {
+      if (OS.Path.basename(backupFilePath) == backupName) {
+        PlacesOrganizer.restoreBookmarksFromFile(backupFilePath);
+        break;
       }
-    });
-  },
+    }
+  }),
 
   /**
    * Called when 'Choose File...' is selected from the restore menu.
@@ -521,10 +515,10 @@ var PlacesOrganizer = {
                          PlacesUIUtils.getString("bookmarksRestoreAlert")))
       return;
 
-    Task.spawn(function() {
+    Task.spawn(function* () {
       try {
         yield BookmarkJSONUtils.importFromFile(aFilePath, true);
-      } catch(ex) {
+      } catch (ex) {
         PlacesOrganizer._showErrorAlert(PlacesUIUtils.getString("bookmarksRestoreParseError"));
       }
     });
@@ -561,6 +555,7 @@ var PlacesOrganizer = {
     fp.appendFilter(PlacesUIUtils.getString("bookmarksRestoreFilterName"),
                     RESTORE_FILEPICKER_FILTER_EXT);
     fp.defaultString = PlacesBackups.getFilenameForDate();
+    fp.defaultExtension = "json";
     fp.displayDirectory = backupsDir;
     fp.open(fpCallback);
   },
@@ -576,7 +571,6 @@ var PlacesOrganizer = {
      * state in a bookmark->folder->bookmark scenario.
      */
     var infoBox = document.getElementById("infoBox");
-    var infoBoxExpander = document.getElementById("infoBoxExpander");
     var infoBoxExpanderWrapper = document.getElementById("infoBoxExpanderWrapper");
     var additionalInfoBroadcaster = document.getElementById("additionalInfoBroadcaster");
 
@@ -633,7 +627,7 @@ var PlacesOrganizer = {
       // don't update the panel if we are already editing this node unless we're
       // in multi-edit mode
       if (selectedNode) {
-        var concreteId = PlacesUtils.getConcreteItemId(selectedNode);
+        let concreteId = PlacesUtils.getConcreteItemId(selectedNode);
         var nodeIsSame = gEditItemOverlay.itemId == selectedNode.itemId ||
                          gEditItemOverlay.itemId == concreteId ||
                          (selectedNode.itemId == -1 && gEditItemOverlay.uri &&
@@ -649,23 +643,6 @@ var PlacesOrganizer = {
 
     if (selectedNode && !PlacesUtils.nodeIsSeparator(selectedNode)) {
       detailsDeck.selectedIndex = 1;
-      // Using the concrete itemId is arguably wrong.  The bookmarks API
-      // does allow setting properties for folder shortcuts as well, but since
-      // the UI does not distinct between the couple, we better just show
-      // the concrete item properties for shortcuts to root nodes.
-      var concreteId = PlacesUtils.getConcreteItemId(selectedNode);
-      var isRootItem = concreteId != -1 && PlacesUtils.isRootItem(concreteId);
-      var readOnly = isRootItem ||
-                     selectedNode.parent.itemId == PlacesUIUtils.leftPaneFolderId;
-      var useConcreteId = isRootItem ||
-                          PlacesUtils.nodeIsTagQuery(selectedNode);
-      var itemId = -1;
-      if (concreteId != -1 && useConcreteId)
-        itemId = concreteId;
-      else if (selectedNode.itemId != -1)
-        itemId = selectedNode.itemId;
-      else
-        itemId = PlacesUtils._uri(selectedNode.uri);
 
       gEditItemOverlay.initPanel({ node: selectedNode
                                  , hiddenRows: ["folderPicker"] });
@@ -737,7 +714,7 @@ var PlacesOrganizer = {
     ctx.fillStyle = "GrayText";
     ctx.mozTextStyle = "12pt sans serif";
     var len = ctx.mozMeasureText(notAvailableText);
-    ctx.translate(-len/2,0);
+    ctx.translate(-len/2, 0);
     ctx.mozDrawText(notAvailableText);
     ctx.restore();
   },
@@ -776,7 +753,7 @@ var PlacesSearchBox = {
   get searchFilter() {
     return document.getElementById("searchFilter");
   },
-   
+
   /**
    * Folders to include when searching.
    */
@@ -896,7 +873,7 @@ var PlacesSearchBox = {
         title = PlacesUIUtils.getString("searchDownloads");
         break;
       default:
-        title = PlacesUIUtils.getString("searchBookmarks");                                    
+        title = PlacesUIUtils.getString("searchBookmarks");
     }
     this.searchFilter.placeholder = title;
   },
@@ -978,7 +955,6 @@ var PlacesQueryBuilder = {
         break;
       default:
         throw "Invalid search scope";
-        break;
     }
 
     // Update the search box.  Re-search if there's an active search.
@@ -1035,9 +1011,8 @@ var ViewMenu = {
         popup.removeChild(startElement.nextSibling);
       return endElement;
     }
-    else {
-      while(popup.hasChildNodes())
-        popup.removeChild(popup.firstChild);
+    while (popup.hasChildNodes()) {
+      popup.removeChild(popup.firstChild);
     }
     return null;
   },
@@ -1067,9 +1042,6 @@ var ViewMenu = {
     var popup = event.target;
     var pivot = this._clean(popup, startID, endID);
 
-    // If no column is "sort-active", the "Unsorted" item needs to be checked,
-    // so track whether or not we find a column that is sort-active.
-    var isSorted = false;
     var content = document.getElementById("placeContent");
     var columns = content.columns;
     for (var i = 0; i < columns.count; ++i) {
@@ -1095,7 +1067,6 @@ var ViewMenu = {
         // This column is the sort key. Its item is checked.
         if (column.getAttribute("sortDirection") != "") {
           menuitem.setAttribute("checked", "true");
-          isSorted = true;
         }
       }
       else if (type == "checkbox") {
@@ -1206,13 +1177,13 @@ var ViewMenu = {
     if (aColumn) {
       columnId = aColumn.getAttribute("anonid");
       if (!aDirection) {
-        var sortColumn = this._getSortColumn();
+        let sortColumn = this._getSortColumn();
         if (sortColumn)
           aDirection = sortColumn.getAttribute("sortDirection");
       }
     }
     else {
-      var sortColumn = this._getSortColumn();
+      let sortColumn = this._getSortColumn();
       columnId = sortColumn ? sortColumn.getAttribute("anonid") : "title";
     }
 
@@ -1238,7 +1209,7 @@ var ViewMenu = {
 
     // Make sure we have a valid column.
     if (!colLookupTable.hasOwnProperty(columnId))
-      throw("Invalid column");
+      throw new Error("Invalid column");
 
     // Use a default sort direction if none has been specified.  If aDirection
     // is invalid, result.sortingMode will be undefined, which has the effect
@@ -1282,7 +1253,7 @@ var ContentArea = {
         return view;
       }
     }
-    catch(ex) {
+    catch (ex) {
       Components.utils.reportError(ex);
     }
     return ContentTree.view;
@@ -1307,7 +1278,7 @@ var ContentArea = {
       throw new Error("Invalid arguments");
 
     this._specialViews.set(aQueryString, { view: aView,
-                                           options: aOptions || new Object() });
+                                           options: aOptions || {} });
   },
 
   get currentView() {
@@ -1375,7 +1346,7 @@ var ContentArea = {
     // Use ContentTree options as default.
     let viewOptions = ContentTree.viewOptions;
     if (this._specialViews.has(this.currentPlace)) {
-      let { view, options } = this._specialViews.get(this.currentPlace);
+      let { options } = this._specialViews.get(this.currentPlace);
       for (let option in options) {
         viewOptions[option] = options[option];
       }

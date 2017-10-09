@@ -20,19 +20,14 @@ public:
 
   // Decode thread.
   already_AddRefed<MediaDataDecoder>
-  CreateVideoDecoder(const VideoInfo& aConfig,
-                     layers::LayersBackend aLayersBackend,
-                     layers::ImageContainer* aImageContainer,
-                     FlushableTaskQueue* aVideoTaskQueue,
-                     MediaDataDecoderCallback* aCallback) override;
+  CreateVideoDecoder(const CreateDecoderParams& aParams) override;
 
   // Decode thread.
   already_AddRefed<MediaDataDecoder>
-  CreateAudioDecoder(const AudioInfo& aConfig,
-                     FlushableTaskQueue* aAudioTaskQueue,
-                     MediaDataDecoderCallback* aCallback) override;
+  CreateAudioDecoder(const CreateDecoderParams& aParams) override;
 
-  bool SupportsMimeType(const nsACString& aMimeType) const override;
+  bool SupportsMimeType(const nsACString& aMimeType,
+                        DecoderDoctorDiagnostics* aDiagnostics) const override;
 
   ConversionRequired
   DecoderNeedsConversion(const TrackInfo& aConfig) const override;
@@ -46,8 +41,6 @@ private:
   static bool sIsCoreMediaAvailable;
   static bool sIsVTAvailable;
   static bool sIsVTHWAvailable;
-  static bool sIsVDAAvailable;
-  static bool sForceVDA;
 };
 
 } // namespace mozilla

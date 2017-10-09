@@ -132,7 +132,7 @@ AutoMounterSetting::AutoMounterSetting()
   nsCOMPtr<nsISettingsServiceLock> lock;
   settingsService->CreateLock(nullptr, getter_AddRefs(lock));
   nsCOMPtr<nsISettingsServiceCallback> callback = new SettingsServiceCallback();
-  JS::Rooted<JS::Value> value(nsContentUtils::RootingCx());
+  JS::Rooted<JS::Value> value(RootingCx());
   value.setInt32(AUTOMOUNTER_DISABLE);
   lock->Set(UMS_MODE, value, callback, nullptr);
   value.setInt32(mStatus);
@@ -161,13 +161,13 @@ AutoMounterSetting::StatusStr(int32_t aStatus)
   return "??? Unknown ???";
 }
 
-class CheckVolumeSettingsRunnable : public nsRunnable
+class CheckVolumeSettingsRunnable : public Runnable
 {
 public:
   CheckVolumeSettingsRunnable(const nsACString& aVolumeName)
     : mVolumeName(aVolumeName) {}
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(NS_IsMainThread());
     nsCOMPtr<nsISettingsService> settingsService =
@@ -194,12 +194,12 @@ AutoMounterSetting::CheckVolumeSettings(const nsACString& aVolumeName)
   NS_DispatchToMainThread(new CheckVolumeSettingsRunnable(aVolumeName));
 }
 
-class SetStatusRunnable : public nsRunnable
+class SetStatusRunnable : public Runnable
 {
 public:
   SetStatusRunnable(int32_t aStatus) : mStatus(aStatus) {}
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(NS_IsMainThread());
     nsCOMPtr<nsISettingsService> settingsService =
@@ -209,8 +209,8 @@ public:
     settingsService->CreateLock(nullptr, getter_AddRefs(lock));
     // lock may be null if this gets called during shutdown.
     if (lock) {
-      mozilla::AutoSafeJSContext cx;
-      JS::Rooted<JS::Value> value(cx, JS::Int32Value(mStatus));
+      JS::Rooted<JS::Value> value(RootingCx(),
+				  JS::Int32Value(mStatus));
       lock->Set(UMS_STATUS, value, nullptr, nullptr);
     }
     return NS_OK;
@@ -247,7 +247,7 @@ AutoMounterSetting::Observe(nsISupports* aSubject,
   // The string that we're interested in will be a JSON string that looks like:
   //  {"key":"ums.autoMount","value":true}
 
-  RootedDictionary<SettingChangeNotification> setting(nsContentUtils::RootingCxForThread());
+  RootedDictionary<SettingChangeNotification> setting(RootingCx());
   if (!WrappedJSToDictionary(aSubject, setting)) {
     return NS_OK;
   }

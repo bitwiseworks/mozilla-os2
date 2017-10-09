@@ -20,10 +20,15 @@
 #include "nsAutoPtr.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/Logging.h"
+#include "mozilla/Atomics.h"
 
-class nsPACMan;
 class nsISystemProxySettings;
 class nsIThread;
+
+namespace mozilla {
+namespace net {
+
+class nsPACMan;
 class WaitForThreadShutdown;
 
 /**
@@ -50,14 +55,14 @@ public:
                                const nsCString &newPACURL) = 0;
 };
 
-class PendingPACQuery final : public nsRunnable,
-                              public mozilla::LinkedListElement<PendingPACQuery>
+class PendingPACQuery final : public Runnable,
+                              public LinkedListElement<PendingPACQuery>
 {
 public:
-  PendingPACQuery(nsPACMan *pacMan, nsIURI *uri, uint32_t appId,
-                  bool isInBrowser, nsPACManCallback *callback,
+  PendingPACQuery(nsPACMan *pacMan, nsIURI *uri,
+                  nsPACManCallback *callback,
                   bool mainThreadResponse);
- 
+
   // can be called from either thread
   void Complete(nsresult status, const nsCString &pacString);
   void UseAlternatePACFile(const nsCString &pacURL);
@@ -67,15 +72,10 @@ public:
   nsCString                  mHost;
   int32_t                    mPort;
 
-  NS_IMETHOD Run(void);     /* nsRunnable */
+  NS_IMETHOD Run(void);     /* Runnable */
 
 private:
   nsPACMan                  *mPACMan;  // weak reference
-
-public:
-  uint32_t                   mAppId;
-  bool                       mIsInBrowser;
-  nsString                   mAppOrigin;
 
 private:
   RefPtr<nsPACManCallback> mCallback;
@@ -108,20 +108,15 @@ public:
    * calling thread.  If the PAC file has not yet been loaded, then this method
    * will queue up the request, and complete it once the PAC file has been
    * loaded.
-   * 
+   *
    * @param uri
    *        The URI to query.
-   * @param appId
-   *        The appId of the app making the connection.
-   * @param isInBrowser
-   *        True if the iframe has mozbrowser but has no mozapp attribute.
    * @param callback
    *        The callback to run once the PAC result is available.
    * @param mustCallbackOnMainThread
    *        If set to false the callback can be made from the PAC thread
    */
-  nsresult AsyncGetProxyForURI(nsIURI *uri, uint32_t appId,
-                               bool isInBrowser,
+  nsresult AsyncGetProxyForURI(nsIURI *uri,
                                nsPACManCallback *callback,
                                bool mustCallbackOnMainThread);
 
@@ -156,11 +151,16 @@ public:
   }
 
   bool IsPACURI(nsIURI *uri) {
-    if (mPACURISpec.IsEmpty() && mPACURIRedirectSpec.IsEmpty())
+    if (mPACURISpec.IsEmpty() && mPACURIRedirectSpec.IsEmpty()) {
       return false;
+    }
 
     nsAutoCString tmp;
-    uri->GetSpec(tmp);
+    nsresult rv = uri->GetSpec(tmp);
+    if (NS_FAILED(rv)) {
+      return false;
+    }
+
     return IsPACURI(tmp);
   }
 
@@ -217,11 +217,11 @@ private:
   void NamePACThread();
 
 private:
-  mozilla::net::ProxyAutoConfig mPAC;
+  ProxyAutoConfig mPAC;
   nsCOMPtr<nsIThread>           mPACThread;
   nsCOMPtr<nsISystemProxySettings> mSystemProxySettings;
 
-  mozilla::LinkedList<PendingPACQuery> mPendingQ; /* pac thread only */
+  LinkedList<PendingPACQuery> mPendingQ; /* pac thread only */
 
   // These specs are not nsIURI so that they can be used off the main thread.
   // The non-normalized versions are directly from the configuration, the
@@ -232,16 +232,16 @@ private:
 
   nsCOMPtr<nsIStreamLoader>    mLoader;
   bool                         mLoadPending;
-  bool                         mShutdown;
-  mozilla::TimeStamp           mScheduledReload;
+  Atomic<bool, Relaxed>        mShutdown;
+  TimeStamp                    mScheduledReload;
   uint32_t                     mLoadFailureCount;
 
   bool                         mInProgress;
+  bool                         mIncludePath;
 };
 
-namespace mozilla {
-namespace net {
 extern LazyLogModule gProxyLog;
+
 } // namespace net
 } // namespace mozilla
 

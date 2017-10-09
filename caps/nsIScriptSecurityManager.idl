@@ -26,7 +26,7 @@ class DomainPolicyClone;
 [ptr] native JSObjectPtr(JSObject);
 [ptr] native DomainPolicyClonePtr(mozilla::dom::DomainPolicyClone);
 
-[scriptable, uuid(b7ae2310-576e-11e5-a837-0800200c9a66)]
+[scriptable, uuid(51daad87-3a0c-44cc-b620-7356801c9022)]
 interface nsIScriptSecurityManager : nsISupports
 {
     /**
@@ -126,24 +126,12 @@ interface nsIScriptSecurityManager : nsISupports
                                       in AUTF8String uri,
                                       in unsigned long flags);
 
-    /**
-     * Return true if scripts may be executed in the scope of the given global.
-     */
-    [noscript,notxpcom] boolean scriptAllowed(in JSObjectPtr aGlobal);
-
     ///////////////// Principals ///////////////////////
 
     /**
      * Return the all-powerful system principal.
      */
     nsIPrincipal getSystemPrincipal();
-
-    /**
-     * Return a principal that has the same origin as aURI.
-     * This principals should not be used for any data/permission check, it will
-     * have appId = UNKNOWN_APP_ID.
-     */
-    nsIPrincipal getSimpleCodebasePrincipal(in nsIURI aURI);
 
     /**
      * Returns a principal that has the given information.
@@ -213,20 +201,6 @@ interface nsIScriptSecurityManager : nsISupports
     nsIPrincipal createNullPrincipal(in jsval originAttributes);
 
     /**
-     * Creates an expanded principal whose capabilities are the union of the
-     * given principals. An expanded principal has an asymmetric privilege
-     * relationship with its sub-principals (that is to say, it subsumes the
-     * sub-principals, but the sub-principals do not subsume it), even if
-     * there's only one. This presents a legitimate use-case for making an
-     * expanded principal around a single sub-principal, which we do frequently.
-     *
-     * Expanded principals cannot have origin attributes themselves, but rather
-     * have them through their sub-principals - so we don't accept them here.
-     */
-    nsIPrincipal createExpandedPrincipal([array, size_is(aLength)] in nsIPrincipal aPrincipalArray,
-                                         [optional] in unsigned long aLength);
-
-    /**
      * Returns OK if aSourceURI and target have the same "origin"
      * (scheme, host, and port).
      * ReportError flag suppresses error reports for functions that
@@ -241,6 +215,24 @@ interface nsIScriptSecurityManager : nsISupports
      * channel's URI otherwise.  aChannel must not be null.
      */
     nsIPrincipal getChannelResultPrincipal(in nsIChannel aChannel);
+
+    /**
+     * Temporary API until bug 1220687 is fixed.
+     *
+     * Returns the same value as getChannelResultPrincipal, but ignoring
+     * sandboxing.  Specifically, if sandboxing would have prevented the
+     * channel's triggering principal from being returned by
+     * getChannelResultPrincipal, the triggering principal will be returned
+     * by this method.
+     *
+     * Note that this method only ignores sandboxing of the channel in
+     * question, it does not ignore sandboxing of any channels further up a
+     * document chain.  The triggering principal itself may still be the null
+     * principal due to sandboxing further up a document chain.  In that regard
+     * the ignoring of sandboxing is limited.
+     */
+    [noscript, nostdcall]
+    nsIPrincipal getChannelResultPrincipalIfNotSandboxed(in nsIChannel aChannel);
 
     /**
      * Get the codebase principal for the channel's URI.
@@ -267,14 +259,6 @@ interface nsIScriptSecurityManager : nsISupports
     const unsigned long SAFEBROWSING_APP_ID = 4294967294; // UINT32_MAX - 1
 
     const unsigned long DEFAULT_USER_CONTEXT_ID = 0;
-
-    /**
-     * Returns the jar prefix for the app.
-     * appId can be NO_APP_ID or a valid app id. appId should not be
-     * UNKNOWN_APP_ID.
-     * inMozBrowser has to be true if the app is inside a mozbrowser iframe.
-     */
-    AUTF8String getJarPrefix(in unsigned long appId, in boolean inMozBrowser);
 
     /**
      * Per-domain controls to enable and disable script. This system is designed

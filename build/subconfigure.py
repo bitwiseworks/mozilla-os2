@@ -206,16 +206,19 @@ def prepare(srcdir, objdir, shell, args):
     # Msys likes to break environment variables and command line arguments,
     # so read those from stdin, as they are passed from the configure script
     # when necessary (on windows).
-    # However, for some reason, $PATH is not handled like other environment
-    # variables, and msys remangles it even when giving it is already a msys
-    # $PATH. Fortunately, the mangling/demangling is just find for $PATH, so
-    # we can just take the value from the environment. Msys will convert it
-    # back properly when calling subconfigure.
     input = sys.stdin.read()
     if input:
         data = {a: b for [a, b] in eval(input)}
         environ = {a: b for a, b in data['env']}
-        environ['PATH'] = os.environ['PATH']
+        # These environment variables as passed from old-configure may contain
+        # posix-style paths, which will not be meaningful to the js
+        # subconfigure, which runs as a native python process, so use their
+        # values from the environment. In the case of autoconf implemented
+        # subconfigures, Msys will re-convert them properly.
+        for var in ('HOME', 'TERM', 'PATH', 'TMPDIR', 'TMP',
+                    'TEMP', 'INCLUDE'):
+            if var in environ and var in os.environ:
+                environ[var] = os.environ[var]
         args = data['args']
     else:
         environ = os.environ
@@ -303,7 +306,23 @@ def run(objdir):
     relobjdir = os.path.relpath(objdir, os.getcwd())
 
     if not skip_configure:
-        command = [data['shell'], configure]
+        if mozpath.normsep(relobjdir) == 'js/src':
+            # Because configure is a shell script calling a python script
+            # calling a shell script, on Windows, with msys screwing the
+            # environment, we lose the benefits from our own efforts in this
+            # script to get past the msys problems. So manually call the python
+            # script instead, so that we don't do a native->msys transition
+            # here. Then the python configure will still have the right
+            # environment when calling the shell configure.
+            command = [
+                sys.executable,
+                os.path.join(os.path.dirname(__file__), '..', 'configure.py'),
+                '--enable-project=js',
+            ]
+            data['env']['OLD_CONFIGURE'] = os.path.join(
+                os.path.dirname(configure), 'old-configure')
+        else:
+            command = [data['shell'], configure]
         for kind in ('target', 'build', 'host'):
             if data.get(kind) is not None:
                 command += ['--%s=%s' % (kind, data[kind])]

@@ -9,16 +9,15 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/ErrorResult.h"
+#include "mozilla/Maybe.h"
 #include "nsIDOMStorage.h"
-#include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsWeakReference.h"
 #include "nsWrapperCache.h"
 #include "nsISupports.h"
 
 class nsIPrincipal;
-class nsIDOMWindow;
-class nsPIDOMWindow;
+class nsPIDOMWindowInner;
 
 namespace mozilla {
 namespace dom {
@@ -56,12 +55,8 @@ public:
   nsIPrincipal* GetPrincipal();
   bool PrincipalEquals(nsIPrincipal* aPrincipal);
   bool CanAccess(nsIPrincipal* aPrincipal);
-  bool IsPrivate()
-  {
-    return mIsPrivate;
-  }
 
-  DOMStorage(nsIDOMWindow* aWindow,
+  DOMStorage(nsPIDOMWindowInner* aWindow,
              DOMStorageManager* aManager,
              DOMStorageCache* aCache,
              const nsAString& aDocumentURI,
@@ -71,59 +66,58 @@ public:
   // WebIDL
   JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
-  nsIDOMWindow* GetParentObject() const
+  nsPIDOMWindowInner* GetParentObject() const
   {
     return mWindow;
   }
 
-  uint32_t GetLength(ErrorResult& aRv);
+  uint32_t GetLength(nsIPrincipal& aSubjectPrincipal,
+                     ErrorResult& aRv);
 
-  void Key(uint32_t aIndex, nsAString& aResult, ErrorResult& aRv);
+  void Key(uint32_t aIndex, nsAString& aResult,
+           nsIPrincipal& aSubjectPrincipal,
+           ErrorResult& aRv);
 
-  void GetItem(const nsAString& aKey, nsAString& aResult, ErrorResult& aRv);
+  void GetItem(const nsAString& aKey, nsAString& aResult,
+               nsIPrincipal& aSubjectPrincipal,
+               ErrorResult& aRv);
 
-  bool NameIsEnumerable(const nsAString& aName) const
-  {
-    return true;
-  }
-
-  void GetSupportedNames(unsigned, nsTArray<nsString>& aKeys);
+  void GetSupportedNames(nsTArray<nsString>& aKeys);
 
   void NamedGetter(const nsAString& aKey, bool& aFound, nsAString& aResult,
+                   nsIPrincipal& aSubjectPrincipal,
                    ErrorResult& aRv)
   {
-    GetItem(aKey, aResult, aRv);
+    GetItem(aKey, aResult, aSubjectPrincipal, aRv);
     aFound = !aResult.IsVoid();
   }
 
   void SetItem(const nsAString& aKey, const nsAString& aValue,
+               nsIPrincipal& aSubjectPrincipal,
                ErrorResult& aRv);
 
   void NamedSetter(const nsAString& aKey, const nsAString& aValue,
+                   nsIPrincipal& aSubjectPrincipal,
                    ErrorResult& aRv)
   {
-    SetItem(aKey, aValue, aRv);
+    SetItem(aKey, aValue, aSubjectPrincipal, aRv);
   }
 
-  void RemoveItem(const nsAString& aKey, ErrorResult& aRv);
+  void RemoveItem(const nsAString& aKey,
+                  nsIPrincipal& aSubjectPrincipal,
+                  ErrorResult& aRv);
 
-  void NamedDeleter(const nsAString& aKey, bool& aFound, ErrorResult& aRv)
+  void NamedDeleter(const nsAString& aKey, bool& aFound,
+                    nsIPrincipal& aSubjectPrincipal,
+                    ErrorResult& aRv)
   {
-    RemoveItem(aKey, aRv);
+    RemoveItem(aKey, aSubjectPrincipal, aRv);
 
     aFound = !aRv.ErrorCodeIs(NS_SUCCESS_DOM_NO_OPERATION);
   }
 
-  void Clear(ErrorResult& aRv);
-
-  // The method checks whether the caller can use a storage.
-  // CanUseStorage is called before any DOM initiated operation
-  // on a storage is about to happen and ensures that the storage's
-  // session-only flag is properly set according the current settings.
-  // It is an optimization since the privileges check and session only
-  // state determination are complex and share the code (comes hand in
-  // hand together).
-  static bool CanUseStorage(nsPIDOMWindow* aWindow, DOMStorage* aStorage = nullptr);
+  void Clear(nsIPrincipal& aSubjectPrincipal,
+             ErrorResult& aRv);
 
   bool IsPrivate() const { return mIsPrivate; }
   bool IsSessionOnly() const { return mIsSessionOnly; }
@@ -134,13 +128,23 @@ public:
     return mCache == aOther->mCache;
   }
 
+protected:
+  // The method checks whether the caller can use a storage.
+  // CanUseStorage is called before any DOM initiated operation
+  // on a storage is about to happen and ensures that the storage's
+  // session-only flag is properly set according the current settings.
+  // It is an optimization since the privileges check and session only
+  // state determination are complex and share the code (comes hand in
+  // hand together).
+  bool CanUseStorage(nsIPrincipal& aSubjectPrincipal);
+
 private:
   ~DOMStorage();
 
   friend class DOMStorageManager;
   friend class DOMStorageCache;
 
-  nsCOMPtr<nsIDOMWindow> mWindow;
+  nsCOMPtr<nsPIDOMWindowInner> mWindow;
   RefPtr<DOMStorageManager> mManager;
   RefPtr<DOMStorageCache> mCache;
   nsString mDocumentURI;

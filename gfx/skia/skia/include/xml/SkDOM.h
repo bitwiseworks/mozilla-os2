@@ -10,14 +10,19 @@
 #ifndef SkDOM_DEFINED
 #define SkDOM_DEFINED
 
+#include "../private/SkTemplates.h"
 #include "SkChunkAlloc.h"
 #include "SkScalar.h"
-#include "SkTemplates.h"
+#include "SkTypes.h"
 
 struct SkDOMNode;
 struct SkDOMAttr;
 
-class SkDOM {
+class SkDOMParser;
+class SkStream;
+class SkXMLParser;
+
+class SK_API SkDOM : public SkNoncopyable {
 public:
     SkDOM();
     ~SkDOM();
@@ -27,10 +32,13 @@ public:
 
     /** Returns null on failure
     */
-    const Node* build(const char doc[], size_t len);
+    const Node* build(SkStream&);
     const Node* copy(const SkDOM& dom, const Node* node);
 
     const Node* getRootNode() const;
+
+    SkXMLParser* beginParsing();
+    const Node* finishParsing();
 
     enum Type {
         kElement_Type,
@@ -71,7 +79,7 @@ public:
 
     class AttrIter {
     public:
-        AttrIter(const class SkDOM&, const Node*);
+        AttrIter(const SkDOM&, const Node*);
         const char* next(const char** value);
     private:
         const Attr* fAttr;
@@ -79,13 +87,13 @@ public:
     };
 
     SkDEBUGCODE(void dump(const Node* node = NULL, int tabLevel = 0) const;)
-    SkDEBUGCODE(static void UnitTest();)
 
 private:
-    SkChunkAlloc    fAlloc;
-    Node*           fRoot;
-    friend class AttrIter;
-    friend class SkDOMParser;
+    SkChunkAlloc               fAlloc;
+    Node*                      fRoot;
+    SkAutoTDelete<SkDOMParser> fParser;
+
+    typedef SkNoncopyable INHERITED;
 };
 
 #endif

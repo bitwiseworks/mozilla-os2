@@ -14,7 +14,6 @@
 #include "mozilla/XorShift128PlusRNG.h"
 
 #include "jsfriendapi.h"
-#include "jslock.h"
 #include "jsmath.h"
 #include "jsutil.h"
 #include "jswin.h"
@@ -22,8 +21,12 @@
 #include <errno.h>
 
 #include "gc/Memory.h"
+#include "threading/LockGuard.h"
+#include "threading/Mutex.h"
+#include "vm/MutexIDs.h"
 
 #ifdef XP_WIN
+# include "mozilla/StackWalk_windows.h"
 # include "mozilla/WindowsVersion.h"
 #else
 # include <sys/mman.h>
@@ -150,7 +153,14 @@ RegisterExecutableMemory(void* p, size_t bytes, size_t pageSize)
     if (!VirtualProtect(p, pageSize, PAGE_EXECUTE_READ, &oldProtect))
         MOZ_CRASH();
 
+    // XXX NB: The profiler believes this function is only called from the main
+    // thread. If that ever becomes untrue, the profiler must be updated
+    // immediately.
+    AcquireStackWalkWorkaroundLock();
+
     bool success = RtlAddFunctionTable(&r->runtimeFunction, 1, reinterpret_cast<DWORD64>(p));
+
+    ReleaseStackWalkWorkaroundLock();
 
     return success;
 }
@@ -160,7 +170,14 @@ UnregisterExecutableMemory(void* p, size_t bytes, size_t pageSize)
 {
     ExceptionHandlerRecord* r = reinterpret_cast<ExceptionHandlerRecord*>(p);
 
+    // XXX NB: The profiler believes this function is only called from the main
+    // thread. If that ever becomes untrue, the profiler must be updated
+    // immediately.
+    AcquireStackWalkWorkaroundLock();
+
     RtlDeleteFunctionTable(&r->runtimeFunction);
+
+    ReleaseStackWalkWorkaroundLock();
 }
 # endif
 
@@ -219,7 +236,12 @@ DeallocateProcessExecutableMemory(void* addr, size_t bytes)
 static DWORD
 ProtectionSettingToFlags(ProtectionSetting protection)
 {
-    return PAGE_EXECUTE_READWRITE;
+    switch (protection) {
+      case ProtectionSetting::Protected:  return PAGE_NOACCESS;
+      case ProtectionSetting::Writable:   return PAGE_READWRITE;
+      case ProtectionSetting::Executable: return PAGE_EXECUTE_READ;
+    }
+    MOZ_CRASH();
 }
 
 static void
@@ -283,7 +305,12 @@ DeallocateProcessExecutableMemory(void* addr, size_t bytes)
 static unsigned
 ProtectionSettingToFlags(ProtectionSetting protection)
 {
-    return PROT_READ | PROT_WRITE | PROT_EXEC;
+    switch (protection) {
+      case ProtectionSetting::Protected:  return PROT_NONE;
+      case ProtectionSetting::Writable:   return PROT_READ | PROT_WRITE;
+      case ProtectionSetting::Executable: return PROT_READ | PROT_EXEC;
+    }
+    MOZ_CRASH();
 }
 
 static void
@@ -363,7 +390,7 @@ class PageBitSet
 #if JS_BITS_PER_WORD == 32
 static const size_t MaxCodeBytesPerProcess = 128 * 1024 * 1024;
 #else
-static const size_t MaxCodeBytesPerProcess = 640 * 1024 * 1024;
+static const size_t MaxCodeBytesPerProcess = 1 * 1024 * 1024 * 1024;
 #endif
 
 // Per-process executable memory allocator. It reserves a block of memory of
@@ -393,7 +420,7 @@ class ProcessExecutableMemory
     uint8_t* base_;
 
     // The fields below should only be accessed while we hold the lock.
-    PRLock* lock_;
+    Mutex lock_;
 
     // pagesAllocated_ is an Atomic so that bytesAllocated does not have to
     // take the lock.
@@ -408,7 +435,7 @@ class ProcessExecutableMemory
   public:
     ProcessExecutableMemory()
       : base_(nullptr),
-        lock_(nullptr),
+        lock_(mutexid::ProcessExecutableRegion),
         pagesAllocated_(0),
         cursor_(0),
         rng_(),
@@ -420,10 +447,6 @@ class ProcessExecutableMemory
 
         MOZ_RELEASE_ASSERT(!initialized());
         MOZ_RELEASE_ASSERT(gc::SystemPageSize() <= ExecutableCodePageSize);
-
-        lock_ = PR_NewLock();
-        if (!lock_)
-            return false;
 
         void* p = ReserveProcessExecutableMemory(MaxCodeBytesPerProcess);
         if (!p)
@@ -453,9 +476,6 @@ class ProcessExecutableMemory
         DeallocateProcessExecutableMemory(base_, MaxCodeBytesPerProcess);
         base_ = nullptr;
         rng_.reset();
-        MOZ_ASSERT(lock_);
-        PR_DestroyLock(lock_);
-        lock_ = nullptr;
         MOZ_ASSERT(!initialized());
     }
 
@@ -480,14 +500,12 @@ ProcessExecutableMemory::allocate(size_t bytes, ProtectionSetting protection)
     // Take the lock and try to allocate.
     void* p = nullptr;
     {
-        PR_Lock(lock_);
+        LockGuard<Mutex> guard(lock_);
         MOZ_ASSERT(pagesAllocated_ <= MaxCodePages);
 
         // Check if we have enough pages available.
-        if (pagesAllocated_ + numPages >= MaxCodePages) {
-            PR_Unlock(lock_);
+        if (pagesAllocated_ + numPages >= MaxCodePages)
             return nullptr;
-        }
 
         MOZ_ASSERT(bytes <= MaxCodeBytesPerProcess);
 
@@ -527,7 +545,6 @@ ProcessExecutableMemory::allocate(size_t bytes, ProtectionSetting protection)
             p = base_ + page * ExecutableCodePageSize;
             break;
         }
-        PR_Unlock(lock_);
         if (!p)
             return nullptr;
     }
@@ -554,7 +571,7 @@ ProcessExecutableMemory::deallocate(void* addr, size_t bytes)
     // Decommit before taking the lock.
     DecommitPages(addr, bytes);
 
-    PR_Lock(lock_);
+    LockGuard<Mutex> guard(lock_);
     MOZ_ASSERT(numPages <= pagesAllocated_);
     pagesAllocated_ -= numPages;
 
@@ -565,8 +582,6 @@ ProcessExecutableMemory::deallocate(void* addr, size_t bytes)
     // whole region.
     if (firstPage < cursor_)
         cursor_ = firstPage;
-
-    PR_Unlock(lock_);
 }
 
 static ProcessExecutableMemory execMemory;
@@ -604,4 +619,38 @@ js::jit::CanLikelyAllocateMoreExecutableMemory()
     MOZ_ASSERT(execMemory.bytesAllocated() <= MaxCodeBytesPerProcess);
 
     return execMemory.bytesAllocated() + BufferSize <= MaxCodeBytesPerProcess;
+}
+
+bool
+js::jit::ReprotectRegion(void* start, size_t size, ProtectionSetting protection)
+{
+    // Calculate the start of the page containing this region,
+    // and account for this extra memory within size.
+    size_t pageSize = gc::SystemPageSize();
+    intptr_t startPtr = reinterpret_cast<intptr_t>(start);
+    intptr_t pageStartPtr = startPtr & ~(pageSize - 1);
+    void* pageStart = reinterpret_cast<void*>(pageStartPtr);
+    size += (startPtr - pageStartPtr);
+
+    // Round size up
+    size += (pageSize - 1);
+    size &= ~(pageSize - 1);
+
+    MOZ_ASSERT((uintptr_t(pageStart) % pageSize) == 0);
+
+    execMemory.assertValidAddress(pageStart, size);
+
+#ifdef XP_WIN
+    DWORD oldProtect;
+    DWORD flags = ProtectionSettingToFlags(protection);
+    if (!VirtualProtect(pageStart, size, flags, &oldProtect))
+        return false;
+#else
+    unsigned flags = ProtectionSettingToFlags(protection);
+    if (mprotect(pageStart, size, flags))
+        return false;
+#endif
+
+    execMemory.assertValidAddress(pageStart, size);
+    return true;
 }

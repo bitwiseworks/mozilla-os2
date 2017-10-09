@@ -4,6 +4,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "Task",
   "resource://gre/modules/Task.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
   "resource://gre/modules/PlacesUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "PromiseUtils",
+  "resource://gre/modules/PromiseUtils.jsm");
 
 // The blocklist shim running in the content process does not initialize at
 // start up, so it's not active until we load content that needs to do a
@@ -13,8 +15,8 @@ function promiseInitContentBlocklistSvc(aBrowser)
 {
   return ContentTask.spawn(aBrowser, {}, function* () {
     try {
-      let bls = Cc["@mozilla.org/extensions/blocklist;1"]
-                          .getService(Ci.nsIBlocklistService);
+      Cc["@mozilla.org/extensions/blocklist;1"]
+        .getService(Ci.nsIBlocklistService);
     } catch (ex) {
       return ex.message;
     }
@@ -71,40 +73,29 @@ function waitForEvent(subject, eventName, checkFn, useCapture, useUntrusted) {
  *        The tab to load into.
  * @param [optional] url
  *        The url to load, or the current url.
- * @param [optional] event
- *        The load event type to wait for.  Defaults to "load".
  * @return {Promise} resolved when the event is handled.
  * @resolves to the received event
  * @rejects if a valid load event is not received within a meaningful interval
  */
-function promiseTabLoadEvent(tab, url, eventType="load") {
-  return new Promise((resolve, reject) => {
-    info("Wait tab event: " + eventType);
+function promiseTabLoadEvent(tab, url) {
+  info("Wait tab event: load");
 
-    function handle(event) {
-      if (event.originalTarget != tab.linkedBrowser.contentDocument ||
-          event.target.location.href == "about:blank" ||
-          (url && event.target.location.href != url)) {
-        info("Skipping spurious '" + eventType + "'' event" +
-              " for " + event.target.location.href);
-        return;
-      }
-      clearTimeout(timeout);
-      tab.linkedBrowser.removeEventListener(eventType, handle, true);
-      info("Tab event received: " + eventType);
-      resolve(event);
+  function handle(loadedUrl) {
+    if (loadedUrl === "about:blank" || (url && loadedUrl !== url)) {
+      info(`Skipping spurious load event for ${loadedUrl}`);
+      return false;
     }
 
-    let timeout = setTimeout(() => {
-      tab.linkedBrowser.removeEventListener(eventType, handle, true);
-      reject(new Error("Timed out while waiting for a '" + eventType + "'' event"));
-    }, 30000);
+    info("Tab event received: load");
+    return true;
+  }
 
-    tab.linkedBrowser.addEventListener(eventType, handle, true, true);
-    if (url) {
-      tab.linkedBrowser.loadURI(url);
-    }
-  });
+  let loaded = BrowserTestUtils.browserLoaded(tab.linkedBrowser, false, handle);
+
+  if (url)
+    BrowserTestUtils.loadURI(tab.linkedBrowser, url);
+
+  return loaded;
 }
 
 function waitForCondition(condition, nextTest, errorMsg, aTries, aWait) {
@@ -202,7 +193,6 @@ function promiseCrashObject(aId, aBrowser) {
   let browser = aBrowser || gTestBrowser;
   return ContentTask.spawn(browser, aId, function* (aId) {
     let plugin = content.document.getElementById(aId);
-    let objLoadingContent = plugin.QueryInterface(Ci.nsIObjectLoadingContent);
     Components.utils.waiveXrays(plugin).crash();
   });
 }

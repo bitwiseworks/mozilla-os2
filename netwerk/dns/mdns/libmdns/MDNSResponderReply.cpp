@@ -4,7 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "MDNSResponderReply.h"
-#include "mozilla/Endian.h"
+#include "mozilla/EndianUtils.h"
 #include "private/pprio.h"
 
 namespace mozilla {
@@ -281,7 +281,11 @@ GetAddrInfoReplyRunnable::Reply(DNSServiceRef aSdRef,
   }
 
   NetAddr address;
-  memcpy(&address, aAddress, sizeof(*aAddress));
+  address.raw.family = aAddress->sa_family;
+
+  static_assert(sizeof(address.raw.data) >= sizeof(aAddress->sa_data),
+                "size of sockaddr.sa_data is too big");
+  memcpy(&address.raw.data, aAddress->sa_data, sizeof(aAddress->sa_data));
 
   thread->Dispatch(new GetAddrInfoReplyRunnable(aSdRef,
                                                 aFlags,

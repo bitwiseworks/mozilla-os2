@@ -9,31 +9,36 @@
 #include <stdint.h>
 
 #include "ExtendedValidation.h"
+#include "NSSErrorsService.h"
 #include "OCSPRequestor.h"
 #include "OCSPVerificationTrustDomain.h"
-#include "certdb.h"
+#include "PublicKeyPinningService.h"
 #include "cert.h"
+#include "certdb.h"
+#include "mozilla/Assertions.h"
+#include "mozilla/Casting.h"
+#include "mozilla/PodOperations.h"
 #include "mozilla/UniquePtr.h"
+#include "mozilla/Unused.h"
 #include "nsNSSCertificate.h"
-#include "nss.h"
-#include "NSSErrorsService.h"
 #include "nsServiceManagerUtils.h"
+#include "nss.h"
 #include "pk11pub.h"
+#include "pkix/Result.h"
 #include "pkix/pkix.h"
 #include "pkix/pkixnss.h"
 #include "prerror.h"
 #include "prmem.h"
 #include "prprf.h"
-#include "PublicKeyPinningService.h"
-#include "ScopedNSSTypes.h"
 #include "secerr.h"
 
 #include "CNNICHashWhitelist.inc"
+#include "StartComAndWoSignData.inc"
 
 using namespace mozilla;
 using namespace mozilla::pkix;
 
-extern PRLogModuleInfo* gCertVerifierLog;
+extern LazyLogModule gCertVerifierLog;
 
 static const uint64_t ServerFailureDelaySeconds = 5 * 60;
 
@@ -50,11 +55,12 @@ NSSCertDBTrustDomain::NSSCertDBTrustDomain(SECTrustType certDBTrustType,
                                            CertVerifier::PinningMode pinningMode,
                                            unsigned int minRSABits,
                                            ValidityCheckingMode validityCheckingMode,
-                                           SignatureDigestOption signatureDigestOption,
                                            CertVerifier::SHA1Mode sha1Mode,
+                                           NetscapeStepUpPolicy netscapeStepUpPolicy,
+                                           const NeckoOriginAttributes& originAttributes,
+                                           UniqueCERTCertList& builtChain,
                               /*optional*/ PinningTelemetryInfo* pinningTelemetryInfo,
-                              /*optional*/ const char* hostname,
-                              /*optional*/ ScopedCERTCertList* builtChain)
+                              /*optional*/ const char* hostname)
   : mCertDBTrustType(certDBTrustType)
   , mOCSPFetching(ocspFetching)
   , mOCSPCache(ocspCache)
@@ -64,20 +70,23 @@ NSSCertDBTrustDomain::NSSCertDBTrustDomain(SECTrustType certDBTrustType,
   , mPinningMode(pinningMode)
   , mMinRSABits(minRSABits)
   , mValidityCheckingMode(validityCheckingMode)
-  , mSignatureDigestOption(signatureDigestOption)
   , mSHA1Mode(sha1Mode)
+  , mNetscapeStepUpPolicy(netscapeStepUpPolicy)
+  , mOriginAttributes(originAttributes)
+  , mBuiltChain(builtChain)
   , mPinningTelemetryInfo(pinningTelemetryInfo)
   , mHostname(hostname)
-  , mBuiltChain(builtChain)
   , mCertBlocklist(do_GetService(NS_CERTBLOCKLIST_CONTRACTID))
   , mOCSPStaplingStatus(CertVerifier::OCSP_STAPLING_NEVER_CHECKED)
+  , mSCTListFromCertificate()
+  , mSCTListFromOCSPStapling()
 {
 }
 
 // If useRoots is true, we only use root certificates in the candidate list.
 // If useRoots is false, we only use non-root certificates in the list.
 static Result
-FindIssuerInner(ScopedCERTCertList& candidates, bool useRoots,
+FindIssuerInner(const UniqueCERTCertList& candidates, bool useRoots,
                 Input encodedIssuerName, TrustDomain::IssuerChecker& checker,
                 /*out*/ bool& keepGoing)
 {
@@ -99,9 +108,9 @@ FindIssuerInner(ScopedCERTCertList& candidates, bool useRoots,
       const_cast<unsigned char*>(encodedIssuerName.UnsafeGetData()),
       encodedIssuerName.GetLength()
     };
-    ScopedSECItem nameConstraints(::SECITEM_AllocItem(nullptr, nullptr, 0));
+    ScopedAutoSECItem nameConstraints;
     SECStatus srv = CERT_GetImposedNameConstraints(&encodedIssuerNameItem,
-                                                   nameConstraints.get());
+                                                   &nameConstraints);
     if (srv != SECSuccess) {
       if (PR_GetError() != SEC_ERROR_EXTENSION_NOT_FOUND) {
         return Result::FATAL_ERROR_LIBRARY_FAILURE;
@@ -112,9 +121,8 @@ FindIssuerInner(ScopedCERTCertList& candidates, bool useRoots,
     } else {
       // Otherwise apply the constraints
       Input nameConstraintsInput;
-      if (nameConstraintsInput.Init(
-              nameConstraints->data,
-              nameConstraints->len) != Success) {
+      if (nameConstraintsInput.Init(nameConstraints.data, nameConstraints.len)
+            != Success) {
         return Result::FATAL_ERROR_LIBRARY_FAILURE;
       }
       rv = checker.Check(certDER, &nameConstraintsInput, keepGoing);
@@ -137,7 +145,7 @@ NSSCertDBTrustDomain::FindIssuer(Input encodedIssuerName,
   // TODO: NSS seems to be ambiguous between "no potential issuers found" and
   // "there was an error trying to retrieve the potential issuers."
   SECItem encodedIssuerNameItem = UnsafeMapInputToSECItem(encodedIssuerName);
-  ScopedCERTCertList
+  UniqueCERTCertList
     candidates(CERT_CreateSubjectCertList(nullptr, CERT_GetDefaultCertDB(),
                                           &encodedIssuerNameItem, 0,
                                           false));
@@ -167,12 +175,6 @@ NSSCertDBTrustDomain::GetCertTrust(EndEntityOrCA endEntityOrCA,
                                    Input candidateCertDER,
                                    /*out*/ TrustLevel& trustLevel)
 {
-#ifdef MOZ_NO_EV_CERTS
-  if (!policy.IsAnyPolicy()) {
-    return Result::ERROR_POLICY_VALIDATION_FAILED;
-  }
-#endif
-
   // XXX: This would be cleaner and more efficient if we could get the trust
   // information without constructing a CERTCertificate here, but NSS doesn't
   // expose it in any other easy-to-use fashion. The use of
@@ -180,7 +182,7 @@ NSSCertDBTrustDomain::GetCertTrust(EndEntityOrCA endEntityOrCA,
   // performance problem because NSS will just find the existing
   // CERTCertificate in its in-memory cache and return it.
   SECItem candidateCertDERSECItem = UnsafeMapInputToSECItem(candidateCertDER);
-  ScopedCERTCertificate candidateCert(
+  UniqueCERTCertificate candidateCert(
     CERT_NewTempCertificate(CERT_GetDefaultCertDB(), &candidateCertDERSECItem,
                             nullptr, false, true));
   if (!candidateCert) {
@@ -192,25 +194,29 @@ NSSCertDBTrustDomain::GetCertTrust(EndEntityOrCA endEntityOrCA,
     return Result::FATAL_ERROR_LIBRARY_FAILURE;
   }
 
-  bool isCertRevoked;
-  nsresult nsrv = mCertBlocklist->IsCertRevoked(
-                    candidateCert->derIssuer.data,
-                    candidateCert->derIssuer.len,
-                    candidateCert->serialNumber.data,
-                    candidateCert->serialNumber.len,
-                    candidateCert->derSubject.data,
-                    candidateCert->derSubject.len,
-                    candidateCert->derPublicKey.data,
-                    candidateCert->derPublicKey.len,
-                    &isCertRevoked);
-  if (NS_FAILED(nsrv)) {
-    return Result::FATAL_ERROR_LIBRARY_FAILURE;
-  }
+  // The certificate blocklist currently only applies to TLS server
+  // certificates.
+  if (mCertDBTrustType == trustSSL) {
+    bool isCertRevoked;
+    nsresult nsrv = mCertBlocklist->IsCertRevoked(
+                      candidateCert->derIssuer.data,
+                      candidateCert->derIssuer.len,
+                      candidateCert->serialNumber.data,
+                      candidateCert->serialNumber.len,
+                      candidateCert->derSubject.data,
+                      candidateCert->derSubject.len,
+                      candidateCert->derPublicKey.data,
+                      candidateCert->derPublicKey.len,
+                      &isCertRevoked);
+    if (NS_FAILED(nsrv)) {
+      return Result::FATAL_ERROR_LIBRARY_FAILURE;
+    }
 
-  if (isCertRevoked) {
-    MOZ_LOG(gCertVerifierLog, LogLevel::Debug,
-           ("NSSCertDBTrustDomain: certificate is in blocklist"));
-    return Result::ERROR_REVOKED_CERTIFICATE;
+    if (isCertRevoked) {
+      MOZ_LOG(gCertVerifierLog, LogLevel::Debug,
+             ("NSSCertDBTrustDomain: certificate is in blocklist"));
+      return Result::ERROR_REVOKED_CERTIFICATE;
+    }
   }
 
   // XXX: CERT_GetCertTrust seems to be abusing SECStatus as a boolean, where
@@ -244,12 +250,10 @@ NSSCertDBTrustDomain::GetCertTrust(EndEntityOrCA endEntityOrCA,
         trustLevel = TrustLevel::TrustAnchor;
         return Success;
       }
-#ifndef MOZ_NO_EV_CERTS
-      if (CertIsAuthoritativeForEVPolicy(candidateCert.get(), policy)) {
+      if (CertIsAuthoritativeForEVPolicy(candidateCert, policy)) {
         trustLevel = TrustLevel::TrustAnchor;
         return Success;
       }
-#endif
     }
   }
 
@@ -263,7 +267,6 @@ NSSCertDBTrustDomain::DigestBuf(Input item, DigestAlgorithm digestAlg,
 {
   return DigestBufNSS(item, digestAlg, digestBuf, digestBufLen);
 }
-
 
 static PRIntervalTime
 OCSPFetchingTypeToTimeoutTime(NSSCertDBTrustDomain::OCSPFetching ocspFetching)
@@ -279,26 +282,32 @@ OCSPFetchingTypeToTimeoutTime(NSSCertDBTrustDomain::OCSPFetching ocspFetching)
     case NSSCertDBTrustDomain::NeverFetchOCSP:
     case NSSCertDBTrustDomain::LocalOnlyOCSPForEV:
       PR_NOT_REACHED("we should never see this OCSPFetching type here");
-    default:
-      PR_NOT_REACHED("we're not handling every OCSPFetching type");
+      break;
   }
+
+  PR_NOT_REACHED("we're not handling every OCSPFetching type");
   return PR_SecondsToInterval(2);
 }
 
 // Copied and modified from CERT_GetOCSPAuthorityInfoAccessLocation and
-// CERT_GetGeneralNameByType. Returns SECFailure on error, SECSuccess
-// with url == nullptr when an OCSP URI was not found, and SECSuccess with
+// CERT_GetGeneralNameByType. Returns a non-Result::Success result on error,
+// Success with url == nullptr when an OCSP URI was not found, and Success with
 // url != nullptr when an OCSP URI was found. The output url will be owned
 // by the arena.
 static Result
-GetOCSPAuthorityInfoAccessLocation(PLArenaPool* arena,
+GetOCSPAuthorityInfoAccessLocation(const UniquePLArenaPool& arena,
                                    Input aiaExtension,
                                    /*out*/ char const*& url)
 {
+  MOZ_ASSERT(arena.get());
+  if (!arena.get()) {
+    return Result::FATAL_ERROR_INVALID_ARGS;
+  }
+
   url = nullptr;
   SECItem aiaExtensionSECItem = UnsafeMapInputToSECItem(aiaExtension);
   CERTAuthInfoAccess** aia =
-    CERT_DecodeAuthInfoAccessExtension(arena, &aiaExtensionSECItem);
+    CERT_DecodeAuthInfoAccessExtension(arena.get(), &aiaExtensionSECItem);
   if (!aia) {
     return Result::ERROR_CERT_BAD_ACCESS_LOCATION;
   }
@@ -319,8 +328,8 @@ GetOCSPAuthorityInfoAccessLocation(PLArenaPool* arena,
             return Result::ERROR_CERT_BAD_ACCESS_LOCATION;
           }
           // Copy the non-null-terminated SECItem into a null-terminated string.
-          char* nullTerminatedURL(static_cast<char*>(
-                                    PORT_ArenaAlloc(arena, location.len + 1)));
+          char* nullTerminatedURL(
+            static_cast<char*>(PORT_ArenaAlloc(arena.get(), location.len + 1)));
           if (!nullTerminatedURL) {
             return Result::FATAL_ERROR_NO_MEMORY;
           }
@@ -410,7 +419,7 @@ NSSCertDBTrustDomain::CheckRevocation(EndEntityOrCA endEntityOrCA,
 
   Result cachedResponseResult = Success;
   Time cachedResponseValidThrough(Time::uninitialized);
-  bool cachedResponsePresent = mOCSPCache.Get(certID,
+  bool cachedResponsePresent = mOCSPCache.Get(certID, mOriginAttributes,
                                               cachedResponseResult,
                                               cachedResponseValidThrough);
   if (cachedResponsePresent) {
@@ -429,8 +438,8 @@ NSSCertDBTrustDomain::CheckRevocation(EndEntityOrCA endEntityOrCA,
     // expired. Don't return with either of these statuses yet - we may be
     // able to fetch a more recent one.
     MOZ_LOG(gCertVerifierLog, LogLevel::Debug,
-           ("NSSCertDBTrustDomain: cached OCSP response: error %ld valid "
-           "until %lld", cachedResponseResult, cachedResponseValidThrough));
+           ("NSSCertDBTrustDomain: cached OCSP response: error %d",
+           cachedResponseResult));
     // When a good cached response has expired, it is more convenient
     // to convert that to an error code and just deal with
     // cachedResponseResult from here on out.
@@ -497,7 +506,7 @@ NSSCertDBTrustDomain::CheckRevocation(EndEntityOrCA endEntityOrCA,
     return Result::ERROR_OCSP_UNKNOWN_CERT;
   }
 
-  ScopedPLArenaPool arena(PORT_NewArena(DER_DEFAULT_CHUNKSIZE));
+  UniquePLArenaPool arena(PORT_NewArena(DER_DEFAULT_CHUNKSIZE));
   if (!arena) {
     return Result::FATAL_ERROR_NO_MEMORY;
   }
@@ -506,7 +515,7 @@ NSSCertDBTrustDomain::CheckRevocation(EndEntityOrCA endEntityOrCA,
   const char* url = nullptr; // owned by the arena
 
   if (aiaExtension) {
-    rv = GetOCSPAuthorityInfoAccessLocation(arena.get(), *aiaExtension, url);
+    rv = GetOCSPAuthorityInfoAccessLocation(arena, *aiaExtension, url);
     if (rv != Success) {
       return rv;
     }
@@ -551,12 +560,15 @@ NSSCertDBTrustDomain::CheckRevocation(EndEntityOrCA endEntityOrCA,
       static_cast<unsigned int>(ocspRequestLength)
     };
     // Owned by arena
-    const SECItem* responseSECItem =
-      DoOCSPRequest(arena.get(), url, &ocspRequestItem,
+    SECItem* responseSECItem = nullptr;
+    Result tempRV =
+      DoOCSPRequest(arena, url, mOriginAttributes, &ocspRequestItem,
                     OCSPFetchingTypeToTimeoutTime(mOCSPFetching),
-                    mOCSPGetConfig == CertVerifier::ocspGetEnabled);
-    if (!responseSECItem) {
-      rv = MapPRErrorCodeToResult(PR_GetError());
+                    mOCSPGetConfig == CertVerifier::ocspGetEnabled,
+                    responseSECItem);
+    MOZ_ASSERT((tempRV != Success) || responseSECItem);
+    if (tempRV != Success) {
+      rv = tempRV;
     } else if (response.Init(responseSECItem->data, responseSECItem->len)
                  != Success) {
       rv = Result::ERROR_OCSP_MALFORMED_RESPONSE; // too big
@@ -574,7 +586,7 @@ NSSCertDBTrustDomain::CheckRevocation(EndEntityOrCA endEntityOrCA,
       if (timeout.AddSeconds(ServerFailureDelaySeconds) != Success) {
         return Result::FATAL_ERROR_LIBRARY_FAILURE; // integer overflow
       }
-      rv = mOCSPCache.Put(certID, error, time, timeout);
+      rv = mOCSPCache.Put(certID, mOriginAttributes, error, time, timeout);
       if (rv != Success) {
         return rv;
       }
@@ -679,7 +691,8 @@ NSSCertDBTrustDomain::VerifyAndMaybeCacheEncodedOCSPResponse(
       rv == Result::ERROR_OCSP_UNKNOWN_CERT) {
     MOZ_LOG(gCertVerifierLog, LogLevel::Debug,
            ("NSSCertDBTrustDomain: caching OCSP response"));
-    Result putRV = mOCSPCache.Put(certID, rv, thisUpdate, validThrough);
+    Result putRV = mOCSPCache.Put(certID, mOriginAttributes, rv, thisUpdate,
+                                  validThrough);
     if (putRV != Success) {
       return putRV;
     }
@@ -722,13 +735,68 @@ private:
   const uint8_t* mTarget;
 };
 
+static bool
+CertIsStartComOrWoSign(const CERTCertificate* cert)
+{
+  for (const DataAndLength& dn : StartComAndWoSignDNs) {
+    if (cert->derSubject.len == dn.len &&
+        PodEqual(cert->derSubject.data, dn.data, dn.len)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// If a certificate in the given chain appears to have been issued by one of
+// seven roots operated by StartCom and WoSign that are not trusted to issue new
+// certificates, verify that the end-entity has a notBefore date before 21
+// October 2016. If the value of notBefore is after this time, the chain is not
+// valid.
+// (NB: While there are seven distinct roots being checked for, two of them
+// share distinguished names, resulting in six distinct distinguished names to
+// actually look for.)
+static Result
+CheckForStartComOrWoSign(const UniqueCERTCertList& certChain)
+{
+  if (CERT_LIST_EMPTY(certChain)) {
+    return Result::FATAL_ERROR_LIBRARY_FAILURE;
+  }
+  const CERTCertListNode* endEntityNode = CERT_LIST_HEAD(certChain);
+  if (!endEntityNode || !endEntityNode->cert) {
+    return Result::FATAL_ERROR_LIBRARY_FAILURE;
+  }
+  PRTime notBefore;
+  PRTime notAfter;
+  if (CERT_GetCertTimes(endEntityNode->cert, &notBefore, &notAfter)
+        != SECSuccess) {
+    return Result::FATAL_ERROR_LIBRARY_FAILURE;
+  }
+  // PRTime is microseconds since the epoch, whereas JS time is milliseconds.
+  // (new Date("2016-10-21T00:00:00Z")).getTime() * 1000
+  static const PRTime OCTOBER_21_2016 = 1477008000000000;
+  if (notBefore <= OCTOBER_21_2016) {
+    return Success;
+  }
+
+  for (const CERTCertListNode* node = CERT_LIST_HEAD(certChain);
+       !CERT_LIST_END(node, certChain); node = CERT_LIST_NEXT(node)) {
+    if (!node || !node->cert) {
+      return Result::FATAL_ERROR_LIBRARY_FAILURE;
+    }
+    if (CertIsStartComOrWoSign(node->cert)) {
+      return Result::ERROR_REVOKED_CERTIFICATE;
+    }
+  }
+  return Success;
+}
+
 Result
 NSSCertDBTrustDomain::IsChainValid(const DERArray& certArray, Time time)
 {
   MOZ_LOG(gCertVerifierLog, LogLevel::Debug,
          ("NSSCertDBTrustDomain: IsChainValid"));
 
-  ScopedCERTCertList certList;
+  UniqueCERTCertList certList;
   SECStatus srv = ConstructCERTCertListFromReversedDERArray(certArray,
                                                             certList);
   if (srv != SECSuccess) {
@@ -736,6 +804,11 @@ NSSCertDBTrustDomain::IsChainValid(const DERArray& certArray, Time time)
   }
   if (CERT_LIST_EMPTY(certList)) {
     return Result::FATAL_ERROR_LIBRARY_FAILURE;
+  }
+
+  Result rv = CheckForStartComOrWoSign(certList);
+  if (rv != Success) {
+    return rv;
   }
 
   // If the certificate appears to have been issued by a CNNIC root, only allow
@@ -769,7 +842,7 @@ NSSCertDBTrustDomain::IsChainValid(const DERArray& certArray, Time time)
       return Result::FATAL_ERROR_LIBRARY_FAILURE;
     }
     const uint8_t* certHash(
-      reinterpret_cast<const uint8_t*>(digest.get().data));
+      BitwiseCast<uint8_t*, unsigned char*>(digest.get().data));
     size_t certHashLen = digest.get().len;
     size_t unused;
     if (!mozilla::BinarySearchIf(WhitelistedCNNICHashes, 0,
@@ -782,9 +855,9 @@ NSSCertDBTrustDomain::IsChainValid(const DERArray& certArray, Time time)
   }
 
   bool isBuiltInRoot = false;
-  srv = IsCertBuiltInRoot(root, isBuiltInRoot);
-  if (srv != SECSuccess) {
-    return MapPRErrorCodeToResult(PR_GetError());
+  rv = IsCertBuiltInRoot(root, isBuiltInRoot);
+  if (rv != Success) {
+    return rv;
   }
   bool skipPinningChecksBecauseOfMITMMode =
     (!isBuiltInRoot && mPinningMode == CertVerifier::pinningAllowUserCAMITM);
@@ -806,9 +879,7 @@ NSSCertDBTrustDomain::IsChainValid(const DERArray& certArray, Time time)
     }
   }
 
-  if (mBuiltChain) {
-    *mBuiltChain = certList.forget();
-  }
+  mBuiltChain = Move(certList);
 
   return Success;
 }
@@ -824,40 +895,29 @@ NSSCertDBTrustDomain::CheckSignatureDigestAlgorithm(DigestAlgorithm aAlg,
   MOZ_LOG(gCertVerifierLog, LogLevel::Debug,
           ("NSSCertDBTrustDomain: CheckSignatureDigestAlgorithm"));
   if (aAlg == DigestAlgorithm::sha1) {
-    // First check based on SHA1Mode
     switch (mSHA1Mode) {
       case CertVerifier::SHA1Mode::Forbidden:
         MOZ_LOG(gCertVerifierLog, LogLevel::Debug, ("SHA-1 certificate rejected"));
         return Result::ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED;
-      case CertVerifier::SHA1Mode::OnlyBefore2016:
+      case CertVerifier::SHA1Mode::ImportedRootOrBefore2016:
         if (JANUARY_FIRST_2016 <= notBefore) {
           MOZ_LOG(gCertVerifierLog, LogLevel::Debug, ("Post-2015 SHA-1 certificate rejected"));
           return Result::ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED;
         }
         break;
       case CertVerifier::SHA1Mode::Allowed:
+      // Enforcing that the resulting chain uses an imported root is only
+      // possible at a higher level. This is done in CertVerifier::VerifyCert.
+      case CertVerifier::SHA1Mode::ImportedRoot:
       default:
         break;
-    }
-
-    // Then check the signatureDigestOption values
-    if (mSignatureDigestOption == DisableSHA1Everywhere) {
-      MOZ_LOG(gCertVerifierLog, LogLevel::Debug, ("SHA-1 certificate rejected"));
-      return Result::ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED;
-    }
-
-    if (endEntityOrCA == EndEntityOrCA::MustBeCA) {
-      MOZ_LOG(gCertVerifierLog, LogLevel::Debug, ("CA cert is SHA-1"));
-      return mSignatureDigestOption == DisableSHA1ForCA
-             ? Result::ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED
-             : Success;
-    } else {
-      MOZ_LOG(gCertVerifierLog, LogLevel::Debug, ("EE cert is SHA-1"));
-      return mSignatureDigestOption == DisableSHA1ForEE
-             ? Result::ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED
-             : Success;
+      // MSVC warns unless we explicitly handle this now-unused option.
+      case CertVerifier::SHA1Mode::UsedToBeBefore2016ButNowIsForbidden:
+        MOZ_ASSERT_UNREACHABLE("unexpected SHA1Mode type");
+        return Result::FATAL_ERROR_LIBRARY_FAILURE;
     }
   }
+
   return Success;
 }
 
@@ -938,39 +998,89 @@ NSSCertDBTrustDomain::CheckValidityIsAcceptable(Time notBefore, Time notAfter,
   return Success;
 }
 
-namespace {
-
-static char*
-nss_addEscape(const char* string, char quote)
+Result
+NSSCertDBTrustDomain::NetscapeStepUpMatchesServerAuth(Time notBefore,
+                                                      /*out*/ bool& matches)
 {
-  char* newString = 0;
-  size_t escapes = 0, size = 0;
-  const char* src;
-  char* dest;
+  // (new Date("2015-08-23T00:00:00Z")).getTime() / 1000
+  static const Time AUGUST_23_2015 = TimeFromEpochInSeconds(1440288000);
+  // (new Date("2016-08-23T00:00:00Z")).getTime() / 1000
+  static const Time AUGUST_23_2016 = TimeFromEpochInSeconds(1471910400);
 
-  for (src = string; *src; src++) {
-  if ((*src == quote) || (*src == '\\')) {
-    escapes++;
+  switch (mNetscapeStepUpPolicy) {
+    case NetscapeStepUpPolicy::AlwaysMatch:
+      matches = true;
+      return Success;
+    case NetscapeStepUpPolicy::MatchBefore23August2016:
+      matches = notBefore < AUGUST_23_2016;
+      return Success;
+    case NetscapeStepUpPolicy::MatchBefore23August2015:
+      matches = notBefore < AUGUST_23_2015;
+      return Success;
+    case NetscapeStepUpPolicy::NeverMatch:
+      matches = false;
+      return Success;
+    default:
+      MOZ_ASSERT_UNREACHABLE("unhandled NetscapeStepUpPolicy type");
   }
-  size++;
-  }
-
-  newString = (char*) PORT_ZAlloc(escapes + size + 1u);
-  if (!newString) {
-    return nullptr;
-  }
-
-  for (src = string, dest = newString; *src; src++, dest++) {
-    if ((*src == quote) || (*src == '\\')) {
-      *dest++ = '\\';
-    }
-    *dest = *src;
-  }
-
-  return newString;
+  return Result::FATAL_ERROR_LIBRARY_FAILURE;
 }
 
-} // unnamed namespace
+void
+NSSCertDBTrustDomain::ResetAccumulatedState()
+{
+  mOCSPStaplingStatus = CertVerifier::OCSP_STAPLING_NEVER_CHECKED;
+  mSCTListFromOCSPStapling = nullptr;
+  mSCTListFromCertificate = nullptr;
+}
+
+static Input
+SECItemToInput(const UniqueSECItem& item)
+{
+  Input result;
+  if (item) {
+    MOZ_ASSERT(item->type == siBuffer);
+    Result rv = result.Init(item->data, item->len);
+    // As used here, |item| originally comes from an Input,
+    // so there should be no issues converting it back.
+    MOZ_ASSERT(rv == Success);
+    Unused << rv; // suppresses warnings in release builds
+  }
+  return result;
+}
+
+Input
+NSSCertDBTrustDomain::GetSCTListFromCertificate() const
+{
+  return SECItemToInput(mSCTListFromCertificate);
+}
+
+Input
+NSSCertDBTrustDomain::GetSCTListFromOCSPStapling() const
+{
+  return SECItemToInput(mSCTListFromOCSPStapling);
+}
+
+void
+NSSCertDBTrustDomain::NoteAuxiliaryExtension(AuxiliaryExtension extension,
+                                             Input extensionData)
+{
+  UniqueSECItem* out = nullptr;
+  switch (extension) {
+    case AuxiliaryExtension::EmbeddedSCTList:
+      out = &mSCTListFromCertificate;
+      break;
+    case AuxiliaryExtension::SCTListFromOCSPResponse:
+      out = &mSCTListFromOCSPStapling;
+      break;
+    default:
+      MOZ_ASSERT_UNREACHABLE("unhandled AuxiliaryExtension");
+  }
+  if (out) {
+    SECItem extensionDataItem = UnsafeMapInputToSECItem(extensionData);
+    out->reset(SECITEM_DupItem(&extensionDataItem));
+  }
+}
 
 SECStatus
 InitializeNSS(const char* dir, bool readOnly, bool loadPKCS11Modules)
@@ -1017,10 +1127,11 @@ LoadLoadableRoots(/*optional*/ const char* dir, const char* modNameUTF8)
     return SECFailure;
   }
 
-  UniquePtr<char, void(&)(void*)>
-    escaped_fullLibraryPath(nss_addEscape(fullLibraryPath.get(), '\"'),
-                            PORT_Free);
-  if (!escaped_fullLibraryPath) {
+  // Escape the \ and " characters.
+  nsAutoCString escapedFullLibraryPath(fullLibraryPath.get());
+  escapedFullLibraryPath.ReplaceSubstring("\\", "\\\\");
+  escapedFullLibraryPath.ReplaceSubstring("\"", "\\\"");
+  if (escapedFullLibraryPath.IsEmpty()) {
     return SECFailure;
   }
 
@@ -1028,16 +1139,16 @@ LoadLoadableRoots(/*optional*/ const char* dir, const char* modNameUTF8)
   int modType;
   SECMOD_DeleteModule(modNameUTF8, &modType);
 
-  UniquePtr<char, void(&)(char*)>
-    pkcs11ModuleSpec(PR_smprintf("name=\"%s\" library=\"%s\"", modNameUTF8,
-                                 escaped_fullLibraryPath.get()),
-                     PR_smprintf_free);
-  if (!pkcs11ModuleSpec) {
+  nsAutoCString pkcs11ModuleSpec;
+  pkcs11ModuleSpec.AppendPrintf("name=\"%s\" library=\"%s\"", modNameUTF8,
+                                escapedFullLibraryPath.get());
+  if (pkcs11ModuleSpec.IsEmpty()) {
     return SECFailure;
   }
 
-  ScopedSECMODModule rootsModule(SECMOD_LoadUserModule(pkcs11ModuleSpec.get(),
-                                                       nullptr, false));
+  UniqueSECMODModule rootsModule(
+    SECMOD_LoadUserModule(const_cast<char*>(pkcs11ModuleSpec.get()), nullptr,
+                          false));
   if (!rootsModule) {
     return SECFailure;
   }
@@ -1054,73 +1165,82 @@ void
 UnloadLoadableRoots(const char* modNameUTF8)
 {
   PR_ASSERT(modNameUTF8);
-  ScopedSECMODModule rootsModule(SECMOD_FindModule(modNameUTF8));
+  UniqueSECMODModule rootsModule(SECMOD_FindModule(modNameUTF8));
 
   if (rootsModule) {
     SECMOD_UnloadUserModule(rootsModule.get());
   }
 }
 
-char*
-DefaultServerNicknameForCert(CERTCertificate* cert)
+nsresult
+DefaultServerNicknameForCert(const CERTCertificate* cert,
+                     /*out*/ nsCString& nickname)
 {
-  char* nickname = nullptr;
-  int count;
-  bool conflict;
-  char* servername = nullptr;
+  MOZ_ASSERT(cert);
+  NS_ENSURE_ARG_POINTER(cert);
 
-  servername = CERT_GetCommonName(&cert->subject);
-  if (!servername) {
-    // Certs without common names are strange, but they do exist...
-    // Let's try to use another string for the nickname
-    servername = CERT_GetOrgUnitName(&cert->subject);
-    if (!servername) {
-      servername = CERT_GetOrgName(&cert->subject);
-      if (!servername) {
-        servername = CERT_GetLocalityName(&cert->subject);
-        if (!servername) {
-          servername = CERT_GetStateName(&cert->subject);
-          if (!servername) {
-            servername = CERT_GetCountryName(&cert->subject);
-            if (!servername) {
-              // We tried hard, there is nothing more we can do.
-              // A cert without any names doesn't really make sense.
-              return nullptr;
-            }
-          }
-        }
-      }
-    }
+  UniquePORTString baseName(CERT_GetCommonName(&cert->subject));
+  if (!baseName) {
+    baseName = UniquePORTString(CERT_GetOrgUnitName(&cert->subject));
+  }
+  if (!baseName) {
+    baseName = UniquePORTString(CERT_GetOrgName(&cert->subject));
+  }
+  if (!baseName) {
+    baseName = UniquePORTString(CERT_GetLocalityName(&cert->subject));
+  }
+  if (!baseName) {
+    baseName = UniquePORTString(CERT_GetStateName(&cert->subject));
+  }
+  if (!baseName) {
+    baseName = UniquePORTString(CERT_GetCountryName(&cert->subject));
+  }
+  if (!baseName) {
+    return NS_ERROR_FAILURE;
   }
 
-  count = 1;
-  while (1) {
-    if (count == 1) {
-      nickname = PR_smprintf("%s", servername);
+  // This function is only used in contexts where a failure to find a suitable
+  // nickname does not block the overall task from succeeding.
+  // As such, we use an arbitrary limit to prevent this nickname searching
+  // process from taking forever.
+  static const uint32_t ARBITRARY_LIMIT = 500;
+  for (uint32_t count = 1; count < ARBITRARY_LIMIT; count++) {
+    nickname = baseName.get();
+    if (count != 1) {
+      nickname.AppendPrintf(" #%u", count);
     }
-    else {
-      nickname = PR_smprintf("%s #%d", servername, count);
-    }
-    if (!nickname) {
-      break;
+    if (nickname.IsEmpty()) {
+      return NS_ERROR_FAILURE;
     }
 
-    conflict = SEC_CertNicknameConflict(nickname, &cert->derSubject,
-                                        cert->dbhandle);
+    bool conflict = SEC_CertNicknameConflict(nickname.get(), &cert->derSubject,
+                                             cert->dbhandle);
     if (!conflict) {
-      break;
+      return NS_OK;
     }
-    PR_Free(nickname);
-    count++;
   }
-  PR_FREEIF(servername);
-  return nickname;
+
+  return NS_ERROR_FAILURE;
 }
 
+/**
+ * Given a list of certificates representing a verified certificate path from an
+ * end-entity certificate to a trust anchor, imports the intermediate
+ * certificates into the permanent certificate database. This is an attempt to
+ * cope with misconfigured servers that don't include the appropriate
+ * intermediate certificates in the TLS handshake.
+ *
+ * @param certList the verified certificate list
+ */
 void
-SaveIntermediateCerts(const ScopedCERTCertList& certList)
+SaveIntermediateCerts(const UniqueCERTCertList& certList)
 {
   if (!certList) {
+    return;
+  }
+
+  UniquePK11SlotInfo slot(PK11_GetInternalKeySlot());
+  if (!slot) {
     return;
   }
 
@@ -1135,7 +1255,8 @@ SaveIntermediateCerts(const ScopedCERTCertList& certList)
     }
 
     if (node->cert->slot) {
-      // This cert was found on a token, no need to remember it in the temp db.
+      // This cert was found on a token; no need to remember it in the permanent
+      // database.
       continue;
     }
 
@@ -1144,16 +1265,27 @@ SaveIntermediateCerts(const ScopedCERTCertList& certList)
       continue;
     }
 
-    // We have found a signer cert that we want to remember.
-    char* nickname = DefaultServerNicknameForCert(node->cert);
-    if (nickname && *nickname) {
-      ScopedPK11SlotInfo slot(PK11_GetInternalKeySlot());
-      if (slot) {
-        PK11_ImportCert(slot.get(), node->cert, CK_INVALID_HANDLE,
-                        nickname, false);
-      }
+    // No need to save the trust anchor - it's either already a permanent
+    // certificate or it's the Microsoft Family Safety root or an enterprise
+    // root temporarily imported via the child mode or enterprise root features.
+    // We don't want to import these because they're intended to be temporary
+    // (and because importing them happens to reset their trust settings, which
+    // breaks these features).
+    if (node == CERT_LIST_TAIL(certList)) {
+      continue;
     }
-    PR_FREEIF(nickname);
+
+    nsAutoCString nickname;
+    nsresult rv = DefaultServerNicknameForCert(node->cert, nickname);
+    if (NS_FAILED(rv)) {
+      continue;
+    }
+
+    // As mentioned in the documentation of this function, we're importing only
+    // to cope with misconfigured servers. As such, we ignore the return value
+    // below, since it doesn't really matter if the import fails.
+    Unused << PK11_ImportCert(slot.get(), node->cert, CK_INVALID_HANDLE,
+                              nickname.get(), false);
   }
 }
 

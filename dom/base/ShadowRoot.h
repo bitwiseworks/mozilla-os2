@@ -9,8 +9,10 @@
 
 #include "mozilla/dom/DocumentFragment.h"
 #include "mozilla/dom/StyleSheetList.h"
+#include "mozilla/StyleSheet.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
+#include "nsIContentInlines.h"
 #include "nsTHashtable.h"
 #include "nsDocument.h"
 
@@ -45,8 +47,8 @@ public:
 
   void AddToIdTable(Element* aElement, nsIAtom* aId);
   void RemoveFromIdTable(Element* aElement, nsIAtom* aId);
-  void InsertSheet(CSSStyleSheet* aSheet, nsIContent* aLinkingContent);
-  void RemoveSheet(CSSStyleSheet* aSheet);
+  void InsertSheet(StyleSheet* aSheet, nsIContent* aLinkingContent);
+  void RemoveSheet(StyleSheet* aSheet);
   bool ApplyAuthorStyles();
   void SetApplyAuthorStyles(bool aApplyAuthorStyles);
   StyleSheetList* StyleSheets();
@@ -200,8 +202,8 @@ public:
     return mShadowRoot;
   }
 
-  virtual uint32_t Length() override;
-  virtual CSSStyleSheet* IndexedGetter(uint32_t aIndex, bool& aFound) override;
+  uint32_t Length() override;
+  StyleSheet* IndexedGetter(uint32_t aIndex, bool& aFound) override;
 
 protected:
   virtual ~ShadowRootStyleSheetList();

@@ -106,12 +106,12 @@ static const size_t UINT32_CHAR_BUFFER_LENGTH = sizeof("4294967295") - 1;
  *  | JSRope                    leftChild, rightChild / -
  *  |
  * JSLinearString (abstract)    latin1Chars, twoByteChars / might be null-terminated
- *  | \
- *  | JSDependentString         base / -
- *  |
- * JSFlatString                 - / null terminated
+ *  |  |
+ *  |  +-- JSDependentString    base / -
  *  |  |
  *  |  +-- JSExternalString     - / char array memory managed by embedding
+ *  |
+ * JSFlatString                 - / null terminated
  *  |  |
  *  |  +-- JSExtensibleString   tracks total buffer capacity (including current text)
  *  |  |
@@ -221,12 +221,12 @@ class JSString : public js::gc::TenuredCell
      *   Linear        -           !000000
      *   HasBase       -            xxxx1x
      *   Dependent     000010       000010
+     *   External      100000       100000
      *   Flat          -            xxxxx1
      *   Undepended    000011       000011
      *   Extensible    010001       010001
      *   Inline        000101       xxx1xx
      *   FatInline     010101       x1x1xx
-     *   External      100001       100001
      *   Atom          001001       xx1xxx
      *   PermanentAtom 101001       1x1xxx
      *   InlineAtom    -            xx11xx
@@ -257,7 +257,7 @@ class JSString : public js::gc::TenuredCell
     static const uint32_t DEPENDENT_FLAGS        = HAS_BASE_BIT;
     static const uint32_t UNDEPENDED_FLAGS       = FLAT_BIT | HAS_BASE_BIT;
     static const uint32_t EXTENSIBLE_FLAGS       = FLAT_BIT | JS_BIT(4);
-    static const uint32_t EXTERNAL_FLAGS         = FLAT_BIT | JS_BIT(5);
+    static const uint32_t EXTERNAL_FLAGS         = JS_BIT(5);
 
     static const uint32_t FAT_INLINE_MASK        = INLINE_CHARS_BIT | JS_BIT(4);
     static const uint32_t PERMANENT_ATOM_MASK    = ATOM_BIT | JS_BIT(5);
@@ -319,6 +319,8 @@ class JSString : public js::gc::TenuredCell
     /* Avoid lame compile errors in JSRope::flatten */
     friend class JSRope;
 
+    friend class js::gc::RelocationOverlay;
+
   protected:
     template <typename CharT>
     MOZ_ALWAYS_INLINE
@@ -350,7 +352,7 @@ class JSString : public js::gc::TenuredCell
     /* Fallible conversions to more-derived string types. */
 
     inline JSLinearString* ensureLinear(js::ExclusiveContext* cx);
-    inline JSFlatString* ensureFlat(js::ExclusiveContext* cx);
+    JSFlatString* ensureFlat(JSContext* cx);
 
     static bool ensureLinear(js::ExclusiveContext* cx, JSString* str) {
         return str->ensureLinear(cx) != nullptr;
@@ -495,11 +497,13 @@ class JSString : public js::gc::TenuredCell
         return offsetof(JSString, d.s.u2.nonInlineCharsTwoByte);
     }
 
-    static inline js::ThingRootKind rootKind() { return js::THING_ROOT_STRING; }
+    static const JS::TraceKind TraceKind = JS::TraceKind::String;
 
 #ifdef DEBUG
+    void dump(FILE* fp);
+    void dumpCharsNoNewline(FILE* fp);
     void dump();
-    void dumpCharsNoNewline(FILE* fp=stderr);
+    void dumpCharsNoNewline();
     void dumpRepresentation(FILE* fp, int indent) const;
     void dumpRepresentationHeader(FILE* fp, int indent, const char* subclass) const;
 
@@ -601,7 +605,7 @@ class JSLinearString : public JSString
     friend class js::AutoStableStringChars;
 
     /* Vacuous and therefore unimplemented. */
-    JSLinearString* ensureLinear(JSContext* cx) = delete;
+    JSLinearString* ensureLinear(js::ExclusiveContext* cx) = delete;
     bool isLinear() const = delete;
     JSLinearString& asLinear() const = delete;
 
@@ -681,10 +685,10 @@ static_assert(sizeof(JSLinearString) == sizeof(JSString),
 class JSDependentString : public JSLinearString
 {
     friend class JSString;
-    JSFlatString* undepend(js::ExclusiveContext* cx);
+    JSFlatString* undepend(JSContext* cx);
 
     template <typename CharT>
-    JSFlatString* undependInternal(js::ExclusiveContext* cx);
+    JSFlatString* undependInternal(JSContext* cx);
 
     void init(js::ExclusiveContext* cx, JSLinearString* base, size_t start,
               size_t length);
@@ -694,16 +698,18 @@ class JSDependentString : public JSLinearString
     JSDependentString& asDependent() const = delete;
 
     /* The offset of this string's chars in base->chars(). */
-    size_t baseOffset() const {
+    MOZ_ALWAYS_INLINE mozilla::Maybe<size_t> baseOffset() const {
         MOZ_ASSERT(JSString::isDependent());
         JS::AutoCheckCannotGC nogc;
+        if (MOZ_UNLIKELY(base()->isUndepended()))
+            return mozilla::Nothing();
         size_t offset;
         if (hasTwoByteChars())
             offset = twoByteChars(nogc) - base()->twoByteChars(nogc);
         else
             offset = latin1Chars(nogc) - base()->latin1Chars(nogc);
         MOZ_ASSERT(offset < base()->length());
-        return offset;
+        return mozilla::Some(offset);
     }
 
   public:
@@ -909,7 +915,7 @@ static_assert(sizeof(JSFatInlineString) % js::gc::CellSize == 0,
               "fat inline strings shouldn't waste space up to the next cell "
               "boundary");
 
-class JSExternalString : public JSFlatString
+class JSExternalString : public JSLinearString
 {
     void init(const char16_t* chars, size_t length, const JSStringFinalizer* fin);
 
@@ -937,6 +943,8 @@ class JSExternalString : public JSFlatString
     /* Only called by the GC for strings with the AllocKind::EXTERNAL_STRING kind. */
 
     inline void finalize(js::FreeOp* fop);
+
+    JSFlatString* ensureFlat(JSContext* cx);
 
 #ifdef DEBUG
     void dumpRepresentation(FILE* fp, int indent) const;
@@ -985,6 +993,7 @@ class JSAtom : public JSFlatString
     inline void initHash(js::HashNumber hash);
 
 #ifdef DEBUG
+    void dump(FILE* fp);
     void dump();
 #endif
 };
@@ -1213,11 +1222,25 @@ NameToId(PropertyName* name)
     return NON_INTEGER_ATOM_TO_JSID(name);
 }
 
-using PropertyNameVector = js::TraceableVector<PropertyName*>;
+using PropertyNameVector = JS::GCVector<PropertyName*>;
 
 template <typename CharT>
 void
 CopyChars(CharT* dest, const JSLinearString& str);
+
+static inline UniqueChars
+StringToNewUTF8CharsZ(ExclusiveContext* maybecx, JSString& str)
+{
+    JS::AutoCheckCannotGC nogc;
+
+    JSLinearString* linear = str.ensureLinear(maybecx);
+    if (!linear)
+        return nullptr;
+
+    return UniqueChars(linear->hasLatin1Chars()
+                       ? JS::CharsToNewUTF8CharsZ(maybecx, linear->latin1Range(nogc)).c_str()
+                       : JS::CharsToNewUTF8CharsZ(maybecx, linear->twoByteRange(nogc)).c_str());
+}
 
 /* GC-allocate a string descriptor for the given malloc-allocated chars. */
 template <js::AllowGC allowGC, typename CharT>
@@ -1231,6 +1254,10 @@ NewStringDontDeflate(js::ExclusiveContext* cx, CharT* chars, size_t length);
 
 extern JSLinearString*
 NewDependentString(JSContext* cx, JSString* base, size_t start, size_t length);
+
+/* Take ownership of an array of Latin1Chars. */
+extern JSFlatString*
+NewLatin1StringZ(js::ExclusiveContext* cx, UniqueChars chars);
 
 /* Copy a counted string and GC-allocate a descriptor for it. */
 template <js::AllowGC allowGC, typename CharT>
@@ -1262,6 +1289,17 @@ inline JSFlatString*
 NewStringCopyZ(js::ExclusiveContext* cx, const char* s)
 {
     return NewStringCopyN<allowGC>(cx, s, strlen(s));
+}
+
+template <js::AllowGC allowGC>
+extern JSFlatString*
+NewStringCopyUTF8N(JSContext* cx, const JS::UTF8Chars utf8);
+
+template <js::AllowGC allowGC>
+inline JSFlatString*
+NewStringCopyUTF8Z(JSContext* cx, const JS::ConstUTF8CharsZ utf8)
+{
+    return NewStringCopyUTF8N<allowGC>(cx, JS::UTF8Chars(utf8.c_str(), strlen(utf8.c_str())));
 }
 
 JS_STATIC_ASSERT(sizeof(HashNumber) == 4);
@@ -1313,16 +1351,6 @@ JSString::ensureLinear(js::ExclusiveContext* cx)
     return isLinear()
            ? &asLinear()
            : asRope().flatten(cx);
-}
-
-MOZ_ALWAYS_INLINE JSFlatString*
-JSString::ensureFlat(js::ExclusiveContext* cx)
-{
-    return isFlat()
-           ? &asFlat()
-           : isDependent()
-             ? asDependent().undepend(cx)
-             : asRope().flatten(cx);
 }
 
 inline JSLinearString*

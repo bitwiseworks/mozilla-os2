@@ -7,16 +7,35 @@
 #ifndef mozilla_logging_h
 #define mozilla_logging_h
 
+#include <string.h>
+#include <stdarg.h>
+
 #include "prlog.h"
 
 #include "mozilla/Assertions.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/Likely.h"
+#include "mozilla/MacroForEach.h"
 
 // This file is a placeholder for a replacement to the NSPR logging framework
 // that is defined in prlog.h. Currently it is just a pass through, but as
 // work progresses more functionality will be swapped out in favor of
 // mozilla logging implementations.
+
+// We normally have logging enabled everywhere, but measurements showed that
+// having logging enabled on Android is quite expensive (hundreds of kilobytes
+// for both the format strings for logging and the code to perform all the
+// logging calls).  Because retrieving logs from a mobile device is
+// comparatively more difficult for Android than it is for desktop and because
+// desktop machines tend to be less space/bandwidth-constrained than Android
+// devices, we've chosen to leave logging enabled on desktop, but disabled on
+// Android.  Given that logging can still be useful for development purposes,
+// however, we leave logging enabled on Android developer builds.
+#if !defined(ANDROID) || !defined(RELEASE_OR_BETA)
+#define MOZ_LOGGING_ENABLED 1
+#else
+#define MOZ_LOGGING_ENABLED 0
+#endif
 
 namespace mozilla {
 
@@ -45,9 +64,16 @@ enum class LogLevel {
   Verbose,
 };
 
+/**
+ * Safely converts an integer into a valid LogLevel.
+ */
+LogLevel ToLogLevel(int32_t aLevel);
+
 class LogModule
 {
 public:
+  ~LogModule() { ::free(mName); }
+
   /**
    * Retrieves the module with the given name. If it does not already exist
    * it will be created.
@@ -55,14 +81,32 @@ public:
    * @param aName The name of the module.
    * @return A log module for the given name. This may be shared.
    */
-#if !defined(MOZILLA_XPCOMRT_API)
   static LogModule* Get(const char* aName);
-#else
-  // For simplicity, libxpcomrt doesn't supoort logging.
-  static LogModule* Get(const char* aName) { return nullptr; }
-#endif
 
   static void Init();
+
+  /**
+   * Sets the log file to the given filename.
+   */
+  static void SetLogFile(const char* aFilename);
+
+  /**
+   * @param aBuffer - pointer to a buffer
+   * @param aLength - the length of the buffer
+   *
+   * @return the actual length of the filepath.
+   */
+  static uint32_t GetLogFile(char *aBuffer, size_t aLength);
+
+  /**
+   * @param aAddTimestamp If we should log a time stamp with every message.
+   */
+  static void SetAddTimestamp(bool aAddTimestamp);
+
+  /**
+   * @param aIsSync If we should flush the file after every logged message.
+   */
+  static void SetIsSync(bool aIsSync);
 
   /**
    * Indicates whether or not the given log level is enabled.
@@ -74,14 +118,33 @@ public:
    */
   LogLevel Level() const { return mLevel; }
 
+  /**
+   * Sets the log module's level.
+   */
+  void SetLevel(LogLevel level) { mLevel = level; }
+
+  /**
+   * Print a log message for this module.
+   */
+  void Printv(LogLevel aLevel, const char* aFmt, va_list aArgs) const;
+
+  /**
+   * Retrieves the module name.
+   */
+  const char* Name() const { return mName; }
+
 private:
   friend class LogModuleManager;
 
-  explicit LogModule(LogLevel aLevel) : mLevel(aLevel) {}
+  explicit LogModule(const char* aName, LogLevel aLevel)
+    : mName(strdup(aName)), mLevel(aLevel)
+  {
+  }
 
   LogModule(LogModule&) = delete;
   LogModule& operator=(const LogModule&) = delete;
 
+  char* mName;
   Atomic<LogLevel, Relaxed> mLevel;
 };
 
@@ -100,7 +163,7 @@ private:
 class LazyLogModule final
 {
 public:
-  explicit MOZ_CONSTEXPR LazyLogModule(const char* aLogName)
+  explicit constexpr LazyLogModule(const char* aLogName)
     : mLogName(aLogName)
     , mLog(nullptr)
   {
@@ -133,36 +196,60 @@ inline bool log_test(const PRLogModuleInfo* module, LogLevel level) {
   return module && module->level >= static_cast<int>(level);
 }
 
+/**
+ * A rather inefficient wrapper for PR_LogPrint that always allocates.
+ * PR_LogModuleInfo is deprecated so it's not worth the effort to do
+ * any better.
+ */
+void log_print(const PRLogModuleInfo* aModule,
+                      LogLevel aLevel,
+                      const char* aFmt, ...);
+
 inline bool log_test(const LogModule* module, LogLevel level) {
   MOZ_ASSERT(level != LogLevel::Disabled);
   return module && module->ShouldLog(level);
 }
 
+void log_print(const LogModule* aModule,
+               LogLevel aLevel,
+               const char* aFmt, ...);
 } // namespace detail
 
 } // namespace mozilla
 
+
+// Helper macro used convert MOZ_LOG's third parameter, |_args|, from a
+// parenthesized form to a varargs form. For example:
+//   ("%s", "a message") => "%s", "a message"
+#define MOZ_LOG_EXPAND_ARGS(...) __VA_ARGS__
+
+#if MOZ_LOGGING_ENABLED
 #define MOZ_LOG_TEST(_module,_level) mozilla::detail::log_test(_module, _level)
+#else
+// Define away MOZ_LOG_TEST here so the compiler will fold away entire
+// logging blocks via dead code elimination, e.g.:
+//
+//   if (MOZ_LOG_TEST(...)) {
+//     ...compute things to log and log them...
+//   }
+//
+// This also has the nice property that no special definition of MOZ_LOG is
+// required when logging is disabled.
+#define MOZ_LOG_TEST(_module,_level) false
+#endif
 
 #define MOZ_LOG(_module,_level,_args)     \
   PR_BEGIN_MACRO             \
     if (MOZ_LOG_TEST(_module,_level)) { \
-      PR_LogPrint _args;         \
+      mozilla::detail::log_print(_module, _level, MOZ_LOG_EXPAND_ARGS _args);         \
     }                     \
   PR_END_MACRO
 
 #undef PR_LOG
 #undef PR_LOG_TEST
 
-/*
- * __func__ was standardized in C++11 and is supported by clang, gcc, and MSVC
- * 2015. Here we polyfill __func__ for earlier versions of MSVC.
- * http://blogs.msdn.com/b/vcblog/archive/2015/06/19/c-11-14-17-features-in-vs-2015-rtm.aspx
- */
-#ifdef _MSC_VER
-#  if _MSC_VER < 1900
-#    define __func__ __FUNCTION__
-#  endif
-#endif
+// This #define is a Logging.h-only knob!  Don't encourage people to get fancy
+// with their log definitions by exporting it outside of Logging.h.
+#undef MOZ_LOGGING_ENABLED
 
 #endif // mozilla_logging_h

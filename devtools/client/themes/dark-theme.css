@@ -3,8 +3,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-@import url(variables.css);
+@import url(resource://devtools/client/themes/variables.css);
+@import url(resource://devtools/client/themes/common.css);
 @import url(toolbars.css);
+@import url(tooltips.css);
 
 body {
   margin: 0;
@@ -41,8 +43,9 @@ body {
 }
 
 .theme-link,
-.cm-s-mozilla .cm-link {
-  color: var(--theme-highlight-blue);
+.cm-s-mozilla .cm-link,
+.cm-s-mozilla .cm-keyword {
+  color: var(--theme-highlight-green);
 }
 
 /*
@@ -67,13 +70,13 @@ body {
 }
 
 .theme-gutter {
-  background-color: #0f171f;
+  background-color: var(--theme-tab-toolbar-background);
   color: var(--theme-content-color3);
-  border-color: #303b47;
+  border-color: var(--theme-splitter-color);
 }
 
-.theme-separator { /* grey */
-  border-color: #303b47;
+.theme-separator {
+  border-color: var(--theme-splitter-color);
 }
 
 .theme-fg-color1,
@@ -81,7 +84,7 @@ body {
 .variable-or-property .token-number,
 .variable-or-property[return] > .title > .name,
 .variable-or-property[scope] > .title > .name {
-  color: var(--theme-highlight-green);
+  color: var(--theme-highlight-red);
 }
 
 .CodeMirror-Tern-completion-number:before {
@@ -90,12 +93,11 @@ body {
 
 .theme-fg-color2,
 .cm-s-mozilla .cm-attribute,
-.cm-s-mozilla .cm-variable,
 .cm-s-mozilla .cm-def,
 .cm-s-mozilla .cm-property,
 .cm-s-mozilla .cm-qualifier,
 .variables-view-variable > .title > .name {
-  color: var(--theme-highlight-blue);
+  color: var(--theme-highlight-purple);
 }
 
 .CodeMirror-Tern-completion-object:before {
@@ -117,7 +119,7 @@ body {
 .cm-s-mozilla .cm-header,
 .cm-s-mozilla .cm-bracket,
 .variables-view-property > .title > .name {
-  color: var(--theme-highlight-pink);
+  color: var(--theme-highlight-green);
 }
 
 .CodeMirror-Tern-completion-array:before {
@@ -128,17 +130,17 @@ body {
   color: var(--theme-highlight-purple);
 }
 
-.theme-fg-color5,
-.cm-s-mozilla .cm-keyword {
-  color: var(--theme-highlight-lightorange);
+.theme-fg-color5 {
+  color: var(--theme-highlight-purple);
 }
 
 .theme-fg-color6,
 .cm-s-mozilla .cm-string,
 .cm-s-mozilla .cm-string-2,
 .variable-or-property .token-string,
+.cm-s-mozilla .cm-variable,
 .CodeMirror-Tern-farg {
-  color: var(--theme-highlight-orange);
+  color: var(--theme-highlight-gray);
 }
 
 .CodeMirror-Tern-completion-string:before,
@@ -168,10 +170,10 @@ body {
 .devtools-toolbar,
 .devtools-sidebar-tabs tabs,
 .devtools-sidebar-alltabs,
-.CodeMirror-dialog { /* General toolbar styling */
+.cm-s-mozilla .CodeMirror-dialog { /* General toolbar styling */
   color: var(--theme-body-color-alt);
   background-color: var(--theme-toolbar-background);
-  border-color: hsla(210,8%,5%,.6);
+  border-color: var(--theme-splitter-color);
 }
 
 .theme-fg-contrast { /* To be used for text on theme-bg-contrast */
@@ -187,13 +189,13 @@ body {
  * Best effort to match the existing theme, some of the colors
  * are duplicated here to prevent weirdness in the main theme. */
 
-.CodeMirror { /* Inherit platform specific font sizing and styles */
+.CodeMirror.cm-s-mozilla  { /* Inherit platform specific font sizing and styles */
   font-family: inherit;
   font-size: inherit;
   background: transparent;
 }
 
-.CodeMirror pre,
+.CodeMirror.cm-s-mozilla  pre,
 .cm-s-mozilla .cm-variable-2,
 .cm-s-mozilla .cm-variable-3,
 .cm-s-mozilla .cm-operator,
@@ -227,20 +229,12 @@ div.CodeMirror div.error-line {
   background: rgba(255,0,0,0.2);
 }
 
-/* Highlight for a line that represents a stack frame's location. */
-div.CodeMirror div.debug-line {
-  background: rgba(0,128,255,0.1);
-  box-shadow:
-    0 1px 0 0 rgba(0,128,255,0.4),
-    0 -1px 0 0 rgba(0,128,255,0.4);
-}
-
 /* Generic highlighted text */
 div.CodeMirror span.marked-text {
   background: rgba(255,255,0,0.2);
   border: 1px dashed rgba(192,192,0,0.6);
-  -moz-margin-start: -1px;
-  -moz-margin-end: -1px;
+  margin-inline-start: -1px;
+  margin-inline-end: -1px;
 }
 
 /* Highlight for evaluating current statement. */
@@ -262,51 +256,7 @@ div.CodeMirror span.eval-text {
   min-height: 1.4em;
 }
 
-/* Twisty and checkbox controls */
-.theme-twisty, .theme-checkbox {
-  width: 14px;
-  height: 14px;
-  background-repeat: no-repeat;
-  background-image: url("chrome://devtools/skin/images/controls.png");
-  background-size: 56px 28px;
-}
-
-.theme-twisty {
-  cursor: pointer;
-  background-position: -28px -14px;
-}
-
-.theme-twisty:-moz-focusring {
-  outline-style: none;
-}
-
-.theme-twisty[open], .theme-twisty.open  {
-  background-position: -42px -14px;
-}
-
-.theme-twisty[invisible] {
-  visibility: hidden;
-}
-
-.theme-checkbox {
-  display: inline-block;
-  border: 0;
-  padding: 0;
-  outline: none;
-  background-position: -28px 0;
-}
-
-.theme-checkbox[checked] {
-  background-position: -42px 0;
-}
-
-@media (min-resolution: 1.1dppx) {
-  .theme-twisty, .theme-checkbox {
-    background-image: url("chrome://devtools/skin/images/controls@2x.png");
-  }
-}
-
-/* XUL panel styling (see devtools/client/shared/widgets/Tooltip.js) */
+/* XUL panel styling (see devtools/client/shared/widgets/tooltip/Tooltip.js) */
 
 .theme-tooltip-panel .panel-arrowcontent {
   padding: 5px;
@@ -326,23 +276,35 @@ div.CodeMirror span.eval-text {
   --arrow-margin: -7px;
 }
 
-.theme-tooltip-panel .panel-arrow[side="top"] {
+.theme-tooltip-panel .panel-arrow[side="top"],
+.theme-tooltip-panel .panel-arrow[side="bottom"] {
   list-style-image: url("chrome://devtools/skin/tooltip/arrow-vertical-dark.png");
+  /* !important is needed to override the popup.css rules in toolkit/themes */
+  width: 39px !important;
+  height: 16px !important;
+}
+
+.theme-tooltip-panel .panel-arrow[side="left"],
+.theme-tooltip-panel .panel-arrow[side="right"] {
+  list-style-image: url("chrome://devtools/skin/tooltip/arrow-horizontal-dark.png");
+  /* !important is needed to override the popup.css rules in toolkit/themes */
+  width: 16px !important;
+  height: 39px !important;
+}
+
+.theme-tooltip-panel .panel-arrow[side="top"] {
   margin-bottom: var(--arrow-margin);
 }
 
 .theme-tooltip-panel .panel-arrow[side="bottom"] {
-  list-style-image: url("chrome://devtools/skin/tooltip/arrow-vertical-dark.png");
   margin-top: var(--arrow-margin);
 }
 
 .theme-tooltip-panel .panel-arrow[side="left"] {
-  list-style-image: url("chrome://devtools/skin/tooltip/arrow-horizontal-dark.png");
   margin-right: var(--arrow-margin);
 }
 
 .theme-tooltip-panel .panel-arrow[side="right"] {
-  list-style-image: url("chrome://devtools/skin/tooltip/arrow-horizontal-dark.png");
   margin-left: var(--arrow-margin);
 }
 
@@ -368,7 +330,8 @@ div.CodeMirror span.eval-text {
 }
 
 .devtools-textinput,
-.devtools-searchinput {
+.devtools-searchinput,
+.devtools-filterinput {
   background-color: rgba(24, 29, 32, 1);
   color: rgba(184, 200, 217, 1);
 }

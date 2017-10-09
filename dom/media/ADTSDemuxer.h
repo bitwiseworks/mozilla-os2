@@ -32,7 +32,6 @@ public:
   already_AddRefed<MediaTrackDemuxer> GetTrackDemuxer(
     TrackInfo::TrackType aType, uint32_t aTrackNumber) override;
   bool IsSeekable() const override;
-  bool ShouldComputeStartTime() const override { return false; }
 
 private:
   bool InitInternal();
@@ -58,12 +57,6 @@ public:
   // Returns the estimated duration up to the given frame number,
   // or a 0-duration if unknown.
   media::TimeUnit Duration(int64_t aNumFrames) const;
-
-#ifdef ENABLE_TESTS
-  const adts::Frame& LastFrame() const;
-  RefPtr<MediaRawData> DemuxSample();
-  media::TimeUnit SeekPosition() const;
-#endif
 
   // MediaTrackDemuxer interface.
   UniquePtr<TrackInfo> GetInfo() const override;

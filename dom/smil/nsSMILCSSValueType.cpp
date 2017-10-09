@@ -25,10 +25,10 @@ using mozilla::StyleAnimationValue;
 /*static*/ nsSMILCSSValueType nsSMILCSSValueType::sSingleton;
 
 struct ValueWrapper {
-  ValueWrapper(nsCSSProperty aPropID, const StyleAnimationValue& aValue) :
+  ValueWrapper(nsCSSPropertyID aPropID, const StyleAnimationValue& aValue) :
     mPropID(aPropID), mCSSValue(aValue) {}
 
-  nsCSSProperty mPropID;
+  nsCSSPropertyID mPropID;
   StyleAnimationValue mCSSValue;
 };
 
@@ -72,7 +72,7 @@ GetZeroValueForUnit(StyleAnimationValue::Unit aUnit)
 // with a eUnit_Float value.  (See comment below.)
 //
 // Returns true on success, or false.
-static const bool
+static bool
 FinalizeStyleAnimationValues(const StyleAnimationValue*& aValue1,
                              const StyleAnimationValue*& aValue2)
 {
@@ -194,8 +194,8 @@ nsSMILCSSValueType::IsEqual(const nsSMILValue& aLeft,
   if (leftWrapper) {
     if (rightWrapper) {
       // Both non-null
-      NS_WARN_IF_FALSE(leftWrapper != rightWrapper,
-                       "Two nsSMILValues with matching ValueWrapper ptr");
+      NS_WARNING_ASSERTION(leftWrapper != rightWrapper,
+                           "Two nsSMILValues with matching ValueWrapper ptr");
       return (leftWrapper->mPropID == rightWrapper->mPropID &&
               leftWrapper->mCSSValue == rightWrapper->mCSSValue);
     }
@@ -223,7 +223,7 @@ nsSMILCSSValueType::Add(nsSMILValue& aDest, const nsSMILValue& aValueToAdd,
   MOZ_ASSERT(destWrapper || valueToAddWrapper,
              "need at least one fully-initialized value");
 
-  nsCSSProperty property = (valueToAddWrapper ? valueToAddWrapper->mPropID :
+  nsCSSPropertyID property = (valueToAddWrapper ? valueToAddWrapper->mPropID :
                             destWrapper->mPropID);
   // Special case: font-size-adjust and stroke-dasharray are explicitly
   // non-additive (even though StyleAnimationValue *could* support adding them)
@@ -278,6 +278,7 @@ nsSMILCSSValueType::ComputeDistance(const nsSMILValue& aFrom,
 
   return StyleAnimationValue::ComputeDistance(toWrapper->mPropID,
                                               *fromCSSValue, *toCSSValue,
+                                              nullptr,
                                               aDistance) ?
     NS_OK : NS_ERROR_FAILURE;
 }
@@ -322,7 +323,7 @@ nsSMILCSSValueType::Interpolate(const nsSMILValue& aStartVal,
 static nsPresContext*
 GetPresContextForElement(Element* aElem)
 {
-  nsIDocument* doc = aElem->GetCurrentDoc();
+  nsIDocument* doc = aElem->GetUncomposedDoc();
   if (!doc) {
     // This can happen if we process certain types of restyles mid-sample
     // and remove anonymous animated content from the document as a result.
@@ -335,7 +336,7 @@ GetPresContextForElement(Element* aElem)
 
 // Helper function to parse a string into a StyleAnimationValue
 static bool
-ValueFromStringHelper(nsCSSProperty aPropID,
+ValueFromStringHelper(nsCSSPropertyID aPropID,
                       Element* aTargetElement,
                       nsPresContext* aPresContext,
                       const nsAString& aString,
@@ -359,9 +360,15 @@ ValueFromStringHelper(nsCSSProperty aPropID,
       subStringBegin = (uint32_t)absValuePos; // Start parsing after '-' sign
     }
   }
+  RefPtr<nsStyleContext> styleContext =
+    nsComputedDOMStyle::GetStyleContextForElement(aTargetElement, nullptr,
+                                                  aPresContext->PresShell());
+  if (!styleContext) {
+    return false;
+  }
   nsDependentSubstring subString(aString, subStringBegin);
-  if (!StyleAnimationValue::ComputeValue(aPropID, aTargetElement, subString,
-                                         true, aStyleAnimValue,
+  if (!StyleAnimationValue::ComputeValue(aPropID, aTargetElement, styleContext,
+                                         subString, true, aStyleAnimValue,
                                          aIsContextSensitive)) {
     return false;
   }
@@ -381,7 +388,7 @@ ValueFromStringHelper(nsCSSProperty aPropID,
 
 // static
 void
-nsSMILCSSValueType::ValueFromString(nsCSSProperty aPropID,
+nsSMILCSSValueType::ValueFromString(nsCSSPropertyID aPropID,
                                     Element* aTargetElement,
                                     const nsAString& aString,
                                     nsSMILValue& aValue,
@@ -394,7 +401,7 @@ nsSMILCSSValueType::ValueFromString(nsCSSProperty aPropID,
     return;
   }
 
-  nsIDocument* doc = aTargetElement->GetCurrentDoc();
+  nsIDocument* doc = aTargetElement->GetUncomposedDoc();
   if (doc && !nsStyleUtil::CSPAllowsInlineStyle(nullptr,
                                                 doc->NodePrincipal(),
                                                 doc->GetDocumentURI(),
@@ -421,4 +428,20 @@ nsSMILCSSValueType::ValueToString(const nsSMILValue& aValue,
   return !wrapper ||
     StyleAnimationValue::UncomputeValue(wrapper->mPropID,
                                         wrapper->mCSSValue, aString);
+}
+
+// static
+nsCSSPropertyID
+nsSMILCSSValueType::PropertyFromValue(const nsSMILValue& aValue)
+{
+  if (aValue.mType != &nsSMILCSSValueType::sSingleton) {
+    return eCSSProperty_UNKNOWN;
+  }
+
+  const ValueWrapper* wrapper = ExtractValueWrapper(aValue);
+  if (!wrapper) {
+    return eCSSProperty_UNKNOWN;
+  }
+
+  return wrapper->mPropID;
 }

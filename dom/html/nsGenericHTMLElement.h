@@ -20,7 +20,7 @@
 #include "mozilla/dom/ValidityState.h"
 #include "mozilla/dom/ElementInlines.h"
 
-class nsDOMSettableTokenList;
+class nsDOMTokenList;
 class nsIDOMHTMLMenuElement;
 class nsIEditor;
 class nsIFormControlFrame;
@@ -38,7 +38,6 @@ class EventListenerManager;
 class EventStates;
 namespace dom {
 class HTMLFormElement;
-class HTMLPropertiesCollection;
 class HTMLMenuElement;
 } // namespace dom
 } // namespace mozilla
@@ -52,9 +51,10 @@ class nsGenericHTMLElement : public nsGenericHTMLElementBase,
                              public nsIDOMHTMLElement
 {
 public:
+  using Element::SetTabIndex;
+  using Element::Focus;
   explicit nsGenericHTMLElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
-    : nsGenericHTMLElementBase(aNodeInfo),
-      mScrollgrab(false)
+    : nsGenericHTMLElementBase(aNodeInfo)
   {
     NS_ASSERTION(mNodeInfo->NamespaceID() == kNameSpaceID_XHTML,
                  "Unexpected namespace");
@@ -73,7 +73,7 @@ public:
   {
     GetHTMLAttr(nsGkAtoms::title, aTitle);
   }
-  NS_IMETHODIMP SetTitle(const nsAString& aTitle) override
+  NS_IMETHOD SetTitle(const nsAString& aTitle) override
   {
     SetHTMLAttr(nsGkAtoms::title, aTitle);
     return NS_OK;
@@ -82,7 +82,7 @@ public:
   {
     GetHTMLAttr(nsGkAtoms::lang, aLang);
   }
-  NS_IMETHODIMP SetLang(const nsAString& aLang) override
+  NS_IMETHOD SetLang(const nsAString& aLang) override
   {
     SetHTMLAttr(nsGkAtoms::lang, aLang);
     return NS_OK;
@@ -95,46 +95,6 @@ public:
   {
     SetHTMLAttr(nsGkAtoms::dir, aDir, aError);
   }
-  already_AddRefed<nsDOMStringMap> Dataset();
-  bool ItemScope() const
-  {
-    return GetBoolAttr(nsGkAtoms::itemscope);
-  }
-  void SetItemScope(bool aItemScope, mozilla::ErrorResult& aError)
-  {
-    SetHTMLBoolAttr(nsGkAtoms::itemscope, aItemScope, aError);
-  }
-  nsDOMSettableTokenList* ItemType()
-  {
-    return GetTokenList(nsGkAtoms::itemtype);
-  }
-  void GetItemId(nsString& aItemId)
-  {
-    GetHTMLURIAttr(nsGkAtoms::itemid, aItemId);
-  }
-  void SetItemId(const nsAString& aItemID, mozilla::ErrorResult& aError)
-  {
-    SetHTMLAttr(nsGkAtoms::itemid, aItemID, aError);
-  }
-  nsDOMSettableTokenList* ItemRef()
-  {
-    return GetTokenList(nsGkAtoms::itemref);
-  }
-  nsDOMSettableTokenList* ItemProp()
-  {
-    return GetTokenList(nsGkAtoms::itemprop);
-  }
-  mozilla::dom::HTMLPropertiesCollection* Properties();
-  void GetItemValue(JSContext* aCx, JSObject* aScope,
-                    JS::MutableHandle<JS::Value> aRetval,
-                    mozilla::ErrorResult& aError);
-  void GetItemValue(JSContext* aCx, JS::MutableHandle<JS::Value> aRetval,
-                    mozilla::ErrorResult& aError)
-  {
-    GetItemValue(aCx, GetWrapperPreserveColor(), aRetval, aError);
-  }
-  void SetItemValue(JSContext* aCx, JS::Value aValue,
-                    mozilla::ErrorResult& aError);
   bool Hidden() const
   {
     return GetBoolAttr(nsGkAtoms::hidden);
@@ -144,20 +104,6 @@ public:
     SetHTMLBoolAttr(nsGkAtoms::hidden, aHidden, aError);
   }
   virtual void Click();
-  virtual int32_t TabIndexDefault()
-  {
-    return -1;
-  }
-  int32_t TabIndex()
-  {
-    return GetIntAttr(nsGkAtoms::tabindex, TabIndexDefault());
-  }
-  void SetTabIndex(int32_t aTabIndex, mozilla::ErrorResult& aError)
-  {
-    SetHTMLIntAttr(nsGkAtoms::tabindex, aTabIndex, aError);
-  }
-  virtual void Focus(mozilla::ErrorResult& aError);
-  virtual void Blur(mozilla::ErrorResult& aError);
   void GetAccessKey(nsString& aAccessKey)
   {
     GetHTMLAttr(nsGkAtoms::accesskey, aAccessKey);
@@ -234,11 +180,15 @@ public:
   }
   bool Scrollgrab() const
   {
-    return mScrollgrab;
+    return HasFlag(ELEMENT_HAS_SCROLLGRAB);
   }
   void SetScrollgrab(bool aValue)
   {
-    mScrollgrab = aValue;
+    if (aValue) {
+      SetFlags(ELEMENT_HAS_SCROLLGRAB);
+    } else {
+      UnsetFlags(ELEMENT_HAS_SCROLLGRAB);
+    }
   }
 
   void GetInnerText(mozilla::dom::DOMString& aValue, mozilla::ErrorResult& aError);
@@ -324,17 +274,7 @@ public:
 protected:
   virtual ~nsGenericHTMLElement() {}
 
-  // These methods are used to implement element-specific behavior of Get/SetItemValue
-  // when an element has @itemprop but no @itemscope.
-  virtual void GetItemValueText(mozilla::dom::DOMString& text);
-  virtual void SetItemValueText(const nsAString& text);
 public:
-  virtual already_AddRefed<mozilla::dom::UndoManager> GetUndoManager() override;
-  virtual bool UndoScope() override;
-  virtual void SetUndoScope(bool aUndoScope, mozilla::ErrorResult& aError) override;
-  // Callback for destructor of of dataset to ensure to null out weak pointer.
-  nsresult ClearDataset();
-
   /**
    * Get width and height, using given image request if attributes are unset.
    * Pass a reference to the image request, since the method may change the
@@ -392,50 +332,6 @@ public:
     mozilla::ErrorResult rv;
     Blur(rv);
     return rv.StealNSResult();
-  }
-  NS_IMETHOD GetItemScope(bool* aItemScope) final override {
-    *aItemScope = ItemScope();
-    return NS_OK;
-  }
-  NS_IMETHOD SetItemScope(bool aItemScope) final override {
-    mozilla::ErrorResult rv;
-    SetItemScope(aItemScope, rv);
-    return rv.StealNSResult();
-  }
-  NS_IMETHOD GetItemType(nsIVariant** aType) final override {
-    GetTokenList(nsGkAtoms::itemtype, aType);
-    return NS_OK;
-  }
-  NS_IMETHOD SetItemType(nsIVariant* aType) final override {
-    return SetTokenList(nsGkAtoms::itemtype, aType);
-  }
-  NS_IMETHOD GetItemId(nsAString& aId) final override {
-    nsString id;
-    GetItemId(id);
-    aId.Assign(id);
-    return NS_OK;
-  }
-  NS_IMETHOD SetItemId(const nsAString& aId) final override {
-    mozilla::ErrorResult rv;
-    SetItemId(aId, rv);
-    return rv.StealNSResult();
-  }
-  NS_IMETHOD GetProperties(nsISupports** aReturn) final override;
-  NS_IMETHOD GetItemValue(nsIVariant** aValue) final override;
-  NS_IMETHOD SetItemValue(nsIVariant* aValue) final override;
-  NS_IMETHOD GetItemRef(nsIVariant** aRef) final override {
-    GetTokenList(nsGkAtoms::itemref, aRef);
-    return NS_OK;
-  }
-  NS_IMETHOD SetItemRef(nsIVariant* aRef) final override {
-    return SetTokenList(nsGkAtoms::itemref, aRef);
-  }
-  NS_IMETHOD GetItemProp(nsIVariant** aProp) final override {
-    GetTokenList(nsGkAtoms::itemprop, aProp);
-    return NS_OK;
-  }
-  NS_IMETHOD SetItemProp(nsIVariant* aProp) final override {
-    return SetTokenList(nsGkAtoms::itemprop, aProp);
   }
   NS_IMETHOD GetAccessKey(nsAString& aAccessKey) final override {
     nsString accessKey;
@@ -981,14 +877,14 @@ protected:
    */
   void AddToNameTable(nsIAtom* aName) {
     NS_ASSERTION(HasName(), "Node doesn't have name?");
-    nsIDocument* doc = GetCurrentDoc();
+    nsIDocument* doc = GetUncomposedDoc();
     if (doc && !IsInAnonymousSubtree()) {
       doc->AddToNameTable(this, aName);
     }
   }
   void RemoveFromNameTable() {
     if (HasName()) {
-      nsIDocument* doc = GetCurrentDoc();
+      nsIDocument* doc = GetUncomposedDoc();
       if (doc) {
         doc->RemoveFromNameTable(this, GetParsedAttr(nsGkAtoms::name)->
                                          GetAtomValue());
@@ -1025,7 +921,12 @@ protected:
     GetEventListenerManagerForAttr(nsIAtom* aAttrName,
                                    bool* aDefer) override;
 
-  virtual const nsAttrName* InternalGetExistingAttrNameFromQName(const nsAString& aStr) const override;
+  /**
+   * Dispatch a simulated mouse click by keyboard to the given element.
+   */
+  nsresult DispatchSimulatedClick(nsGenericHTMLElement* aElement,
+                                  bool aIsTrusted,
+                                  nsPresContext* aPresContext);
 
   /**
    * Create a URI for the given aURISpec string.
@@ -1071,7 +972,8 @@ protected:
       UnsetHTMLAttr(aName, aError);
     }
   }
-  void SetHTMLIntAttr(nsIAtom* aName, int32_t aValue, mozilla::ErrorResult& aError)
+  template<typename T>
+  void SetHTMLIntAttr(nsIAtom* aName, T aValue, mozilla::ErrorResult& aError)
   {
     nsAutoString value;
     value.AppendInt(aValue);
@@ -1129,12 +1031,19 @@ protected:
    *
    * @param aAttr    name of attribute.
    * @param aValue   Integer value of attribute.
+   * @param aDefault Default value (in case value is out of range).  If the spec
+   *                 doesn't provide one, should be 1 if the value is limited to
+   *                 nonzero values, and 0 otherwise.
    */
-  void SetUnsignedIntAttr(nsIAtom* aName, uint32_t aValue,
+  void SetUnsignedIntAttr(nsIAtom* aName, uint32_t aValue, uint32_t aDefault,
                           mozilla::ErrorResult& aError)
   {
     nsAutoString value;
-    value.AppendInt(aValue);
+    if (aValue > INT32_MAX) {
+      value.AppendInt(aDefault);
+    } else {
+      value.AppendInt(aValue);
+    }
 
     SetHTMLAttr(aName, value, aError);
   }
@@ -1153,20 +1062,6 @@ protected:
 
     SetHTMLAttr(aAttr, value, aRv);
   }
-
-  /**
-   * This method works like GetURIAttr, except that it supports multiple
-   * URIs separated by whitespace (one or more U+0020 SPACE characters).
-   *
-   * Gets the absolute URI values of an attribute, by resolving any relative
-   * URIs in the attribute against the baseuri of the element. If a substring
-   * isn't a relative URI, the substring is returned as is. Only works for
-   * attributes in null namespace.
-   *
-   * @param aAttr    name of attribute.
-   * @param aResult  result value [out]
-   */
-  nsresult GetURIListAttr(nsIAtom* aAttr, nsAString& aResult);
 
   /**
    * Locates the nsIEditor associated with this node.  In general this is
@@ -1239,12 +1134,8 @@ protected:
    */
   bool IsEditableRoot() const;
 
-  nsresult SetUndoScopeInternal(bool aUndoScope);
-
 private:
   void ChangeEditableState(int32_t aChange);
-
-  bool mScrollgrab;
 };
 
 namespace mozilla {
@@ -1387,7 +1278,7 @@ protected:
    * with the id in @form. Otherwise, it *must* be null.
    *
    * @note Callers of UpdateFormOwner have to be sure the element is in a
-   * document (GetCurrentDoc() != nullptr).
+   * document (GetUncomposedDoc() != nullptr).
    */
   void UpdateFormOwner(bool aBindToTree, Element* aFormIdElement);
 
@@ -1475,7 +1366,7 @@ public:
    * Called when we have been cloned and adopted, and the information of the
    * node has been changed.
    */
-  virtual void NodeInfoChanged(mozilla::dom::NodeInfo* aOldNodeInfo) override;
+  virtual void NodeInfoChanged() override;
 
 protected:
   /* Generates the state key for saving the form state in the session if not
@@ -1548,7 +1439,7 @@ protected:
   _class::Set##_method(uint32_t aValue)                                   \
   {                                                                       \
     mozilla::ErrorResult rv;                                              \
-    SetUnsignedIntAttr(nsGkAtoms::_atom, aValue, rv);                     \
+    SetUnsignedIntAttr(nsGkAtoms::_atom, aValue, _default, rv);           \
     return rv.StealNSResult();                                            \
   }
 
@@ -1575,7 +1466,7 @@ protected:
       return NS_ERROR_DOM_INDEX_SIZE_ERR;                                 \
     }                                                                     \
     mozilla::ErrorResult rv;                                              \
-    SetUnsignedIntAttr(nsGkAtoms::_atom, aValue, rv);                     \
+    SetUnsignedIntAttr(nsGkAtoms::_atom, aValue, _default, rv);           \
     return rv.StealNSResult();                                            \
   }
 
@@ -1763,8 +1654,8 @@ NS_DECLARE_NS_NEW_HTML_ELEMENT(Content)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Mod)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Data)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(DataList)
+NS_DECLARE_NS_NEW_HTML_ELEMENT(Details)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Div)
-NS_DECLARE_NS_NEW_HTML_ELEMENT(ExtApp)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(FieldSet)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Font)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Form)
@@ -1800,6 +1691,7 @@ NS_DECLARE_NS_NEW_HTML_ELEMENT(Shadow)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Source)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Span)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Style)
+NS_DECLARE_NS_NEW_HTML_ELEMENT(Summary)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(TableCaption)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(TableCell)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(TableCol)

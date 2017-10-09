@@ -29,8 +29,16 @@ include $(MOZILLA_DIR)/config/makefiles/makeutils.mk
 
 ifdef REBUILD_CHECK
 REPORT_BUILD = $(info $(shell $(PYTHON) $(MOZILLA_DIR)/config/rebuild_check.py $@ $^))
+REPORT_BUILD_VERBOSE = $(REPORT_BUILD)
 else
 REPORT_BUILD = $(info $(notdir $@))
+
+ifdef BUILD_VERBOSE_LOG
+REPORT_BUILD_VERBOSE = $(REPORT_BUILD)
+else
+REPORT_BUILD_VERBOSE =
+endif
+
 endif
 
 EXEC			= exec
@@ -53,19 +61,6 @@ _VPATH_SRCS = $(abspath $<)
 testxpcobjdir = $(DEPTH)/_tests/xpcshell
 
 ifdef ENABLE_TESTS
-
-# Add test directories to the regular directories list. TEST_DIRS should
-# arguably have the same status as other *_DIRS variables. It is coded this way
-# until Makefiles stop using the "ifdef ENABLE_TESTS; DIRS +=" convention.
-#
-# The current developer workflow expects tests to be updated when processing
-# the default target. If we ever change this implementation, the behavior
-# should be preserved or the change should be widely communicated. A
-# consequence of not processing test dir targets during the default target is
-# that changes to tests may not be updated and code could assume to pass
-# locally against non-current test code.
-DIRS += $(TEST_DIRS)
-
 ifdef CPP_UNIT_TESTS
 ifdef COMPILE_ENVIRONMENT
 
@@ -73,7 +68,7 @@ ifdef COMPILE_ENVIRONMENT
 # through TestHarness.h, by modifying the list of includes and the libs against
 # which stuff links.
 SIMPLE_PROGRAMS += $(CPP_UNIT_TESTS)
-INCLUDES += -I$(DIST)/include/testing
+INCLUDES += -I$(ABS_DIST)/include/testing
 
 ifndef MOZ_PROFILE_GENERATE
 CPP_UNIT_TESTS_FILES = $(CPP_UNIT_TESTS)
@@ -100,22 +95,6 @@ cppunittests-remote:
 
 endif # COMPILE_ENVIRONMENT
 endif # CPP_UNIT_TESTS
-
-.PHONY: check
-
-ifdef PYTHON_UNIT_TESTS
-
-RUN_PYTHON_UNIT_TESTS := $(addsuffix -run,$(PYTHON_UNIT_TESTS))
-
-.PHONY: $(RUN_PYTHON_UNIT_TESTS)
-
-check:: $(RUN_PYTHON_UNIT_TESTS)
-
-$(RUN_PYTHON_UNIT_TESTS): %-run: %
-	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) $<
-
-endif # PYTHON_UNIT_TESTS
-
 endif # ENABLE_TESTS
 
 
@@ -220,12 +199,6 @@ MOZ_PROGRAM_LDFLAGS += -Wl,-rpath -Wl,@executable_path/Frameworks
 endif
 endif
 
-ifeq ($(SOLARIS_SUNPRO_CXX),1)
-ifeq (86,$(findstring 86,$(OS_TEST)))
-OS_LDFLAGS += -M $(MOZILLA_DIR)/config/solaris_ia32.map
-endif # x86
-endif # Solaris Sun Studio C++
-
 ifeq ($(HOST_OS_ARCH),WINNT)
 HOST_PDBFILE=$(basename $(@F)).pdb
 HOST_PDB_FLAG ?= -Fd$(HOST_PDBFILE)
@@ -249,10 +222,11 @@ SOBJS = $(notdir $(SSRCS:.S=.$(OBJ_SUFFIX)))
 CPPOBJS = $(notdir $(addsuffix .$(OBJ_SUFFIX),$(basename $(CPPSRCS))))
 CMOBJS = $(notdir $(CMSRCS:.m=.$(OBJ_SUFFIX)))
 CMMOBJS = $(notdir $(CMMSRCS:.mm=.$(OBJ_SUFFIX)))
-ASOBJS = $(notdir $(ASFILES:.$(ASM_SUFFIX)=.$(OBJ_SUFFIX)))
-RSOBJS = $(addprefix lib,$(notdir $(RSSRCS:.rs=.$(LIB_SUFFIX))))
+# ASFILES can have different extensions (.s, .asm)
+ASOBJS = $(notdir $(addsuffix .$(OBJ_SUFFIX),$(basename $(ASFILES))))
+RS_STATICLIB_CRATE_OBJ = $(addprefix lib,$(notdir $(RS_STATICLIB_CRATE_SRC:.rs=.$(LIB_SUFFIX))))
 ifndef OBJS
-_OBJS = $(COBJS) $(SOBJS) $(CPPOBJS) $(CMOBJS) $(CMMOBJS) $(ASOBJS) $(RSOBJS)
+_OBJS = $(COBJS) $(SOBJS) $(CPPOBJS) $(CMOBJS) $(CMMOBJS) $(ASOBJS)
 OBJS = $(strip $(_OBJS))
 endif
 
@@ -275,7 +249,6 @@ SIMPLE_PROGRAMS :=
 HOST_LIBRARY :=
 HOST_PROGRAM :=
 HOST_SIMPLE_PROGRAMS :=
-SDK_BINARY := $(filter %.py,$(SDK_BINARY))
 SDK_LIBRARY :=
 endif
 
@@ -306,25 +279,6 @@ ifdef HOST_SIMPLE_PROGRAMS
 GARBAGE			+= $(HOST_SIMPLE_PROGRAMS:%=%.$(OBJ_SUFFIX))
 endif
 
-#
-# the Solaris WorkShop template repository cache.  it occasionally can get
-# out of sync, so targets like clobber should kill it.
-#
-ifeq ($(SOLARIS_SUNPRO_CXX),1)
-GARBAGE_DIRS += SunWS_cache
-endif
-
-ifdef MOZ_UPDATE_XTERM
-# Its good not to have a newline at the end of the titlebar string because it
-# makes the make -s output easier to read.  Echo -n does not work on all
-# platforms, but we can trick printf into doing it.
-ifeq (.,$(relativesrcdir))
-UPDATE_TITLE = printf '\033]0;%s in %s\007' $(1) $(2) ;
-else
-UPDATE_TITLE = printf '\033]0;%s in %s\007' $(1) $(relativesrcdir)/$(2) ;
-endif
-endif
-
 ifdef MACH
 ifndef NO_BUILDSTATUS_MESSAGES
 define BUILDSTATUS
@@ -335,7 +289,6 @@ endif
 endif
 
 define SUBMAKE # $(call SUBMAKE,target,directory,static)
-+@$(UPDATE_TITLE)
 +@$(MAKE) $(if $(2),-C $(2)) $(1)
 
 endef # The extra line is important here! don't delete it
@@ -475,6 +428,24 @@ EXTRA_DEPS += $(LD_VERSION_SCRIPT)
 endif
 endif
 
+ifdef SYMBOLS_FILE
+ifeq ($(OS_TARGET),WINNT)
+ifndef GNU_CC
+EXTRA_DSO_LDOPTS += -DEF:$(call normalizepath,$(SYMBOLS_FILE))
+else
+EXTRA_DSO_LDOPTS += $(call normalizepath,$(SYMBOLS_FILE))
+endif
+else
+ifdef GCC_USE_GNU_LD
+EXTRA_DSO_LDOPTS += -Wl,--version-script,$(SYMBOLS_FILE)
+else
+ifeq ($(OS_TARGET),Darwin)
+EXTRA_DSO_LDOPTS += -Wl,-exported_symbols_list,$(SYMBOLS_FILE)
+endif
+endif
+endif
+EXTRA_DEPS += $(SYMBOLS_FILE)
+endif
 #
 # GNU doesn't have path length limitation
 #
@@ -527,12 +498,17 @@ endif
 ifndef MOZBUILD_BACKEND_CHECKED
 ifndef MACH
 ifndef TOPLEVEL_BUILD
-$(DEPTH)/backend.RecursiveMakeBackend:
+BUILD_BACKEND_FILES := $(addprefix $(DEPTH)/backend.,$(addsuffix Backend,$(BUILD_BACKENDS)))
+$(DEPTH)/backend.%Backend:
 	$(error Build configuration changed. Build with |mach build| or run |mach build-backend| to regenerate build config)
 
-include $(DEPTH)/backend.RecursiveMakeBackend.pp
+define build_backend_rule
+$(1): $$(shell cat $(1).in)
 
-default:: $(DEPTH)/backend.RecursiveMakeBackend
+endef
+$(foreach file,$(BUILD_BACKEND_FILES),$(eval $(call build_backend_rule,$(file))))
+
+default:: $(BUILD_BACKEND_FILES)
 
 export MOZBUILD_BACKEND_CHECKED=1
 endif
@@ -573,7 +549,7 @@ compile:: host target
 
 host:: $(HOST_LIBRARY) $(HOST_PROGRAM) $(HOST_SIMPLE_PROGRAMS)
 
-target:: $(LIBRARY) $(SHARED_LIBRARY) $(PROGRAM) $(SIMPLE_PROGRAMS)
+target:: $(LIBRARY) $(SHARED_LIBRARY) $(PROGRAM) $(SIMPLE_PROGRAMS) $(RUST_LIBRARY_FILE)
 
 include $(MOZILLA_DIR)/config/makefiles/target_binaries.mk
 endif
@@ -669,14 +645,14 @@ ifdef MSMANIFEST_TOOL
 	@if test -f $@.manifest; then \
 		if test -f '$(srcdir)/$@.manifest'; then \
 			echo 'Embedding manifest from $(srcdir)/$@.manifest and $@.manifest'; \
-			mt.exe -NOLOGO -MANIFEST '$(win_srcdir)/$@.manifest' $@.manifest -OUTPUTRESOURCE:$@\;1; \
+			$(MT) -NOLOGO -MANIFEST '$(win_srcdir)/$@.manifest' $@.manifest -OUTPUTRESOURCE:$@\;1; \
 		else \
 			echo 'Embedding manifest from $@.manifest'; \
-			mt.exe -NOLOGO -MANIFEST $@.manifest -OUTPUTRESOURCE:$@\;1; \
+			$(MT) -NOLOGO -MANIFEST $@.manifest -OUTPUTRESOURCE:$@\;1; \
 		fi; \
 	elif test -f '$(srcdir)/$@.manifest'; then \
 		echo 'Embedding manifest from $(srcdir)/$@.manifest'; \
-		mt.exe -NOLOGO -MANIFEST '$(win_srcdir)/$@.manifest' -OUTPUTRESOURCE:$@\;1; \
+		$(MT) -NOLOGO -MANIFEST '$(win_srcdir)/$@.manifest' -OUTPUTRESOURCE:$@\;1; \
 	fi
 endif	# MSVC with manifest tool
 ifdef MOZ_PROFILE_GENERATE
@@ -704,14 +680,14 @@ ifdef MSMANIFEST_TOOL
 	@if test -f $@.manifest; then \
 		if test -f '$(srcdir)/$@.manifest'; then \
 			echo 'Embedding manifest from $(srcdir)/$@.manifest and $@.manifest'; \
-			mt.exe -NOLOGO -MANIFEST '$(win_srcdir)/$@.manifest' $@.manifest -OUTPUTRESOURCE:$@\;1; \
+			$(MT) -NOLOGO -MANIFEST '$(win_srcdir)/$@.manifest' $@.manifest -OUTPUTRESOURCE:$@\;1; \
 		else \
 			echo 'Embedding manifest from $@.manifest'; \
-			mt.exe -NOLOGO -MANIFEST $@.manifest -OUTPUTRESOURCE:$@\;1; \
+			$(MT) -NOLOGO -MANIFEST $@.manifest -OUTPUTRESOURCE:$@\;1; \
 		fi; \
 	elif test -f '$(srcdir)/$@.manifest'; then \
 		echo 'Embedding manifest from $(srcdir)/$@.manifest'; \
-		mt.exe -NOLOGO -MANIFEST '$(win_srcdir)/$@.manifest' -OUTPUTRESOURCE:$@\;1; \
+		$(MT) -NOLOGO -MANIFEST '$(win_srcdir)/$@.manifest' -OUTPUTRESOURCE:$@\;1; \
 	fi
 endif	# MSVC with manifest tool
 else
@@ -739,7 +715,7 @@ ifeq (_WINNT,$(GNU_CC)_$(OS_ARCH))
 	$(EXPAND_LD) -nologo -out:$@ -pdb:$(LINK_PDBFILE) $< $(WIN32_EXE_LDFLAGS) $(LDFLAGS) $(MOZ_PROGRAM_LDFLAGS) $(STATIC_LIBS) $(SHARED_LIBS) $(EXTRA_LIBS) $(OS_LIBS)
 ifdef MSMANIFEST_TOOL
 	@if test -f $@.manifest; then \
-		mt.exe -NOLOGO -MANIFEST $@.manifest -OUTPUTRESOURCE:$@\;1; \
+		$(MT) -NOLOGO -MANIFEST $@.manifest -OUTPUTRESOURCE:$@\;1; \
 		rm -f $@.manifest; \
 	fi
 endif	# MSVC with manifest tool
@@ -820,7 +796,7 @@ endif
 # symlinks back to the originals. The symlinks are a no-op for stabs debugging,
 # so no need to conditionalize on OS version or debugging format.
 
-$(SHARED_LIBRARY): $(OBJS) $(RESFILE) $(STATIC_LIBS_DEPS) $(EXTRA_DEPS) $(GLOBAL_DEPS)
+$(SHARED_LIBRARY): $(OBJS) $(RESFILE) $(RUST_STATIC_LIB_FOR_SHARED_LIB) $(STATIC_LIBS_DEPS) $(EXTRA_DEPS) $(GLOBAL_DEPS)
 	$(REPORT_BUILD)
 ifndef INCREMENTAL_LINKER
 	$(RM) $@
@@ -829,10 +805,10 @@ ifdef DTRACE_LIB_DEPENDENT
 ifndef XP_MACOSX
 	dtrace -x nolibs -G -C -s $(MOZILLA_DTRACE_SRC) -o  $(DTRACE_PROBE_OBJ) $(shell $(EXPAND_LIBS) $(MOZILLA_PROBE_LIBS))
 endif
-	$(EXPAND_MKSHLIB) $(SHLIB_LDSTARTFILE) $(OBJS) $(SUB_SHLOBJS) $(DTRACE_PROBE_OBJ) $(MOZILLA_PROBE_LIBS) $(RESFILE) $(LDFLAGS) $(WRAP_LDFLAGS) $(STATIC_LIBS) $(SHARED_LIBS) $(EXTRA_DSO_LDOPTS) $(MOZ_GLUE_LDFLAGS) $(EXTRA_LIBS) $(OS_LIBS) $(SHLIB_LDENDFILE)
+	$(EXPAND_MKSHLIB) $(SHLIB_LDSTARTFILE) $(OBJS) $(SUB_SHLOBJS) $(DTRACE_PROBE_OBJ) $(MOZILLA_PROBE_LIBS) $(RESFILE) $(LDFLAGS) $(WRAP_LDFLAGS) $(STATIC_LIBS) $(RUST_STATIC_LIB_FOR_SHARED_LIB) $(SHARED_LIBS) $(EXTRA_DSO_LDOPTS) $(MOZ_GLUE_LDFLAGS) $(EXTRA_LIBS) $(OS_LIBS) $(SHLIB_LDENDFILE)
 	@$(RM) $(DTRACE_PROBE_OBJ)
 else # ! DTRACE_LIB_DEPENDENT
-	$(EXPAND_MKSHLIB) $(SHLIB_LDSTARTFILE) $(OBJS) $(SUB_SHLOBJS) $(RESFILE) $(LDFLAGS) $(WRAP_LDFLAGS) $(STATIC_LIBS) $(SHARED_LIBS) $(EXTRA_DSO_LDOPTS) $(MOZ_GLUE_LDFLAGS) $(EXTRA_LIBS) $(OS_LIBS) $(SHLIB_LDENDFILE)
+	$(EXPAND_MKSHLIB) $(SHLIB_LDSTARTFILE) $(OBJS) $(SUB_SHLOBJS) $(RESFILE) $(LDFLAGS) $(WRAP_LDFLAGS) $(STATIC_LIBS) $(RUST_STATIC_LIB_FOR_SHARED_LIB) $(SHARED_LIBS) $(EXTRA_DSO_LDOPTS) $(MOZ_GLUE_LDFLAGS) $(EXTRA_LIBS) $(OS_LIBS) $(SHLIB_LDENDFILE)
 endif # DTRACE_LIB_DEPENDENT
 	$(call CHECK_BINARY,$@)
 
@@ -840,8 +816,16 @@ ifeq (_WINNT,$(GNU_CC)_$(OS_ARCH))
 ifdef MSMANIFEST_TOOL
 ifdef EMBED_MANIFEST_AT
 	@if test -f $@.manifest; then \
-		mt.exe -NOLOGO -MANIFEST $@.manifest -OUTPUTRESOURCE:$@\;$(EMBED_MANIFEST_AT); \
-		rm -f $@.manifest; \
+		if test -f '$(srcdir)/$@.manifest'; then \
+			echo 'Embedding manifest from $(srcdir)/$@.manifest and $@.manifest'; \
+			$(MT) -NOLOGO -MANIFEST '$(win_srcdir)/$@.manifest' $@.manifest -OUTPUTRESOURCE:$@\;$(EMBED_MANIFEST_AT); \
+		else \
+			echo 'Embedding manifest from $@.manifest'; \
+			$(MT) -NOLOGO -MANIFEST $@.manifest -OUTPUTRESOURCE:$@\;$(EMBED_MANIFEST_AT); \
+		fi; \
+	elif test -f '$(srcdir)/$@.manifest'; then \
+		echo 'Embedding manifest from $(srcdir)/$@.manifest'; \
+		$(MT) -NOLOGO -MANIFEST '$(win_srcdir)/$@.manifest' -OUTPUTRESOURCE:$@\;$(EMBED_MANIFEST_AT); \
 	fi
 endif   # EMBED_MANIFEST_AT
 endif	# MSVC with manifest tool
@@ -853,28 +837,6 @@ endif	# WINNT && !GCC
 ifdef ENABLE_STRIP
 	$(STRIP) $(STRIP_FLAGS) $@
 endif
-ifdef MOZ_POST_DSO_LIB_COMMAND
-	$(MOZ_POST_DSO_LIB_COMMAND) $@
-endif
-
-ifeq ($(SOLARIS_SUNPRO_CC),1)
-_MDDEPFILE = $(MDDEPDIR)/$(@F).pp
-
-define MAKE_DEPS_AUTO_CC
-if test -d $(@D); then \
-	echo 'Building deps for $< using Sun Studio cc'; \
-	$(CC) $(COMPILE_CFLAGS) -xM  $< >$(_MDDEPFILE) ; \
-	$(PYTHON) $(MOZILLA_DIR)/build/unix/add_phony_targets.py $(_MDDEPFILE) ; \
-fi
-endef
-define MAKE_DEPS_AUTO_CXX
-if test -d $(@D); then \
-	echo 'Building deps for $< using Sun Studio CC'; \
-	$(CXX) $(COMPILE_CXXFLAGS) -xM $< >$(_MDDEPFILE) ; \
-	$(PYTHON) $(MOZILLA_DIR)/build/unix/add_phony_targets.py $(_MDDEPFILE) ; \
-fi
-endef
-endif # Sun Studio on Solaris
 
 # The object file is in the current directory, and the source file can be any
 # relative path. This macro adds the dependency obj: src for each source file.
@@ -889,99 +851,130 @@ $(foreach f,$(HOST_CSRCS) $(HOST_CPPSRCS) $(HOST_CMSRCS) $(HOST_CMMSRCS),$(eval 
 
 # The Rust compiler only outputs library objects, and so we need different
 # mangling to generate dependency rules for it.
-mk_libname = $(basename lib$(notdir $1)).$(LIB_SUFFIX)
+mk_libname = $(basename lib$(notdir $1)).rlib
 src_libdep = $(call mk_libname,$1): $1 $$(call mkdir_deps,$$(MDDEPDIR))
+mk_global_crate_libname = $(basename lib$(notdir $1)).$(LIB_SUFFIX)
+crate_src_libdep = $(call mk_global_crate_libname,$1): $1 $$(call mkdir_deps,$$(MDDEPDIR))
 $(foreach f,$(RSSRCS),$(eval $(call src_libdep,$(f))))
+$(foreach f,$(RS_STATICLIB_CRATE_SRC),$(eval $(call crate_src_libdep,$(f))))
 
 $(OBJS) $(HOST_OBJS) $(PROGOBJS) $(HOST_PROGOBJS): $(GLOBAL_DEPS)
 
 # Rules for building native targets must come first because of the host_ prefix
 $(HOST_COBJS):
-	$(REPORT_BUILD)
-	$(ELOG) $(HOST_CC) $(HOST_OUTOPTION)$@ -c $(HOST_CFLAGS) $(INCLUDES) $(NSPR_CFLAGS) $(_VPATH_SRCS)
+	$(REPORT_BUILD_VERBOSE)
+	$(ELOG) $(HOST_CC) $(HOST_OUTOPTION)$@ -c $(HOST_CPPFLAGS) $(HOST_CFLAGS) $(INCLUDES) $(NSPR_CFLAGS) $(_VPATH_SRCS)
 
 $(HOST_CPPOBJS):
-	$(REPORT_BUILD)
-	$(ELOG) $(HOST_CXX) $(HOST_OUTOPTION)$@ -c $(HOST_CXXFLAGS) $(INCLUDES) $(NSPR_CFLAGS) $(_VPATH_SRCS)
+	$(REPORT_BUILD_VERBOSE)
+	$(call BUILDSTATUS,OBJECT_FILE $@)
+	$(ELOG) $(HOST_CXX) $(HOST_OUTOPTION)$@ -c $(HOST_CPPFLAGS) $(HOST_CXXFLAGS) $(INCLUDES) $(NSPR_CFLAGS) $(_VPATH_SRCS)
 
 $(HOST_CMOBJS):
-	$(REPORT_BUILD)
-	$(ELOG) $(HOST_CC) $(HOST_OUTOPTION)$@ -c $(HOST_CFLAGS) $(HOST_CMFLAGS) $(INCLUDES) $(NSPR_CFLAGS) $(_VPATH_SRCS)
+	$(REPORT_BUILD_VERBOSE)
+	$(ELOG) $(HOST_CC) $(HOST_OUTOPTION)$@ -c $(HOST_CPPFLAGS) $(HOST_CFLAGS) $(HOST_CMFLAGS) $(INCLUDES) $(NSPR_CFLAGS) $(_VPATH_SRCS)
 
 $(HOST_CMMOBJS):
-	$(REPORT_BUILD)
-	$(ELOG) $(HOST_CXX) $(HOST_OUTOPTION)$@ -c $(HOST_CXXFLAGS) $(HOST_CMMFLAGS) $(INCLUDES) $(NSPR_CFLAGS) $(_VPATH_SRCS)
+	$(REPORT_BUILD_VERBOSE)
+	$(ELOG) $(HOST_CXX) $(HOST_OUTOPTION)$@ -c $(HOST_CPPFLAGS) $(HOST_CXXFLAGS) $(HOST_CMMFLAGS) $(INCLUDES) $(NSPR_CFLAGS) $(_VPATH_SRCS)
 
 $(COBJS):
-	$(REPORT_BUILD)
-	@$(MAKE_DEPS_AUTO_CC)
-	$(ELOG) $(CC) $(OUTOPTION)$@ -c $(COMPILE_CFLAGS) $($(notdir $<)_FLAGS) $(TARGET_LOCAL_INCLUDES) $(_VPATH_SRCS)
+	$(REPORT_BUILD_VERBOSE)
+	$(ELOG) $(CC) $(OUTOPTION)$@ -c $(COMPILE_CFLAGS) $($(notdir $<)_FLAGS) $(_VPATH_SRCS)
 
 # DEFINES and ACDEFINES are needed here to enable conditional compilation of Q_OBJECTs:
 # 'moc' only knows about #defines it gets on the command line (-D...), not in
 # included headers like mozilla-config.h
 $(filter moc_%.cpp,$(CPPSRCS)): moc_%.cpp: %.h
-	$(REPORT_BUILD)
+	$(REPORT_BUILD_VERBOSE)
 	$(ELOG) $(MOC) $(DEFINES) $(ACDEFINES) $< $(OUTOPTION)$@
 
 $(filter moc_%.cc,$(CPPSRCS)): moc_%.cc: %.cc
-	$(REPORT_BUILD)
+	$(REPORT_BUILD_VERBOSE)
 	$(ELOG) $(MOC) $(DEFINES) $(ACDEFINES) $(_VPATH_SRCS:.cc=.h) $(OUTOPTION)$@
 
 $(filter qrc_%.cpp,$(CPPSRCS)): qrc_%.cpp: %.qrc
-	$(REPORT_BUILD)
+	$(REPORT_BUILD_VERBOSE)
 	$(ELOG) $(RCC) -name $* $< $(OUTOPTION)$@
 
 ifdef ASFILES
 # The AS_DASH_C_FLAG is needed cause not all assemblers (Solaris) accept
 # a '-c' flag.
 $(ASOBJS):
-	$(REPORT_BUILD)
+	$(REPORT_BUILD_VERBOSE)
 	$(AS) $(ASOUTOPTION)$@ $(ASFLAGS) $($(notdir $<)_FLAGS) $(AS_DASH_C_FLAG) $(_VPATH_SRCS)
 endif
 
 ifdef MOZ_RUST
-# Assume any system libraries rustc links against are already
-# in the target's LIBS.
-$(RSOBJS):
-	$(REPORT_BUILD)
-	$(RUSTC) $(RUSTFLAGS) --crate-type staticlib -o $(call mk_libname,$<) $(_VPATH_SRCS)
+ifdef RUST_LIBRARY_FILE
+
+# Permit users to pass flags to cargo from their mozconfigs (e.g. --color=always).
+cargo_build_flags = $(CARGOFLAGS)
+ifndef MOZ_DEBUG
+cargo_build_flags = --release
 endif
+ifdef MOZ_CARGO_SUPPORTS_FROZEN
+cargo_build_flags += --frozen
+endif
+
+cargo_build_flags += --manifest-path $(CARGO_FILE)
+cargo_build_flags += --target=$(RUST_TARGET)
+cargo_build_flags += --verbose
+
+# Enable color output if original stdout was a TTY and color settings
+# aren't already present. This essentially restores the default behavior
+# of cargo when running via `mach`.
+ifdef MACH_STDOUT_ISATTY
+ifeq (,$(findstring --color,$(cargo_build_flags)))
+cargo_build_flags += --color=always
+endif
+endif
+
+# Assume any system libraries rustc links against are already in the target's LIBS.
+#
+# We need to run cargo unconditionally, because cargo is the only thing that
+# has full visibility into how changes in Rust sources might affect the final
+# build.
+force-cargo-build:
+	$(REPORT_BUILD)
+	env CARGO_TARGET_DIR=. RUSTC=$(RUSTC) $(CARGO) build $(cargo_build_flags) --
+
+$(RUST_LIBRARY_FILE): force-cargo-build
+endif # CARGO_FILE
+endif # MOZ_RUST
 
 $(SOBJS):
 	$(REPORT_BUILD)
-	$(AS) -o $@ $(ASFLAGS) $($(notdir $<)_FLAGS) $(LOCAL_INCLUDES) $(TARGET_LOCAL_INCLUDES) -c $<
+	$(AS) -o $@ $(DEFINES) $(ASFLAGS) $($(notdir $<)_FLAGS) $(LOCAL_INCLUDES) -c $<
 
 $(CPPOBJS):
-	$(REPORT_BUILD)
-	@$(MAKE_DEPS_AUTO_CXX)
-	$(ELOG) $(CCC) $(OUTOPTION)$@ -c $(COMPILE_CXXFLAGS) $($(notdir $<)_FLAGS) $(TARGET_LOCAL_INCLUDES) $(_VPATH_SRCS)
+	$(REPORT_BUILD_VERBOSE)
+	$(call BUILDSTATUS,OBJECT_FILE $@)
+	$(ELOG) $(CCC) $(OUTOPTION)$@ -c $(COMPILE_CXXFLAGS) $($(notdir $<)_FLAGS) $(_VPATH_SRCS)
 
 $(CMMOBJS):
-	$(REPORT_BUILD)
-	@$(MAKE_DEPS_AUTO_CXX)
-	$(ELOG) $(CCC) -o $@ -c $(COMPILE_CXXFLAGS) $(COMPILE_CMMFLAGS) $($(notdir $<)_FLAGS) $(TARGET_LOCAL_INCLUDES) $(_VPATH_SRCS)
+	$(REPORT_BUILD_VERBOSE)
+	$(ELOG) $(CCC) -o $@ -c $(COMPILE_CXXFLAGS) $(COMPILE_CMMFLAGS) $($(notdir $<)_FLAGS) $(_VPATH_SRCS)
 
 $(CMOBJS):
-	$(REPORT_BUILD)
-	@$(MAKE_DEPS_AUTO_CC)
-	$(ELOG) $(CC) -o $@ -c $(COMPILE_CFLAGS) $(COMPILE_CMFLAGS) $($(notdir $<)_FLAGS) $(TARGET_LOCAL_INCLUDES) $(_VPATH_SRCS)
+	$(REPORT_BUILD_VERBOSE)
+	$(ELOG) $(CC) -o $@ -c $(COMPILE_CFLAGS) $(COMPILE_CMFLAGS) $($(notdir $<)_FLAGS) $(_VPATH_SRCS)
 
 $(filter %.s,$(CPPSRCS:%.cpp=%.s)): %.s: %.cpp $(call mkdir_deps,$(MDDEPDIR))
-	$(REPORT_BUILD)
-	$(CCC) -S $(COMPILE_CXXFLAGS) $($(notdir $<)_FLAGS) $(TARGET_LOCAL_INCLUDES) $(_VPATH_SRCS)
+	$(REPORT_BUILD_VERBOSE)
+	$(CCC) -S $(COMPILE_CXXFLAGS) $($(notdir $<)_FLAGS) $(_VPATH_SRCS)
 
 $(filter %.s,$(CPPSRCS:%.cc=%.s)): %.s: %.cc $(call mkdir_deps,$(MDDEPDIR))
-	$(REPORT_BUILD)
-	$(CCC) -S $(COMPILE_CXXFLAGS) $($(notdir $<)_FLAGS) $(TARGET_LOCAL_INCLUDES) $(_VPATH_SRCS)
+	$(REPORT_BUILD_VERBOSE)
+	$(CCC) -S $(COMPILE_CXXFLAGS) $($(notdir $<)_FLAGS) $(_VPATH_SRCS)
 
 $(filter %.s,$(CPPSRCS:%.cxx=%.s)): %.s: %.cpp $(call mkdir_deps,$(MDDEPDIR))
-	$(REPORT_BUILD)
-	$(CCC) -S $(COMPILE_CXXFLAGS) $($(notdir $<)_FLAGS) $(TARGET_LOCAL_INCLUDES) $(_VPATH_SRCS)
+	$(REPORT_BUILD_VERBOSE)
+	$(CCC) -S $(COMPILE_CXXFLAGS) $($(notdir $<)_FLAGS) $(_VPATH_SRCS)
 
 $(filter %.s,$(CSRCS:%.c=%.s)): %.s: %.c $(call mkdir_deps,$(MDDEPDIR))
-	$(REPORT_BUILD)
-	$(CC) -S $(COMPILE_CFLAGS) $($(notdir $<)_FLAGS) $(TARGET_LOCAL_INCLUDES) $(_VPATH_SRCS)
+	$(REPORT_BUILD_VERBOSE)
+	$(CC) -S $(COMPILE_CFLAGS) $($(notdir $<)_FLAGS) $(_VPATH_SRCS)
 
 ifneq (,$(filter %.i,$(MAKECMDGOALS)))
 # Call as $(call _group_srcs,extension,$(SRCS)) - this will create a list
@@ -1007,29 +1000,29 @@ VPATH += $(addprefix $(srcdir)/,$(sort $(dir $(CPPSRCS) $(CSRCS) $(CMMSRCS))))
 .PHONY: $(_PREPROCESSED_CPP_FILES) $(_PREPROCESSED_CC_FILES) $(_PREPROCESSED_CXX_FILES) $(_PREPROCESSED_C_FILES) $(_PREPROCESSED_CMM_FILES)
 
 $(_PREPROCESSED_CPP_FILES): %.i: %.cpp $(call mkdir_deps,$(MDDEPDIR))
-	$(REPORT_BUILD)
+	$(REPORT_BUILD_VERBOSE)
 	$(addprefix $(MKDIR) -p ,$(filter-out .,$(@D)))
-	$(CCC) -C $(PREPROCESS_OPTION)$@ $(COMPILE_CXXFLAGS) $($(notdir $<)_FLAGS) $(TARGET_LOCAL_INCLUDES) $(_VPATH_SRCS)
+	$(CCC) -C $(PREPROCESS_OPTION)$@ $(COMPILE_CXXFLAGS) $($(notdir $<)_FLAGS) $(_VPATH_SRCS)
 
 $(_PREPROCESSED_CC_FILES): %.i: %.cc $(call mkdir_deps,$(MDDEPDIR))
-	$(REPORT_BUILD)
+	$(REPORT_BUILD_VERBOSE)
 	$(addprefix $(MKDIR) -p ,$(filter-out .,$(@D)))
-	$(CCC) -C $(PREPROCESS_OPTION)$@ $(COMPILE_CXXFLAGS) $($(notdir $<)_FLAGS) $(TARGET_LOCAL_INCLUDES) $(_VPATH_SRCS)
+	$(CCC) -C $(PREPROCESS_OPTION)$@ $(COMPILE_CXXFLAGS) $($(notdir $<)_FLAGS) $(_VPATH_SRCS)
 
 $(_PREPROCESSED_CXX_FILES): %.i: %.cxx $(call mkdir_deps,$(MDDEPDIR))
-	$(REPORT_BUILD)
+	$(REPORT_BUILD_VERBOSE)
 	$(addprefix $(MKDIR) -p ,$(filter-out .,$(@D)))
-	$(CCC) -C $(PREPROCESS_OPTION)$@ $(COMPILE_CXXFLAGS) $($(notdir $<)_FLAGS) $(TARGET_LOCAL_INCLUDES) $(_VPATH_SRCS)
+	$(CCC) -C $(PREPROCESS_OPTION)$@ $(COMPILE_CXXFLAGS) $($(notdir $<)_FLAGS) $(_VPATH_SRCS)
 
 $(_PREPROCESSED_C_FILES): %.i: %.c $(call mkdir_deps,$(MDDEPDIR))
-	$(REPORT_BUILD)
+	$(REPORT_BUILD_VERBOSE)
 	$(addprefix $(MKDIR) -p ,$(filter-out .,$(@D)))
-	$(CC) -C $(PREPROCESS_OPTION)$@ $(COMPILE_CFLAGS) $($(notdir $<)_FLAGS) $(TARGET_LOCAL_INCLUDES) $(_VPATH_SRCS)
+	$(CC) -C $(PREPROCESS_OPTION)$@ $(COMPILE_CFLAGS) $($(notdir $<)_FLAGS) $(_VPATH_SRCS)
 
 $(_PREPROCESSED_CMM_FILES): %.i: %.mm $(call mkdir_deps,$(MDDEPDIR))
-	$(REPORT_BUILD)
+	$(REPORT_BUILD_VERBOSE)
 	$(addprefix $(MKDIR) -p ,$(filter-out .,$(@D)))
-	$(CCC) -C $(PREPROCESS_OPTION)$@ $(COMPILE_CXXFLAGS) $(COMPILE_CMMFLAGS) $($(notdir $<)_FLAGS) $(TARGET_LOCAL_INCLUDES) $(_VPATH_SRCS)
+	$(CCC) -C $(PREPROCESS_OPTION)$@ $(COMPILE_CXXFLAGS) $(COMPILE_CMMFLAGS) $($(notdir $<)_FLAGS) $(_VPATH_SRCS)
 
 # Default to pre-processing the actual unified file. This can be overridden
 # at the command-line to pre-process only the individual source file.
@@ -1150,18 +1143,6 @@ PREF_DIR = defaults/preferences
 endif
 
 ################################################################################
-# Copy each element of AUTOCFG_JS_EXPORTS to $(FINAL_TARGET)/defaults/autoconfig
-
-ifneq ($(AUTOCFG_JS_EXPORTS),)
-ifndef NO_DIST_INSTALL
-AUTOCFG_JS_EXPORTS_FILES := $(AUTOCFG_JS_EXPORTS)
-AUTOCFG_JS_EXPORTS_DEST := $(FINAL_TARGET)/defaults/autoconfig
-AUTOCFG_JS_EXPORTS_TARGET := export
-INSTALL_TARGETS += AUTOCFG_JS_EXPORTS
-endif
-endif
-
-################################################################################
 # SDK
 
 ifneq (,$(SDK_LIBRARY))
@@ -1172,18 +1153,6 @@ SDK_LIBRARY_TARGET := target
 INSTALL_TARGETS += SDK_LIBRARY
 endif
 endif # SDK_LIBRARY
-
-# SDK_BINARY is still used in various makefiles for non-products of the
-# compilation, so we need to keep that running on the libs tier.
-ifneq (,$(strip $(SDK_BINARY)))
-ifndef NO_DIST_INSTALL
-SDK_BINARY_FILES := $(SDK_BINARY)
-SDK_BINARY_DEST := $(SDK_BIN_DIR)
-# SDK_BINARY_TARGET is set in xpcom/idl-parser/Makefile.in
-SDK_BINARY_TARGET ?= libs target
-INSTALL_TARGETS += SDK_BINARY
-endif
-endif # SDK_BINARY
 
 ################################################################################
 # CHROME PACKAGING
@@ -1217,17 +1186,11 @@ endif
 libs realchrome:: $(FINAL_TARGET)/chrome
 	$(call py_action,jar_maker,\
 	  $(QUIET) -d $(FINAL_TARGET) \
-	  $(MAKE_JARS_FLAGS) $(DEFINES) $(ACDEFINES) $(MOZ_DEBUG_DEFINES) \
+	  $(MAKE_JARS_FLAGS) $(DEFINES) $(ACDEFINES) \
 	  $(JAR_MANIFEST))
 
 endif
 
-# This is a temporary check to ensure patches relying on the old behavior
-# of silently picking up jar.mn files continue to work.
-else # No JAR_MANIFEST
-ifneq (,$(wildcard $(srcdir)/jar.mn))
-$(error $(srcdir) contains a jar.mn file but this file is not declared in a JAR_MANIFESTS variable in a moz.build file)
-endif
 endif
 
 # When you move this out of the tools tier, please remove the corresponding
@@ -1459,7 +1422,9 @@ PP_TARGETS_ALL_RESULTS := $(sort $(foreach tier,$(PP_TARGETS_TIERS),$(PP_TARGETS
 $(PP_TARGETS_ALL_RESULTS):
 	$(if $(filter-out $(notdir $@),$(notdir $(<:.in=))),$(error Looks like $@ has an unexpected dependency on $< which breaks PP_TARGETS))
 	$(RM) '$@'
-	$(call py_action,preprocessor,--depend $(MDDEPDIR)/$(@F).pp $(PP_TARGET_FLAGS) $(DEFINES) $(ACDEFINES) $(MOZ_DEBUG_DEFINES) '$<' -o '$@')
+	$(call py_action,preprocessor,--depend $(MDDEPDIR)/$(@F).pp $(PP_TARGET_FLAGS) $(DEFINES) $(ACDEFINES) '$<' -o '$@')
+
+$(filter %.css,$(PP_TARGETS_ALL_RESULTS)): PP_TARGET_FLAGS+=--marker %
 
 # The depfile is based on the filename, and we don't want conflicts. So check
 # there's only one occurrence of any given filename in PP_TARGETS_ALL_RESULTS.
@@ -1557,9 +1522,6 @@ libs export::
 	$(CHECK_FROZEN_VARIABLES)
 
 PURGECACHES_DIRS ?= $(DIST)/bin
-ifdef MOZ_WEBAPP_RUNTIME
-PURGECACHES_DIRS += $(DIST)/bin/webapprt
-endif
 
 PURGECACHES_FILES = $(addsuffix /.purgecaches,$(PURGECACHES_DIRS))
 
@@ -1577,7 +1539,3 @@ include $(MOZILLA_DIR)/config/makefiles/autotargets.mk
 ifneq ($(NULL),$(AUTO_DEPS))
   default all libs tools export:: $(AUTO_DEPS)
 endif
-
-export:: $(GENERATED_FILES)
-
-GARBAGE += $(GENERATED_FILES)

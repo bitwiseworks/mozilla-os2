@@ -6,6 +6,7 @@
 #include "js/UbiNode.h"
 #include "js/UbiNodeDominatorTree.h"
 #include "js/UbiNodePostOrder.h"
+#include "js/UbiNodeShortestPaths.h"
 #include "jsapi-tests/tests.h"
 #include "vm/SavedFrame.h"
 
@@ -23,8 +24,15 @@ struct FakeNode
 
     explicit FakeNode(char name) : name(name), edges() { }
 
-    bool addEdgeTo(FakeNode& referent) {
+    bool addEdgeTo(FakeNode& referent, const char16_t* edgeName = nullptr) {
         JS::ubi::Node node(&referent);
+
+        if (edgeName) {
+            auto ownedName = js::DuplicateString(edgeName);
+            MOZ_RELEASE_ASSERT(ownedName);
+            return edges.emplaceBack(ownedName.release(), node);
+        }
+
         return edges.emplaceBack(nullptr, node);
     }
 };
@@ -33,12 +41,16 @@ namespace JS {
 namespace ubi {
 
 template<>
-struct Concrete<FakeNode> : public Base
+class Concrete<FakeNode> : public Base
 {
-    static const char16_t concreteTypeName[];
-    const char16_t* typeName() const override { return concreteTypeName; }
+  protected:
+    explicit Concrete(FakeNode* ptr) : Base(ptr) { }
+    FakeNode& get() const { return *static_cast<FakeNode*>(ptr); }
 
-    UniquePtr<EdgeRange> edges(JSRuntime* rt, bool wantNames) const override {
+  public:
+    static void construct(void* storage, FakeNode* ptr) { new (storage) Concrete(ptr); }
+
+    UniquePtr<EdgeRange> edges(JSContext* cx, bool wantNames) const override {
         return UniquePtr<EdgeRange>(js_new<PreComputedEdgeRange>(get().edges));
     }
 
@@ -46,14 +58,11 @@ struct Concrete<FakeNode> : public Base
         return 1;
     }
 
-    static void construct(void* storage, FakeNode* ptr) { new (storage) Concrete(ptr); }
-
-  protected:
-    explicit Concrete(FakeNode* ptr) : Base(ptr) { }
-    FakeNode& get() const { return *static_cast<FakeNode*>(ptr); }
+    static const char16_t concreteTypeName[];
+    const char16_t* typeName() const override { return concreteTypeName; }
 };
 
-const char16_t Concrete<FakeNode>::concreteTypeName[] = MOZ_UTF16("FakeNode");
+const char16_t Concrete<FakeNode>::concreteTypeName[] = u"FakeNode";
 
 } // namespace ubi
 } // namespace JS
@@ -65,8 +74,9 @@ BEGIN_TEST(test_ubiNodeZone)
     CHECK(global1);
     CHECK(JS::ubi::Node(global1).zone() == cx->zone());
 
+    JS::CompartmentOptions globalOptions;
     RootedObject global2(cx, JS_NewGlobalObject(cx, getGlobalClass(), nullptr,
-                                                JS::FireOnNewGlobalHook));
+                                                JS::FireOnNewGlobalHook, globalOptions));
     CHECK(global2);
     CHECK(global1->zone() != global2->zone());
     CHECK(JS::ubi::Node(global2).zone() == global2->zone());
@@ -108,8 +118,9 @@ BEGIN_TEST(test_ubiNodeCompartment)
     CHECK(global1);
     CHECK(JS::ubi::Node(global1).compartment() == cx->compartment());
 
+    JS::CompartmentOptions globalOptions;
     RootedObject global2(cx, JS_NewGlobalObject(cx, getGlobalClass(), nullptr,
-                                                JS::FireOnNewGlobalHook));
+                                                JS::FireOnNewGlobalHook, globalOptions));
     CHECK(global2);
     CHECK(global1->compartment() != global2->compartment());
     CHECK(JS::ubi::Node(global2).compartment() == global2->compartment());
@@ -143,10 +154,10 @@ BEGIN_TEST(test_ubiNodeJSObjectConstructorName)
     EVAL("this.Ctor = function Ctor() {}; new Ctor", &val);
     CHECK(val.isObject());
 
-    mozilla::UniquePtr<char16_t[], JS::FreePolicy> ctorName;
+    UniqueTwoByteChars ctorName;
     CHECK(JS::ubi::Node(&val.toObject()).jsObjectConstructorName(cx, ctorName));
     CHECK(ctorName);
-    CHECK(js_strcmp(ctorName.get(), MOZ_UTF16("Ctor")) == 0);
+    CHECK(js_strcmp(ctorName.get(), u"Ctor") == 0);
 
     return true;
 }
@@ -364,8 +375,8 @@ BEGIN_TEST(test_ubiPostOrder)
         // `expectedEdges` as we find them to ensure that we only find each edge
         // once.
 
-        JS::AutoCheckCannotGC nogc(rt);
-        JS::ubi::PostOrder traversal(rt, nogc);
+        JS::AutoCheckCannotGC nogc(cx);
+        JS::ubi::PostOrder traversal(cx, nogc);
         CHECK(traversal.init());
         CHECK(traversal.addStart(&r));
 
@@ -512,8 +523,8 @@ BEGIN_TEST(test_JS_ubi_DominatorTree)
 
     mozilla::Maybe<JS::ubi::DominatorTree> maybeTree;
     {
-        JS::AutoCheckCannotGC noGC(rt);
-        maybeTree = JS::ubi::DominatorTree::Create(rt, noGC, &r);
+        JS::AutoCheckCannotGC noGC(cx);
+        maybeTree = JS::ubi::DominatorTree::Create(cx, noGC, &r);
     }
 
     CHECK(maybeTree.isSome());
@@ -648,3 +659,351 @@ BEGIN_TEST(test_JS_ubi_Node_scriptFilename)
     return true;
 }
 END_TEST(test_JS_ubi_Node_scriptFilename)
+
+#define LAMBDA_CHECK(cond)                                                         \
+    do {                                                                           \
+        if (!(cond)) {                                                             \
+            fprintf(stderr,"%s:%d:CHECK failed: " #cond "\n", __FILE__, __LINE__); \
+            return false;                                                          \
+        }                                                                          \
+    } while (false)
+
+static void
+dumpPath(JS::ubi::Path& path)
+{
+    for (size_t i = 0; i < path.length(); i++) {
+        fprintf(stderr, "path[%llu]->predecessor() = '%c'\n",
+                (long long unsigned) i,
+                path[i]->predecessor().as<FakeNode>()->name);
+    }
+}
+
+BEGIN_TEST(test_JS_ubi_ShortestPaths_no_path)
+{
+    // Create the following graph:
+    //
+    //     .---.      .---.    .---.
+    //     | a | <--> | c |    | b |
+    //     '---'      '---'    '---'
+    FakeNode a('a');
+    FakeNode b('b');
+    FakeNode c('c');
+    CHECK(a.addEdgeTo(c));
+    CHECK(c.addEdgeTo(a));
+
+    mozilla::Maybe<JS::ubi::ShortestPaths> maybeShortestPaths;
+    {
+        JS::AutoCheckCannotGC noGC(cx);
+
+        JS::ubi::NodeSet targets;
+        CHECK(targets.init());
+        CHECK(targets.put(&b));
+
+        maybeShortestPaths = JS::ubi::ShortestPaths::Create(cx, noGC, 10, &a,
+                                                            mozilla::Move(targets));
+    }
+
+    CHECK(maybeShortestPaths);
+    auto& paths = *maybeShortestPaths;
+
+    size_t numPathsFound = 0;
+    bool ok = paths.forEachPath(&b, [&](JS::ubi::Path& path) {
+        numPathsFound++;
+        dumpPath(path);
+        return true;
+    });
+    CHECK(ok);
+    CHECK(numPathsFound == 0);
+
+    return true;
+}
+END_TEST(test_JS_ubi_ShortestPaths_no_path)
+
+BEGIN_TEST(test_JS_ubi_ShortestPaths_one_path)
+{
+    // Create the following graph:
+    //
+    //     .---.      .---.     .---.
+    //     | a | <--> | c | --> | b |
+    //     '---'      '---'     '---'
+    FakeNode a('a');
+    FakeNode b('b');
+    FakeNode c('c');
+    CHECK(a.addEdgeTo(c));
+    CHECK(c.addEdgeTo(a));
+    CHECK(c.addEdgeTo(b));
+
+    mozilla::Maybe<JS::ubi::ShortestPaths> maybeShortestPaths;
+    {
+        JS::AutoCheckCannotGC noGC(cx);
+
+        JS::ubi::NodeSet targets;
+        CHECK(targets.init());
+        CHECK(targets.put(&b));
+
+        maybeShortestPaths = JS::ubi::ShortestPaths::Create(cx, noGC, 10, &a,
+                                                            mozilla::Move(targets));
+    }
+
+    CHECK(maybeShortestPaths);
+    auto& paths = *maybeShortestPaths;
+
+    size_t numPathsFound = 0;
+    bool ok = paths.forEachPath(&b, [&](JS::ubi::Path& path) {
+        numPathsFound++;
+
+        dumpPath(path);
+        LAMBDA_CHECK(path.length() == 2);
+        LAMBDA_CHECK(path[0]->predecessor() == JS::ubi::Node(&a));
+        LAMBDA_CHECK(path[1]->predecessor() == JS::ubi::Node(&c));
+
+        return true;
+    });
+
+    CHECK(ok);
+    CHECK(numPathsFound == 1);
+
+    return true;
+}
+END_TEST(test_JS_ubi_ShortestPaths_one_path)
+
+BEGIN_TEST(test_JS_ubi_ShortestPaths_multiple_paths)
+{
+    // Create the following graph:
+    //
+    //                .---.
+    //          .-----| a |-----.
+    //          |     '---'     |
+    //          V       |       V
+    //        .---.     |     .---.
+    //        | b |     |     | d |
+    //        '---'     |     '---'
+    //          |       |       |
+    //          V       |       V
+    //        .---.     |     .---.
+    //        | c |     |     | e |
+    //        '---'     V     '---'
+    //          |     .---.     |
+    //          '---->| f |<----'
+    //                '---'
+    FakeNode a('a');
+    FakeNode b('b');
+    FakeNode c('c');
+    FakeNode d('d');
+    FakeNode e('e');
+    FakeNode f('f');
+    CHECK(a.addEdgeTo(b));
+    CHECK(a.addEdgeTo(f));
+    CHECK(a.addEdgeTo(d));
+    CHECK(b.addEdgeTo(c));
+    CHECK(c.addEdgeTo(f));
+    CHECK(d.addEdgeTo(e));
+    CHECK(e.addEdgeTo(f));
+
+    mozilla::Maybe<JS::ubi::ShortestPaths> maybeShortestPaths;
+    {
+        JS::AutoCheckCannotGC noGC(cx);
+
+        JS::ubi::NodeSet targets;
+        CHECK(targets.init());
+        CHECK(targets.put(&f));
+
+        maybeShortestPaths = JS::ubi::ShortestPaths::Create(cx, noGC, 10, &a,
+                                                            mozilla::Move(targets));
+    }
+
+    CHECK(maybeShortestPaths);
+    auto& paths = *maybeShortestPaths;
+
+    size_t numPathsFound = 0;
+    bool ok = paths.forEachPath(&f, [&](JS::ubi::Path& path) {
+        numPathsFound++;
+        dumpPath(path);
+
+        switch (path.back()->predecessor().as<FakeNode>()->name) {
+            case 'a': {
+                LAMBDA_CHECK(path.length() == 1);
+                break;
+            }
+
+            case 'c': {
+                LAMBDA_CHECK(path.length() == 3);
+                LAMBDA_CHECK(path[0]->predecessor() == JS::ubi::Node(&a));
+                LAMBDA_CHECK(path[1]->predecessor() == JS::ubi::Node(&b));
+                LAMBDA_CHECK(path[2]->predecessor() == JS::ubi::Node(&c));
+                break;
+            }
+
+            case 'e': {
+                LAMBDA_CHECK(path.length() == 3);
+                LAMBDA_CHECK(path[0]->predecessor() == JS::ubi::Node(&a));
+                LAMBDA_CHECK(path[1]->predecessor() == JS::ubi::Node(&d));
+                LAMBDA_CHECK(path[2]->predecessor() == JS::ubi::Node(&e));
+                break;
+            }
+
+            default: {
+                // Unexpected path!
+                LAMBDA_CHECK(false);
+            }
+        }
+
+        return true;
+    });
+
+    CHECK(ok);
+    fprintf(stderr, "numPathsFound = %llu\n", (long long unsigned) numPathsFound);
+    CHECK(numPathsFound == 3);
+
+    return true;
+}
+END_TEST(test_JS_ubi_ShortestPaths_multiple_paths)
+
+BEGIN_TEST(test_JS_ubi_ShortestPaths_more_paths_than_max)
+{
+    // Create the following graph:
+    //
+    //                .---.
+    //          .-----| a |-----.
+    //          |     '---'     |
+    //          V       |       V
+    //        .---.     |     .---.
+    //        | b |     |     | d |
+    //        '---'     |     '---'
+    //          |       |       |
+    //          V       |       V
+    //        .---.     |     .---.
+    //        | c |     |     | e |
+    //        '---'     V     '---'
+    //          |     .---.     |
+    //          '---->| f |<----'
+    //                '---'
+    FakeNode a('a');
+    FakeNode b('b');
+    FakeNode c('c');
+    FakeNode d('d');
+    FakeNode e('e');
+    FakeNode f('f');
+    CHECK(a.addEdgeTo(b));
+    CHECK(a.addEdgeTo(f));
+    CHECK(a.addEdgeTo(d));
+    CHECK(b.addEdgeTo(c));
+    CHECK(c.addEdgeTo(f));
+    CHECK(d.addEdgeTo(e));
+    CHECK(e.addEdgeTo(f));
+
+    mozilla::Maybe<JS::ubi::ShortestPaths> maybeShortestPaths;
+    {
+        JS::AutoCheckCannotGC noGC(cx);
+
+        JS::ubi::NodeSet targets;
+        CHECK(targets.init());
+        CHECK(targets.put(&f));
+
+        maybeShortestPaths = JS::ubi::ShortestPaths::Create(cx, noGC, 1, &a,
+                                                            mozilla::Move(targets));
+    }
+
+    CHECK(maybeShortestPaths);
+    auto& paths = *maybeShortestPaths;
+
+    size_t numPathsFound = 0;
+    bool ok = paths.forEachPath(&f, [&](JS::ubi::Path& path) {
+        numPathsFound++;
+        dumpPath(path);
+        return true;
+    });
+
+    CHECK(ok);
+    fprintf(stderr, "numPathsFound = %llu\n", (long long unsigned) numPathsFound);
+    CHECK(numPathsFound == 1);
+
+    return true;
+}
+END_TEST(test_JS_ubi_ShortestPaths_more_paths_than_max)
+
+BEGIN_TEST(test_JS_ubi_ShortestPaths_multiple_edges_to_target)
+{
+    // Create the following graph:
+    //
+    //                .---.
+    //          .-----| a |-----.
+    //          |     '---'     |
+    //          |       |       |
+    //          |x      |y      |z
+    //          |       |       |
+    //          |       V       |
+    //          |     .---.     |
+    //          '---->| b |<----'
+    //                '---'
+    FakeNode a('a');
+    FakeNode b('b');
+    CHECK(a.addEdgeTo(b, u"x"));
+    CHECK(a.addEdgeTo(b, u"y"));
+    CHECK(a.addEdgeTo(b, u"z"));
+
+    mozilla::Maybe<JS::ubi::ShortestPaths> maybeShortestPaths;
+    {
+        JS::AutoCheckCannotGC noGC(cx);
+
+        JS::ubi::NodeSet targets;
+        CHECK(targets.init());
+        CHECK(targets.put(&b));
+
+        maybeShortestPaths = JS::ubi::ShortestPaths::Create(cx, noGC, 10, &a,
+                                                            mozilla::Move(targets));
+    }
+
+    CHECK(maybeShortestPaths);
+    auto& paths = *maybeShortestPaths;
+
+    size_t numPathsFound = 0;
+    bool foundX = false;
+    bool foundY = false;
+    bool foundZ = false;
+
+    bool ok = paths.forEachPath(&b, [&](JS::ubi::Path& path) {
+        numPathsFound++;
+        dumpPath(path);
+
+        LAMBDA_CHECK(path.length() == 1);
+        LAMBDA_CHECK(path.back()->name());
+        LAMBDA_CHECK(js_strlen(path.back()->name().get()) == 1);
+
+        auto c = uint8_t(path.back()->name().get()[0]);
+        fprintf(stderr, "Edge name = '%c'\n", c);
+
+        switch (c) {
+            case 'x': {
+                foundX = true;
+                break;
+            }
+            case 'y': {
+                foundY = true;
+                break;
+            }
+            case 'z': {
+                foundZ = true;
+                break;
+            }
+            default: {
+                // Unexpected edge!
+                LAMBDA_CHECK(false);
+            }
+        }
+
+        return true;
+    });
+
+    CHECK(ok);
+    fprintf(stderr, "numPathsFound = %llu\n", (long long unsigned) numPathsFound);
+    CHECK(numPathsFound == 3);
+    CHECK(foundX);
+    CHECK(foundY);
+    CHECK(foundZ);
+
+    return true;
+}
+END_TEST(test_JS_ubi_ShortestPaths_multiple_edges_to_target)
+
+#undef LAMBDA_CHECK

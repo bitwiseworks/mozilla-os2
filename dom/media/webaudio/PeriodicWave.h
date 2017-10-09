@@ -24,6 +24,7 @@ public:
                const float* aRealData,
                const float* aImagData,
                const uint32_t aLength,
+               const bool aDisableNormalization,
                ErrorResult& aRv);
 
   NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(PeriodicWave)
@@ -34,11 +35,16 @@ public:
     return mContext;
   }
 
-  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   uint32_t DataLength() const
   {
     return mLength;
+  }
+
+  bool DisableNormalization() const
+  {
+    return mDisableNormalization;
   }
 
   ThreadSharedFloatArrayBufferList* GetThreadSharedBuffer() const
@@ -55,6 +61,7 @@ private:
   RefPtr<AudioContext> mContext;
   RefPtr<ThreadSharedFloatArrayBufferList> mCoefficients;
   uint32_t mLength;
+  bool mDisableNormalization;
 };
 
 } // namespace dom

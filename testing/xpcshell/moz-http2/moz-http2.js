@@ -5,13 +5,18 @@
 // This module is the stateful server side of test_http2.js and is meant
 // to have node be restarted in between each invocation
 
-var http2 = require('../node-http2');
+var node_http2_root = '../node-http2';
+if (process.env.NODE_HTTP2_ROOT) {
+  node_http2_root = process.env.NODE_HTTP2_ROOT;
+}
+var http2 = require(node_http2_root);
 var fs = require('fs');
 var url = require('url');
 var crypto = require('crypto');
 
 // Hook into the decompression code to log the decompressed name-value pairs
-var http2_compression = require('../node-http2/lib/protocol/compressor');
+var compression_module = node_http2_root + "/lib/protocol/compressor";
+var http2_compression = require(compression_module);
 var HeaderSetDecompressor = http2_compression.HeaderSetDecompressor;
 var originalRead = HeaderSetDecompressor.prototype.read;
 var lastDecompressor;
@@ -28,7 +33,8 @@ HeaderSetDecompressor.prototype.read = function() {
   return pair;
 }
 
-var http2_connection = require('../node-http2/lib/protocol/connection');
+var connection_module = node_http2_root + "/lib/protocol/connection";
+var http2_connection = require(connection_module);
 var Connection = http2_connection.Connection;
 var originalClose = Connection.prototype.close;
 Connection.prototype.close = function (error, lastId) {
@@ -38,6 +44,31 @@ Connection.prototype.close = function (error, lastId) {
 
   originalClose.apply(this, arguments);
 }
+
+var framer_module = node_http2_root + "/lib/protocol/framer";
+var http2_framer = require(framer_module);
+var Serializer = http2_framer.Serializer;
+var originalTransform = Serializer.prototype._transform;
+var newTransform = function (frame, encoding, done) {
+  if (frame.type == 'DATA') {
+    // Insert our empty DATA frame
+    emptyFrame = {};
+    emptyFrame.type = 'DATA';
+    emptyFrame.data = new Buffer(0);
+    emptyFrame.flags = [];
+    emptyFrame.stream = frame.stream;
+    var buffers = [];
+    Serializer['DATA'](emptyFrame, buffers);
+    Serializer.commonHeader(emptyFrame, buffers);
+    for (var i = 0; i < buffers.length; i++) {
+      this.push(buffers[i]);
+    }
+
+    // Reset to the original version for later uses
+    Serializer.prototype._transform = originalTransform;
+  }
+  originalTransform.apply(this, arguments);
+};
 
 function getHttpContent(path) {
   var content = '<!doctype html>' +
@@ -173,7 +204,7 @@ function handleRequest(req, res) {
   var push, push1, push1a, push2, push3;
 
   // PushService tests.
-  var pushPushServer1, pushPushServer2, pushPushServer3;
+  var pushPushServer1, pushPushServer2, pushPushServer3, pushPushServer4;
 
   if (req.httpVersionMajor === 2) {
     res.setHeader('X-Connection-Http2', 'yes');
@@ -256,6 +287,20 @@ function handleRequest(req, res) {
     });
     push.end('// comments');
     content = '<head> <script src="push2.js"/></head>body text';
+  }
+
+  else if (u.pathname === "/push5") {
+    push = res.push('/push5.js');
+    push.writeHead(200, {
+      'content-type': 'application/javascript',
+      'pushed' : 'yes',
+      // no content-length
+      'X-Connection-Http2': 'yes'
+    });
+    content = generateContent(1024 * 150);
+    push.write(content);
+    push.end();
+    content = '<head> <script src="push5.js"/></head>body text';
   }
 
   else if (u.pathname === "/pushapi1") {
@@ -451,21 +496,19 @@ function handleRequest(req, res) {
   else if (u.pathname === "/altsvc1") {
     if (req.httpVersionMajor != 2 ||
       req.scheme != "http" ||
-      req.headers['alt-used'] != ("localhost:" + serverPort)) {
-      res.setHeader('Connection', 'close');
+      req.headers['alt-used'] != ("foo.example.com:" + serverPort)) {
       res.writeHead(400);
       res.end("WHAT?");
       return;
    }
    // test the alt svc frame for use with altsvc2
-   res.altsvc("localhost", serverPort, "h2", 3600, req.headers['x-redirect-origin']);
+   res.altsvc("foo.example.com", serverPort, "h2", 3600, req.headers['x-redirect-origin']);
   }
 
   else if (u.pathname === "/altsvc2") {
     if (req.httpVersionMajor != 2 ||
       req.scheme != "http" ||
-      req.headers['alt-used'] != ("localhost:" + serverPort)) {
-      res.setHeader('Connection', 'close');
+      req.headers['alt-used'] != ("foo.example.com:" + serverPort)) {
       res.writeHead(400);
       res.end("WHAT?");
       return;
@@ -476,6 +519,14 @@ function handleRequest(req, res) {
   else if (u.pathname === "/altsvc-test") {
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Alt-Svc', 'h2=' + req.headers['x-altsvc']);
+  }
+
+  else if (u.pathname === "/.well-known/http-opportunistic") {
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Content-Type', 'application/json');
+    res.writeHead(200, "OK");
+    res.end('{"http://' + req.headers['host'] + '": { "tls-ports": [' + serverPort + '] }}');
+    return;
   }
 
   // for PushService tests.
@@ -563,7 +614,8 @@ function handleRequest(req, res) {
       { hostname: 'localhost:' + serverPort, port: serverPort,
         path : '/pushNotificationsDeliver1', method : 'GET',
         headers: { 'Encryption-Key': 'keyid="notification1"; dh="BO_tgGm-yvYAGLeRe16AvhzaUcpYRiqgsGOlXpt0DRWDRGGdzVLGlEVJMygqAUECarLnxCiAOHTP_znkedrlWoU"',
-                   'Encryption': 'keyid="notification1";salt="uAZaiXpOSfOLJxtOCZ09dA"'
+                   'Encryption': 'keyid="notification1";salt="uAZaiXpOSfOLJxtOCZ09dA"',
+                   'Content-Encoding': 'aesgcm128',
                  }
       });
     pushPushServer1.writeHead(200, {
@@ -579,7 +631,8 @@ function handleRequest(req, res) {
       { hostname: 'localhost:' + serverPort, port: serverPort,
         path : '/pushNotificationsDeliver3', method : 'GET',
         headers: { 'Encryption-Key': 'keyid="notification2"; dh="BKVdQcgfncpNyNWsGrbecX0zq3eHIlHu5XbCGmVcxPnRSbhjrA6GyBIeGdqsUL69j5Z2CvbZd-9z1UBH0akUnGQ"',
-                   'Encryption': 'keyid="notification2";salt="vFn3t3M_k42zHBdpch3VRw"'
+                   'Encryption': 'keyid="notification2";salt="vFn3t3M_k42zHBdpch3VRw"',
+                   'Content-Encoding': 'aesgcm128',
                  }
       });
     pushPushServer2.writeHead(200, {
@@ -595,7 +648,8 @@ function handleRequest(req, res) {
       { hostname: 'localhost:' + serverPort, port: serverPort,
         path : '/pushNotificationsDeliver3', method : 'GET',
         headers: { 'Encryption-Key': 'keyid="notification3";dh="BD3xV_ACT8r6hdIYES3BJj1qhz9wyv7MBrG9vM2UCnjPzwE_YFVpkD-SGqE-BR2--0M-Yf31wctwNsO1qjBUeMg"',
-                   'Encryption': 'keyid="notification3"; salt="DFq188piWU7osPBgqn4Nlg"; rs=24'
+                   'Encryption': 'keyid="notification3"; salt="DFq188piWU7osPBgqn4Nlg"; rs=24',
+                   'Content-Encoding': 'aesgcm128',
                  }
       });
     pushPushServer3.writeHead(200, {
@@ -603,6 +657,23 @@ function handleRequest(req, res) {
       });
 
     pushPushServer3.end('2caaeedd9cf1059b80c58b6c6827da8ff7de864ac8bea6d5775892c27c005209cbf9c4de0c3fbcddb9711d74eaeebd33f7275374cb42dd48c07168bc2cc9df63e045ce2d2a2408c66088a40c', 'hex');
+    return;
+  }
+
+  else if (u.pathname == "/pushNotifications/subscription4") {
+    pushPushServer4 = res.push(
+      { hostname: 'localhost:' + serverPort, port: serverPort,
+        path : '/pushNotificationsDeliver4', method : 'GET',
+        headers: { 'Crypto-Key': 'keyid="notification4";dh="BJScXUUTcs7D8jJWI1AOxSgAKkF7e56ay4Lek52TqDlWo1yGd5czaxFWfsuP4j7XNWgGYm60-LKpSUMlptxPFVQ"',
+                   'Encryption': 'keyid="notification4"; salt="sn9p2QqF3V6KBclda8vx7w"',
+                   'Content-Encoding': 'aesgcm',
+                 }
+      });
+    pushPushServer4.writeHead(200, {
+      'subresource' : '1'
+      });
+
+    pushPushServer4.end('9eba7ba6192544a39bd9e9b58e702d0748f1776b27f6616cdc55d29ed5a015a6db8f2dd82cd5751a14315546194ff1c18458ab91eb36c9760ccb042670001fd9964557a079553c3591ee131ceb259389cfffab3ab873f873caa6a72e87d262b8684c3260e5940b992234deebf57a9ff3a8775742f3cbcb152d249725a28326717e19cce8506813a155eff5df9bdba9e3ae8801d3cc2b7e7f2f1b6896e63d1fdda6f85df704b1a34db7b2dd63eba11ede154300a318c6f83c41a3d32356a196e36bc905b99195fd91ae4ff3f545c42d17f1fdc1d5bd2bf7516d0765e3a859fffac84f46160b79cedda589f74c25357cf6988cd8ba83867ebd86e4579c9d3b00a712c77fcea3b663007076e21f9819423faa830c2176ff1001c1690f34be26229a191a938517', 'hex');
     return;
   }
 
@@ -643,6 +714,31 @@ function handleRequest(req, res) {
     // Fall through to the default response behavior
   }
 
+  else if (u.pathname === "/emptydata") {
+    // Overwrite the original transform with our version that will insert an
+    // empty DATA frame at the beginning of the stream response, then fall
+    // through to the default response behavior.
+    Serializer.prototype._transform = newTransform;
+  }
+
+  // for use with test_immutable.js
+  else if (u.pathname === "/immutable-test-without-attribute") {
+     res.setHeader('Cache-Control', 'max-age=100000');
+     res.setHeader('Etag', '1');
+     if (req.headers["if-none-match"]) {
+       res.setHeader("x-conditional", "true");
+     }
+    // default response from here
+  }
+  else if (u.pathname === "/immutable-test-with-attribute") {
+    res.setHeader('Cache-Control', 'max-age=100000, immutable');
+    res.setHeader('Etag', '2');
+     if (req.headers["if-none-match"]) {
+       res.setHeader("x-conditional", "true");
+     }
+   // default response from here
+  }
+
   res.setHeader('Content-Type', 'text/html');
   if (req.httpVersionMajor != 2) {
     res.setHeader('Connection', 'close');
@@ -656,8 +752,12 @@ function handleRequest(req, res) {
 var options = {
   key: fs.readFileSync(__dirname + '/http2-key.pem'),
   cert: fs.readFileSync(__dirname + '/http2-cert.pem'),
-  //, log: require('../node-http2/test/util').createLogger('server')
 };
+
+if (process.env.HTTP2_LOG !== undefined) {
+  var log_module = node_http2_root + "/test/util";
+  options.log = require(log_module).createLogger('server')
+}
 
 var server = http2.createServer(options, handleRequest);
 
@@ -674,7 +774,7 @@ function listenok() {
   serverPort = server._server.address().port;
   console.log('HTTP2 server listening on port ' + serverPort);
 }
-var portSelection = -1;
+var portSelection = 0;
 var envport = process.env.MOZHTTP2_PORT;
 if (envport !== undefined) {
   try {

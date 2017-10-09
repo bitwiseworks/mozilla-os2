@@ -20,6 +20,7 @@ from mach.decorators import (
 
 from mozbuild.base import MachCommandBase
 from mozbuild.base import MachCommandConditions as conditions
+import mozpack.path as mozpath
 from argparse import ArgumentParser
 
 UNKNOWN_TEST = '''
@@ -55,10 +56,15 @@ TEST_SUITES = {
         'mach_command': 'crashtest',
         'kwargs': {'test_file': None},
     },
-    'crashtest-ipc': {
-        'aliases': ('Cipc', 'cipc'),
-        'mach_command': 'crashtest-ipc',
-        'kwargs': {'test_file': None},
+    'firefox-ui-functional': {
+        'aliases': ('Fxfn',),
+        'mach_command': 'firefox-ui-functional',
+        'kwargs': {},
+    },
+    'firefox-ui-update': {
+        'aliases': ('Fxup',),
+        'mach_command': 'firefox-ui-update',
+        'kwargs': {},
     },
     'jetpack': {
         'aliases': ('J',),
@@ -92,19 +98,14 @@ TEST_SUITES = {
         'mach_command': 'mochitest',
         'kwargs': {'flavor': 'plain', 'test_paths': None},
     },
-    'luciddream': {
-        'mach_command': 'luciddream',
-        'kwargs': {'test_paths': None},
+    'python': {
+        'mach_command': 'python-test',
+        'kwargs': {'tests': None},
     },
     'reftest': {
         'aliases': ('RR', 'rr', 'Rr'),
         'mach_command': 'reftest',
         'kwargs': {'tests': None},
-    },
-    'reftest-ipc': {
-        'aliases': ('Ripc',),
-        'mach_command': 'reftest-ipc',
-        'kwargs': {'test_file': None},
     },
     'web-platform-tests': {
         'aliases': ('wpt',),
@@ -133,34 +134,45 @@ TEST_FLAVORS = {
         'mach_command': 'mochitest',
         'kwargs': {'flavor': 'browser-chrome', 'test_paths': []},
     },
-    'chrashtest': { },
+    'crashtest': {},
     'chrome': {
         'mach_command': 'mochitest',
         'kwargs': {'flavor': 'chrome', 'test_paths': []},
+    },
+    'firefox-ui-functional': {
+        'mach_command': 'firefox-ui-functional',
+        'kwargs': {'tests': []},
+    },
+    'firefox-ui-update': {
+        'mach_command': 'firefox-ui-update',
+        'kwargs': {'tests': []},
+    },
+    'marionette': {
+        'mach_command': 'marionette-test',
+        'kwargs': {'tests': []},
     },
     'mochitest': {
         'mach_command': 'mochitest',
         'kwargs': {'flavor': 'mochitest', 'test_paths': []},
     },
+    'python': {
+        'mach_command': 'python-test',
+        'kwargs': {},
+    },
     'reftest': {
         'mach_command': 'reftest',
         'kwargs': {'tests': []}
     },
-    'steeplechase': { },
+    'steeplechase': {},
     'web-platform-tests': {
         'mach_command': 'web-platform-tests',
         'kwargs': {'include': []}
-    },
-    'webapprt-chrome': {
-        'mach_command': 'mochitest',
-        'kwargs': {'flavor': 'webapprt-chrome', 'test_paths': []},
     },
     'xpcshell': {
         'mach_command': 'xpcshell-test',
         'kwargs': {'test_paths': []},
     },
 }
-
 
 for i in range(1, MOCHITEST_TOTAL_CHUNKS + 1):
     TEST_SUITES['mochitest-%d' %i] = {
@@ -298,7 +310,7 @@ class Test(MachCommandBase):
 
         buckets = {}
         for test in run_tests:
-            key = (test['flavor'], test['subsuite'])
+            key = (test['flavor'], test.get('subsuite', ''))
             buckets.setdefault(key, []).append(test)
 
         for (flavor, subsuite), tests in sorted(buckets.items()):
@@ -449,7 +461,11 @@ class CheckSpiderMonkeyCommand(MachCommandBase):
         check_masm_cmd = [sys.executable, os.path.join(self.topsrcdir, 'config', 'check_macroassembler_style.py')]
         check_masm_result = subprocess.call(check_masm_cmd, cwd=os.path.join(self.topsrcdir, 'js', 'src'))
 
-        all_passed = jittest_result and jstest_result and jsapi_tests_result and check_style_result and check_masm_result
+        print('running check-js-msg-encoding')
+        check_js_msg_cmd = [sys.executable, os.path.join(self.topsrcdir, 'config', 'check_js_msg_encoding.py')]
+        check_js_msg_result = subprocess.call(check_js_msg_cmd, cwd=self.topsrcdir)
+
+        all_passed = jittest_result and jstest_result and jsapi_tests_result and check_style_result and check_masm_result and check_js_msg_result
 
         return all_passed
 
@@ -499,6 +515,7 @@ class PushToTry(MachCommandBase):
             return rv
 
     def validate_args(self, **kwargs):
+        from autotry import AutoTry
         if not kwargs["paths"] and not kwargs["tests"] and not kwargs["tags"]:
             print("Paths, tags, or tests must be specified as an argument to autotry.")
             sys.exit(1)
@@ -532,10 +549,10 @@ class PushToTry(MachCommandBase):
 
         paths = []
         for p in kwargs["paths"]:
-            p = os.path.normpath(os.path.abspath(p))
-            if not p.startswith(self.topsrcdir):
-                print('Specified path "%s" is outside of the srcdir, unable to'
-                      ' specify tests outside of the srcdir' % p)
+            p = mozpath.normpath(os.path.abspath(p))
+            if not (os.path.isdir(p) and p.startswith(self.topsrcdir)):
+                print('Specified path "%s" is not a directory under the srcdir,'
+                      ' unable to specify tests outside of the srcdir' % p)
                 sys.exit(1)
             if len(p) <= len(self.topsrcdir):
                 print('Specified path "%s" is at the top of the srcdir and would'
@@ -549,7 +566,11 @@ class PushToTry(MachCommandBase):
             print("Error parsing --tags argument:\n%s" % e.message)
             sys.exit(1)
 
-        return kwargs["builds"], platforms, tests, talos, paths, tags, kwargs["extra_args"]
+        extra_values = {k['dest'] for k in AutoTry.pass_through_arguments.values()}
+        extra_args = {k: v for k, v in kwargs.items()
+                      if k in extra_values and v}
+
+        return kwargs["builds"], platforms, tests, talos, paths, tags, extra_args
 
 
     @Command('try',
@@ -599,7 +620,6 @@ class PushToTry(MachCommandBase):
         """
 
         from mozbuild.testing import TestResolver
-        from mozbuild.controller.building import BuildDriver
         from autotry import AutoTry
 
         print("mach try is under development, please file bugs blocking 1149670.")
@@ -629,12 +649,9 @@ class PushToTry(MachCommandBase):
         if not any(kwargs[item] for item in ("paths", "tests", "tags")):
             kwargs["paths"], kwargs["tags"] = at.find_paths_and_tags(kwargs["verbose"])
 
-        builds, platforms, tests, talos, paths, tags, extra_args = self.validate_args(**kwargs)
+        builds, platforms, tests, talos, paths, tags, extra = self.validate_args(**kwargs)
 
         if paths or tags:
-            driver = self._spawn(BuildDriver)
-            driver.install_tests(remove=False)
-
             paths = [os.path.relpath(os.path.normpath(os.path.abspath(item)), self.topsrcdir)
                      for item in paths]
             paths_by_flavor = at.paths_by_flavor(paths=paths, tags=tags)
@@ -651,7 +668,7 @@ class PushToTry(MachCommandBase):
 
         try:
             msg = at.calc_try_syntax(platforms, tests, talos, builds, paths_by_flavor, tags,
-                                     extra_args, kwargs["intersection"])
+                                     extra, kwargs["intersection"])
         except ValueError as e:
             print(e.message)
             sys.exit(1)
@@ -705,11 +722,11 @@ def get_parser(argv=None):
                              'chunkByDir directories.',
                         default=None)
 
-    parser.add_argument('--e10s',
-                        action='store_true',
+    parser.add_argument('--disable-e10s',
+                        action='store_false',
                         dest='e10s',
-                        help='Find test on chunk with electrolysis preferences enabled.',
-                        default=False)
+                        help='Find test on chunk with electrolysis preferences disabled.',
+                        default=True)
 
     parser.add_argument('-p', '--platform',
                         choices=['linux', 'linux64', 'mac', 'macosx64', 'win32', 'win64'],

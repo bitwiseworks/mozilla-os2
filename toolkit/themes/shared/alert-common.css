@@ -26,6 +26,12 @@
   animation-name: alert-closing-animation;
 }
 
+#alertBox[animate]:not([clicked]):not([closing]):hover {
+  /* !important is necessary because CSS animations have highest
+     importance in the cascade with exception to !important rules. */
+  opacity: 1 !important;
+}
+
 @keyframes alert-animation {
   from {
     opacity: 0;
@@ -50,6 +56,22 @@
 @keyframes alert-closing-animation {
   to {
     opacity: 0;
+  }
+}
+
+#alertIcon {
+  margin-top: 6px;
+  margin-inline-start: 8px;
+  margin-inline-end: 0;
+  margin-bottom: 0;
+  width: 16px;
+  min-height: 16px;
+  max-height: 16px;
+}
+
+@media (resolution: 2dppx) {
+  #alertIcon {
+    image-rendering: -moz-crisp-edges;
   }
 }
 

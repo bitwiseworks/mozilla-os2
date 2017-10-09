@@ -21,10 +21,11 @@
 
 #include "common/angleutils.h"
 #include "libANGLE/angletypes.h"
+#include "libANGLE/Debug.h"
 
 namespace rx
 {
-class ImplFactory;
+class GLImplFactory;
 class ShaderImpl;
 class ShaderSh;
 }
@@ -32,64 +33,71 @@ class ShaderSh;
 namespace gl
 {
 class Compiler;
+class ContextState;
 struct Limitations;
 class ResourceManager;
-struct Data;
+class Context;
 
-class Shader : angle::NonCopyable
+class ShaderState final : angle::NonCopyable
 {
   public:
-    class Data final : angle::NonCopyable
+    ShaderState(GLenum shaderType);
+    ~ShaderState();
+
+    const std::string &getLabel() const { return mLabel; }
+
+    const std::string &getSource() const { return mSource; }
+    const std::string &getTranslatedSource() const { return mTranslatedSource; }
+
+    GLenum getShaderType() const { return mShaderType; }
+    int getShaderVersion() const { return mShaderVersion; }
+
+    const std::vector<sh::Varying> &getVaryings() const { return mVaryings; }
+    const std::vector<sh::Uniform> &getUniforms() const { return mUniforms; }
+    const std::vector<sh::InterfaceBlock> &getInterfaceBlocks() const { return mInterfaceBlocks; }
+    const std::vector<sh::Attribute> &getActiveAttributes() const { return mActiveAttributes; }
+    const std::vector<sh::OutputVariable> &getActiveOutputVariables() const
     {
-      public:
-        Data(GLenum shaderType);
-        ~Data();
+        return mActiveOutputVariables;
+    }
 
-        const std::string &getSource() const { return mSource; }
-        const std::string &getTranslatedSource() const { return mTranslatedSource; }
+  private:
+    friend class Shader;
 
-        GLenum getShaderType() const { return mShaderType; }
-        int getShaderVersion() const { return mShaderVersion; }
+    std::string mLabel;
 
-        const std::vector<sh::Varying> &getVaryings() const { return mVaryings; }
-        const std::vector<sh::Uniform> &getUniforms() const { return mUniforms; }
-        const std::vector<sh::InterfaceBlock> &getInterfaceBlocks() const
-        {
-            return mInterfaceBlocks;
-        }
-        const std::vector<sh::Attribute> &getActiveAttributes() const { return mActiveAttributes; }
-        const std::vector<sh::OutputVariable> &getActiveOutputVariables() const
-        {
-            return mActiveOutputVariables;
-        }
+    GLenum mShaderType;
+    int mShaderVersion;
+    std::string mTranslatedSource;
+    std::string mSource;
 
-      private:
-        friend class Shader;
+    sh::WorkGroupSize mLocalSize;
 
-        GLenum mShaderType;
-        int mShaderVersion;
-        std::string mTranslatedSource;
-        std::string mSource;
+    std::vector<sh::Varying> mVaryings;
+    std::vector<sh::Uniform> mUniforms;
+    std::vector<sh::InterfaceBlock> mInterfaceBlocks;
+    std::vector<sh::Attribute> mActiveAttributes;
+    std::vector<sh::OutputVariable> mActiveOutputVariables;
+};
 
-        std::vector<sh::Varying> mVaryings;
-        std::vector<sh::Uniform> mUniforms;
-        std::vector<sh::InterfaceBlock> mInterfaceBlocks;
-        std::vector<sh::Attribute> mActiveAttributes;
-        std::vector<sh::OutputVariable> mActiveOutputVariables;
-    };
-
+class Shader final : angle::NonCopyable, public LabeledObject
+{
+  public:
     Shader(ResourceManager *manager,
-           rx::ImplFactory *implFactory,
+           rx::GLImplFactory *implFactory,
            const gl::Limitations &rendererLimitations,
            GLenum type,
            GLuint handle);
 
     virtual ~Shader();
 
+    void setLabel(const std::string &label) override;
+    const std::string &getLabel() const override;
+
     GLenum getType() const { return mType; }
     GLuint getHandle() const;
 
-    const rx::ShaderImpl *getImplementation() const { return mImplementation; }
+    rx::ShaderImpl *getImplementation() const { return mImplementation; }
 
     void deleteSource();
     void setSource(GLsizei count, const char *const *string, const GLint *length);
@@ -99,11 +107,11 @@ class Shader : angle::NonCopyable
     void getSource(GLsizei bufSize, GLsizei *length, char *buffer) const;
     int getTranslatedSourceLength() const;
     int getTranslatedSourceWithDebugInfoLength() const;
-    const std::string &getTranslatedSource() const { return mData.getTranslatedSource(); }
+    const std::string &getTranslatedSource() const { return mState.getTranslatedSource(); }
     void getTranslatedSource(GLsizei bufSize, GLsizei *length, char *buffer) const;
     void getTranslatedSourceWithDebugInfo(GLsizei bufSize, GLsizei *length, char *buffer) const;
 
-    void compile(Compiler *compiler);
+    void compile(const Context *context);
     bool isCompiled() const { return mCompiled; }
 
     void addRef();
@@ -122,10 +130,12 @@ class Shader : angle::NonCopyable
 
     int getSemanticIndex(const std::string &attributeName) const;
 
+    const sh::WorkGroupSize &getWorkGroupSize() const { return mState.mLocalSize; }
+
   private:
     static void getSourceImpl(const std::string &source, GLsizei bufSize, GLsizei *length, char *buffer);
 
-    Data mData;
+    ShaderState mState;
     rx::ShaderImpl *mImplementation;
     const gl::Limitations &mRendererLimitations;
     const GLuint mHandle;

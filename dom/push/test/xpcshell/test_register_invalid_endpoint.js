@@ -11,9 +11,6 @@ const channelID = 'c0660af8-b532-4931-81f0-9fd27a12d6ab';
 function run_test() {
   do_get_profile();
   setPrefs();
-  disableServiceWorkerEvents(
-    'https://example.net/page/invalid-endpoint'
-  );
   run_next_test();
 }
 
@@ -24,7 +21,6 @@ add_task(function* test_register_invalid_endpoint() {
   PushServiceWebSocket._generateID = () => channelID;
   PushService.init({
     serverURI: "wss://push.example.org/",
-    networkInfo: new MockDesktopNetworkInfo(),
     db,
     makeWebSocket(uri) {
       return new MockWebSocket(uri, {
@@ -49,9 +45,11 @@ add_task(function* test_register_invalid_endpoint() {
   });
 
   yield rejects(
-    PushNotificationService.register(
-      'https://example.net/page/invalid-endpoint',
-      ChromeUtils.originAttributesToSuffix({ appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inBrowser: false })),
+    PushService.register({
+      scope: 'https://example.net/page/invalid-endpoint',
+      originAttributes: ChromeUtils.originAttributesToSuffix(
+        { appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inIsolatedMozBrowser: false }),
+    }),
     'Expected error for invalid endpoint'
   );
 

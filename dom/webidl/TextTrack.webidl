@@ -21,7 +21,6 @@ enum TextTrackMode {
   "showing"
 };
 
-[Pref="media.webvtt.enabled"]
 interface TextTrack : EventTarget {
   readonly attribute TextTrackKind kind;
   readonly attribute DOMString label;
@@ -39,7 +38,7 @@ interface TextTrack : EventTarget {
   [Throws]
   void removeCue(VTTCue cue);
 
-           //(Not implemented)attribute EventHandler oncuechange;
+           attribute EventHandler oncuechange;
 };
 
 // Mozilla Extensions

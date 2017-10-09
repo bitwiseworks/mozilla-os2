@@ -145,8 +145,8 @@ enum : uint32_t {
     /* Whether any objects have been iterated over. */
     OBJECT_FLAG_ITERATED              = 0x00080000,
 
-    /* For a global object, whether flags were set on the RegExpStatics. */
-    OBJECT_FLAG_REGEXP_FLAGS_SET      = 0x00100000,
+    /* Whether any object this represents may be frozen. */
+    OBJECT_FLAG_FROZEN                = 0x00100000,
 
     /*
      * For the function on a run-once script, whether the function has actually
@@ -156,9 +156,9 @@ enum : uint32_t {
 
     /*
      * For a global object, whether any array buffers in this compartment with
-     * typed object views have been neutered.
+     * typed object views have ever been detached.
      */
-    OBJECT_FLAG_TYPED_OBJECT_NEUTERED = 0x00400000,
+    OBJECT_FLAG_TYPED_OBJECT_HAS_DETACHED_BUFFER = 0x00400000,
 
     /*
      * Whether objects with this type should be allocated directly in the
@@ -267,12 +267,14 @@ class TypeSet
         void ensureTrackedProperty(JSContext* cx, jsid id);
 
         ObjectGroup* maybeGroup();
-    };
+
+        JSCompartment* maybeCompartment();
+    } JS_HAZ_GC_POINTER;
 
     // Information about a single concrete type. We pack this into one word,
     // where small values are particular primitive or other singleton types and
     // larger values are either specific JS objects or object groups.
-    class Type : public JS::Traceable
+    class Type
     {
         friend class TypeSet;
 
@@ -350,13 +352,13 @@ class TypeSet
         inline ObjectGroup* group() const;
         inline ObjectGroup* groupNoBarrier() const;
 
-        static void trace(Type* v, JSTracer* trc) {
-            MarkTypeUnbarriered(trc, v, "TypeSet::Type");
-        }
+        inline void trace(JSTracer* trc);
+
+        JSCompartment* maybeCompartment();
 
         bool operator == (Type o) const { return data == o.data; }
         bool operator != (Type o) const { return data != o.data; }
-    };
+    } JS_HAZ_GC_POINTER;
 
     static inline Type UndefinedType() { return Type(JSVAL_TYPE_UNDEFINED); }
     static inline Type NullType()      { return Type(JSVAL_TYPE_NULL); }
@@ -380,13 +382,8 @@ class TypeSet
 
     static const char* NonObjectTypeString(Type type);
 
-#ifdef DEBUG
     static const char* TypeString(Type type);
     static const char* ObjectGroupString(ObjectGroup* group);
-#else
-    static const char* TypeString(Type type) { return nullptr; }
-    static const char* ObjectGroupString(ObjectGroup* group) { return nullptr; }
-#endif
 
   protected:
     /* Flags for this type set. */
@@ -509,6 +506,8 @@ class TypeSet
     TemporaryTypeSet* cloneObjectsOnly(LifoAlloc* alloc);
     TemporaryTypeSet* cloneWithoutObjects(LifoAlloc* alloc);
 
+    JSCompartment* maybeCompartment();
+
     // Trigger a read barrier on all the contents of a type set.
     static void readBarrier(const TypeSet* types);
 
@@ -530,12 +529,10 @@ class TypeSet
     // out of Ion, such as for argument and local types.
     static inline Type GetMaybeUntrackedValueType(const Value& val);
 
-    static void MarkTypeRoot(JSTracer* trc, Type* v, const char* name);
-    static void MarkTypeUnbarriered(JSTracer* trc, Type* v, const char* name);
     static bool IsTypeMarked(JSRuntime* rt, Type* v);
     static bool IsTypeAllocatedDuringIncremental(Type v);
     static bool IsTypeAboutToBeFinalized(Type* v);
-};
+} JS_HAZ_GC_POINTER;
 
 /*
  * A constraint which listens to additions to a type set and propagates those
@@ -575,6 +572,9 @@ public:
      * zone's new allocator. Type constraints only hold weak references.
      */
     virtual bool sweep(TypeZone& zone, TypeConstraint** res) = 0;
+
+    /* The associated compartment, if any. */
+    virtual JSCompartment* maybeCompartment() = 0;
 };
 
 // If there is an OOM while sweeping types, the type information is deoptimized
@@ -663,6 +663,12 @@ class TemporaryTypeSet : public TypeSet
         this->objectSet = objectSet;
     }
 
+    TemporaryTypeSet(LifoAlloc* alloc, jit::MIRType type)
+      : TemporaryTypeSet(alloc, PrimitiveType(ValueTypeFromMIRType(type)))
+    {
+        MOZ_ASSERT(type != jit::MIRType::Value);
+    }
+
     /*
      * Constraints for JIT compilation.
      *
@@ -675,7 +681,7 @@ class TemporaryTypeSet : public TypeSet
     /* Get any type tag which all values in this set must have. */
     jit::MIRType getKnownMIRType();
 
-    bool isMagicArguments() { return getKnownMIRType() == jit::MIRType_MagicOptimizedArguments; }
+    bool isMagicArguments() { return getKnownMIRType() == jit::MIRType::MagicOptimizedArguments; }
 
     /* Whether this value may be an object. */
     bool maybeObject() { return unknownObject() || baseObjectCount() > 0; }
@@ -823,7 +829,7 @@ class PreliminaryObjectArray
 
 class PreliminaryObjectArrayWithTemplate : public PreliminaryObjectArray
 {
-    RelocatablePtrShape shape_;
+    HeapPtr<Shape*> shape_;
 
   public:
     explicit PreliminaryObjectArrayWithTemplate(Shape* shape)
@@ -900,7 +906,7 @@ class TypeNewScript
 
   private:
     // Scripted function which this information was computed for.
-    RelocatablePtrFunction function_;
+    HeapPtr<JSFunction*> function_;
 
     // Any preliminary objects with the type. The analyses are not performed
     // until this array is cleared.
@@ -912,7 +918,7 @@ class TypeNewScript
     // allocation kind to use. This is null if the new objects have an unboxed
     // layout, in which case the UnboxedLayout provides the initial structure
     // of the object.
-    RelocatablePtrPlainObject templateObject_;
+    HeapPtr<PlainObject*> templateObject_;
 
     // Order in which definite properties become initialized. We need this in
     // case the definite properties are invalidated (such as by adding a setter
@@ -929,11 +935,11 @@ class TypeNewScript
     // shape contains all such additional properties (plus the definite
     // properties). When an object of this group acquires this shape, it is
     // fully initialized and its group can be changed to initializedGroup.
-    RelocatablePtrShape initializedShape_;
+    HeapPtr<Shape*> initializedShape_;
 
     // Group with definite properties set for all properties found by
     // both the definite and acquired properties analyses.
-    RelocatablePtrObjectGroup initializedGroup_;
+    HeapPtr<ObjectGroup*> initializedGroup_;
 
   public:
     TypeNewScript() { mozilla::PodZero(this); }
@@ -1223,7 +1229,9 @@ class RecompileInfo
     bool shouldSweep(TypeZone& types);
 };
 
-typedef Vector<RecompileInfo, 0, SystemAllocPolicy> RecompileInfoVector;
+// The RecompileInfoVector has a MinInlineCapacity of one so that invalidating a
+// single IonScript doesn't require an allocation.
+typedef Vector<RecompileInfo, 1, SystemAllocPolicy> RecompileInfoVector;
 
 struct AutoEnterAnalysis;
 
@@ -1285,11 +1293,13 @@ enum SpewChannel {
 
 #ifdef DEBUG
 
+bool InferSpewActive(SpewChannel channel);
 const char * InferSpewColorReset();
 const char * InferSpewColor(TypeConstraint* constraint);
 const char * InferSpewColor(TypeSet* types);
 
-void InferSpew(SpewChannel which, const char* fmt, ...);
+#define InferSpew(channel, ...) if (InferSpewActive(channel)) { InferSpewImpl(__VA_ARGS__); } else {}
+void InferSpewImpl(const char* fmt, ...) MOZ_FORMAT_PRINTF(1, 2);
 
 /* Check that the type property for id in group contains value. */
 bool ObjectGroupHasProperty(JSContext* cx, ObjectGroup* group, jsid id, const Value& value);
@@ -1299,12 +1309,10 @@ bool ObjectGroupHasProperty(JSContext* cx, ObjectGroup* group, jsid id, const Va
 inline const char * InferSpewColorReset() { return nullptr; }
 inline const char * InferSpewColor(TypeConstraint* constraint) { return nullptr; }
 inline const char * InferSpewColor(TypeSet* types) { return nullptr; }
-inline void InferSpew(SpewChannel which, const char* fmt, ...) {}
+
+#define InferSpew(channel, ...) do {} while (0)
 
 #endif
-
-/* Print a warning, dump state and abort the program. */
-MOZ_NORETURN MOZ_COLD void TypeFailure(JSContext* cx, const char* fmt, ...);
 
 // Prints type information for a context if spew is enabled or force is set.
 void
@@ -1318,14 +1326,17 @@ namespace JS {
 namespace ubi {
 
 template<>
-struct Concrete<js::ObjectGroup> : TracerConcrete<js::ObjectGroup> {
-    Size size(mozilla::MallocSizeOf mallocSizeOf) const override;
-
+class Concrete<js::ObjectGroup> : TracerConcrete<js::ObjectGroup> {
   protected:
     explicit Concrete(js::ObjectGroup *ptr) : TracerConcrete<js::ObjectGroup>(ptr) { }
 
   public:
     static void construct(void *storage, js::ObjectGroup *ptr) { new (storage) Concrete(ptr); }
+
+    Size size(mozilla::MallocSizeOf mallocSizeOf) const override;
+
+    const char16_t* typeName() const override { return concreteTypeName; }
+    static const char16_t concreteTypeName[];
 };
 
 } // namespace ubi

@@ -18,6 +18,7 @@
 #include "nsWeakReference.h"
 #include "nsCOMArray.h"
 #include "nsRect.h"
+#include "Units.h"
 
 // Interfaces needed
 #include "nsIBaseWindow.h"
@@ -72,6 +73,7 @@ public:
    void LockUntilChromeLoad() { mLockedUntilChromeLoad = true; }
    bool IsLocked() const { return mLockedUntilChromeLoad; }
    void IgnoreXULSizeMode(bool aEnable) { mIgnoreXULSizeMode = aEnable; }
+   void WasRegistered() { mRegistered = true; }
 
 protected:
    enum persistentAttributes {
@@ -92,13 +94,14 @@ protected:
    void OnChromeLoaded();
    void StaggerPosition(int32_t &aRequestedX, int32_t &aRequestedY,
                         int32_t aSpecWidth, int32_t aSpecHeight);
-   bool       LoadPositionFromXUL();
-   bool       LoadSizeFromXUL();
+   bool       LoadPositionFromXUL(int32_t aSpecWidth, int32_t aSpecHeight);
+   bool       LoadSizeFromXUL(int32_t& aSpecWidth, int32_t& aSpecHeight);
+   void       SetSpecifiedSize(int32_t aSpecWidth, int32_t aSpecHeight);
    bool       LoadMiscPersistentAttributesFromXUL();
    void       SyncAttributesToWidget();
    NS_IMETHOD SavePersistentAttributes();
 
-   NS_IMETHOD GetWindowDOMWindow(nsIDOMWindow** aDOMWindow);
+   NS_IMETHOD GetWindowDOMWindow(mozIDOMWindowProxy** aDOMWindow);
    mozilla::dom::Element* GetWindowDOMElement() const;
 
    // See nsIDocShellTreeOwner for docs on next two methods
@@ -106,11 +109,21 @@ protected:
                                           bool aPrimary, bool aTargetable,
                                           const nsAString& aID);
    nsresult ContentShellRemoved(nsIDocShellTreeItem* aContentShell);
+   NS_IMETHOD GetPrimaryContentSize(int32_t* aWidth,
+                                    int32_t* aHeight);
+   NS_IMETHOD SetPrimaryContentSize(int32_t aWidth,
+                                    int32_t aHeight);
+   nsresult GetRootShellSize(int32_t* aWidth,
+                             int32_t* aHeight);
+   nsresult SetRootShellSize(int32_t aWidth,
+                             int32_t aHeight);
+
    NS_IMETHOD SizeShellTo(nsIDocShellTreeItem* aShellItem, int32_t aCX, 
       int32_t aCY);
    NS_IMETHOD ExitModalLoop(nsresult aStatus);
-   NS_IMETHOD CreateNewChromeWindow(int32_t aChromeFlags, nsITabParent* aOpeningTab, nsIXULWindow **_retval);
-   NS_IMETHOD CreateNewContentWindow(int32_t aChromeFlags, nsITabParent* aOpeningTab, nsIXULWindow **_retval);
+   NS_IMETHOD CreateNewChromeWindow(int32_t aChromeFlags, nsITabParent* aOpeningTab, mozIDOMWindowProxy* aOpenerWindow, nsIXULWindow **_retval);
+   NS_IMETHOD CreateNewContentWindow(int32_t aChromeFlags, nsITabParent* aOpeningTab, mozIDOMWindowProxy* aOpenerWindow, nsIXULWindow **_retval);
+   NS_IMETHOD GetHasPrimaryContent(bool* aResult);
 
    void       EnableParent(bool aEnable);
    bool       ConstrainToZLevel(bool aImmediate, nsWindowZ *aPlacement,
@@ -126,7 +139,7 @@ protected:
    nsContentTreeOwner*     mPrimaryContentTreeOwner;
    nsCOMPtr<nsIWidget>     mWindow;
    nsCOMPtr<nsIDocShell>   mDocShell;
-   nsCOMPtr<nsIDOMWindow>  mDOMWindow;
+   nsCOMPtr<nsPIDOMWindowOuter>  mDOMWindow;
    nsCOMPtr<nsIWeakReference> mParentWindow;
    nsCOMPtr<nsIPrompt>     mPrompter;
    nsCOMPtr<nsIAuthPrompt> mAuthPrompter;
@@ -149,6 +162,7 @@ protected:
    // mDestroying is used to prevent reentry into into Destroy(), which can
    // otherwise happen due to script running as we tear down various things.
    bool                    mDestroying;
+   bool                    mRegistered;
    uint32_t                mContextFlags;
    uint32_t                mPersistentAttributesDirty; // persistentAttributes
    uint32_t                mPersistentAttributesMask;
@@ -159,6 +173,10 @@ protected:
    nsCOMArray<nsIWeakReference> mTargetableShells; // targetable shells only
 
    nsCOMPtr<nsITabParent> mPrimaryTabParent;
+private:
+   nsresult GetPrimaryTabParentSize(int32_t* aWidth, int32_t* aHeight);
+   nsresult GetPrimaryContentShellSize(int32_t* aWidth, int32_t* aHeight);
+   nsresult SetPrimaryTabParentSize(int32_t aWidth, int32_t aHeight);
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsXULWindow, NS_XULWINDOW_IMPL_CID)

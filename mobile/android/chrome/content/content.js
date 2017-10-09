@@ -5,6 +5,7 @@
 
 var { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
+Cu.import("resource://gre/modules/ExtensionContent.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
@@ -21,20 +22,28 @@ var AboutReaderListener = {
 
   _articlePromise: null,
 
+  _isLeavingReaderMode: false,
+
   init: function() {
     addEventListener("AboutReaderContentLoaded", this, false, true);
     addEventListener("DOMContentLoaded", this, false);
     addEventListener("pageshow", this, false);
     addEventListener("pagehide", this, false);
-    addMessageListener("Reader:ParseDocument", this);
+    addMessageListener("Reader:ToggleReaderMode", this);
     addMessageListener("Reader:PushState", this);
   },
 
   receiveMessage: function(message) {
     switch (message.name) {
-      case "Reader:ParseDocument":
-        this._articlePromise = ReaderMode.parseDocument(content.document).catch(Cu.reportError);
-        content.document.location = "about:reader?url=" + encodeURIComponent(message.data.url);
+      case "Reader:ToggleReaderMode":
+        let url = content.document.location.href;
+        if (!this.isAboutReader) {
+          this._articlePromise = ReaderMode.parseDocument(content.document).catch(Cu.reportError);
+          ReaderMode.enterReaderMode(docShell, content);
+        } else {
+          this._isLeavingReaderMode = true;
+          ReaderMode.leaveReaderMode(docShell, content);
+        }
         break;
 
       case "Reader:PushState":
@@ -69,7 +78,13 @@ var AboutReaderListener = {
         break;
 
       case "pagehide":
-        sendAsyncMessage("Reader:UpdateReaderButton", { isArticle: false });
+        // this._isLeavingReaderMode is used here to keep the Reader Mode icon
+        // visible in the location bar when transitioning from reader-mode page
+        // back to the source page.
+        sendAsyncMessage("Reader:UpdateReaderButton", { isArticle: this._isLeavingReaderMode });
+        if (this._isLeavingReaderMode) {
+          this._isLeavingReaderMode = false;
+        }
         break;
 
       case "pageshow":
@@ -90,6 +105,39 @@ var AboutReaderListener = {
         content.document.mozSyntheticDocument) {
       return;
     }
+
+    this.scheduleReadabilityCheckPostPaint(forceNonArticle);
+  },
+
+  cancelPotentialPendingReadabilityCheck: function() {
+    if (this._pendingReadabilityCheck) {
+      removeEventListener("MozAfterPaint", this._pendingReadabilityCheck);
+      delete this._pendingReadabilityCheck;
+    }
+  },
+
+  scheduleReadabilityCheckPostPaint: function(forceNonArticle) {
+    if (this._pendingReadabilityCheck) {
+      // We need to stop this check before we re-add one because we don't know
+      // if forceNonArticle was true or false last time.
+      this.cancelPotentialPendingReadabilityCheck();
+    }
+    this._pendingReadabilityCheck = this.onPaintWhenWaitedFor.bind(this, forceNonArticle);
+    addEventListener("MozAfterPaint", this._pendingReadabilityCheck);
+  },
+
+  onPaintWhenWaitedFor: function(forceNonArticle, event) {
+    // In non-e10s, we'll get called for paints other than ours, and so it's
+    // possible that this page hasn't been laid out yet, in which case we
+    // should wait until we get an event that does relate to our layout. We
+    // determine whether any of our content got painted by checking if there
+    // are any painted rects.
+    if (!event.clientRects.length) {
+      return;
+    }
+
+    this.cancelPotentialPendingReadabilityCheck();
+
     // Only send updates when there are articles; there's no point updating with
     // |false| all the time.
     if (ReaderMode.isProbablyReaderable(content.document)) {
@@ -103,4 +151,9 @@ AboutReaderListener.init();
 
 addMessageListener("RemoteLogins:fillForm", function(message) {
   LoginManagerContent.receiveMessage(message, content);
+});
+
+ExtensionContent.init(this);
+addEventListener("unload", () => {
+  ExtensionContent.uninit(this);
 });

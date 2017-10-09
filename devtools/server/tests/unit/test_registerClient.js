@@ -65,13 +65,13 @@ function run_test()
 function init()
 {
   gClient = new DebuggerClient(DebuggerServer.connectPipe());
-  gClient.connect(function onConnect() {
-    gClient.listTabs(function onListTabs(aResponse) {
+  gClient.connect()
+    .then(() => gClient.listTabs())
+    .then(aResponse => {
       gActors = aResponse;
       gTestClient = new TestClient(gClient, aResponse);
       run_next_test();
     });
-  });
 }
 
 function test_client_events()
@@ -86,10 +86,10 @@ function test_client_events()
 }
 
 function close_client() {
-  gClient.close(() => {
+  gClient.close().then(() => {
     // Check that client.detach method is call on client destruction
     do_check_true(gTestClient.detached);
-    run_next_test()
+    run_next_test();
   });
 }
 

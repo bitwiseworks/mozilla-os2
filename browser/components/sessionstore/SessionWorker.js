@@ -150,7 +150,6 @@ var Agent = {
 
     let stateString = JSON.stringify(state);
     let data = Encoder.encode(stateString);
-    let startWriteMs, stopWriteMs;
 
     try {
 
@@ -167,7 +166,7 @@ var Agent = {
         File.move(this.Paths.clean, this.Paths.cleanBackup);
       }
 
-      startWriteMs = Date.now();
+      let startWriteMs = Date.now();
 
       if (options.isFinalWrite) {
         // We are shutting down. At this stage, we know that
@@ -198,7 +197,8 @@ var Agent = {
         });
       }
 
-      stopWriteMs = Date.now();
+      telemetry.FX_SESSION_RESTORE_WRITE_FILE_MS = Date.now() - startWriteMs;
+      telemetry.FX_SESSION_RESTORE_FILE_SIZE_BYTES = data.byteLength;
 
     } catch (ex) {
       // Don't throw immediately
@@ -276,10 +276,7 @@ var Agent = {
       result: {
         upgradeBackup: upgradeBackupComplete
       },
-      telemetry: {
-        FX_SESSION_RESTORE_WRITE_FILE_MS: stopWriteMs - startWriteMs,
-        FX_SESSION_RESTORE_FILE_SIZE_BYTES: data.byteLength,
-      }
+      telemetry: telemetry,
     };
   },
 
@@ -344,25 +341,29 @@ var Agent = {
     let exn = null;
 
     let iterator = new File.DirectoryIterator(path);
-    if (!iterator.exists()) {
-      return;
-    }
-    for (let entry in iterator) {
-      if (entry.isDir) {
-        continue;
+    try {
+      if (!iterator.exists()) {
+        return;
       }
-      if (!prefix || entry.name.startsWith(prefix)) {
-        try {
-          File.remove(entry.path);
-        } catch (ex) {
-          // Don't stop immediately
-          exn = exn || ex;
+      for (let entry in iterator) {
+        if (entry.isDir) {
+          continue;
+        }
+        if (!prefix || entry.name.startsWith(prefix)) {
+          try {
+            File.remove(entry.path);
+          } catch (ex) {
+            // Don't stop immediately
+            exn = exn || ex;
+          }
         }
       }
-    }
 
-    if (exn) {
-      throw exn;
+      if (exn) {
+        throw exn;
+      }
+    } finally {
+      iterator.close();
     }
   },
 };

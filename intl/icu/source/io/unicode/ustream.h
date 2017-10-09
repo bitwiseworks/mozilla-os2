@@ -1,3 +1,5 @@
+// Copyright (C) 2016 and later: Unicode, Inc. and others.
+// License & terms of use: http://www.unicode.org/copyright.html
 /*
 **********************************************************************
 *   Copyright (C) 2001-2014 International Business Machines
@@ -28,7 +30,7 @@
  * C++ I/O stream API.
  */
 
-#if !defined(_MSC_VER)
+#if defined(__GLIBCXX__)
 namespace std { class type_info; } // WORKAROUND: http://llvm.org/bugs/show_bug.cgi?id=13364
 #endif
 

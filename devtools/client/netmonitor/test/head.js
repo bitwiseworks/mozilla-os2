@@ -2,29 +2,29 @@
    http://creativecommons.org/publicdomain/zero/1.0/ */
 "use strict";
 
-var { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
+/* import-globals-from ../../framework/test/shared-head.js */
 
-var { Services } = Cu.import("resource://gre/modules/Services.jsm", {});
-var { Task } = Cu.import("resource://gre/modules/Task.jsm", {});
-var { gDevTools } = Cu.import("resource://devtools/client/framework/gDevTools.jsm", {});
-var { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
-var { CurlUtils } = Cu.import("resource://devtools/client/shared/Curl.jsm", {});
-var promise = require("promise");
+// shared-head.js handles imports, constants, and utility functions
+Services.scriptloader.loadSubScript(
+  "chrome://mochitests/content/browser/devtools/client/framework/test/shared-head.js",
+  this);
+
 var NetworkHelper = require("devtools/shared/webconsole/network-helper");
-var DevToolsUtils = require("devtools/shared/DevToolsUtils");
-var { TargetFactory } = require("devtools/client/framework/target");
 var { Toolbox } = require("devtools/client/framework/toolbox");
 
 const EXAMPLE_URL = "http://example.com/browser/devtools/client/netmonitor/test/";
+const HTTPS_EXAMPLE_URL = "https://example.com/browser/devtools/client/netmonitor/test/";
 
 const API_CALLS_URL = EXAMPLE_URL + "html_api-calls-test-page.html";
 const SIMPLE_URL = EXAMPLE_URL + "html_simple-test-page.html";
 const NAVIGATE_URL = EXAMPLE_URL + "html_navigate-test-page.html";
 const CONTENT_TYPE_URL = EXAMPLE_URL + "html_content-type-test-page.html";
 const CONTENT_TYPE_WITHOUT_CACHE_URL = EXAMPLE_URL + "html_content-type-without-cache-test-page.html";
+const CONTENT_TYPE_WITHOUT_CACHE_REQUESTS = 8;
 const CYRILLIC_URL = EXAMPLE_URL + "html_cyrillic-test-page.html";
 const STATUS_CODES_URL = EXAMPLE_URL + "html_status-codes-test-page.html";
 const POST_DATA_URL = EXAMPLE_URL + "html_post-data-test-page.html";
+const POST_JSON_URL = EXAMPLE_URL + "html_post-json-test-page.html";
 const POST_RAW_URL = EXAMPLE_URL + "html_post-raw-test-page.html";
 const POST_RAW_WITH_HEADERS_URL = EXAMPLE_URL + "html_post-raw-with-headers-test-page.html";
 const PARAMS_URL = EXAMPLE_URL + "html_params-test-page.html";
@@ -42,23 +42,24 @@ const STATISTICS_URL = EXAMPLE_URL + "html_statistics-test-page.html";
 const CURL_URL = EXAMPLE_URL + "html_copy-as-curl.html";
 const CURL_UTILS_URL = EXAMPLE_URL + "html_curl-utils.html";
 const SEND_BEACON_URL = EXAMPLE_URL + "html_send-beacon.html";
+const CORS_URL = EXAMPLE_URL + "html_cors-test-page.html";
 
 const SIMPLE_SJS = EXAMPLE_URL + "sjs_simple-test-server.sjs";
 const CONTENT_TYPE_SJS = EXAMPLE_URL + "sjs_content-type-test-server.sjs";
+const HTTPS_CONTENT_TYPE_SJS = HTTPS_EXAMPLE_URL + "sjs_content-type-test-server.sjs";
 const STATUS_CODES_SJS = EXAMPLE_URL + "sjs_status-codes-test-server.sjs";
 const SORTING_SJS = EXAMPLE_URL + "sjs_sorting-test-server.sjs";
 const HTTPS_REDIRECT_SJS = EXAMPLE_URL + "sjs_https-redirect-test-server.sjs";
 const CORS_SJS_PATH = "/browser/devtools/client/netmonitor/test/sjs_cors-test-server.sjs";
+const HSTS_SJS = EXAMPLE_URL + "sjs_hsts-test-server.sjs";
+
+const HSTS_BASE_URL = EXAMPLE_URL;
+const HSTS_PAGE_URL = CUSTOM_GET_URL;
 
 const TEST_IMAGE = EXAMPLE_URL + "test-image.png";
 const TEST_IMAGE_DATA_URI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAABGdBTUEAAK/INwWK6QAAABl0RVh0U29mdHdhcmUAQWRvYmUgSW1hZ2VSZWFkeXHJZTwAAAHWSURBVHjaYvz//z8DJQAggJiQOe/fv2fv7Oz8rays/N+VkfG/iYnJfyD/1+rVq7ffu3dPFpsBAAHEAHIBCJ85c8bN2Nj4vwsDw/8zQLwKiO8CcRoQu0DxqlWrdsHUwzBAAIGJmTNnPgYa9j8UqhFElwPxf2MIDeIrKSn9FwSJoRkAEEAM0DD4DzMAyPi/G+QKY4hh5WAXGf8PDQ0FGwJ22d27CjADAAIIrLmjo+MXA9R2kAHvGBA2wwx6B8W7od6CeQcggKCmCEL8bgwxYCbUIGTDVkHDBia+CuotgACCueD3TDQN75D4xmAvCoK9ARMHBzAw0AECiBHkAlC0Mdy7x9ABNA3obAZXIAa6iKEcGlMVQHwWyjYuL2d4v2cPg8vZswx7gHyAAAK7AOif7SAbOqCmn4Ha3AHFsIDtgPq/vLz8P4MSkJ2W9h8ggBjevXvHDo4FQUQg/kdypqCg4H8lUIACnQ/SOBMYI8bAsAJFPcj1AAEEjwVQqLpAbXmH5BJjqI0gi9DTAAgDBBCcAVLkgmQ7yKCZxpCQxqUZhAECCJ4XgMl493ug21ZD+aDAXH0WLM4A9MZPXJkJIIAwTAR5pQMalaCABQUULttBGCCAGCnNzgABBgAMJ5THwGvJLAAAAABJRU5ErkJggg==";
 
-const FRAME_SCRIPT_UTILS_URL = "chrome://devtools/content/shared/frame-script-utils.js"
-
-DevToolsUtils.testing = true;
-SimpleTest.registerCleanupFunction(() => {
-  DevToolsUtils.testing = false;
-});
+const FRAME_SCRIPT_UTILS_URL = "chrome://devtools/content/shared/frame-script-utils.js";
 
 // All tests are asynchronous.
 waitForExplicitFinish();
@@ -79,37 +80,7 @@ registerCleanupFunction(() => {
   Services.prefs.setBoolPref("devtools.debugger.log", gEnableLogging);
   Services.prefs.setCharPref("devtools.netmonitor.filters", gDefaultFilters);
   Services.prefs.clearUserPref("devtools.cache.disabled");
-  Services.prefs.clearUserPref("devtools.dump.emit");
 });
-
-function addTab(aUrl, aWindow) {
-  info("Adding tab: " + aUrl);
-
-  let deferred = promise.defer();
-  let targetWindow = aWindow || window;
-  let targetBrowser = targetWindow.gBrowser;
-
-  targetWindow.focus();
-  let tab = targetBrowser.selectedTab = targetBrowser.addTab(aUrl);
-  let browser = tab.linkedBrowser;
-
-  browser.addEventListener("load", function onLoad() {
-    browser.removeEventListener("load", onLoad, true);
-    deferred.resolve(tab);
-  }, true);
-
-  return deferred.promise;
-}
-
-function removeTab(aTab, aWindow) {
-  info("Removing tab.");
-
-  let targetWindow = aWindow || window;
-  let targetBrowser = targetWindow.gBrowser;
-
-  // browser_net_pane-toggle.js relies on synchronous removeTab behavior.
-  targetBrowser.removeTab(aTab, {skipPermitUnload: true});
-}
 
 function waitForNavigation(aTarget) {
   let deferred = promise.defer();
@@ -125,7 +96,7 @@ function reconfigureTab(aTarget, aOptions) {
   let deferred = promise.defer();
   aTarget.activeTab.reconfigure(aOptions, deferred.resolve);
   return deferred.promise;
-};
+}
 
 function toggleCache(aTarget, aDisabled) {
   let options = { cacheDisabled: aDisabled, performReload: true };
@@ -140,7 +111,7 @@ function toggleCache(aTarget, aDisabled) {
 function initNetMonitor(aUrl, aWindow, aEnableCache) {
   info("Initializing a network monitor pane.");
 
-  return Task.spawn(function*() {
+  return Task.spawn(function* () {
     let tab = yield addTab(aUrl);
     info("Net tab added successfully: " + aUrl);
 
@@ -149,7 +120,8 @@ function initNetMonitor(aUrl, aWindow, aEnableCache) {
     yield target.makeRemote();
     info("Target remoted.");
 
-    if(!aEnableCache) {
+    if (!aEnableCache) {
+      info("Disabling cache and reloading page.");
       yield toggleCache(target, true);
       info("Cache disabled when the current and all future toolboxes are open.");
       // Remove any requests generated by the reload while toggling the cache to
@@ -160,37 +132,38 @@ function initNetMonitor(aUrl, aWindow, aEnableCache) {
     }
 
     let toolbox = yield gDevTools.showToolbox(target, "netmonitor");
-    info("Netork monitor pane shown successfully.");
+    info("Network monitor pane shown successfully.");
 
-    let debuggee = tab.linkedBrowser.contentWindow.wrappedJSObject;
     let monitor = toolbox.getCurrentPanel();
-    return [tab, debuggee, monitor];
+    return {tab, monitor};
   });
 }
 
-function restartNetMonitor(aMonitor, aNewUrl) {
+function restartNetMonitor(monitor, newUrl) {
   info("Restarting the specified network monitor.");
 
-  let deferred = promise.defer();
-  let tab = aMonitor.target.tab;
-  let url = aNewUrl || tab.linkedBrowser.contentWindow.wrappedJSObject.location.href;
+  return Task.spawn(function* () {
+    let tab = monitor.target.tab;
+    let url = newUrl || tab.linkedBrowser.currentURI.spec;
 
-  aMonitor.once("destroyed", () => initNetMonitor(url).then(deferred.resolve));
-  removeTab(tab);
+    let onDestroyed = monitor.once("destroyed");
+    yield removeTab(tab);
+    yield onDestroyed;
 
-  return deferred.promise;
+    return initNetMonitor(url);
+  });
 }
 
-function teardown(aMonitor) {
+function teardown(monitor) {
   info("Destroying the specified network monitor.");
 
-  let deferred = promise.defer();
-  let tab = aMonitor.target.tab;
+  return Task.spawn(function* () {
+    let tab = monitor.target.tab;
 
-  aMonitor.once("destroyed", () => executeSoon(deferred.resolve));
-  removeTab(tab);
-
-  return deferred.promise;
+    let onDestroyed = monitor.once("destroyed");
+    yield removeTab(tab);
+    yield onDestroyed;
+  });
 }
 
 function waitForNetworkEvents(aMonitor, aGetRequests, aPostRequests = 0) {
@@ -249,11 +222,12 @@ function waitForNetworkEvents(aMonitor, aGetRequests, aPostRequests = 0) {
       "got " + event + " for " + actor);
 
     let networkInfo =
-      panel.NetMonitorController.webConsoleClient.getNetworkRequest(actor)
+      panel.NetMonitorController.webConsoleClient.getNetworkRequest(actor);
     let url = networkInfo.request.url;
     updateProgressForURL(url, event);
 
-    info("> Current state: " + JSON.stringify(progress, null, 2));
+    // Uncomment this to get a detailed progress logging (when debugging a test)
+    // info("> Current state: " + JSON.stringify(progress, null, 2));
 
     // There are 15 updates which need to be fired for a request to be
     // considered finished. The "requestPostData" packet isn't fired for
@@ -273,7 +247,7 @@ function waitForNetworkEvents(aMonitor, aGetRequests, aPostRequests = 0) {
 function verifyRequestItemTarget(aRequestItem, aMethod, aUrl, aData = {}) {
   info("> Verifying: " + aMethod + " " + aUrl + " " + aData.toSource());
   // This bloats log sizes significantly in automation (bug 992485)
-  //info("> Request: " + aRequestItem.attachment.toSource());
+  // info("> Request: " + aRequestItem.attachment.toSource());
 
   let requestsMenu = aRequestItem.ownerView;
   let widgetIndex = requestsMenu.indexOfItem(aRequestItem);
@@ -282,9 +256,9 @@ function verifyRequestItemTarget(aRequestItem, aMethod, aUrl, aData = {}) {
   info("Widget index of item: " + widgetIndex);
   info("Visible index of item: " + visibleIndex);
 
-  let { fuzzyUrl, status, statusText, type, fullMimeType,
-        transferred, size, time, fromCache } = aData;
-  let { attachment, target } = aRequestItem
+  let { fuzzyUrl, status, statusText, cause, type, fullMimeType,
+        transferred, size, time, displayedStatus } = aData;
+  let { attachment, target } = aRequestItem;
 
   let uri = Services.io.newURI(aUrl, null, null).QueryInterface(Ci.nsIURL);
   let unicodeUrl = NetworkHelper.convertToUnicode(unescape(aUrl));
@@ -330,9 +304,18 @@ function verifyRequestItemTarget(aRequestItem, aMethod, aUrl, aData = {}) {
     info("Displayed status: " + value);
     info("Displayed code: " + codeValue);
     info("Tooltip status: " + tooltip);
-    is(value, fromCache ? "cached" : status, "The displayed status is correct.");
+    is(value, displayedStatus ? displayedStatus : status, "The displayed status is correct.");
     is(codeValue, status, "The displayed status code is correct.");
     is(tooltip, status + " " + statusText, "The tooltip status is correct.");
+  }
+  if (cause !== undefined) {
+    let causeLabel = target.querySelector(".requests-menu-cause-label");
+    let value = causeLabel.getAttribute("value");
+    let tooltip = causeLabel.getAttribute("tooltiptext");
+    info("Displayed cause: " + value);
+    info("Tooltip cause: " + tooltip);
+    is(value, cause.type, "The displayed cause is correct.");
+    is(tooltip, cause.loadingDocumentUri, "The tooltip cause is correct.")
   }
   if (type !== undefined) {
     let value = target.querySelector(".requests-menu-type").getAttribute("value");
@@ -393,7 +376,7 @@ function verifyRequestItemTarget(aRequestItem, aMethod, aUrl, aData = {}) {
  * @return object
  *        Returns a promise that resolves upon firing of the event.
  */
-function waitFor (subject, eventName) {
+function waitFor(subject, eventName) {
   let deferred = promise.defer();
   subject.once(eventName, deferred.resolve);
   return deferred.promise;
@@ -402,17 +385,19 @@ function waitFor (subject, eventName) {
 /**
  * Tests if a button for a filter of given type is the only one checked.
  *
- * @param string aFilterType
+ * @param string filterType
  *        The type of the filter that should be the only one checked.
  */
-function testFilterButtons(aMonitor, aFilterType) {
-  let doc = aMonitor.panelWin.document;
-  let target = doc.querySelector("#requests-menu-filter-" + aFilterType + "-button");
-  let buttons = doc.querySelectorAll(".requests-menu-footer-button");
+function testFilterButtons(monitor, filterType) {
+  let doc = monitor.panelWin.document;
+  let target = doc.querySelector("#requests-menu-filter-" + filterType + "-button");
+  ok(target, `Filter button '${filterType}' was found`);
+  let buttons = [...doc.querySelectorAll(".menu-filter-button")];
+  ok(buttons.length > 0, "More than zero filter buttons were found");
 
   // Only target should be checked.
-  let checkStatus = [...buttons].map(button => button == target ? 1 : 0);
-  testFilterButtonsCustom(aMonitor, checkStatus);
+  let checkStatus = buttons.map(button => button == target ? 1 : 0);
+  testFilterButtonsCustom(monitor, checkStatus);
 }
 
 /**
@@ -425,15 +410,15 @@ function testFilterButtons(aMonitor, aFilterType) {
  */
 function testFilterButtonsCustom(aMonitor, aIsChecked) {
   let doc = aMonitor.panelWin.document;
-  let buttons = doc.querySelectorAll(".requests-menu-footer-button");
+  let buttons = doc.querySelectorAll(".menu-filter-button");
   for (let i = 0; i < aIsChecked.length; i++) {
     let button = buttons[i];
     if (aIsChecked[i]) {
-      is(button.hasAttribute("checked"), true,
-        "The " + button.id + " button should have a 'checked' attribute.");
+      is(button.classList.contains("checked"), true,
+        "The " + button.id + " button should have a 'checked' class.");
     } else {
-      is(button.hasAttribute("checked"), false,
-        "The " + button.id + " button should not have a 'checked' attribute.");
+      is(button.classList.contains("checked"), false,
+        "The " + button.id + " button should not have a 'checked' class.");
     }
   }
 }
@@ -461,7 +446,7 @@ function loadCommonFrameScript(tab) {
  */
 function performRequestsInContent(requests) {
   info("Performing requests in the context of the content.");
-  return executeInContent("devtools:test:xhr", requests)
+  return executeInContent("devtools:test:xhr", requests);
 }
 
 /**
@@ -483,7 +468,7 @@ function performRequestsInContent(requests) {
  *         Resolves to the response data if a response is expected, immediately
  *         resolves otherwise
  */
-function executeInContent(name, data={}, objects={}, expectResponse=true) {
+function executeInContent(name, data = {}, objects = {}, expectResponse = true) {
   let mm = gBrowser.selectedBrowser.messageManager;
 
   mm.sendAsyncMessage(name, data, objects);
@@ -510,4 +495,24 @@ function waitForContentMessage(name) {
     def.resolve(msg);
   });
   return def.promise;
+}
+
+/**
+ * Open the requestMenu menu and return all of it's items in a flat array
+ * @param {netmonitorPanel} netmonitor
+ * @param {Event} event mouse event with screenX and screenX coordinates
+ * @return An array of MenuItems
+ */
+function openContextMenuAndGetAllItems(netmonitor, event) {
+  let menu = netmonitor.RequestsMenu.contextMenu.open(event);
+
+  // Flatten all menu items into a single array to make searching through it easier
+  let allItems = [].concat.apply([], menu.items.map(function addItem(item) {
+    if (item.submenu) {
+      return addItem(item.submenu.items);
+    }
+    return item;
+  }));
+
+  return allItems;
 }

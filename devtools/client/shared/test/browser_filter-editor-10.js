@@ -6,20 +6,20 @@
 // Tests the Filter Editor Widget inputs increase/decrease value when cursor is
 // on a number using arrow keys if cursor is behind/mid/after the number strings
 
-const TEST_URI = "chrome://devtools/content/shared/widgets/filter-frame.xhtml";
 const {CSSFilterEditorWidget} = require("devtools/client/shared/widgets/FilterWidget");
+const {getClientCssProperties} = require("devtools/shared/fronts/css-properties");
 
-const FAST_VALUE_MULTIPLIER = 10;
-const SLOW_VALUE_MULTIPLIER = 0.1;
 const DEFAULT_VALUE_MULTIPLIER = 1;
 
-add_task(function*() {
-  yield addTab("about:blank");
-  let [host, win, doc] = yield createHost("bottom", TEST_URI);
+const TEST_URI = `data:text/html,<div id="filter-container" />`;
 
-  const container = doc.querySelector("#container");
+add_task(function* () {
+  let [,, doc] = yield createHost("bottom", TEST_URI);
+  const cssIsValid = getClientCssProperties().getValidityChecker(doc);
+
+  const container = doc.querySelector("#filter-container");
   const initialValue = "drop-shadow(rgb(0, 0, 0) 10px 1px 0px)";
-  let widget = new CSSFilterEditorWidget(container, initialValue);
+  let widget = new CSSFilterEditorWidget(container, initialValue, cssIsValid);
   const input = widget.el.querySelector("#filters input");
 
   let value = 10;
@@ -73,7 +73,7 @@ function triggerKey(key, modifier) {
     target: input,
     keyCode: key,
     [modifier]: true,
-    preventDefault: function() {}
+    preventDefault: function () {}
   });
 }
 

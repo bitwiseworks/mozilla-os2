@@ -4,7 +4,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifdef JS_JITSPEW
+
 #include "jit/JSONSpewer.h"
+
+#include "mozilla/SizePrintfMacros.h"
 
 #include <stdarg.h>
 
@@ -144,9 +148,9 @@ JSONSpewer::beginFunction(JSScript* script)
 {
     beginObject();
     if (script)
-        stringProperty("name", "%s:%d", script->filename(), script->lineno());
+        stringProperty("name", "%s:%" PRIuSIZE, script->filename(), script->lineno());
     else
-        stringProperty("name", "asm.js compilation");
+        stringProperty("name", "wasm compilation");
     beginListProperty("passes");
 }
 
@@ -154,7 +158,7 @@ void
 JSONSpewer::beginPass(const char* pass)
 {
     beginObject();
-    stringProperty("name", pass);
+    stringProperty("name", "%s", pass);
 }
 
 void
@@ -232,7 +236,7 @@ JSONSpewer::spewMDef(MDefinition* def)
     if (def->isAdd() || def->isSub() || def->isMod() || def->isMul() || def->isDiv())
         isTruncated = static_cast<MBinaryArithInstruction*>(def)->isTruncated();
 
-    if (def->type() != MIRType_None && def->range()) {
+    if (def->type() != MIRType::None && def->range()) {
         beginStringProperty("type");
         def->range()->dump(out_);
         out_.printf(" : %s%s", StringFromMIRType(def->type()), (isTruncated ? " (t)" : ""));
@@ -371,7 +375,7 @@ JSONSpewer::spewRanges(BacktrackingAllocator* regalloc)
 
                     beginObject();
                     property("allocation");
-                    out_.printf("\"%s\"", range->bundle()->allocation().toString());
+                    out_.printf("\"%s\"", range->bundle()->allocation().toString().get());
                     integerProperty("start", range->from().bits());
                     integerProperty("end", range->to().bits());
                     endObject();
@@ -403,11 +407,4 @@ JSONSpewer::endFunction()
     endObject();
 }
 
-void
-JSONSpewer::spewDebuggerGraph(MIRGraph* graph)
-{
-    beginObject();
-    spewMIR(graph);
-    spewLIR(graph);
-    endObject();
-}
+#endif /* JS_JITSPEW */

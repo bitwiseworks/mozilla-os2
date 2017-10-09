@@ -13,7 +13,6 @@
 #include <stdio.h>
 #include "nsArrayEnumerator.h"
 #include "nsCOMArray.h"
-#include "nsISupportsArray.h"
 #include "nsIRDFDataSource.h"
 #include "nsIRDFObserver.h"
 #include "nsIServiceManager.h"
@@ -294,7 +293,7 @@ FileSystemDataSource::GetTarget(nsIRDFResource *source,
         if (property == mNC_pulse)
         {
             nsIRDFLiteral   *pulseLiteral;
-            mRDFService->GetLiteral(MOZ_UTF16("12"), &pulseLiteral);
+            mRDFService->GetLiteral(u"12", &pulseLiteral);
             *target = pulseLiteral;
             return NS_OK;
         }
@@ -406,7 +405,7 @@ FileSystemDataSource::GetTarget(nsIRDFResource *source,
         else if (property == mNC_pulse)
         {
             nsCOMPtr<nsIRDFLiteral> pulseLiteral;
-            mRDFService->GetLiteral(MOZ_UTF16("12"), getter_AddRefs(pulseLiteral));
+            mRDFService->GetLiteral(u"12", getter_AddRefs(pulseLiteral));
             rv = pulseLiteral->QueryInterface(NS_GET_IID(nsIRDFNode), (void**) target);
             return(rv);
         }
@@ -482,7 +481,7 @@ FileSystemDataSource::GetTargets(nsIRDFResource *source,
         else if (property == mNC_pulse)
         {
             nsCOMPtr<nsIRDFLiteral> pulseLiteral;
-            mRDFService->GetLiteral(MOZ_UTF16("12"),
+            mRDFService->GetLiteral(u"12",
                                     getter_AddRefs(pulseLiteral));
             return NS_NewSingletonEnumerator(targets, pulseLiteral);
         }
@@ -526,7 +525,7 @@ FileSystemDataSource::GetTargets(nsIRDFResource *source,
         else if (property == mNC_pulse)
         {
             nsCOMPtr<nsIRDFLiteral> pulseLiteral;
-            rv = mRDFService->GetLiteral(MOZ_UTF16("12"),
+            rv = mRDFService->GetLiteral(u"12",
                 getter_AddRefs(pulseLiteral));
             if (NS_FAILED(rv)) return rv;
 
@@ -801,9 +800,9 @@ FileSystemDataSource::GetAllCmds(nsIRDFResource* source,
 
 
 NS_IMETHODIMP
-FileSystemDataSource::IsCommandEnabled(nsISupportsArray/*<nsIRDFResource>*/* aSources,
+FileSystemDataSource::IsCommandEnabled(nsISupports/*<nsIRDFResource>*/* aSources,
                                        nsIRDFResource*   aCommand,
-                                       nsISupportsArray/*<nsIRDFResource>*/* aArguments,
+                                       nsISupports/*<nsIRDFResource>*/* aArguments,
                                        bool* aResult)
 {
     return(NS_ERROR_NOT_IMPLEMENTED);
@@ -812,9 +811,9 @@ FileSystemDataSource::IsCommandEnabled(nsISupportsArray/*<nsIRDFResource>*/* aSo
 
 
 NS_IMETHODIMP
-FileSystemDataSource::DoCommand(nsISupportsArray/*<nsIRDFResource>*/* aSources,
+FileSystemDataSource::DoCommand(nsISupports/*<nsIRDFResource>*/* aSources,
                                 nsIRDFResource*   aCommand,
-                                nsISupportsArray/*<nsIRDFResource>*/* aArguments)
+                                nsISupports/*<nsIRDFResource>*/* aArguments)
 {
     return(NS_ERROR_NOT_IMPLEMENTED);
 }
@@ -1007,16 +1006,14 @@ FileSystemDataSource::GetFolderList(nsIRDFResource *source, bool allowHidden,
             fullURI.Append('/');
         }
 
-        char    *escLeafStr = nsEscape(NS_ConvertUTF16toUTF8(leafStr).get(), url_Path);
+        nsAutoCString leaf;
+        bool escaped = NS_Escape(NS_ConvertUTF16toUTF8(leafStr), leaf, url_Path);
         leafStr.Truncate();
 
-        if (!escLeafStr)
+        if (!escaped) {
             continue;
+        }
   
-        nsAutoCString           leaf(escLeafStr);
-        free(escLeafStr);
-        escLeafStr = nullptr;
-
         // using nsEscape() [above] doesn't escape slashes, so do that by hand
         int32_t         aOffset;
         while ((aOffset = leaf.FindChar('/')) >= 0)

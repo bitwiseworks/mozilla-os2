@@ -19,33 +19,25 @@ class EMEDecoderModule : public PlatformDecoderModule {
 private:
 
 public:
-  EMEDecoderModule(CDMProxy* aProxy,
-                   PDMFactory* aPDM,
-                   bool aCDMDecodesAudio,
-                   bool aCDMDecodesVideo);
+  EMEDecoderModule(CDMProxy* aProxy, PDMFactory* aPDM);
 
   virtual ~EMEDecoderModule();
 
 protected:
   // Decode thread.
   already_AddRefed<MediaDataDecoder>
-  CreateVideoDecoder(const VideoInfo& aConfig,
-                    layers::LayersBackend aLayersBackend,
-                    layers::ImageContainer* aImageContainer,
-                    FlushableTaskQueue* aVideoTaskQueue,
-                    MediaDataDecoderCallback* aCallback) override;
+  CreateVideoDecoder(const CreateDecoderParams& aParams) override;
 
   // Decode thread.
   already_AddRefed<MediaDataDecoder>
-  CreateAudioDecoder(const AudioInfo& aConfig,
-                     FlushableTaskQueue* aAudioTaskQueue,
-                     MediaDataDecoderCallback* aCallback) override;
+  CreateAudioDecoder(const CreateDecoderParams& aParams) override;
 
   ConversionRequired
   DecoderNeedsConversion(const TrackInfo& aConfig) const override;
 
   bool
-  SupportsMimeType(const nsACString& aMimeType) const override;
+  SupportsMimeType(const nsACString& aMimeType,
+                   DecoderDoctorDiagnostics* aDiagnostics) const override;
 
 private:
   RefPtr<CDMProxy> mProxy;
@@ -53,8 +45,6 @@ private:
   RefPtr<PDMFactory> mPDM;
   // We run the PDM on its own task queue.
   RefPtr<TaskQueue> mTaskQueue;
-  bool mCDMDecodesAudio;
-  bool mCDMDecodesVideo;
 };
 
 } // namespace mozilla

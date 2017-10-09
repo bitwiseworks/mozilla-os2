@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 // Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -36,22 +38,15 @@ class Message : public Pickle {
  public:
   typedef uint32_t msgid_t;
 
-  // Implemented by objects that can send IPC messages across a channel.
-  class Sender {
-   public:
-    virtual ~Sender() {}
-
-    // Sends the given IPC message.  The implementor takes ownership of the
-    // given Message regardless of whether or not this method succeeds.  This
-    // is done to make this method easier to use.  Returns true on success and
-    // false otherwise.
-    virtual bool Send(Message* msg) = 0;
+  enum NestedLevel {
+    NOT_NESTED = 1,
+    NESTED_INSIDE_SYNC = 2,
+    NESTED_INSIDE_CPOW = 3
   };
 
   enum PriorityValue {
-    PRIORITY_NORMAL = 1,
-    PRIORITY_HIGH = 2,
-    PRIORITY_URGENT = 3
+    NORMAL_PRIORITY,
+    HIGH_PRIORITY,
   };
 
   enum MessageCompression {
@@ -66,27 +61,41 @@ class Message : public Pickle {
 
   // Initialize a message with a user-defined type, priority value, and
   // destination WebView ID.
-  Message(int32_t routing_id, msgid_t type, PriorityValue priority,
+  Message(int32_t routing_id,
+          msgid_t type,
+          NestedLevel nestedLevel = NOT_NESTED,
+          PriorityValue priority = NORMAL_PRIORITY,
           MessageCompression compression = COMPRESSION_NONE,
           const char* const name="???");
 
-  // Initializes a message from a const block of data.  The data is not copied;
-  // instead the data is merely referenced by this message.  Only const methods
-  // should be used on the message when initialized this way.
   Message(const char* data, int data_len);
 
-  Message(const Message& other);
+  Message(const Message& other) = delete;
   Message(Message&& other);
-  Message& operator=(const Message& other);
+  Message& operator=(const Message& other) = delete;
   Message& operator=(Message&& other);
 
-  PriorityValue priority() const {
-    return static_cast<PriorityValue>(header()->flags & PRIORITY_MASK);
+  NestedLevel nested_level() const {
+    return static_cast<NestedLevel>(header()->flags & NESTED_MASK);
   }
 
-  void set_priority(int prio) {
-    DCHECK((prio & ~PRIORITY_MASK) == 0);
-    header()->flags = (header()->flags & ~PRIORITY_MASK) | prio;
+  void set_nested_level(NestedLevel nestedLevel) {
+    DCHECK((nestedLevel & ~NESTED_MASK) == 0);
+    header()->flags = (header()->flags & ~NESTED_MASK) | nestedLevel;
+  }
+
+  PriorityValue priority() const {
+    if (header()->flags & PRIO_BIT) {
+      return HIGH_PRIORITY;
+    }
+    return NORMAL_PRIORITY;
+  }
+
+  void set_priority(PriorityValue prio) {
+    header()->flags &= ~PRIO_BIT;
+    if (prio == HIGH_PRIORITY) {
+      header()->flags |= PRIO_BIT;
+    }
   }
 
   // True if this is a synchronous message.
@@ -125,27 +134,6 @@ class Message : public Pickle {
 
   bool is_reply_error() const {
     return (header()->flags & REPLY_ERROR_BIT) != 0;
-  }
-
-  // Normally when a receiver gets a message and they're blocked on a
-  // synchronous message Send, they buffer a message.  Setting this flag causes
-  // the receiver to be unblocked and the message to be dispatched immediately.
-  void set_unblock(bool unblock) {
-    if (unblock) {
-      header()->flags |= UNBLOCK_BIT;
-    } else {
-      header()->flags &= ~UNBLOCK_BIT;
-    }
-  }
-
-  bool should_unblock() const {
-    return (header()->flags & UNBLOCK_BIT) != 0;
-  }
-
-  // Tells the receiver that the caller is pumping messages while waiting
-  // for the result.
-  bool is_caller_pumping_messages() const {
-    return (header()->flags & PUMPING_MSGS_BIT) != 0;
   }
 
   msgid_t type() const {
@@ -194,7 +182,7 @@ class Message : public Pickle {
     header()->seqno = aSeqno;
   }
 
-  const char* const name() const {
+  const char* name() const {
     return name_;
   }
 
@@ -236,10 +224,11 @@ class Message : public Pickle {
   static void Log(const Message* msg, std::wstring* l) {
   }
 
-  // Find the end of the message data that starts at range_start.  Returns NULL
-  // if the entire message is not found in the given data range.
-  static const char* FindNext(const char* range_start, const char* range_end) {
-    return Pickle::FindNext(sizeof(Header), range_start, range_end);
+  // Figure out how big the message starting at range_start is. Returns 0 if
+  // there's no enough data to determine (i.e., if [range_start, range_end) does
+  // not contain enough of the message header to know the size).
+  static uint32_t MessageSize(const char* range_start, const char* range_end) {
+    return Pickle::MessageSize(sizeof(Header), range_start, range_end);
   }
 
 #if defined(OS_POSIX)
@@ -250,7 +239,7 @@ class Message : public Pickle {
   bool WriteFileDescriptor(const base::FileDescriptor& descriptor);
   // Get a file descriptor from the message. Returns false on error.
   //   iter: a Pickle iterator to the current location in the message.
-  bool ReadFileDescriptor(void** iter, base::FileDescriptor* descriptor) const;
+  bool ReadFileDescriptor(PickleIterator* iter, base::FileDescriptor* descriptor) const;
 
 #if defined(OS_MACOSX)
   void set_fd_cookie(uint32_t cookie) {
@@ -281,16 +270,14 @@ class Message : public Pickle {
 
   // flags
   enum {
-    PRIORITY_MASK   = 0x0003,
-    SYNC_BIT        = 0x0004,
-    REPLY_BIT       = 0x0008,
-    REPLY_ERROR_BIT = 0x0010,
-    UNBLOCK_BIT     = 0x0020,
-    PUMPING_MSGS_BIT= 0x0040,
-    HAS_SENT_TIME_BIT = 0x0080,
-    INTERRUPT_BIT   = 0x0100,
-    COMPRESS_BIT    = 0x0200,
-    COMPRESSALL_BIT = 0x0400,
+    NESTED_MASK     = 0x0003,
+    PRIO_BIT        = 0x0004,
+    SYNC_BIT        = 0x0008,
+    REPLY_BIT       = 0x0010,
+    REPLY_ERROR_BIT = 0x0020,
+    INTERRUPT_BIT   = 0x0040,
+    COMPRESS_BIT    = 0x0080,
+    COMPRESSALL_BIT = 0x0100,
   };
 
   struct Header : Pickle::Header {
@@ -348,6 +335,21 @@ class Message : public Pickle {
 
   const char* name_;
 
+};
+
+class MessageInfo {
+public:
+    typedef uint32_t msgid_t;
+
+    explicit MessageInfo(const Message& aMsg)
+        : mSeqno(aMsg.seqno()), mType(aMsg.type()) {}
+
+    int32_t seqno() const { return mSeqno; }
+    msgid_t type() const { return mType; }
+
+private:
+    int32_t mSeqno;
+    msgid_t mType;
 };
 
 //------------------------------------------------------------------------------

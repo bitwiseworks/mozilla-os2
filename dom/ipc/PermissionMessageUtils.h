@@ -13,17 +13,28 @@
 
 namespace IPC {
 
-class Principal {
+class Principal
+{
   friend struct ParamTraits<Principal>;
 
 public:
-  Principal() : mPrincipal(nullptr) {}
-  explicit Principal(nsIPrincipal* aPrincipal) : mPrincipal(aPrincipal) {}
+  Principal()
+    : mPrincipal(nullptr)
+  {}
+
+  explicit Principal(nsIPrincipal* aPrincipal)
+    : mPrincipal(aPrincipal)
+  {}
+
   operator nsIPrincipal*() const { return mPrincipal.get(); }
 
+  Principal& operator=(const Principal& aOther)
+  {
+    mPrincipal = aOther.mPrincipal;
+    return *this;
+  }
+
 private:
-  // Unimplemented
-  Principal& operator=(Principal&);
   nsCOMPtr<nsIPrincipal> mPrincipal;
 };
 
@@ -32,7 +43,7 @@ struct ParamTraits<Principal>
 {
   typedef Principal paramType;
   static void Write(Message* aMsg, const paramType& aParam);
-  static bool Read(const Message* aMsg, void** aIter, paramType* aResult);
+  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult);
 };
 
 } // namespace IPC

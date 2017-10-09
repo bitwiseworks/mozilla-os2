@@ -1,10 +1,18 @@
 // Check to make sure that a worker can be attached to a toolbox
 // directly, and that the toolbox has expected properties.
 
+"use strict";
+
+// Whitelisting this test.
+// As part of bug 1077403, the leaking uncaught rejections should be fixed.
+thisTestLeaksUncaughtRejectionsAndShouldBeFixed("[object Object]");
+
 var TAB_URL = EXAMPLE_URL + "doc_WorkerActor.attachThread-tab.html";
 var WORKER_URL = "code_WorkerActor.attachThread-worker.js";
 
 add_task(function* () {
+  yield pushPrefs(["devtools.scratchpad.enabled", true]);
+
   DebuggerServer.init();
   DebuggerServer.addBrowserActors();
 
@@ -26,8 +34,17 @@ add_task(function* () {
                                             "jsdebugger",
                                             Toolbox.HostType.WINDOW);
 
-  is(toolbox._host.type, "window", "correct host");
-  ok(toolbox._host._window.document.title.contains(WORKER_URL),
+  is(toolbox.hostType, "window", "correct host");
+
+  yield new Promise(done => {
+    toolbox.win.parent.addEventListener("message", function onmessage(event) {
+      if (event.data.name == "set-host-title") {
+        toolbox.win.parent.removeEventListener("message", onmessage);
+        done();
+      }
+    });
+  });
+  ok(toolbox.win.parent.document.title.includes(WORKER_URL),
      "worker URL in host title");
 
   let toolTabs = toolbox.doc.querySelectorAll(".devtools-tab");
@@ -36,8 +53,9 @@ add_task(function* () {
   is(activeTools.join(","), "webconsole,jsdebugger,scratchpad,options",
     "Correct set of tools supported by worker");
 
-  yield gDevTools.closeToolbox(TargetFactory.forWorker(workerClient));
   terminateWorkerInTab(tab, WORKER_URL);
   yield waitForWorkerClose(workerClient);
   yield close(client);
+
+  yield toolbox.destroy();
 });

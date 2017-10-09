@@ -20,7 +20,10 @@ public class AndroidBrowserHistoryServerSyncStage extends ServerSyncStage {
   // Eventually this kind of sync stage will be data-driven,
   // and all this hard-coding can go away.
   private static final String HISTORY_SORT          = "index";
-  private static final long   HISTORY_REQUEST_LIMIT = 250;
+  // Sanity limit. Batch and total limit are the same for now, and will be adjusted
+  // once buffer and high water mark are in place. See Bug 730142.
+  private static final long HISTORY_BATCH_LIMIT = 250;
+  private static final long HISTORY_TOTAL_LIMIT = 250;
 
   @Override
   protected String getCollection() {
@@ -50,7 +53,9 @@ public class AndroidBrowserHistoryServerSyncStage extends ServerSyncStage {
                                              session.config.storageURL(),
                                              session.getAuthHeaderProvider(),
                                              session.config.infoCollections,
-                                             HISTORY_REQUEST_LIMIT,
+                                             session.config.infoConfiguration,
+                                             HISTORY_BATCH_LIMIT,
+                                             HISTORY_TOTAL_LIMIT,
                                              HISTORY_SORT);
   }
 

@@ -15,47 +15,49 @@
 // [Constructor(DOMString url, optional (URL or DOMString) base = "about:blank")]
 [Constructor(DOMString url, URL base),
  Constructor(DOMString url, optional DOMString base),
- Exposed=(Window,Worker)]
+ Exposed=(Window,Worker,WorkerDebugger)]
 interface URL {
   // Bug 824857: no support for stringifier attributes yet.
   //  stringifier attribute USVString href;
 
   // Bug 824857 should remove this.
-  [Throws=Workers]
+  [Throws]
   stringifier;
 
-  [SetterThrows, GetterThrows=Workers]
+  [Throws]
   attribute USVString href;
-  [Throws=Workers]
+  [Throws]
   readonly attribute USVString origin;
-  [Throws=Workers]
+  [Throws]
            attribute USVString protocol;
-  [Throws=Workers]
+  [Throws]
            attribute USVString username;
-  [Throws=Workers]
+  [Throws]
            attribute USVString password;
-  [Throws=Workers]
+  [Throws]
            attribute USVString host;
-  [Throws=Workers]
+  [Throws]
            attribute USVString hostname;
-  [Throws=Workers]
+  [Throws]
            attribute USVString port;
-  [Throws=Workers]
+  [Throws]
            attribute USVString pathname;
-  [Throws=Workers]
+  [Throws]
            attribute USVString search;
   readonly attribute URLSearchParams searchParams;
-  [Throws=Workers]
+  [Throws]
            attribute USVString hash;
 };
 
 partial interface URL {
   [Throws]
-  static DOMString? createObjectURL(Blob blob, optional objectURLOptions options);
+  static DOMString createObjectURL(Blob blob, optional objectURLOptions options);
   [Throws]
-  static DOMString? createObjectURL(MediaStream stream, optional objectURLOptions options);
+  static DOMString createObjectURL(MediaStream stream, optional objectURLOptions options);
   [Throws]
   static void revokeObjectURL(DOMString url);
+  [ChromeOnly, Throws]
+  static boolean isValidURL(DOMString url);
 };
 
 dictionary objectURLOptions

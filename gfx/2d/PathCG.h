@@ -52,7 +52,7 @@ public:
 
   virtual already_AddRefed<Path> Finish();
 
-  virtual BackendType GetBackendType() const { return BackendType::COREGRAPHICS; }
+  virtual BackendType GetBackendType() const { return BackendType::SKIA; }
 
 private:
   friend class PathCG;
@@ -80,11 +80,11 @@ public:
 
   // Paths will always return BackendType::COREGRAPHICS, but note that they
   // are compatible with BackendType::COREGRAPHICS_ACCELERATED backend.
-  virtual BackendType GetBackendType() const { return BackendType::COREGRAPHICS; }
+  virtual BackendType GetBackendType() const { return BackendType::SKIA; }
 
-  virtual already_AddRefed<PathBuilder> CopyToBuilder(FillRule aFillRule = FillRule::FILL_WINDING) const;
+  virtual already_AddRefed<PathBuilder> CopyToBuilder(FillRule aFillRule) const;
   virtual already_AddRefed<PathBuilder> TransformedCopyToBuilder(const Matrix &aTransform,
-                                                             FillRule aFillRule = FillRule::FILL_WINDING) const;
+                                                             FillRule aFillRule) const;
 
   virtual bool ContainsPoint(const Point &aPoint, const Matrix &aTransform) const;
   virtual bool StrokeContainsPoint(const StrokeOptions &aStrokeOptions,

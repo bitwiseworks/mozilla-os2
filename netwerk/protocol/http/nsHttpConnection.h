@@ -7,6 +7,7 @@
 #define nsHttpConnection_h__
 
 #include "nsHttpConnectionInfo.h"
+#include "nsHttpResponseHead.h"
 #include "nsAHttpTransaction.h"
 #include "nsCOMPtr.h"
 #include "nsAutoPtr.h"
@@ -76,7 +77,7 @@ public:
     nsresult Activate(nsAHttpTransaction *, uint32_t caps, int32_t pri);
 
     // Close the underlying socket transport.
-    void Close(nsresult reason);
+    void Close(nsresult reason, bool aIsShutdown = false);
 
     //-------------------------------------------------------------------------
     // XXX document when these are ok to call
@@ -127,7 +128,7 @@ public:
 
     // nsAHttpConnection compatible methods (non-virtual):
     nsresult OnHeadersAvailable(nsAHttpTransaction *, nsHttpRequestHead *, nsHttpResponseHead *, bool *reset);
-    void     CloseTransaction(nsAHttpTransaction *, nsresult reason);
+    void     CloseTransaction(nsAHttpTransaction *, nsresult reason, bool aIsShutdown = false);
     void     GetConnectionInfo(nsHttpConnectionInfo **ci) { NS_IF_ADDREF(*ci = mConnInfo); }
     nsresult TakeTransport(nsISocketTransport **,
                            nsIAsyncInputStream **,
@@ -146,8 +147,8 @@ public:
     nsresult ForceSend();
     nsresult ForceRecv();
 
-    static NS_METHOD ReadFromStream(nsIInputStream *, void *, const char *,
-                                    uint32_t, uint32_t, uint32_t *);
+    static nsresult ReadFromStream(nsIInputStream *, void *, const char *,
+                                   uint32_t, uint32_t, uint32_t *);
 
     // When a persistent connection is in the connection manager idle
     // connection pool, the nsHttpConnection still reads errors and hangups
@@ -241,7 +242,8 @@ private:
 
     // Makes certain the SSL handshake is complete and NPN negotiation
     // has had a chance to happen
-    bool     EnsureNPNComplete();
+    bool     EnsureNPNComplete(nsresult &aOut0RTTWriteHandshakeValue,
+                               uint32_t &aOut0RTTBytesWritten);
     void     SetupSSL();
 
     // Start the Spdy transaction handler when NPN indicates spdy/*
@@ -331,7 +333,7 @@ private:
     // version level in use, 0 if unused
     uint8_t                         mUsingSpdyVersion;
 
-    RefPtr<ASpdySession>          mSpdySession;
+    RefPtr<ASpdySession>            mSpdySession;
     int32_t                         mPriority;
     bool                            mReportedSpdy;
 
@@ -356,6 +358,18 @@ private:
     nsresult                        MaybeForceSendIO();
     bool                            mForceSendPending;
     nsCOMPtr<nsITimer>              mForceSendTimer;
+
+    // Helper variable for 0RTT handshake;
+    bool                            m0RTTChecked; // Possible 0RTT has been
+                                                  // checked.
+    bool                            mWaitingFor0RTTResponse; // We have are
+                                                             // sending 0RTT
+                                                             // data and we
+                                                             // are waiting
+                                                             // for the end of
+                                                             // the handsake.
+    int64_t                        mContentBytesWritten0RTT;
+    bool                           mEarlyDataNegotiated; //Only used for telemetry
 };
 
 } // namespace net

@@ -37,8 +37,8 @@ public:
                               PeekWordState* aState) override;
 
   virtual void Reflow(nsPresContext* aPresContext,
-                          nsHTMLReflowMetrics& aDesiredSize,
-                          const nsHTMLReflowState& aReflowState,
+                          ReflowOutput& aDesiredSize,
+                          const ReflowInput& aReflowInput,
                           nsReflowStatus& aStatus) override;
   virtual void AddInlineMinISize(nsRenderingContext *aRenderingContext,
                                  InlineMinISizeData *aData) override;
@@ -80,14 +80,14 @@ BRFrame::~BRFrame()
 
 void
 BRFrame::Reflow(nsPresContext* aPresContext,
-                nsHTMLReflowMetrics& aMetrics,
-                const nsHTMLReflowState& aReflowState,
+                ReflowOutput& aMetrics,
+                const ReflowInput& aReflowInput,
                 nsReflowStatus& aStatus)
 {
   MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("BRFrame");
-  DISPLAY_REFLOW(aPresContext, this, aReflowState, aMetrics, aStatus);
-  WritingMode wm = aReflowState.GetWritingMode();
+  DISPLAY_REFLOW(aPresContext, this, aReflowInput, aMetrics, aStatus);
+  WritingMode wm = aReflowInput.GetWritingMode();
   LogicalSize finalSize(wm);
   finalSize.BSize(wm) = 0; // BR frames with block size 0 are ignored in quirks
                            // mode by nsLineLayout::VerticalAlignFrames .
@@ -101,7 +101,7 @@ BRFrame::Reflow(nsPresContext* aPresContext,
   // on the *parent's* ShouldSuppressLineBreak() method, instead of our
   // own, because we may have custom "display" value that makes our
   // ShouldSuppressLineBreak() return false.
-  nsLineLayout* ll = aReflowState.mLineLayout;
+  nsLineLayout* ll = aReflowInput.mLineLayout;
   if (ll && !GetParent()->StyleContext()->ShouldSuppressLineBreak()) {
     // Note that the compatibility mode check excludes AlmostStandards
     // mode, since this is the inline box model.  See bug 161691.
@@ -121,11 +121,10 @@ BRFrame::Reflow(nsPresContext* aPresContext,
       // We also do this in strict mode because BR should act like a
       // normal inline frame.  That line-height is used is important
       // here for cases where the line-height is less than 1.
-      RefPtr<nsFontMetrics> fm;
-      nsLayoutUtils::GetFontMetricsForFrame(this, getter_AddRefs(fm),
-        nsLayoutUtils::FontSizeInflationFor(this));
+      RefPtr<nsFontMetrics> fm =
+        nsLayoutUtils::GetInflatedFontMetricsForFrame(this);
       if (fm) {
-        nscoord logicalHeight = aReflowState.CalcLineHeight();
+        nscoord logicalHeight = aReflowInput.CalcLineHeight();
         finalSize.BSize(wm) = logicalHeight;
         aMetrics.SetBlockStartAscent(nsLayoutUtils::GetCenteredFontBaseline(
                                        fm, logicalHeight, wm.IsLineInverted()));
@@ -140,13 +139,14 @@ BRFrame::Reflow(nsPresContext* aPresContext,
       // XXX This also fixes bug 10036!
       // Warning: nsTextControlFrame::CalculateSizeStandard depends on
       // the following line, see bug 228752.
+      // The code below in AddInlinePrefISize also adds 1 appunit to width
       finalSize.ISize(wm) = 1;
     }
 
     // Return our reflow status
-    uint32_t breakType = aReflowState.mStyleDisplay->PhysicalBreakType(wm);
-    if (NS_STYLE_CLEAR_NONE == breakType) {
-      breakType = NS_STYLE_CLEAR_LINE;
+    StyleClear breakType = aReflowInput.mStyleDisplay->PhysicalBreakType(wm);
+    if (StyleClear::None == breakType) {
+      breakType = StyleClear::Line;
     }
 
     aStatus = NS_INLINE_BREAK | NS_INLINE_BREAK_AFTER |
@@ -162,7 +162,7 @@ BRFrame::Reflow(nsPresContext* aPresContext,
 
   mAscent = aMetrics.BlockStartAscent();
 
-  NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aMetrics);
+  NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aMetrics);
 }
 
 /* virtual */ void
@@ -179,6 +179,8 @@ BRFrame::AddInlinePrefISize(nsRenderingContext *aRenderingContext,
                             nsIFrame::InlinePrefISizeData *aData)
 {
   if (!GetParent()->StyleContext()->ShouldSuppressLineBreak()) {
+    // Match the 1 appunit width assigned in the Reflow method above
+    aData->mCurrentLine += 1;
     aData->ForceBreak();
   }
 }
@@ -264,6 +266,13 @@ BRFrame::AccessibleType()
       parent->GetChildCount() == 1) {
     // This <br> is the only node in a text control, therefore it is the hacky
     // "bogus node" used when there is no text in the control
+    return a11y::eNoType;
+  }
+
+  // Trailing HTML br element don't play any difference. We don't need to expose
+  // it to AT (see bug https://bugzilla.mozilla.org/show_bug.cgi?id=899433#c16
+  // for details).
+  if (!mContent->GetNextSibling() && !GetNextSibling()) {
     return a11y::eNoType;
   }
 

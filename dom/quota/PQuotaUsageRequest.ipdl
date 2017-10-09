@@ -12,6 +12,7 @@ struct UsageResponse
 {
   uint64_t usage;
   uint64_t fileUsage;
+  uint64_t limit;
 };
 
 union UsageRequestResponse
@@ -25,10 +26,10 @@ protocol PQuotaUsageRequest
   manager PQuota;
 
 parent:
-  Cancel();
+  async Cancel();
 
 child:
-  __delete__(UsageRequestResponse response);
+  async __delete__(UsageRequestResponse response);
 };
 
 } // namespace quota

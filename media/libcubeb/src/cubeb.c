@@ -8,13 +8,13 @@
 #include <assert.h>
 #include <stddef.h>
 #include <stdlib.h>
-#if defined(HAVE_CONFIG_H)
-#include "config.h"
-#endif
 #include "cubeb/cubeb.h"
 #include "cubeb-internal.h"
 
 #define NELEMS(x) ((int) (sizeof(x) / sizeof(x[0])))
+
+cubeb_log_level g_log_level;
+cubeb_log_callback g_log_callback;
 
 struct cubeb {
   struct cubeb_ops * ops;
@@ -33,14 +33,8 @@ int jack_init (cubeb ** context, char const * context_name);
 #if defined(USE_ALSA)
 int alsa_init(cubeb ** context, char const * context_name);
 #endif
-#if defined(USE_AUDIOQUEUE)
-int audioqueue_init(cubeb ** context, char const * context_name);
-#endif
 #if defined(USE_AUDIOUNIT)
 int audiounit_init(cubeb ** context, char const * context_name);
-#endif
-#if defined(USE_DIRECTSOUND)
-int directsound_init(cubeb ** context, char const * context_name);
 #endif
 #if defined(USE_WINMM)
 int winmm_init(cubeb ** context, char const * context_name);
@@ -61,15 +55,37 @@ int audiotrack_init(cubeb ** context, char const * context_name);
 int kai_init(cubeb ** context, char const * context_name);
 #endif
 
-int
-validate_stream_params(cubeb_stream_params stream_params)
+
+static int
+validate_stream_params(cubeb_stream_params * input_stream_params,
+                       cubeb_stream_params * output_stream_params)
 {
-  if (stream_params.rate < 1000 || stream_params.rate > 192000 ||
-      stream_params.channels < 1 || stream_params.channels > 8) {
-    return CUBEB_ERROR_INVALID_FORMAT;
+  XASSERT(input_stream_params || output_stream_params);
+  if (output_stream_params) {
+    if (output_stream_params->rate < 1000 || output_stream_params->rate > 192000 ||
+        output_stream_params->channels < 1 || output_stream_params->channels > 8) {
+      return CUBEB_ERROR_INVALID_FORMAT;
+    }
+  }
+  if (input_stream_params) {
+    if (input_stream_params->rate < 1000 || input_stream_params->rate > 192000 ||
+        input_stream_params->channels < 1 || input_stream_params->channels > 8) {
+      return CUBEB_ERROR_INVALID_FORMAT;
+    }
+  }
+  // Rate and sample format must be the same for input and output, if using a
+  // duplex stream
+  if (input_stream_params && output_stream_params) {
+    if (input_stream_params->rate != output_stream_params->rate  ||
+        input_stream_params->format != output_stream_params->format) {
+      return CUBEB_ERROR_INVALID_FORMAT;
+    }
   }
 
-  switch (stream_params.format) {
+  cubeb_stream_params * params = input_stream_params ?
+                                 input_stream_params : output_stream_params;
+
+  switch (params->format) {
   case CUBEB_SAMPLE_S16LE:
   case CUBEB_SAMPLE_S16BE:
   case CUBEB_SAMPLE_FLOAT32LE:
@@ -80,10 +96,12 @@ validate_stream_params(cubeb_stream_params stream_params)
   return CUBEB_ERROR_INVALID_FORMAT;
 }
 
-int
+
+
+static int
 validate_latency(int latency)
 {
-  if (latency < 1 || latency > 2000) {
+  if (latency < 1 || latency > 96000) {
     return CUBEB_ERROR_INVALID_PARAMETER;
   }
   return CUBEB_OK;
@@ -105,17 +123,11 @@ cubeb_init(cubeb ** context, char const * context_name)
 #if defined(USE_AUDIOUNIT)
     audiounit_init,
 #endif
-#if defined(USE_AUDIOQUEUE)
-    audioqueue_init,
-#endif
 #if defined(USE_WASAPI)
     wasapi_init,
 #endif
 #if defined(USE_WINMM)
     winmm_init,
-#endif
-#if defined(USE_DIRECTSOUND)
-    directsound_init,
 #endif
 #if defined(USE_SNDIO)
     sndio_init,
@@ -218,7 +230,11 @@ cubeb_destroy(cubeb * context)
 
 int
 cubeb_stream_init(cubeb * context, cubeb_stream ** stream, char const * stream_name,
-                  cubeb_stream_params stream_params, unsigned int latency,
+                  cubeb_devid input_device,
+                  cubeb_stream_params * input_stream_params,
+                  cubeb_devid output_device,
+                  cubeb_stream_params * output_stream_params,
+                  unsigned int latency,
                   cubeb_data_callback data_callback,
                   cubeb_state_callback state_callback,
                   void * user_ptr)
@@ -229,13 +245,17 @@ cubeb_stream_init(cubeb * context, cubeb_stream ** stream, char const * stream_n
     return CUBEB_ERROR_INVALID_PARAMETER;
   }
 
-  if ((r = validate_stream_params(stream_params)) != CUBEB_OK ||
+  if ((r = validate_stream_params(input_stream_params, output_stream_params)) != CUBEB_OK ||
       (r = validate_latency(latency)) != CUBEB_OK) {
     return r;
   }
 
   return context->ops->stream_init(context, stream, stream_name,
-                                   stream_params, latency,
+                                   input_device,
+                                   input_stream_params,
+                                   output_device,
+                                   output_stream_params,
+                                   latency,
                                    data_callback,
                                    state_callback,
                                    user_ptr);
@@ -353,7 +373,7 @@ int cubeb_stream_device_destroy(cubeb_stream * stream,
 int cubeb_stream_register_device_changed_callback(cubeb_stream * stream,
                                                   cubeb_device_changed_callback device_changed_callback)
 {
-  if (!stream || !device_changed_callback) {
+  if (!stream) {
     return CUBEB_ERROR_INVALID_PARAMETER;
   }
 
@@ -364,10 +384,98 @@ int cubeb_stream_register_device_changed_callback(cubeb_stream * stream,
   return stream->context->ops->stream_register_device_changed_callback(stream, device_changed_callback);
 }
 
+static
+void log_device(cubeb_device_info * device_info)
+{
+  char devfmts[128] = "";
+  const char * devtype, * devstate, * devdeffmt;
+
+  switch (device_info->type) {
+    case CUBEB_DEVICE_TYPE_INPUT:
+      devtype = "input";
+      break;
+    case CUBEB_DEVICE_TYPE_OUTPUT:
+      devtype = "output";
+      break;
+    case CUBEB_DEVICE_TYPE_UNKNOWN:
+    default:
+      devtype = "unknown?";
+      break;
+  };
+
+  switch (device_info->state) {
+    case CUBEB_DEVICE_STATE_DISABLED:
+      devstate = "disabled";
+      break;
+    case CUBEB_DEVICE_STATE_UNPLUGGED:
+      devstate = "unplugged";
+      break;
+    case CUBEB_DEVICE_STATE_ENABLED:
+      devstate = "enabled";
+      break;
+    default:
+      devstate = "unknown?";
+      break;
+  };
+
+  switch (device_info->default_format) {
+    case CUBEB_DEVICE_FMT_S16LE:
+      devdeffmt = "S16LE";
+      break;
+    case CUBEB_DEVICE_FMT_S16BE:
+      devdeffmt = "S16BE";
+      break;
+    case CUBEB_DEVICE_FMT_F32LE:
+      devdeffmt = "F32LE";
+      break;
+    case CUBEB_DEVICE_FMT_F32BE:
+      devdeffmt = "F32BE";
+      break;
+    default:
+      devdeffmt = "unknown?";
+      break;
+  };
+
+  if (device_info->format & CUBEB_DEVICE_FMT_S16LE) {
+    strcat(devfmts, " S16LE");
+  }
+  if (device_info->format & CUBEB_DEVICE_FMT_S16BE) {
+    strcat(devfmts, " S16BE");
+  }
+  if (device_info->format & CUBEB_DEVICE_FMT_F32LE) {
+    strcat(devfmts, " F32LE");
+  }
+  if (device_info->format & CUBEB_DEVICE_FMT_F32BE) {
+    strcat(devfmts, " F32BE");
+  }
+
+  LOG("DeviceID: \"%s\"%s\n"
+      "\tName:\t\"%s\"\n"
+      "\tGroup:\t\"%s\"\n"
+      "\tVendor:\t\"%s\"\n"
+      "\tType:\t%s\n"
+      "\tState:\t%s\n"
+      "\tMaximum channels:\t%u\n"
+      "\tFormat:\t%s (0x%x) (default: %s)\n"
+      "\tRate:\t[%u, %u] (default: %u)\n"
+      "\tLatency: lo %u frames, hi %u frames",
+      device_info->device_id, device_info->preferred ? " (PREFERRED)" : "",
+      device_info->friendly_name,
+      device_info->group_id,
+      device_info->vendor_name,
+      devtype,
+      devstate,
+      device_info->max_channels,
+      (devfmts[0] == '\0') ? devfmts : devfmts + 1, (unsigned int)device_info->format, devdeffmt,
+      device_info->min_rate, device_info->max_rate, device_info->default_rate,
+      device_info->latency_lo, device_info->latency_hi);
+}
+
 int cubeb_enumerate_devices(cubeb * context,
                             cubeb_device_type devtype,
                             cubeb_device_collection ** collection)
 {
+  int rv;
   if ((devtype & (CUBEB_DEVICE_TYPE_INPUT | CUBEB_DEVICE_TYPE_OUTPUT)) == 0)
     return CUBEB_ERROR_INVALID_PARAMETER;
   if (collection == NULL)
@@ -375,7 +483,15 @@ int cubeb_enumerate_devices(cubeb * context,
   if (!context->ops->enumerate_devices)
     return CUBEB_ERROR_NOT_SUPPORTED;
 
-  return context->ops->enumerate_devices(context, devtype, collection);
+  rv = context->ops->enumerate_devices(context, devtype, collection);
+
+  if (g_log_callback) {
+    for (uint32_t i = 0; i < (*collection)->count; i++) {
+      log_device((*collection)->device[i]);
+    }
+  }
+
+  return rv;
 }
 
 int cubeb_device_collection_destroy(cubeb_device_collection * collection)
@@ -394,6 +510,10 @@ int cubeb_device_collection_destroy(cubeb_device_collection * collection)
 
 int cubeb_device_info_destroy(cubeb_device_info * info)
 {
+  if (info == NULL) {
+    return CUBEB_ERROR_INVALID_PARAMETER;
+  }
+
   free(info->device_id);
   free(info->friendly_name);
   free(info->group_id);
@@ -404,9 +524,45 @@ int cubeb_device_info_destroy(cubeb_device_info * info)
 }
 
 int cubeb_register_device_collection_changed(cubeb * context,
+                                             cubeb_device_type devtype,
                                              cubeb_device_collection_changed_callback callback,
                                              void * user_ptr)
 {
-  return CUBEB_ERROR_NOT_SUPPORTED;
+  if (context == NULL || (devtype & (CUBEB_DEVICE_TYPE_INPUT | CUBEB_DEVICE_TYPE_OUTPUT)) == 0)
+    return CUBEB_ERROR_INVALID_PARAMETER;
+
+  if (!context->ops->register_device_collection_changed) {
+    return CUBEB_ERROR_NOT_SUPPORTED;
+  }
+
+  return context->ops->register_device_collection_changed(context, devtype, callback, user_ptr);
+}
+
+int cubeb_set_log_callback(cubeb_log_level log_level,
+                           cubeb_log_callback log_callback)
+{
+  if (log_level < CUBEB_LOG_DISABLED || log_level > CUBEB_LOG_VERBOSE) {
+    return CUBEB_ERROR_INVALID_FORMAT;
+  }
+
+  if (!log_callback && log_level != CUBEB_LOG_DISABLED) {
+    return CUBEB_ERROR_INVALID_PARAMETER;
+  }
+
+  if (g_log_callback && log_callback) {
+    return CUBEB_ERROR_NOT_SUPPORTED;
+  }
+
+  g_log_callback = log_callback;
+  g_log_level = log_level;
+
+  return CUBEB_OK;
+}
+
+void
+cubeb_crash()
+{
+  abort();
+  *((volatile int *) NULL) = 0;
 }
 

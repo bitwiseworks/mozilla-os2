@@ -12,6 +12,7 @@
 #include "nsISupports.h"
 #include "nsTArrayForwardDeclare.h"
 #include "mozilla/dom/CPOWManagerGetter.h"
+#include "mozilla/ipc/Shmem.h"
 #include "mozilla/jsipc/CrossProcessObjectWrappers.h"
 
 #define NS_ICONTENTCHILD_IID                                    \
@@ -25,6 +26,12 @@ class Principal;
 } // namespace IPC
 
 namespace mozilla {
+namespace ipc {
+class FileDescriptor;
+class PFileDescriptorSetChild;
+class PSendStreamChild;
+class Shmem;
+} // namespace ipc
 
 namespace jsipc {
 class PJavaScriptChild;
@@ -44,6 +51,7 @@ class PBrowserChild;
 
 class nsIContentChild : public nsISupports
                       , public CPOWManagerGetter
+                      , public mozilla::ipc::IShmemAllocator
 {
 public:
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_ICONTENTCHILD_IID)
@@ -51,9 +59,9 @@ public:
   BlobChild* GetOrCreateActorForBlob(Blob* aBlob);
   BlobChild* GetOrCreateActorForBlobImpl(BlobImpl* aImpl);
 
-  virtual PBlobChild* SendPBlobConstructor(
-    PBlobChild* aActor,
-    const BlobConstructorParams& aParams) = 0;
+  virtual PBlobChild*
+  SendPBlobConstructor(PBlobChild* aActor,
+                       const BlobConstructorParams& aParams) = 0;
 
   virtual bool
   SendPBrowserConstructor(PBrowserChild* aActor,
@@ -63,6 +71,13 @@ public:
                           const ContentParentId& aCpID,
                           const bool& aIsForApp,
                           const bool& aIsForBrowser) = 0;
+
+  virtual mozilla::ipc::PFileDescriptorSetChild*
+  SendPFileDescriptorSetConstructor(const mozilla::ipc::FileDescriptor&) = 0;
+
+  virtual mozilla::ipc::PSendStreamChild*
+  SendPSendStreamConstructor(mozilla::ipc::PSendStreamChild*) = 0;
+
 protected:
   virtual jsipc::PJavaScriptChild* AllocPJavaScriptChild();
   virtual bool DeallocPJavaScriptChild(jsipc::PJavaScriptChild*);
@@ -79,10 +94,20 @@ protected:
 
   virtual bool DeallocPBlobChild(PBlobChild* aActor);
 
+  virtual mozilla::ipc::PSendStreamChild* AllocPSendStreamChild();
+
+  virtual bool DeallocPSendStreamChild(mozilla::ipc::PSendStreamChild* aActor);
+
+  virtual mozilla::ipc::PFileDescriptorSetChild*
+  AllocPFileDescriptorSetChild(const mozilla::ipc::FileDescriptor& aFD);
+
+  virtual bool
+  DeallocPFileDescriptorSetChild(mozilla::ipc::PFileDescriptorSetChild* aActor);
+
   virtual bool RecvAsyncMessage(const nsString& aMsg,
-                                const ClonedMessageData& aData,
                                 InfallibleTArray<jsipc::CpowEntry>&& aCpows,
-                                const IPC::Principal& aPrincipal);
+                                const IPC::Principal& aPrincipal,
+                                const ClonedMessageData& aData);
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsIContentChild, NS_ICONTENTCHILD_IID)

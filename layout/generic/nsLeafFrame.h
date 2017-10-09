@@ -41,14 +41,14 @@ public:
    * Our auto size is just intrinsic width and intrinsic height.
    */
   virtual mozilla::LogicalSize
-  ComputeAutoSize(nsRenderingContext *aRenderingContext,
-                  mozilla::WritingMode aWritingMode,
+  ComputeAutoSize(nsRenderingContext*         aRenderingContext,
+                  mozilla::WritingMode        aWM,
                   const mozilla::LogicalSize& aCBSize,
-                  nscoord aAvailableISize,
+                  nscoord                     aAvailableISize,
                   const mozilla::LogicalSize& aMargin,
                   const mozilla::LogicalSize& aBorder,
                   const mozilla::LogicalSize& aPadding,
-                  bool aShrinkWrap) override;
+                  ComputeSizeFlags            aFlags) override;
 
   /**
    * Reflow our frame.  This will use the computed width plus borderpadding for
@@ -57,16 +57,16 @@ public:
    * and descent will be set to 0.
    */
   virtual void Reflow(nsPresContext*      aPresContext,
-                      nsHTMLReflowMetrics& aDesiredSize,
-                      const nsHTMLReflowState& aReflowState,
+                      ReflowOutput& aDesiredSize,
+                      const ReflowInput& aReflowInput,
                       nsReflowStatus&      aStatus) override;
   
   /**
    * This method does most of the work that Reflow() above need done.
    */
   virtual void DoReflow(nsPresContext*      aPresContext,
-                        nsHTMLReflowMetrics& aDesiredSize,
-                        const nsHTMLReflowState& aReflowState,
+                        ReflowOutput& aDesiredSize,
+                        const ReflowInput& aReflowInput,
                         nsReflowStatus&      aStatus);
 
   virtual bool IsFrameOfType(uint32_t aFlags) const override
@@ -84,11 +84,6 @@ protected:
    * Return the intrinsic isize of the frame's content area. Note that this
    * should not include borders or padding and should not depend on the applied
    * styles.
-   * One exception to this is that the intrinsic (logical) size of an <iframe>
-   * depends on the writing-mode property (because the default intrinsic size
-   * is specified physically, for compat reasons). This should be OK because a
-   * change to writing-mode will trigger frame reconstruction anyhow, so the
-   * result will remain consistent for any given frame once constructed.
    */
   virtual nscoord GetIntrinsicISize() = 0;
 
@@ -102,16 +97,10 @@ protected:
   virtual nscoord GetIntrinsicBSize();
 
   /**
-   * Subroutine to add in borders and padding
-   */
-  void AddBordersAndPadding(const nsHTMLReflowState& aReflowState,
-                            mozilla::LogicalSize& aDesiredSize);
-
-  /**
    * Set aDesiredSize to be the available size
    */
-  void SizeToAvailSize(const nsHTMLReflowState& aReflowState,
-                       nsHTMLReflowMetrics& aDesiredSize);
+  void SizeToAvailSize(const ReflowInput& aReflowInput,
+                       ReflowOutput& aDesiredSize);
 };
 
 #endif /* nsLeafFrame_h___ */

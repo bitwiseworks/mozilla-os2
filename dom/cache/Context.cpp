@@ -7,7 +7,6 @@
 #include "mozilla/dom/cache/Context.h"
 
 #include "mozilla/AutoRestore.h"
-#include "mozilla/DebugOnly.h"
 #include "mozilla/dom/cache/Action.h"
 #include "mozilla/dom/cache/FileUtils.h"
 #include "mozilla/dom/cache/Manager.h"
@@ -35,7 +34,7 @@ public:
   RunOnTarget(Resolver* aResolver, const QuotaInfo&, Data*) override
   {
     // Resolve success immediately.  This Action does no actual work.
-    MOZ_ASSERT(aResolver);
+    MOZ_DIAGNOSTIC_ASSERT(aResolver);
     aResolver->Resolve(NS_OK);
   }
 };
@@ -46,7 +45,6 @@ namespace mozilla {
 namespace dom {
 namespace cache {
 
-using mozilla::DebugOnly;
 using mozilla::dom::quota::AssertIsOnIOThread;
 using mozilla::dom::quota::OpenDirectoryListener;
 using mozilla::dom::quota::QuotaManager;
@@ -59,7 +57,7 @@ public:
   explicit Data(nsIThread* aTarget)
     : mTarget(aTarget)
   {
-    MOZ_ASSERT(mTarget);
+    MOZ_DIAGNOSTIC_ASSERT(mTarget);
   }
 
   virtual mozIStorageConnection*
@@ -73,9 +71,9 @@ public:
   SetConnection(mozIStorageConnection* aConn) override
   {
     MOZ_ASSERT(mTarget == NS_GetCurrentThread());
-    MOZ_ASSERT(!mConnection);
+    MOZ_DIAGNOSTIC_ASSERT(!mConnection);
     mConnection = aConn;
-    MOZ_ASSERT(mConnection);
+    MOZ_DIAGNOSTIC_ASSERT(mConnection);
   }
 
 private:
@@ -119,18 +117,18 @@ public:
     , mState(STATE_INIT)
     , mCanceled(false)
   {
-    MOZ_ASSERT(mContext);
-    MOZ_ASSERT(mManager);
-    MOZ_ASSERT(mData);
-    MOZ_ASSERT(mTarget);
-    MOZ_ASSERT(mInitiatingThread);
-    MOZ_ASSERT(mInitAction);
+    MOZ_DIAGNOSTIC_ASSERT(mContext);
+    MOZ_DIAGNOSTIC_ASSERT(mManager);
+    MOZ_DIAGNOSTIC_ASSERT(mData);
+    MOZ_DIAGNOSTIC_ASSERT(mTarget);
+    MOZ_DIAGNOSTIC_ASSERT(mInitiatingThread);
+    MOZ_DIAGNOSTIC_ASSERT(mInitAction);
   }
 
   nsresult Dispatch()
   {
     NS_ASSERT_OWNINGTHREAD(QuotaInitRunnable);
-    MOZ_ASSERT(mState == STATE_INIT);
+    MOZ_DIAGNOSTIC_ASSERT(mState == STATE_INIT);
 
     mState = STATE_GET_INFO;
     nsresult rv = NS_DispatchToMainThread(this, nsIThread::DISPATCH_NORMAL);
@@ -144,7 +142,7 @@ public:
   void Cancel()
   {
     NS_ASSERT_OWNINGTHREAD(QuotaInitRunnable);
-    MOZ_ASSERT(!mCanceled);
+    MOZ_DIAGNOSTIC_ASSERT(!mCanceled);
     mCanceled = true;
     mInitAction->CancelOnInitiatingThread();
   }
@@ -170,7 +168,7 @@ private:
     virtual void
     Resolve(nsresult aRv) override
     {
-      MOZ_ASSERT(!mResolved);
+      MOZ_DIAGNOSTIC_ASSERT(!mResolved);
       mResolved = true;
       mResult = aRv;
     };
@@ -189,9 +187,9 @@ private:
 
   ~QuotaInitRunnable()
   {
-    MOZ_ASSERT(mState == STATE_COMPLETE);
-    MOZ_ASSERT(!mContext);
-    MOZ_ASSERT(!mInitAction);
+    MOZ_DIAGNOSTIC_ASSERT(mState == STATE_COMPLETE);
+    MOZ_DIAGNOSTIC_ASSERT(!mContext);
+    MOZ_DIAGNOSTIC_ASSERT(!mInitAction);
   }
 
   enum State
@@ -210,20 +208,20 @@ private:
 
   void Complete(nsresult aResult)
   {
-    MOZ_ASSERT(mState == STATE_RUNNING || NS_FAILED(aResult));
+    MOZ_DIAGNOSTIC_ASSERT(mState == STATE_RUNNING || NS_FAILED(aResult));
 
-    MOZ_ASSERT(NS_SUCCEEDED(mResult));
+    MOZ_DIAGNOSTIC_ASSERT(NS_SUCCEEDED(mResult));
     mResult = aResult;
 
     mState = STATE_COMPLETING;
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
-      mInitiatingThread->Dispatch(this, nsIThread::DISPATCH_NORMAL)));
+    MOZ_ALWAYS_SUCCEEDS(
+      mInitiatingThread->Dispatch(this, nsIThread::DISPATCH_NORMAL));
   }
 
   void Clear()
   {
     NS_ASSERT_OWNINGTHREAD(QuotaInitRunnable);
-    MOZ_ASSERT(mContext);
+    MOZ_DIAGNOSTIC_ASSERT(mContext);
     mContext = nullptr;
     mManager = nullptr;
     mInitAction = nullptr;
@@ -251,9 +249,9 @@ void
 Context::QuotaInitRunnable::OpenDirectory()
 {
   NS_ASSERT_OWNINGTHREAD(QuotaInitRunnable);
-  MOZ_ASSERT(mState == STATE_CREATE_QUOTA_MANAGER ||
-             mState == STATE_OPEN_DIRECTORY);
-  MOZ_ASSERT(QuotaManager::Get());
+  MOZ_DIAGNOSTIC_ASSERT(mState == STATE_CREATE_QUOTA_MANAGER ||
+                        mState == STATE_OPEN_DIRECTORY);
+  MOZ_DIAGNOSTIC_ASSERT(QuotaManager::Get());
 
   // QuotaManager::OpenDirectory() will hold a reference to us as
   // a listener.  We will then get DirectoryLockAcquired() on the owning
@@ -272,8 +270,8 @@ void
 Context::QuotaInitRunnable::DirectoryLockAcquired(DirectoryLock* aLock)
 {
   NS_ASSERT_OWNINGTHREAD(QuotaInitRunnable);
-  MOZ_ASSERT(mState == STATE_WAIT_FOR_DIRECTORY_LOCK);
-  MOZ_ASSERT(!mDirectoryLock);
+  MOZ_DIAGNOSTIC_ASSERT(mState == STATE_WAIT_FOR_DIRECTORY_LOCK);
+  MOZ_DIAGNOSTIC_ASSERT(!mDirectoryLock);
 
   mDirectoryLock = aLock;
 
@@ -283,7 +281,7 @@ Context::QuotaInitRunnable::DirectoryLockAcquired(DirectoryLock* aLock)
   }
 
   QuotaManager* qm = QuotaManager::Get();
-  MOZ_ASSERT(qm);
+  MOZ_DIAGNOSTIC_ASSERT(qm);
 
   mState = STATE_ENSURE_ORIGIN_INITIALIZED;
   nsresult rv = qm->IOThread()->Dispatch(this, nsIThread::DISPATCH_NORMAL);
@@ -297,8 +295,8 @@ void
 Context::QuotaInitRunnable::DirectoryLockFailed()
 {
   NS_ASSERT_OWNINGTHREAD(QuotaInitRunnable);
-  MOZ_ASSERT(mState == STATE_WAIT_FOR_DIRECTORY_LOCK);
-  MOZ_ASSERT(!mDirectoryLock);
+  MOZ_DIAGNOSTIC_ASSERT(mState == STATE_WAIT_FOR_DIRECTORY_LOCK);
+  MOZ_DIAGNOSTIC_ASSERT(!mDirectoryLock);
 
   NS_WARNING("Failed to acquire a directory lock!");
 
@@ -377,6 +375,7 @@ Context::QuotaInitRunnable::Run()
       RefPtr<ManagerId> managerId = mManager->GetManagerId();
       nsCOMPtr<nsIPrincipal> principal = managerId->Principal();
       nsresult rv = QuotaManager::GetInfoFromPrincipal(principal,
+                                                       &mQuotaInfo.mSuffix,
                                                        &mQuotaInfo.mGroup,
                                                        &mQuotaInfo.mOrigin,
                                                        &mQuotaInfo.mIsApp);
@@ -386,8 +385,8 @@ Context::QuotaInitRunnable::Run()
       }
 
       mState = STATE_CREATE_QUOTA_MANAGER;
-      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
-        mInitiatingThread->Dispatch(this, nsIThread::DISPATCH_NORMAL)));
+      MOZ_ALWAYS_SUCCEEDS(
+        mInitiatingThread->Dispatch(this, nsIThread::DISPATCH_NORMAL));
       break;
     }
     // ----------------------------------
@@ -433,8 +432,9 @@ Context::QuotaInitRunnable::Run()
       }
 
       QuotaManager* qm = QuotaManager::Get();
-      MOZ_ASSERT(qm);
+      MOZ_DIAGNOSTIC_ASSERT(qm);
       nsresult rv = qm->EnsureOriginIsInitialized(PERSISTENCE_TYPE_DEFAULT,
+                                                  mQuotaInfo.mSuffix,
                                                   mQuotaInfo.mGroup,
                                                   mQuotaInfo.mOrigin,
                                                   mQuotaInfo.mIsApp,
@@ -446,8 +446,8 @@ Context::QuotaInitRunnable::Run()
 
       mState = STATE_RUN_ON_TARGET;
 
-      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
-        mTarget->Dispatch(this, nsIThread::DISPATCH_NORMAL)));
+      MOZ_ALWAYS_SUCCEEDS(
+        mTarget->Dispatch(this, nsIThread::DISPATCH_NORMAL));
       break;
     }
     // -------------------
@@ -460,7 +460,7 @@ Context::QuotaInitRunnable::Run()
       // Execute the provided initialization Action.  The Action must Resolve()
       // before returning.
       mInitAction->RunOnTarget(resolver, mQuotaInfo, mData);
-      MOZ_ASSERT(resolver->Resolved());
+      MOZ_DIAGNOSTIC_ASSERT(resolver->Resolved());
 
       mData = nullptr;
 
@@ -468,7 +468,7 @@ Context::QuotaInitRunnable::Run()
       // the marker file.  If it wasn't opened successfully, then no need to
       // create a marker file anyway.
       if (NS_SUCCEEDED(resolver->Result())) {
-        MOZ_ALWAYS_TRUE(NS_SUCCEEDED(CreateMarkerFile(mQuotaInfo)));
+        MOZ_ALWAYS_SUCCEEDS(CreateMarkerFile(mQuotaInfo));
       }
 
       break;
@@ -521,18 +521,18 @@ public:
     , mResult(NS_OK)
     , mExecutingRunOnTarget(false)
   {
-    MOZ_ASSERT(mContext);
+    MOZ_DIAGNOSTIC_ASSERT(mContext);
     // mData may be nullptr
-    MOZ_ASSERT(mTarget);
-    MOZ_ASSERT(mAction);
+    MOZ_DIAGNOSTIC_ASSERT(mTarget);
+    MOZ_DIAGNOSTIC_ASSERT(mAction);
     // mQuotaInfo.mDir may be nullptr if QuotaInitRunnable failed
-    MOZ_ASSERT(mInitiatingThread);
+    MOZ_DIAGNOSTIC_ASSERT(mInitiatingThread);
   }
 
   nsresult Dispatch()
   {
     NS_ASSERT_OWNINGTHREAD(ActionRunnable);
-    MOZ_ASSERT(mState == STATE_INIT);
+    MOZ_DIAGNOSTIC_ASSERT(mState == STATE_INIT);
 
     mState = STATE_RUN_ON_TARGET;
     nsresult rv = mTarget->Dispatch(this, nsIEventTarget::DISPATCH_NORMAL);
@@ -560,7 +560,7 @@ public:
   virtual void Resolve(nsresult aRv) override
   {
     MOZ_ASSERT(mTarget == NS_GetCurrentThread());
-    MOZ_ASSERT(mState == STATE_RUNNING);
+    MOZ_DIAGNOSTIC_ASSERT(mState == STATE_RUNNING);
 
     mResult = aRv;
 
@@ -579,23 +579,23 @@ public:
 
     // Otherwise we are in an asynchronous resolve.  And must perform a thread
     // bounce to run on the target thread again.
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
-      mTarget->Dispatch(this, nsIThread::DISPATCH_NORMAL)));
+    MOZ_ALWAYS_SUCCEEDS(
+      mTarget->Dispatch(this, nsIThread::DISPATCH_NORMAL));
   }
 
 private:
   ~ActionRunnable()
   {
-    MOZ_ASSERT(mState == STATE_COMPLETE);
-    MOZ_ASSERT(!mContext);
-    MOZ_ASSERT(!mAction);
+    MOZ_DIAGNOSTIC_ASSERT(mState == STATE_COMPLETE);
+    MOZ_DIAGNOSTIC_ASSERT(!mContext);
+    MOZ_DIAGNOSTIC_ASSERT(!mAction);
   }
 
   void Clear()
   {
     NS_ASSERT_OWNINGTHREAD(ActionRunnable);
-    MOZ_ASSERT(mContext);
-    MOZ_ASSERT(mAction);
+    MOZ_DIAGNOSTIC_ASSERT(mContext);
+    MOZ_DIAGNOSTIC_ASSERT(mAction);
     mContext->RemoveActivity(this);
     mContext = nullptr;
     mAction = nullptr;
@@ -671,7 +671,7 @@ Context::ActionRunnable::Run()
     case STATE_RUN_ON_TARGET:
     {
       MOZ_ASSERT(NS_GetCurrentThread() == mTarget);
-      MOZ_ASSERT(!mExecutingRunOnTarget);
+      MOZ_DIAGNOSTIC_ASSERT(!mExecutingRunOnTarget);
 
       // Note that we are calling RunOnTarget().  This lets us detect
       // if Resolve() is called synchronously.
@@ -704,8 +704,8 @@ Context::ActionRunnable::Run()
       mState = STATE_COMPLETING;
       // Shutdown must be delayed until all Contexts are destroyed.  Crash
       // for this invariant violation.
-      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
-        mInitiatingThread->Dispatch(this, nsIThread::DISPATCH_NORMAL)));
+      MOZ_ALWAYS_SUCCEEDS(
+        mInitiatingThread->Dispatch(this, nsIThread::DISPATCH_NORMAL));
       break;
     }
     // -------------------
@@ -740,9 +740,9 @@ Context::ThreadsafeHandle::AllowToClose()
   // Dispatch is guaranteed to succeed here because we block shutdown until
   // all Contexts have been destroyed.
   nsCOMPtr<nsIRunnable> runnable =
-    NS_NewRunnableMethod(this, &ThreadsafeHandle::AllowToCloseOnOwningThread);
-  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
-    mOwningThread->Dispatch(runnable, nsIThread::DISPATCH_NORMAL)));
+    NewRunnableMethod(this, &ThreadsafeHandle::AllowToCloseOnOwningThread);
+  MOZ_ALWAYS_SUCCEEDS(
+    mOwningThread->Dispatch(runnable, nsIThread::DISPATCH_NORMAL));
 }
 
 void
@@ -756,9 +756,9 @@ Context::ThreadsafeHandle::InvalidateAndAllowToClose()
   // Dispatch is guaranteed to succeed here because we block shutdown until
   // all Contexts have been destroyed.
   nsCOMPtr<nsIRunnable> runnable =
-    NS_NewRunnableMethod(this, &ThreadsafeHandle::InvalidateAndAllowToCloseOnOwningThread);
-  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
-    mOwningThread->Dispatch(runnable, nsIThread::DISPATCH_NORMAL)));
+    NewRunnableMethod(this, &ThreadsafeHandle::InvalidateAndAllowToCloseOnOwningThread);
+  MOZ_ALWAYS_SUCCEEDS(
+    mOwningThread->Dispatch(runnable, nsIThread::DISPATCH_NORMAL));
 }
 
 Context::ThreadsafeHandle::ThreadsafeHandle(Context* aContext)
@@ -780,10 +780,7 @@ Context::ThreadsafeHandle::~ThreadsafeHandle()
 
   // Dispatch is guaranteed to succeed here because we block shutdown until
   // all Contexts have been destroyed.
-  nsCOMPtr<nsIRunnable> runnable =
-    NS_NewNonOwningRunnableMethod(mStrongRef.forget().take(), &Context::Release);
-  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
-    mOwningThread->Dispatch(runnable, nsIThread::DISPATCH_NORMAL)));
+  NS_ProxyRelease(mOwningThread, mStrongRef.forget());
 }
 
 void
@@ -821,16 +818,16 @@ Context::ThreadsafeHandle::InvalidateAndAllowToCloseOnOwningThread()
   }
   // We should synchronously have AllowToCloseOnOwningThread called when
   // the Context is canceled.
-  MOZ_ASSERT(!mStrongRef);
+  MOZ_DIAGNOSTIC_ASSERT(!mStrongRef);
 }
 
 void
 Context::ThreadsafeHandle::ContextDestroyed(Context* aContext)
 {
   MOZ_ASSERT(mOwningThread == NS_GetCurrentThread());
-  MOZ_ASSERT(!mStrongRef);
-  MOZ_ASSERT(mWeakRef);
-  MOZ_ASSERT(mWeakRef == aContext);
+  MOZ_DIAGNOSTIC_ASSERT(!mStrongRef);
+  MOZ_DIAGNOSTIC_ASSERT(mWeakRef);
+  MOZ_DIAGNOSTIC_ASSERT(mWeakRef == aContext);
   mWeakRef = nullptr;
 }
 
@@ -852,17 +849,17 @@ Context::Context(Manager* aManager, nsIThread* aTarget, Action* aInitAction)
   , mOrphanedData(false)
   , mInitAction(aInitAction)
 {
-  MOZ_ASSERT(mManager);
-  MOZ_ASSERT(mTarget);
+  MOZ_DIAGNOSTIC_ASSERT(mManager);
+  MOZ_DIAGNOSTIC_ASSERT(mTarget);
 }
 
 void
 Context::Dispatch(Action* aAction)
 {
   NS_ASSERT_OWNINGTHREAD(Context);
-  MOZ_ASSERT(aAction);
+  MOZ_DIAGNOSTIC_ASSERT(aAction);
 
-  MOZ_ASSERT(mState != STATE_CONTEXT_CANCELED);
+  MOZ_DIAGNOSTIC_ASSERT(mState != STATE_CONTEXT_CANCELED);
   if (mState == STATE_CONTEXT_CANCELED) {
     return;
   } else if (mState == STATE_CONTEXT_INIT ||
@@ -872,7 +869,7 @@ Context::Dispatch(Action* aAction)
     return;
   }
 
-  MOZ_ASSERT(STATE_CONTEXT_READY);
+  MOZ_DIAGNOSTIC_ASSERT(mState == STATE_CONTEXT_READY);
   DispatchAction(aAction);
 }
 
@@ -884,7 +881,7 @@ Context::CancelAll()
   // In PREINIT state we have not dispatch the init action yet.  Just
   // forget it.
   if (mState == STATE_CONTEXT_PREINIT) {
-    MOZ_ASSERT(!mInitRunnable);
+    MOZ_DIAGNOSTIC_ASSERT(!mInitRunnable);
     mInitAction = nullptr;
 
   // In INIT state we have dispatched the runnable, but not received the
@@ -954,8 +951,8 @@ Context::CancelForCacheId(CacheId aCacheId)
 Context::~Context()
 {
   NS_ASSERT_OWNINGTHREAD(Context);
-  MOZ_ASSERT(mManager);
-  MOZ_ASSERT(!mData);
+  MOZ_DIAGNOSTIC_ASSERT(mManager);
+  MOZ_DIAGNOSTIC_ASSERT(!mData);
 
   if (mThreadsafeHandle) {
     mThreadsafeHandle->ContextDestroyed(this);
@@ -965,7 +962,7 @@ Context::~Context()
   mManager->RemoveContext(this);
 
   if (mQuotaInfo.mDir && !mOrphanedData) {
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(DeleteMarkerFile(mQuotaInfo)));
+    MOZ_ALWAYS_SUCCEEDS(DeleteMarkerFile(mQuotaInfo));
   }
 
   if (mNextContext) {
@@ -994,13 +991,13 @@ Context::Start()
   // Previous context closing delayed our start, but then we were canceled.
   // In this case, just do nothing here.
   if (mState == STATE_CONTEXT_CANCELED) {
-    MOZ_ASSERT(!mInitRunnable);
-    MOZ_ASSERT(!mInitAction);
+    MOZ_DIAGNOSTIC_ASSERT(!mInitRunnable);
+    MOZ_DIAGNOSTIC_ASSERT(!mInitAction);
     return;
   }
 
-  MOZ_ASSERT(mState == STATE_CONTEXT_PREINIT);
-  MOZ_ASSERT(!mInitRunnable);
+  MOZ_DIAGNOSTIC_ASSERT(mState == STATE_CONTEXT_PREINIT);
+  MOZ_DIAGNOSTIC_ASSERT(!mInitRunnable);
 
   mInitRunnable = new QuotaInitRunnable(this, mManager, mData, mTarget,
                                         mInitAction);
@@ -1044,14 +1041,14 @@ Context::OnQuotaInit(nsresult aRv, const QuotaInfo& aQuotaInfo,
 {
   NS_ASSERT_OWNINGTHREAD(Context);
 
-  MOZ_ASSERT(mInitRunnable);
+  MOZ_DIAGNOSTIC_ASSERT(mInitRunnable);
   mInitRunnable = nullptr;
 
   mQuotaInfo = aQuotaInfo;
 
   // Always save the directory lock to ensure QuotaManager does not shutdown
   // before the Context has gone away.
-  MOZ_ASSERT(!mDirectoryLock);
+  MOZ_DIAGNOSTIC_ASSERT(!mDirectoryLock);
   mDirectoryLock = aDirectoryLock;
 
   // If we opening the context failed, but we were not explicitly canceled,
@@ -1072,7 +1069,7 @@ Context::OnQuotaInit(nsresult aRv, const QuotaInfo& aQuotaInfo,
     return;
   }
 
-  MOZ_ASSERT(mState == STATE_CONTEXT_INIT);
+  MOZ_DIAGNOSTIC_ASSERT(mState == STATE_CONTEXT_INIT);
   mState = STATE_CONTEXT_READY;
 
   for (uint32_t i = 0; i < mPendingActions.Length(); ++i) {
@@ -1085,7 +1082,7 @@ void
 Context::AddActivity(Activity* aActivity)
 {
   NS_ASSERT_OWNINGTHREAD(Context);
-  MOZ_ASSERT(aActivity);
+  MOZ_DIAGNOSTIC_ASSERT(aActivity);
   MOZ_ASSERT(!mActivityList.Contains(aActivity));
   mActivityList.AppendElement(aActivity);
 }
@@ -1094,7 +1091,7 @@ void
 Context::RemoveActivity(Activity* aActivity)
 {
   NS_ASSERT_OWNINGTHREAD(Context);
-  MOZ_ASSERT(aActivity);
+  MOZ_DIAGNOSTIC_ASSERT(aActivity);
   MOZ_ALWAYS_TRUE(mActivityList.RemoveElement(aActivity));
   MOZ_ASSERT(!mActivityList.Contains(aActivity));
 }
@@ -1122,8 +1119,8 @@ void
 Context::SetNextContext(Context* aNextContext)
 {
   NS_ASSERT_OWNINGTHREAD(Context);
-  MOZ_ASSERT(aNextContext);
-  MOZ_ASSERT(!mNextContext);
+  MOZ_DIAGNOSTIC_ASSERT(aNextContext);
+  MOZ_DIAGNOSTIC_ASSERT(!mNextContext);
   mNextContext = aNextContext;
 }
 
@@ -1131,7 +1128,7 @@ void
 Context::DoomTargetData()
 {
   NS_ASSERT_OWNINGTHREAD(Context);
-  MOZ_ASSERT(mData);
+  MOZ_DIAGNOSTIC_ASSERT(mData);
 
   // We are about to drop our reference to the Data.  We need to ensure that
   // the ~Context() destructor does not run until contents of Data have been
@@ -1144,7 +1141,7 @@ Context::DoomTargetData()
   RefPtr<Action> action = new NullAction();
   DispatchAction(action, true /* doomed data */);
 
-  MOZ_ASSERT(!mData);
+  MOZ_DIAGNOSTIC_ASSERT(!mData);
 }
 
 } // namespace cache

@@ -19,10 +19,11 @@
 #include "nsIContent.h"
 #include "nsIDocument.h"
 #include "nsIDocumentEncoder.h"
+#include "nsIParserService.h"
 #include "nsNameSpaceManager.h"
 #include "nsTextFragment.h"
 #include "nsString.h"
-#include "prprf.h"
+#include "mozilla/Sprintf.h"
 #include "nsUnicharUtils.h"
 #include "nsCRT.h"
 #include "nsContentUtils.h"
@@ -72,7 +73,7 @@ nsXMLContentSerializer::~nsXMLContentSerializer()
 
 NS_IMPL_ISUPPORTS(nsXMLContentSerializer, nsIContentSerializer)
 
-NS_IMETHODIMP 
+NS_IMETHODIMP
 nsXMLContentSerializer::Init(uint32_t aFlags, uint32_t aWrapColumn,
                              const char* aCharSet, bool aIsCopying,
                              bool aRewriteEncodingDeclaration)
@@ -151,7 +152,7 @@ nsXMLContentSerializer::AppendTextData(nsIContent* aNode,
     // error.
     return NS_OK;
   }
-    
+
   if (frag->Is2b()) {
     const char16_t *strStart = frag->Get2b() + aStartOffset;
     if (aTranslateEntities) {
@@ -177,7 +178,7 @@ nsXMLContentSerializer::AppendTextData(nsIContent* aNode,
   return NS_OK;
 }
 
-NS_IMETHODIMP 
+NS_IMETHODIMP
 nsXMLContentSerializer::AppendText(nsIContent* aText,
                                    int32_t aStartOffset,
                                    int32_t aEndOffset,
@@ -208,7 +209,7 @@ nsXMLContentSerializer::AppendText(nsIContent* aText,
   return NS_OK;
 }
 
-NS_IMETHODIMP 
+NS_IMETHODIMP
 nsXMLContentSerializer::AppendCDATASection(nsIContent* aCDATASection,
                                            int32_t aStartOffset,
                                            int32_t aEndOffset,
@@ -243,7 +244,7 @@ nsXMLContentSerializer::AppendCDATASection(nsIContent* aCDATASection,
   return NS_OK;
 }
 
-NS_IMETHODIMP 
+NS_IMETHODIMP
 nsXMLContentSerializer::AppendProcessingInstruction(nsIContent* aPI,
                                                     int32_t aStartOffset,
                                                     int32_t aEndOffset,
@@ -292,7 +293,7 @@ nsXMLContentSerializer::AppendProcessingInstruction(nsIContent* aPI,
   return NS_OK;
 }
 
-NS_IMETHODIMP 
+NS_IMETHODIMP
 nsXMLContentSerializer::AppendComment(nsIContent* aComment,
                                       int32_t aStartOffset,
                                       int32_t aEndOffset,
@@ -349,7 +350,7 @@ nsXMLContentSerializer::AppendComment(nsIContent* aComment,
   return NS_OK;
 }
 
-NS_IMETHODIMP 
+NS_IMETHODIMP
 nsXMLContentSerializer::AppendDoctype(nsIContent* aDocType,
                                       nsAString& aStr)
 {
@@ -410,13 +411,13 @@ nsXMLContentSerializer::AppendDoctype(nsIContent* aDocType,
     NS_ENSURE_TRUE(AppendToString(systemId, aStr), NS_ERROR_OUT_OF_MEMORY);
     NS_ENSURE_TRUE(AppendToString(quote, aStr), NS_ERROR_OUT_OF_MEMORY);
   }
-  
+
   if (!internalSubset.IsEmpty()) {
     NS_ENSURE_TRUE(AppendToString(NS_LITERAL_STRING(" ["), aStr), NS_ERROR_OUT_OF_MEMORY);
     NS_ENSURE_TRUE(AppendToString(internalSubset, aStr), NS_ERROR_OUT_OF_MEMORY);
     NS_ENSURE_TRUE(AppendToString(char16_t(']'), aStr), NS_ERROR_OUT_OF_MEMORY);
   }
-    
+
   NS_ENSURE_TRUE(AppendToString(kGreaterThan, aStr), NS_ERROR_OUT_OF_MEMORY);
   MaybeFlagNewlineForRootNode(aDocType);
 
@@ -515,7 +516,7 @@ nsXMLContentSerializer::ConfirmPrefix(nsAString& aPrefix,
         break;
       }
 
-      haveSeenOurPrefix = true;      
+      haveSeenOurPrefix = true;
 
       // If they don't, and either:
       // 1) We have a prefix (so we'd be redeclaring this prefix to point to a
@@ -543,7 +544,7 @@ nsXMLContentSerializer::ConfirmPrefix(nsAString& aPrefix,
         continue;
       }
     }
-    
+
     // If we've found a URI match, then record the first one
     if (!uriMatch && aURI.Equals(decl.mURI)) {
       // Need to check that decl->mPrefix is not declared anywhere closer to
@@ -553,13 +554,13 @@ nsXMLContentSerializer::ConfirmPrefix(nsAString& aPrefix,
       for (index2 = count-1; index2 > index && prefixOK; --index2) {
         prefixOK = (mNameSpaceStack[index2].mPrefix != decl.mPrefix);
       }
-      
+
       if (prefixOK) {
         uriMatch = true;
         closestURIMatch.Assign(decl.mPrefix);
       }
     }
-    
+
     --index;
   }
 
@@ -569,7 +570,7 @@ nsXMLContentSerializer::ConfirmPrefix(nsAString& aPrefix,
   // 2) There is nothing on the namespace stack that has aPrefix as the prefix
   //    and a _different_ URI, except for the case aPrefix.IsEmpty (and
   //    possible default namespaces on ancestors)
-  
+
   // So if uriMatch is set it's OK to use the closestURIMatch prefix.  The one
   // exception is when closestURIMatch is actually empty (default namespace
   // decl) and we must have a prefix.
@@ -577,7 +578,7 @@ nsXMLContentSerializer::ConfirmPrefix(nsAString& aPrefix,
     aPrefix.Assign(closestURIMatch);
     return false;
   }
-  
+
   if (aPrefix.IsEmpty()) {
     // At this point, aPrefix is empty (which means we never had a prefix to
     // start with).  If we must have a prefix, just generate a new prefix and
@@ -607,7 +608,7 @@ nsXMLContentSerializer::GenerateNewPrefix(nsAString& aPrefix)
 {
   aPrefix.Assign('a');
   char buf[128];
-  PR_snprintf(buf, sizeof(buf), "%d", mPrefixIndex++);
+  SprintfLiteral(buf, "%d", mPrefixIndex++);
   AppendASCIItoUTF16(buf, aPrefix);
 }
 
@@ -653,30 +654,24 @@ nsXMLContentSerializer::SerializeAttr(const nsAString& aPrefix,
     // See http://www.w3.org/TR/REC-html40/appendix/notes.html#h-B.3.2.2 for
     // the standard on character entity references in values.  We also have to
     // make sure to escape any '&' characters.
-    
+
     bool bIncludesSingle = false;
     bool bIncludesDouble = false;
     nsAString::const_iterator iCurr, iEnd;
-    uint32_t uiSize, i;
     aValue.BeginReading(iCurr);
     aValue.EndReading(iEnd);
-    for ( ; iCurr != iEnd; iCurr.advance(uiSize) ) {
-      const char16_t * buf = iCurr.get();
-      uiSize = iCurr.size_forward();
-      for ( i = 0; i < uiSize; i++, buf++ ) {
-        if ( *buf == char16_t('\'') )
-        {
-          bIncludesSingle = true;
-          if ( bIncludesDouble ) break;
+    for ( ; iCurr != iEnd; ++iCurr) {
+      if (*iCurr == char16_t('\'')) {
+        bIncludesSingle = true;
+        if (bIncludesDouble) {
+          break;
         }
-        else if ( *buf == char16_t('"') )
-        {
-          bIncludesDouble = true;
-          if ( bIncludesSingle ) break;
+      } else if (*iCurr == char16_t('"')) {
+        bIncludesDouble = true;
+        if (bIncludesSingle) {
+          break;
         }
       }
-      // if both have been found we don't need to search further
-      if ( bIncludesDouble && bIncludesSingle ) break;
     }
 
     // Delimiter and escaping is according to the following table
@@ -685,7 +680,7 @@ nsXMLContentSerializer::SerializeAttr(const nsAString& aPrefix,
     //    FALSE               TRUE                "               FALSE
     //    TRUE                FALSE               '               FALSE
     //    TRUE                TRUE                "               TRUE
-    char16_t cDelimiter = 
+    char16_t cDelimiter =
         (bIncludesDouble && !bIncludesSingle) ? char16_t('\'') : char16_t('"');
     NS_ENSURE_TRUE(attrString.Append(char16_t('='), mozilla::fallible), false);
     NS_ENSURE_TRUE(attrString.Append(cDelimiter, mozilla::fallible), false);
@@ -715,7 +710,7 @@ nsXMLContentSerializer::SerializeAttr(const nsAString& aPrefix,
   return true;
 }
 
-uint32_t 
+uint32_t
 nsXMLContentSerializer::ScanNamespaceDeclarations(nsIContent* aContent,
                                                   nsIContent *aOriginalElement,
                                                   const nsAString& aTagNamespaceURI)
@@ -728,11 +723,13 @@ nsXMLContentSerializer::ScanNamespaceDeclarations(nsIContent* aContent,
   // First scan for namespace declarations, pushing each on the stack
   uint32_t skipAttr = count;
   for (index = 0; index < count; index++) {
-    
-    const nsAttrName* name = aContent->GetAttrNameAt(index);
+
+    const BorrowedAttrInfo info = aContent->GetAttrInfoAt(index);
+    const nsAttrName* name = info.mName;
+
     int32_t namespaceID = name->NamespaceID();
     nsIAtom *attrName = name->LocalName();
-    
+
     if (namespaceID == kNameSpaceID_XMLNS ||
         // Also push on the stack attrs named "xmlns" in the null
         // namespace... because once we serialize those out they'll look like
@@ -741,7 +738,7 @@ nsXMLContentSerializer::ScanNamespaceDeclarations(nsIContent* aContent,
         // in the xmlns namespace?
         (namespaceID == kNameSpaceID_None &&
          attrName == nsGkAtoms::xmlns)) {
-      aContent->GetAttr(namespaceID, attrName, uriStr);
+      info.mValue->ToString(uriStr);
 
       if (!name->GetPrefix()) {
         if (aTagNamespaceURI.IsEmpty() && !uriStr.IsEmpty()) {
@@ -864,14 +861,14 @@ nsXMLContentSerializer::SerializeAttributes(nsIContent* aContent,
       nsContentUtils::NameSpaceManager()->GetNameSpaceURI(namespaceID, uriStr);
       addNSAttr = ConfirmPrefix(prefixStr, uriStr, aOriginalElement, true);
     }
-    
+
     aContent->GetAttr(namespaceID, attrName, valueStr);
 
     nsDependentAtomString nameStr(attrName);
     bool isJS = IsJavaScript(aContent, attrName, namespaceID, valueStr);
 
     NS_ENSURE_TRUE(SerializeAttr(prefixStr, nameStr, valueStr, aStr, !isJS), false);
-    
+
     if (addNSAttr) {
       NS_ASSERTION(!prefixStr.IsEmpty(),
                    "Namespaced attributes must have a prefix");
@@ -883,7 +880,7 @@ nsXMLContentSerializer::SerializeAttributes(nsIContent* aContent,
   return true;
 }
 
-NS_IMETHODIMP 
+NS_IMETHODIMP
 nsXMLContentSerializer::AppendElementStart(Element* aElement,
                                            Element* aOriginalElement,
                                            nsAString& aStr)
@@ -895,6 +892,10 @@ nsXMLContentSerializer::AppendElementStart(Element* aElement,
   bool forceFormat = false;
   nsresult rv = NS_OK;
   if (!CheckElementStart(content, forceFormat, aStr, rv)) {
+    // When we go to AppendElementEnd for this element, we're going to
+    // MaybeLeaveFromPreContent().  So make sure to MaybeEnterInPreContent()
+    // now, so our PreLevel() doesn't get confused.
+    MaybeEnterInPreContent(content);
     return rv;
   }
 
@@ -960,8 +961,7 @@ nsXMLContentSerializer::AppendElementStart(Element* aElement,
                                      name, aStr, skipAttr, addNSAttr),
                  NS_ERROR_OUT_OF_MEMORY);
 
-  NS_ENSURE_TRUE(AppendEndOfElementStart(aOriginalElement, name,
-                                         content->GetNameSpaceID(), aStr),
+  NS_ENSURE_TRUE(AppendEndOfElementStart(aElement, aOriginalElement, aStr),
                  NS_ERROR_OUT_OF_MEMORY);
 
   if ((mDoFormat || forceFormat) && !mDoRaw && !PreLevel()
@@ -974,22 +974,59 @@ nsXMLContentSerializer::AppendElementStart(Element* aElement,
   return NS_OK;
 }
 
-bool
-nsXMLContentSerializer::AppendEndOfElementStart(nsIContent *aOriginalElement,
-                                                nsIAtom * aName,
-                                                int32_t aNamespaceID,
-                                                nsAString& aStr)
+// aElement is the actual element we're outputting.  aOriginalElement is the one
+// in the original DOM, which is the one we have to test for kids.
+static bool
+ElementNeedsSeparateEndTag(Element* aElement, Element* aOriginalElement)
 {
-  // We don't output a separate end tag for empty elements
-  if (!aOriginalElement->GetChildCount()) {
-    return AppendToString(NS_LITERAL_STRING("/>"), aStr);
+  if (aOriginalElement->GetChildCount()) {
+    // We have kids, so we need a separate end tag.  This needs to be checked on
+    // aOriginalElement because that's the one that's actually in the DOM and
+    // might have kids.
+    return true;
   }
-  else {
-    return AppendToString(kGreaterThan, aStr);
+
+  if (!aElement->IsHTMLElement()) {
+    // Empty non-HTML elements can just skip a separate end tag.
+    return false;
   }
+
+  // HTML container tags should have a separate end tag even if empty, per spec.
+  // See
+  // https://w3c.github.io/DOM-Parsing/#dfn-concept-xml-serialization-algorithm
+  bool isHTMLContainer = true; // Default in case we get no parser service.
+  nsIParserService* parserService = nsContentUtils::GetParserService();
+  if (parserService) {
+    nsIAtom* localName = aElement->NodeInfo()->NameAtom();
+    parserService->IsContainer(
+      parserService->HTMLCaseSensitiveAtomTagToId(localName),
+      isHTMLContainer);
+  }
+  return isHTMLContainer;
 }
 
-NS_IMETHODIMP 
+bool
+nsXMLContentSerializer::AppendEndOfElementStart(Element* aElement,
+                                                Element* aOriginalElement,
+                                                nsAString& aStr)
+{
+  if (ElementNeedsSeparateEndTag(aElement, aOriginalElement)) {
+    return AppendToString(kGreaterThan, aStr);
+  }
+
+  // We don't need a separate end tag.  For HTML elements (which at this point
+  // must be non-containers), append a space before the '/', per spec.  See
+  // https://w3c.github.io/DOM-Parsing/#dfn-concept-xml-serialization-algorithm
+  if (aOriginalElement->IsHTMLElement()) {
+    if (!AppendToString(kSpace, aStr)) {
+      return false;
+    }
+  }
+
+  return AppendToString(NS_LITERAL_STRING("/>"), aStr);
+}
+
+NS_IMETHODIMP
 nsXMLContentSerializer::AppendElementEnd(Element* aElement,
                                          nsAString& aStr)
 {
@@ -998,7 +1035,7 @@ nsXMLContentSerializer::AppendElementEnd(Element* aElement,
   nsIContent* content = aElement;
 
   bool forceFormat = false, outputElementEnd;
-  outputElementEnd = CheckElementEnd(content, forceFormat, aStr);
+  outputElementEnd = CheckElementEnd(aElement, forceFormat, aStr);
 
   nsIAtom *name = content->NodeInfo()->NameAtom();
 
@@ -1007,13 +1044,16 @@ nsXMLContentSerializer::AppendElementEnd(Element* aElement,
   }
 
   if (!outputElementEnd) {
+    // Keep this in sync with the cleanup at the end of this method.
     PopNameSpaceDeclsFor(aElement);
+    MaybeLeaveFromPreContent(content);
     MaybeFlagNewlineForRootNode(aElement);
+    AfterElementEnd(content, aStr);
     return NS_OK;
   }
 
   nsAutoString tagPrefix, tagLocalName, tagNamespaceURI;
-  
+
   aElement->NodeInfo()->GetPrefix(tagPrefix);
   aElement->NodeInfo()->GetName(tagLocalName);
   aElement->NodeInfo()->GetNamespaceURI(tagNamespaceURI);
@@ -1052,6 +1092,7 @@ nsXMLContentSerializer::AppendElementEnd(Element* aElement,
   NS_ENSURE_TRUE(AppendToString(tagLocalName, aStr), NS_ERROR_OUT_OF_MEMORY);
   NS_ENSURE_TRUE(AppendToString(kGreaterThan, aStr), NS_ERROR_OUT_OF_MEMORY);
 
+  // Keep what follows in sync with the cleanup in the !outputElementEnd case.
   PopNameSpaceDeclsFor(aElement);
 
   MaybeLeaveFromPreContent(content);
@@ -1084,7 +1125,7 @@ nsXMLContentSerializer::AppendDocumentStart(nsIDocument *aDocument,
   NS_NAMED_LITERAL_STRING(endQuote, "\"");
 
   aStr += NS_LITERAL_STRING("<?xml version=\"") + version + endQuote;
-  
+
   if (!mCharset.IsEmpty()) {
     aStr += NS_LITERAL_STRING(" encoding=\"") +
       NS_ConvertASCIItoUTF16(mCharset) + endQuote;
@@ -1119,13 +1160,17 @@ nsXMLContentSerializer::CheckElementStart(nsIContent * aContent,
 }
 
 bool
-nsXMLContentSerializer::CheckElementEnd(nsIContent * aContent,
-                                        bool & aForceFormat,
+nsXMLContentSerializer::CheckElementEnd(Element* aElement,
+                                        bool& aForceFormat,
                                         nsAString& aStr)
 {
   // We don't output a separate end tag for empty element
   aForceFormat = false;
-  return aContent->GetChildCount() > 0;
+
+  // XXXbz this is a bit messed up, but by now we don't have our fixed-up
+  // version of aElement anymore.  Let's hope fixup never changes the localName
+  // or namespace...
+  return ElementNeedsSeparateEndTag(aElement, aElement);
 }
 
 bool
@@ -1152,24 +1197,39 @@ nsXMLContentSerializer::AppendToString(const nsAString& aStr,
 
 
 static const uint16_t kGTVal = 62;
-static const char* kEntities[] = {
-  "", "", "", "", "", "", "", "", "", "",
-  "", "", "", "", "", "", "", "", "", "",
-  "", "", "", "", "", "", "", "", "", "",
-  "", "", "", "", "", "", "", "", "&amp;", "",
-  "", "", "", "", "", "", "", "", "", "",
-  "", "", "", "", "", "", "", "", "", "",
-  "&lt;", "", "&gt;"
+
+#define _ 0
+
+// This table indexes into kEntityStrings[].
+static const uint8_t kEntities[] = {
+  _, _, _, _, _, _, _, _, _, _,
+  _, _, _, _, _, _, _, _, _, _,
+  _, _, _, _, _, _, _, _, _, _,
+  _, _, _, _, _, _, _, _, 2, _,
+  _, _, _, _, _, _, _, _, _, _,
+  _, _, _, _, _, _, _, _, _, _,
+  3, _, 4
 };
 
-static const char* kAttrEntities[] = {
-  "", "", "", "", "", "", "", "", "", "",
-  "", "", "", "", "", "", "", "", "", "",
-  "", "", "", "", "", "", "", "", "", "",
-  "", "", "", "", "&quot;", "", "", "", "&amp;", "",
-  "", "", "", "", "", "", "", "", "", "",
-  "", "", "", "", "", "", "", "", "", "",
-  "&lt;", "", "&gt;"
+// This table indexes into kEntityStrings[].
+static const uint8_t kAttrEntities[] = {
+  _, _, _, _, _, _, _, _, _, _,
+  _, _, _, _, _, _, _, _, _, _,
+  _, _, _, _, _, _, _, _, _, _,
+  _, _, _, _, 1, _, _, _, 2, _,
+  _, _, _, _, _, _, _, _, _, _,
+  _, _, _, _, _, _, _, _, _, _,
+  3, _, 4
+};
+
+#undef _
+
+static const char* const kEntityStrings[] = {
+  /* 0 */ nullptr,
+  /* 1 */ "&quot;",
+  /* 2 */ "&amp;",
+  /* 3 */ "&lt;",
+  /* 4 */ "&gt;",
 };
 
 bool
@@ -1183,12 +1243,12 @@ nsXMLContentSerializer::AppendAndTranslateEntities(const nsAString& aStr,
   uint32_t advanceLength = 0;
   nsReadingIterator<char16_t> iter;
 
-  const char **entityTable = mInAttribute ? kAttrEntities : kEntities;
+  const uint8_t* entityTable = mInAttribute ? kAttrEntities : kEntities;
 
   for (aStr.BeginReading(iter);
        iter != done_reading;
        iter.advance(int32_t(advanceLength))) {
-    uint32_t fragmentLength = iter.size_forward();
+    uint32_t fragmentLength = done_reading - iter;
     const char16_t* c = iter.get();
     const char16_t* fragmentStart = c;
     const char16_t* fragmentEnd = c + fragmentLength;
@@ -1199,8 +1259,8 @@ nsXMLContentSerializer::AppendAndTranslateEntities(const nsAString& aStr,
     // needs to be replaced
     for (; c < fragmentEnd; c++, advanceLength++) {
       char16_t val = *c;
-      if ((val <= kGTVal) && (entityTable[val][0] != 0)) {
-        entityText = entityTable[val];
+      if ((val <= kGTVal) && entityTable[val]) {
+        entityText = kEntityStrings[entityTable[val]];
         break;
       }
     }
@@ -1311,19 +1371,19 @@ nsXMLContentSerializer::LineBreakBeforeOpen(int32_t aNamespaceID, nsIAtom* aName
   return mAddSpace;
 }
 
-bool 
+bool
 nsXMLContentSerializer::LineBreakAfterOpen(int32_t aNamespaceID, nsIAtom* aName)
 {
   return false;
 }
 
-bool 
+bool
 nsXMLContentSerializer::LineBreakBeforeClose(int32_t aNamespaceID, nsIAtom* aName)
 {
   return mAddSpace;
 }
 
-bool 
+bool
 nsXMLContentSerializer::LineBreakAfterClose(int32_t aNamespaceID, nsIAtom* aName)
 {
   return false;
@@ -1389,7 +1449,7 @@ nsXMLContentSerializer::AppendFormatedWrapped_WhitespaceSequence(
       case ' ':
       case '\t':
         sawBlankOrTab = true;
-        // no break
+        MOZ_FALLTHROUGH;
       case '\n':
         ++aPos;
         // do not increase mColPos,
@@ -1525,11 +1585,11 @@ nsXMLContentSerializer::AppendWrapped_NonWhitespaceSequence(
     }
     else { // we reach the max column
       if (!thisSequenceStartsAtBeginningOfLine &&
-          (mAddSpace || (!mDoFormat && aSequenceStartAfterAWhiteSpace))) { 
+          (mAddSpace || (!mDoFormat && aSequenceStartAfterAWhiteSpace))) {
           // when !mDoFormat, mAddSpace is not used, mAddSpace is always false
           // so, in the case where mDoWrap && !mDoFormat, if we want to enter in this condition...
 
-        // We can avoid to wrap. We try to add the whole block 
+        // We can avoid to wrap. We try to add the whole block
         // in an empty new line
 
         NS_ENSURE_TRUE(AppendNewLineToString(aOutputStr), false);

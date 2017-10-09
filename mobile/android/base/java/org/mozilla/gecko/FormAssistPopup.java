@@ -91,14 +91,14 @@ public class FormAssistPopup extends RelativeLayout implements GeckoEventListene
 
         setFocusable(false);
 
-        EventDispatcher.getInstance().registerGeckoThreadListener(this,
+        GeckoApp.getEventDispatcher().registerGeckoThreadListener(this,
             "FormAssist:AutoComplete",
             "FormAssist:ValidationMessage",
             "FormAssist:Hide");
     }
 
     void destroy() {
-        EventDispatcher.getInstance().unregisterGeckoThreadListener(this,
+        GeckoApp.getEventDispatcher().unregisterGeckoThreadListener(this,
             "FormAssist:AutoComplete",
             "FormAssist:ValidationMessage",
             "FormAssist:Hide");
@@ -122,10 +122,11 @@ public class FormAssistPopup extends RelativeLayout implements GeckoEventListene
     private void handleAutoCompleteMessage(JSONObject message) throws JSONException  {
         final JSONArray suggestions = message.getJSONArray("suggestions");
         final JSONObject rect = message.getJSONObject("rect");
+        final boolean isEmpty = message.getBoolean("isEmpty");
         ThreadUtils.postToUiThread(new Runnable() {
             @Override
             public void run() {
-                showAutoCompleteSuggestions(suggestions, rect);
+                showAutoCompleteSuggestions(suggestions, rect, isEmpty);
             }
         });
     }
@@ -150,7 +151,15 @@ public class FormAssistPopup extends RelativeLayout implements GeckoEventListene
         });
     }
 
-    private void showAutoCompleteSuggestions(JSONArray suggestions, JSONObject rect) {
+    private void showAutoCompleteSuggestions(JSONArray suggestions, JSONObject rect, boolean isEmpty) {
+        final String inputMethod = InputMethods.getCurrentInputMethod(mContext);
+        if (!isEmpty && sInputMethodBlocklist.contains(inputMethod)) {
+            // Don't display the form auto-complete popup after the user starts typing
+            // to avoid confusing somes IME. See bug 758820 and bug 632744.
+            hide();
+            return;
+        }
+
         if (mAutoCompleteList == null) {
             LayoutInflater inflater = LayoutInflater.from(mContext);
             mAutoCompleteList = (ListView) inflater.inflate(R.layout.autocomplete_list, null);
@@ -198,7 +207,7 @@ public class FormAssistPopup extends RelativeLayout implements GeckoEventListene
 
             addView(mAutoCompleteList);
         }
-        
+
         AutoCompleteListAdapter adapter = new AutoCompleteListAdapter(mContext, R.layout.autocomplete_list_item);
         adapter.populateSuggestionsList(suggestions);
         mAutoCompleteList.setAdapter(adapter);
@@ -378,11 +387,6 @@ public class FormAssistPopup extends RelativeLayout implements GeckoEventListene
         }
     }
 
-    void onInputMethodChanged(String newInputMethod) {
-        boolean blocklisted = sInputMethodBlocklist.contains(newInputMethod);
-        broadcastGeckoEvent("FormAssist:Blocklisted", String.valueOf(blocklisted));
-    }
-
     void onTranslationChanged() {
         ThreadUtils.assertOnUiThread();
         if (!isShown()) {
@@ -405,7 +409,7 @@ public class FormAssistPopup extends RelativeLayout implements GeckoEventListene
     }
 
     private static void broadcastGeckoEvent(String eventName, String eventData) {
-        GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent(eventName, eventData));
+        GeckoAppShell.notifyObservers(eventName, eventData);
     }
 
     private class AutoCompleteListAdapter extends ArrayAdapter<Pair<String, String>> {

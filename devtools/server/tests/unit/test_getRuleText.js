@@ -5,7 +5,7 @@
 
 "use strict";
 
-const {getRuleText} = devtools.require("devtools/server/actors/styles");
+const {getRuleText} = require("devtools/server/actors/styles");
 
 const TEST_DATA = [
   {
@@ -69,8 +69,8 @@ const TEST_DATA = [
     desc: "Multi-lines CSS and multi-line rule",
     input: [
       "/* ",
-       "* some comments",
-       "*/",
+      "* some comments",
+      "*/",
       "",
       "body {",
       "    margin: 0;",

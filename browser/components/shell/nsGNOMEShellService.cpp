@@ -14,7 +14,7 @@
 #include "nsDirectoryServiceDefs.h"
 #include "nsIPrefService.h"
 #include "prenv.h"
-#include "nsStringAPI.h"
+#include "nsString.h"
 #include "nsIGConfService.h"
 #include "nsIGIOService.h"
 #include "nsIGSettingsService.h"
@@ -27,7 +27,7 @@
 #include "nsIImageLoadingContent.h"
 #include "imgIRequest.h"
 #include "imgIContainer.h"
-#include "prprf.h"
+#include "mozilla/Sprintf.h"
 #if defined(MOZ_WIDGET_GTK)
 #include "nsIImageToPixbuf.h"
 #endif
@@ -70,16 +70,16 @@ static const MimeTypeAssociation appTypes[] = {
 // GConf registry key constants
 #define DG_BACKGROUND "/desktop/gnome/background"
 
-static const char kDesktopImageKey[] = DG_BACKGROUND "/picture_filename";
-static const char kDesktopOptionsKey[] = DG_BACKGROUND "/picture_options";
-static const char kDesktopDrawBGKey[] = DG_BACKGROUND "/draw_background";
-static const char kDesktopColorKey[] = DG_BACKGROUND "/primary_color";
+#define kDesktopImageKey DG_BACKGROUND "/picture_filename"
+#define kDesktopOptionsKey DG_BACKGROUND "/picture_options"
+#define kDesktopDrawBGKey DG_BACKGROUND "/draw_background"
+#define kDesktopColorKey DG_BACKGROUND "/primary_color"
 
-static const char kDesktopBGSchema[] = "org.gnome.desktop.background";
-static const char kDesktopImageGSKey[] = "picture-uri";
-static const char kDesktopOptionGSKey[] = "picture-options";
-static const char kDesktopDrawBGGSKey[] = "draw-background";
-static const char kDesktopColorGSKey[] = "primary-color";
+#define kDesktopBGSchema "org.gnome.desktop.background"
+#define kDesktopImageGSKey "picture-uri"
+#define kDesktopOptionGSKey "picture-options"
+#define kDesktopDrawBGGSKey "draw-background"
+#define kDesktopColorGSKey "primary-color"
 
 nsresult
 nsGNOMEShellService::Init()
@@ -117,7 +117,7 @@ nsGNOMEShellService::Init()
   return appPath->GetNativePath(mAppPath);
 }
 
-NS_IMPL_ISUPPORTS(nsGNOMEShellService, nsIShellService)
+NS_IMPL_ISUPPORTS(nsGNOMEShellService, nsIGNOMEShellService, nsIShellService)
 
 bool
 nsGNOMEShellService::GetAppPathFromLauncher()
@@ -201,8 +201,6 @@ nsGNOMEShellService::IsDefaultBrowser(bool aStartupCheck,
                                       bool* aIsDefaultBrowser)
 {
   *aIsDefaultBrowser = false;
-  if (aStartupCheck)
-    mCheckedThisSession = true;
 
   nsCOMPtr<nsIGConfService> gconf = do_GetService(NS_GCONFSERVICE_CONTRACTID);
   nsCOMPtr<nsIGIOService> giovfs = do_GetService(NS_GIOSERVICE_CONTRACTID);
@@ -286,7 +284,7 @@ nsGNOMEShellService::SetDefaultBrowser(bool aClaimAllTypes,
     NS_ENSURE_SUCCESS(rv, rv);
 
     nsString brandShortName;
-    brandBundle->GetStringFromName(MOZ_UTF16("brandShortName"),
+    brandBundle->GetStringFromName(u"brandShortName",
                                    getter_Copies(brandShortName));
 
     // use brandShortName as the application id.
@@ -326,37 +324,6 @@ nsGNOMEShellService::SetDefaultBrowser(bool aClaimAllTypes,
 }
 
 NS_IMETHODIMP
-nsGNOMEShellService::GetShouldCheckDefaultBrowser(bool* aResult)
-{
-  // If we've already checked, the browser has been started and this is a 
-  // new window open, and we don't want to check again.
-  if (mCheckedThisSession) {
-    *aResult = false;
-    return NS_OK;
-  }
-
-  nsresult rv;
-  nsCOMPtr<nsIPrefBranch> prefs(do_GetService(NS_PREFSERVICE_CONTRACTID, &rv));
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
-
-  return prefs->GetBoolPref(PREF_CHECKDEFAULTBROWSER, aResult);
-}
-
-NS_IMETHODIMP
-nsGNOMEShellService::SetShouldCheckDefaultBrowser(bool aShouldCheck)
-{
-  nsresult rv;
-  nsCOMPtr<nsIPrefBranch> prefs(do_GetService(NS_PREFSERVICE_CONTRACTID, &rv));
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
-
-  return prefs->SetBoolPref(PREF_CHECKDEFAULTBROWSER, aShouldCheck);
-}
-
-NS_IMETHODIMP
 nsGNOMEShellService::GetCanSetDesktopBackground(bool* aResult)
 {
   // setting desktop background is currently only supported
@@ -392,7 +359,7 @@ WriteImage(const nsCString& aPath, imgIContainer* aImage)
   return res ? NS_OK : NS_ERROR_FAILURE;
 #endif
 }
-                 
+
 NS_IMETHODIMP
 nsGNOMEShellService::SetDesktopBackground(nsIDOMElement* aElement, 
                                           int32_t aPosition)
@@ -435,7 +402,7 @@ nsGNOMEShellService::SetDesktopBackground(nsIDOMElement* aElement,
     rv = bundleService->CreateBundle(BRAND_PROPERTIES,
                                      getter_AddRefs(brandBundle));
     if (NS_SUCCEEDED(rv) && brandBundle) {
-      rv = brandBundle->GetStringFromName(MOZ_UTF16("brandShortName"),
+      rv = brandBundle->GetStringFromName(u"brandShortName",
                                           getter_Copies(brandName));
       NS_ENSURE_SUCCESS(rv, rv);
     }
@@ -541,7 +508,8 @@ static void
 ColorToCString(uint32_t aColor, nsCString& aResult)
 {
   // The #rrrrggggbbbb format is used to match gdk_color_to_string()
-  char *buf = aResult.BeginWriting(13);
+  aResult.SetLength(13);
+  char *buf = aResult.BeginWriting();
   if (!buf)
     return;
 
@@ -549,7 +517,7 @@ ColorToCString(uint32_t aColor, nsCString& aResult)
   uint16_t green = COLOR_8_TO_16_BIT((aColor >> 8) & 0xff);
   uint16_t blue = COLOR_8_TO_16_BIT(aColor & 0xff);
 
-  PR_snprintf(buf, 14, "#%04x%04x%04x", red, green, blue);
+  snprintf(buf, 14, "#%04x%04x%04x", red, green, blue);
 }
 
 NS_IMETHODIMP

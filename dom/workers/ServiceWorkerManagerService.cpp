@@ -7,8 +7,10 @@
 #include "ServiceWorkerManagerService.h"
 #include "ServiceWorkerManagerParent.h"
 #include "ServiceWorkerRegistrar.h"
+#include "mozilla/dom/ContentParent.h"
 #include "mozilla/ipc/BackgroundParent.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
+#include "nsAutoPtr.h"
 
 namespace mozilla {
 
@@ -91,7 +93,7 @@ ServiceWorkerManagerService::PropagateRegistration(
 
   DebugOnly<bool> parentFound = false;
   for (auto iter = mAgents.Iter(); !iter.Done(); iter.Next()) {
-    ServiceWorkerManagerParent* parent = iter.Get()->GetKey();
+    RefPtr<ServiceWorkerManagerParent> parent = iter.Get()->GetKey();
     MOZ_ASSERT(parent);
 
     if (parent->ID() != aParentID) {
@@ -118,12 +120,13 @@ ServiceWorkerManagerService::PropagateSoftUpdate(
 
   DebugOnly<bool> parentFound = false;
   for (auto iter = mAgents.Iter(); !iter.Done(); iter.Next()) {
-    ServiceWorkerManagerParent* parent = iter.Get()->GetKey();
+    RefPtr<ServiceWorkerManagerParent> parent = iter.Get()->GetKey();
     MOZ_ASSERT(parent);
 
     nsString scope(aScope);
     Unused << parent->SendNotifySoftUpdate(aOriginAttributes,
                                            scope);
+
 #ifdef DEBUG
     if (parent->ID() == aParentID) {
       parentFound = true;
@@ -155,7 +158,7 @@ ServiceWorkerManagerService::PropagateUnregister(
 
   DebugOnly<bool> parentFound = false;
   for (auto iter = mAgents.Iter(); !iter.Done(); iter.Next()) {
-    ServiceWorkerManagerParent* parent = iter.Get()->GetKey();
+    RefPtr<ServiceWorkerManagerParent> parent = iter.Get()->GetKey();
     MOZ_ASSERT(parent);
 
     if (parent->ID() != aParentID) {
@@ -181,7 +184,7 @@ ServiceWorkerManagerService::PropagateRemove(uint64_t aParentID,
 
   DebugOnly<bool> parentFound = false;
   for (auto iter = mAgents.Iter(); !iter.Done(); iter.Next()) {
-    ServiceWorkerManagerParent* parent = iter.Get()->GetKey();
+    RefPtr<ServiceWorkerManagerParent> parent = iter.Get()->GetKey();
     MOZ_ASSERT(parent);
 
     if (parent->ID() != aParentID) {
@@ -212,7 +215,7 @@ ServiceWorkerManagerService::PropagateRemoveAll(uint64_t aParentID)
 
   DebugOnly<bool> parentFound = false;
   for (auto iter = mAgents.Iter(); !iter.Done(); iter.Next()) {
-    ServiceWorkerManagerParent* parent = iter.Get()->GetKey();
+    RefPtr<ServiceWorkerManagerParent> parent = iter.Get()->GetKey();
     MOZ_ASSERT(parent);
 
     if (parent->ID() != aParentID) {

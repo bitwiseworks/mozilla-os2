@@ -30,13 +30,12 @@ interface HTMLDocument : Document {
   [Pure]
   readonly attribute HTMLCollection scripts;
   NodeList getElementsByName(DOMString elementName);
-  NodeList getItems(optional DOMString typeNames = ""); // microdata
 
   // dynamic markup insertion
   [Throws]
   Document open(optional DOMString type = "text/html", optional DOMString replace = "");
   [Throws]
-  WindowProxy open(DOMString url, DOMString name, DOMString features, optional boolean replace = false);
+  WindowProxy? open(DOMString url, DOMString name, DOMString features, optional boolean replace = false);
   [Throws]
   void close();
   [Throws]
@@ -44,7 +43,7 @@ interface HTMLDocument : Document {
   [Throws]
   void writeln(DOMString... text);
 
-           [SetterThrows]
+  [SetterThrows, NeedsSubjectPrincipal]
            attribute DOMString designMode;
   [Throws]
   boolean execCommand(DOMString commandId, optional boolean showUI = false,

@@ -66,12 +66,12 @@ struct JoinTestSanityCheck : public SanityChecker {
   {
     // Job 0 is the special task executed when everything is joined after task 1
     if (aCmdId == 0) {
-      MOZ_RELEASE_ASSERT(!mSpecialJobHasRun);
+      MOZ_RELEASE_ASSERT(!mSpecialJobHasRun, "GFX: A special task has been executed.");
       mSpecialJobHasRun = true;
       for (auto advancement : mAdvancements) {
         // Because of the synchronization point (beforeFilter), all
         // task buffers should have run task 1 when task 0 is run.
-        MOZ_RELEASE_ASSERT(advancement == 1);
+        MOZ_RELEASE_ASSERT(advancement == 1, "GFX: task buffer has not run task 1.");
       }
     } else {
       // This check does not apply to task 0.
@@ -79,7 +79,7 @@ struct JoinTestSanityCheck : public SanityChecker {
     }
 
     if (aCmdId == 2) {
-      MOZ_RELEASE_ASSERT(mSpecialJobHasRun);
+      MOZ_RELEASE_ASSERT(mSpecialJobHasRun, "GFX: Special job has not run.");
     }
   }
 };
@@ -145,13 +145,7 @@ void TestSchedulerJoin(uint32_t aNumThreads, uint32_t aNumCmdBuffers)
   }
   completion->FreezePrerequisites();
 
-  RefPtr<EventObject> waitForCompletion = new EventObject();
-  auto evtJob = new SetEventJob(waitForCompletion, completion);
-  JobScheduler::SubmitJob(evtJob);
-
-  MaybeYieldThread();
-
-  waitForCompletion->Wait();
+  JobScheduler::Join(completion);
 
   MaybeYieldThread();
 
@@ -205,13 +199,7 @@ void TestSchedulerChain(uint32_t aNumThreads, uint32_t aNumCmdBuffers)
   }
   completion->FreezePrerequisites();
 
-  RefPtr<EventObject> waitForCompletion = new EventObject();
-  auto evtJob = new SetEventJob(waitForCompletion, completion);
-  JobScheduler::SubmitJob(evtJob);
-
-  MaybeYieldThread();
-
-  waitForCompletion->Wait();
+  JobScheduler::Join(completion);
 
   for (auto advancement : check.mAdvancements) {
     EXPECT_TRUE(advancement == numJobs);
@@ -219,6 +207,16 @@ void TestSchedulerChain(uint32_t aNumThreads, uint32_t aNumCmdBuffers)
 }
 
 } // namespace test_scheduler
+
+TEST(Moz2D, JobScheduler_Shutdown) {
+  srand(time(nullptr));
+  for (uint32_t threads = 1; threads < 16; ++threads) {
+    for (uint32_t i = 1; i < 1000; ++i) {
+      mozilla::gfx::JobScheduler::Init(threads, threads);
+      mozilla::gfx::JobScheduler::ShutDown();
+    }
+  }
+}
 
 TEST(Moz2D, JobScheduler_Join) {
   srand(time(nullptr));

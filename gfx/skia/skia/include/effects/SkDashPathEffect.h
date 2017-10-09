@@ -36,35 +36,41 @@ public:
 
         Note: only affects stroked paths.
     */
-    static SkDashPathEffect* Create(const SkScalar intervals[], int count,
-                                    SkScalar phase) {
-        return SkNEW_ARGS(SkDashPathEffect, (intervals, count, phase));
+    static sk_sp<SkPathEffect> Make(const SkScalar intervals[], int count, SkScalar phase);
+
+#ifdef SK_SUPPORT_LEGACY_PATHEFFECT_PTR
+    static SkPathEffect* Create(const SkScalar intervals[], int count, SkScalar phase) {
+        return Make(intervals, count, phase).release();
     }
-    virtual ~SkDashPathEffect();
+#endif
 
     virtual bool filterPath(SkPath* dst, const SkPath& src,
-                            SkStrokeRec*, const SkRect*) const SK_OVERRIDE;
+                            SkStrokeRec*, const SkRect*) const override;
 
     virtual bool asPoints(PointData* results, const SkPath& src,
                           const SkStrokeRec&, const SkMatrix&,
-                          const SkRect*) const SK_OVERRIDE;
+                          const SkRect*) const override;
 
-    virtual DashType asADash(DashInfo* info) const SK_OVERRIDE;
+    DashType asADash(DashInfo* info) const override;
 
-    virtual Factory getFactory() const SK_OVERRIDE;
+    SK_TO_STRING_OVERRIDE()
+    SK_DECLARE_PUBLIC_FLATTENABLE_DESERIALIZATION_PROCS(SkDashPathEffect)
 
-    static SkFlattenable* CreateProc(SkReadBuffer&);
+#ifdef SK_BUILD_FOR_ANDROID_FRAMEWORK
+    bool exposedInAndroidJavaAPI() const override { return true; }
+#endif
 
 protected:
+    virtual ~SkDashPathEffect();
     SkDashPathEffect(const SkScalar intervals[], int count, SkScalar phase);
-    explicit SkDashPathEffect(SkReadBuffer&);
-    virtual void flatten(SkWriteBuffer&) const SK_OVERRIDE;
+    void flatten(SkWriteBuffer&) const override;
 
 private:
     SkScalar*   fIntervals;
     int32_t     fCount;
     SkScalar    fPhase;
     // computed from phase
+
     SkScalar    fInitialDashLength;
     int32_t     fInitialDashIndex;
     SkScalar    fIntervalLength;

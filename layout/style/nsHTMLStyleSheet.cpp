@@ -33,7 +33,9 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/Element.h"
 #include "nsHashKeys.h"
-#include "RestyleManager.h"
+#include "mozilla/OperatorNewExtensions.h"
+#include "mozilla/RestyleManagerHandle.h"
+#include "mozilla/RestyleManagerHandleInlines.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -55,6 +57,14 @@ nsHTMLStyleSheet::HTMLColorRule::MapRuleInfoInto(nsRuleData* aRuleData)
 nsHTMLStyleSheet::HTMLColorRule::MightMapInheritedStyleData()
 {
   return true;
+}
+
+/* virtual */ bool
+nsHTMLStyleSheet::HTMLColorRule::
+GetDiscretelyAnimatedCSSValue(nsCSSPropertyID aProperty, nsCSSValue* aValue)
+{
+  MOZ_ASSERT(false, "GetDiscretelyAnimatedCSSValue is not implemented yet");
+  return false;
 }
 
 #ifdef DEBUG
@@ -102,6 +112,14 @@ nsHTMLStyleSheet::TableTHRule::MightMapInheritedStyleData()
   return true;
 }
 
+/* virtual */ bool
+nsHTMLStyleSheet::TableTHRule::
+GetDiscretelyAnimatedCSSValue(nsCSSPropertyID aProperty, nsCSSValue* aValue)
+{
+  MOZ_ASSERT(false, "GetDiscretelyAnimatedCSSValue is not implemented yet");
+  return false;
+}
+
 /* virtual */ void
 nsHTMLStyleSheet::TableQuirkColorRule::MapRuleInfoInto(nsRuleData* aRuleData)
 {
@@ -121,6 +139,13 @@ nsHTMLStyleSheet::TableQuirkColorRule::MightMapInheritedStyleData()
   return true;
 }
 
+/* virtual */ bool
+nsHTMLStyleSheet::TableQuirkColorRule::
+GetDiscretelyAnimatedCSSValue(nsCSSPropertyID aProperty, nsCSSValue* aValue)
+{
+  MOZ_ASSERT(false, "GetDiscretelyAnimatedCSSValue is not implemented yet");
+  return false;
+}
 
 NS_IMPL_ISUPPORTS(nsHTMLStyleSheet::LangRule, nsIStyleRule)
 
@@ -139,6 +164,14 @@ nsHTMLStyleSheet::LangRule::MapRuleInfoInto(nsRuleData* aRuleData)
 nsHTMLStyleSheet::LangRule::MightMapInheritedStyleData()
 {
   return true;
+}
+
+/* virtual */ bool
+nsHTMLStyleSheet::LangRule::
+GetDiscretelyAnimatedCSSValue(nsCSSPropertyID aProperty, nsCSSValue* aValue)
+{
+  MOZ_ASSERT(false, "GetDiscretelyAnimatedCSSValue is not implemented yet");
+  return false;
 }
 
 #ifdef DEBUG
@@ -163,7 +196,7 @@ struct MappedAttrTableEntry : public PLDHashEntryHdr {
 };
 
 static PLDHashNumber
-MappedAttrTable_HashKey(PLDHashTable *table, const void *key)
+MappedAttrTable_HashKey(const void *key)
 {
   nsMappedAttributes *attributes =
     static_cast<nsMappedAttributes*>(const_cast<void*>(key));
@@ -181,8 +214,7 @@ MappedAttrTable_ClearEntry(PLDHashTable *table, PLDHashEntryHdr *hdr)
 }
 
 static bool
-MappedAttrTable_MatchEntry(PLDHashTable *table, const PLDHashEntryHdr *hdr,
-                           const void *key)
+MappedAttrTable_MatchEntry(const PLDHashEntryHdr *hdr, const void *key)
 {
   nsMappedAttributes *attributes =
     static_cast<nsMappedAttributes*>(const_cast<void*>(key));
@@ -207,7 +239,7 @@ struct LangRuleTableEntry : public PLDHashEntryHdr {
 };
 
 static PLDHashNumber
-LangRuleTable_HashKey(PLDHashTable *table, const void *key)
+LangRuleTable_HashKey(const void *key)
 {
   const nsString *lang = static_cast<const nsString*>(key);
   return HashString(*lang);
@@ -223,8 +255,7 @@ LangRuleTable_ClearEntry(PLDHashTable *table, PLDHashEntryHdr *hdr)
 }
 
 static bool
-LangRuleTable_MatchEntry(PLDHashTable *table, const PLDHashEntryHdr *hdr,
-                         const void *key)
+LangRuleTable_MatchEntry(const PLDHashEntryHdr *hdr, const void *key)
 {
   const nsString *lang = static_cast<const nsString*>(key);
   const LangRuleTableEntry *entry = static_cast<const LangRuleTableEntry*>(hdr);
@@ -237,7 +268,7 @@ LangRuleTable_InitEntry(PLDHashEntryHdr *hdr, const void *key)
 {
   const nsString *lang = static_cast<const nsString*>(key);
 
-  LangRuleTableEntry *entry = new (hdr) LangRuleTableEntry();
+  LangRuleTableEntry *entry = new (KnownNotNull, hdr) LangRuleTableEntry();
 
   // Create the unique rule for this language
   entry->mRule = new nsHTMLStyleSheet::LangRule(*lang);
@@ -467,7 +498,7 @@ nsHTMLStyleSheet::ImplLinkColorSetter(RefPtr<HTMLColorRule>& aRule, nscolor aCol
     Element* root = mDocument->GetRootElement();
     if (root) {
       mDocument->GetShell()->GetPresContext()->RestyleManager()->
-        PostRestyleEvent(root, eRestyle_Subtree, NS_STYLE_HINT_NONE);
+        PostRestyleEvent(root, eRestyle_Subtree, nsChangeHint(0));
     }
   }
   return NS_OK;

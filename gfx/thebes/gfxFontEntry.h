@@ -15,7 +15,6 @@
 #include "nsTHashtable.h"
 #include "mozilla/HashFunctions.h"
 #include "mozilla/MemoryReporting.h"
-#include "DrawMode.h"
 #include "nsUnicodeScriptCodes.h"
 #include "nsDataHashtable.h"
 #include "harfbuzz/hb.h"
@@ -34,11 +33,13 @@ class gfxFont;
 class gfxFontFamily;
 class gfxUserFontData;
 class gfxSVGGlyphs;
-class gfxMathTable;
-class gfxTextContextPaint;
 class FontInfoData;
 struct FontListSizes;
 class nsIAtom;
+
+namespace mozilla {
+class SVGContextPaint;
+};
 
 class gfxCharacterMap : public gfxSparseBitSet {
 public:
@@ -97,6 +98,9 @@ private:
 
 class gfxFontEntry {
 public:
+    typedef mozilla::gfx::DrawTarget DrawTarget;
+    typedef mozilla::unicode::Script Script;
+
     NS_INLINE_DECL_REFCOUNTING(gfxFontEntry)
 
     explicit gfxFontEntry(const nsAString& aName, bool aIsStandardFace = false);
@@ -132,12 +136,12 @@ public:
 
     // whether a feature is supported by the font (limited to a small set
     // of features for which some form of fallback needs to be implemented)
-    bool SupportsOpenTypeFeature(int32_t aScript, uint32_t aFeatureTag);
+    bool SupportsOpenTypeFeature(Script aScript, uint32_t aFeatureTag);
     bool SupportsGraphiteFeature(uint32_t aFeatureTag);
 
     // returns a set containing all input glyph ids for a given feature
     const hb_set_t*
-    InputsForOpenTypeFeature(int32_t aScript, uint32_t aFeatureTag);
+    InputsForOpenTypeFeature(Script aScript, uint32_t aFeatureTag);
 
     virtual bool IsSymbolFont();
 
@@ -180,89 +184,17 @@ public:
 
     bool TryGetSVGData(gfxFont* aFont);
     bool HasSVGGlyph(uint32_t aGlyphId);
-    bool GetSVGGlyphExtents(gfxContext *aContext, uint32_t aGlyphId,
+    bool GetSVGGlyphExtents(DrawTarget* aDrawTarget, uint32_t aGlyphId,
                             gfxRect *aResult);
-    bool RenderSVGGlyph(gfxContext *aContext, uint32_t aGlyphId, int aDrawMode,
-                        gfxTextContextPaint *aContextPaint);
+    bool RenderSVGGlyph(gfxContext *aContext, uint32_t aGlyphId,
+                        mozilla::SVGContextPaint* aContextPaint);
     // Call this when glyph geometry or rendering has changed
     // (e.g. animated SVG glyphs)
     void NotifyGlyphsChanged();
 
-    enum MathConstant {
-        // The order of the constants must match the order of the fields
-        // defined in the MATH table.
-        ScriptPercentScaleDown,
-        ScriptScriptPercentScaleDown,
-        DelimitedSubFormulaMinHeight,
-        DisplayOperatorMinHeight,
-        MathLeading,
-        AxisHeight,
-        AccentBaseHeight,
-        FlattenedAccentBaseHeight,
-        SubscriptShiftDown,
-        SubscriptTopMax,
-        SubscriptBaselineDropMin,
-        SuperscriptShiftUp,
-        SuperscriptShiftUpCramped,
-        SuperscriptBottomMin,
-        SuperscriptBaselineDropMax,
-        SubSuperscriptGapMin,
-        SuperscriptBottomMaxWithSubscript,
-        SpaceAfterScript,
-        UpperLimitGapMin,
-        UpperLimitBaselineRiseMin,
-        LowerLimitGapMin,
-        LowerLimitBaselineDropMin,
-        StackTopShiftUp,
-        StackTopDisplayStyleShiftUp,
-        StackBottomShiftDown,
-        StackBottomDisplayStyleShiftDown,
-        StackGapMin,
-        StackDisplayStyleGapMin,
-        StretchStackTopShiftUp,
-        StretchStackBottomShiftDown,
-        StretchStackGapAboveMin,
-        StretchStackGapBelowMin,
-        FractionNumeratorShiftUp,
-        FractionNumeratorDisplayStyleShiftUp,
-        FractionDenominatorShiftDown,
-        FractionDenominatorDisplayStyleShiftDown,
-        FractionNumeratorGapMin,
-        FractionNumDisplayStyleGapMin,
-        FractionRuleThickness,
-        FractionDenominatorGapMin,
-        FractionDenomDisplayStyleGapMin,
-        SkewedFractionHorizontalGap,
-        SkewedFractionVerticalGap,
-        OverbarVerticalGap,
-        OverbarRuleThickness,
-        OverbarExtraAscender,
-        UnderbarVerticalGap,
-        UnderbarRuleThickness,
-        UnderbarExtraDescender,
-        RadicalVerticalGap,
-        RadicalDisplayStyleVerticalGap,
-        RadicalRuleThickness,
-        RadicalExtraAscender,
-        RadicalKernBeforeDegree,
-        RadicalKernAfterDegree,
-        RadicalDegreeBottomRaisePercent
-    };
-
-    // Call TryGetMathTable to try to load the Open Type MATH table. The other
-    // functions forward the call to the gfxMathTable class. The GetMath...()
-    // functions MUST NOT be called unless TryGetMathTable() has returned true.
-    bool     TryGetMathTable();
-    gfxFloat GetMathConstant(MathConstant aConstant);
-    bool     GetMathItalicsCorrection(uint32_t aGlyphID,
-                                      gfxFloat* aItalicCorrection);
-    uint32_t GetMathVariantsSize(uint32_t aGlyphID, bool aVertical,
-                                 uint16_t aSize);
-    bool     GetMathVariantsParts(uint32_t aGlyphID, bool aVertical,
-                                  uint32_t aGlyphs[4]);
-
     bool     TryGetColorGlyphs();
     bool     GetColorLayersInfo(uint32_t aGlyphId,
+                                const mozilla::gfx::Color& aDefaultColor,
                                 nsTArray<uint16_t>& layerGlyphs,
                                 nsTArray<mozilla::gfx::Color>& layerColors);
 
@@ -335,7 +267,7 @@ public:
     // Pass nullptr for aBuffer to indicate that the table is not present and
     // nullptr will be returned.  Also returns nullptr on OOM.
     hb_blob_t *ShareFontTableAndGetBlob(uint32_t aTag,
-                                        FallibleTArray<uint8_t>* aTable);
+                                        nsTArray<uint8_t>* aTable);
 
     // Get the font's unitsPerEm from the 'head' table, in the case of an
     // sfnt resource. Will return kInvalidUPEM for non-sfnt fonts,
@@ -373,11 +305,16 @@ public:
     // the fonts belonging to this font entry.
     void NotifyFontDestroyed(gfxFont* aFont);
 
-    // For memory reporting
+    // For memory reporting of the platform font list.
     virtual void AddSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,
                                         FontListSizes* aSizes) const;
     virtual void AddSizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf,
                                         FontListSizes* aSizes) const;
+
+    // Used for reporting on individual font entries in the user font cache,
+    // which are not present in the platform font list.
+    size_t
+    ComputedSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
     // Used when checking for complex script support, to mask off cmap ranges
     struct ScriptRange {
@@ -404,7 +341,6 @@ public:
     bool             mIgnoreGDEF  : 1;
     bool             mIgnoreGSUB  : 1;
     bool             mSVGInitialized : 1;
-    bool             mMathInitialized : 1;
     bool             mHasSpaceFeaturesInitialized : 1;
     bool             mHasSpaceFeatures : 1;
     bool             mHasSpaceFeaturesKerning : 1;
@@ -422,8 +358,8 @@ public:
 
     // bitvector of substitution space features per script, one each
     // for default and non-default features
-    uint32_t         mDefaultSubSpaceFeatures[(MOZ_NUM_SCRIPT_CODES + 31) / 32];
-    uint32_t         mNonDefaultSubSpaceFeatures[(MOZ_NUM_SCRIPT_CODES + 31) / 32];
+    uint32_t         mDefaultSubSpaceFeatures[(int(Script::NUM_SCRIPT_CODES) + 31) / 32];
+    uint32_t         mNonDefaultSubSpaceFeatures[(int(Script::NUM_SCRIPT_CODES) + 31) / 32];
 
     uint16_t         mWeight;
     int16_t          mStretch;
@@ -431,14 +367,13 @@ public:
     RefPtr<gfxCharacterMap> mCharacterMap;
     uint32_t         mUVSOffset;
     mozilla::UniquePtr<uint8_t[]> mUVSData;
-    nsAutoPtr<gfxUserFontData> mUserFontData;
-    nsAutoPtr<gfxSVGGlyphs> mSVGGlyphs;
+    mozilla::UniquePtr<gfxUserFontData> mUserFontData;
+    mozilla::UniquePtr<gfxSVGGlyphs> mSVGGlyphs;
     // list of gfxFonts that are using SVG glyphs
     nsTArray<gfxFont*> mFontsUsingSVGGlyphs;
-    nsAutoPtr<gfxMathTable> mMathTable;
     nsTArray<gfxFontFeature> mFeatureSettings;
-    nsAutoPtr<nsDataHashtable<nsUint32HashKey,bool>> mSupportedFeatures;
-    nsAutoPtr<nsDataHashtable<nsUint32HashKey,hb_set_t*>> mFeatureInputs;
+    mozilla::UniquePtr<nsDataHashtable<nsUint32HashKey,bool>> mSupportedFeatures;
+    mozilla::UniquePtr<nsDataHashtable<nsUint32HashKey,hb_set_t*>> mFeatureInputs;
     uint32_t         mLanguageOverride;
 
     // Color Layer font support
@@ -451,6 +386,7 @@ protected:
     friend class gfxUserFcFontEntry;
     friend class gfxFontFamily;
     friend class gfxSingleFaceMacFontFamily;
+    friend class gfxUserFontEntry;
 
     gfxFontEntry();
 
@@ -467,18 +403,10 @@ protected:
     // Copy a font table into aBuffer.
     // The caller will be responsible for ownership of the data.
     virtual nsresult CopyFontTable(uint32_t aTableTag,
-                                   FallibleTArray<uint8_t>& aBuffer) {
+                                   nsTArray<uint8_t>& aBuffer) {
         NS_NOTREACHED("forgot to override either GetFontTable or CopyFontTable?");
         return NS_ERROR_FAILURE;
     }
-
-    // Return a blob that wraps a table found within a buffer of font data.
-    // The blob does NOT own its data; caller guarantees that the buffer
-    // will remain valid at least as long as the blob.
-    // Returns null if the specified table is not found.
-    // This method assumes aFontData is valid 'sfnt' data; before using this,
-    // caller is responsible to do any sanitization/validation necessary.
-    hb_blob_t* GetTableFromFontData(const void* aFontData, uint32_t aTableTag);
 
     // lookup the cmap in cached font data
     virtual already_AddRefed<gfxCharacterMap>
@@ -528,6 +456,12 @@ protected:
                                   size_t *aLen);
     static void GrReleaseTable(const void *aAppFaceHandle,
                                const void *aTableBuffer);
+
+    // For memory reporting: size of user-font data belonging to this entry.
+    // We record this in the font entry because the actual data block may be
+    // handed over to platform APIs, so that it would become difficult (and
+    // platform-specific) to measure it directly at report-gathering time.
+    uint32_t mComputedSizeOfUserFont;
 
 private:
     /**
@@ -603,7 +537,7 @@ private:
         // recorded in the hashtable entry so that others may use the same
         // table.
         hb_blob_t *
-        ShareTableAndGetBlob(FallibleTArray<uint8_t>& aTable,
+        ShareTableAndGetBlob(nsTArray<uint8_t>&& aTable,
                              nsTHashtable<FontTableHashEntry> *aHashtable);
 
         // Return a strong reference to the blob.
@@ -623,7 +557,7 @@ private:
         hb_blob_t *mBlob;
     };
 
-    nsAutoPtr<nsTHashtable<FontTableHashEntry> > mFontTableCache;
+    mozilla::UniquePtr<nsTHashtable<FontTableHashEntry> > mFontTableCache;
 
     gfxFontEntry(const gfxFontEntry&);
     gfxFontEntry& operator=(const gfxFontEntry&);
@@ -633,7 +567,7 @@ private:
 // used when iterating over all fonts looking for a match for a given character
 struct GlobalFontMatch {
     GlobalFontMatch(const uint32_t aCharacter,
-                    int32_t aRunScript,
+                    mozilla::unicode::Script aRunScript,
                     const gfxFontStyle *aStyle) :
         mCh(aCharacter), mRunScript(aRunScript), mStyle(aStyle),
         mMatchRank(0), mCount(0), mCmapsTested(0)
@@ -642,7 +576,7 @@ struct GlobalFontMatch {
         }
 
     const uint32_t         mCh;          // codepoint to be matched
-    int32_t                mRunScript;   // Unicode script for the codepoint
+    mozilla::unicode::Script mRunScript;   // Unicode script for the codepoint
     const gfxFontStyle*    mStyle;       // style to match
     int32_t                mMatchRank;   // metric indicating closest match
     RefPtr<gfxFontEntry> mBestMatch;   // current best match
@@ -704,7 +638,7 @@ public:
     gfxFontEntry *FindFontForStyle(const gfxFontStyle& aFontStyle, 
                                    bool& aNeedsSyntheticBold);
 
-    void
+    virtual void
     FindAllFontsForStyle(const gfxFontStyle& aFontStyle,
                          nsTArray<gfxFontEntry*>& aFontEntryList,
                          bool& aNeedsSyntheticBold);

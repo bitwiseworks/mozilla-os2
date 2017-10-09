@@ -56,23 +56,23 @@ public:
   // gets the rect inside our border and debug border. If you wish to paint inside a box
   // call this method to get the rect so you don't draw on the debug border or outer border.
 
-  virtual void SetLayoutManager(nsBoxLayout* aLayout) override { mLayoutManager = aLayout; }
-  virtual nsBoxLayout* GetLayoutManager() override { return mLayoutManager; }
+  virtual void SetXULLayoutManager(nsBoxLayout* aLayout) override { mLayoutManager = aLayout; }
+  virtual nsBoxLayout* GetXULLayoutManager() override { return mLayoutManager; }
 
-  virtual nsresult RelayoutChildAtOrdinal(nsBoxLayoutState& aState, nsIFrame* aChild) override;
+  virtual nsresult XULRelayoutChildAtOrdinal(nsIFrame* aChild) override;
 
-  virtual nsSize GetPrefSize(nsBoxLayoutState& aBoxLayoutState) override;
-  virtual nsSize GetMinSize(nsBoxLayoutState& aBoxLayoutState) override;
-  virtual nsSize GetMaxSize(nsBoxLayoutState& aBoxLayoutState) override;
-  virtual nscoord GetFlex(nsBoxLayoutState& aBoxLayoutState) override;
-  virtual nscoord GetBoxAscent(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nsSize GetXULPrefSize(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nsSize GetXULMinSize(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nsSize GetXULMaxSize(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nscoord GetXULFlex() override;
+  virtual nscoord GetXULBoxAscent(nsBoxLayoutState& aBoxLayoutState) override;
 #ifdef DEBUG_LAYOUT
-  virtual nsresult SetDebug(nsBoxLayoutState& aBoxLayoutState, bool aDebug) override;
-  virtual nsresult GetDebug(bool& aDebug) override;
+  virtual nsresult SetXULDebug(nsBoxLayoutState& aBoxLayoutState, bool aDebug) override;
+  virtual nsresult GetXULDebug(bool& aDebug) override;
 #endif
-  virtual Valignment GetVAlign() const override { return mValign; }
-  virtual Halignment GetHAlign() const override { return mHalign; }
-  NS_IMETHOD DoLayout(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual Valignment GetXULVAlign() const override { return mValign; }
+  virtual Halignment GetXULHAlign() const override { return mHalign; }
+  NS_IMETHOD DoXULLayout(nsBoxLayoutState& aBoxLayoutState) override;
 
   virtual bool ComputesOwnOverflowArea() override { return false; }
 
@@ -94,8 +94,8 @@ public:
   virtual nscoord GetPrefISize(nsRenderingContext *aRenderingContext) override;
 
   virtual void Reflow(nsPresContext*           aPresContext,
-                      nsHTMLReflowMetrics&     aDesiredSize,
-                      const nsHTMLReflowState& aReflowState,
+                      ReflowOutput&     aDesiredSize,
+                      const ReflowInput& aReflowInput,
                       nsReflowStatus&          aStatus) override;
 
   virtual void SetInitialChildList(ChildListID  aListID,
@@ -124,7 +124,7 @@ public:
 
     // This is bogus, but it's what we've always done.
     // (Given that we're replaced, we need to say we're a replaced element
-    // that contains a block so nsHTMLReflowState doesn't tell us to be
+    // that contains a block so ReflowInput doesn't tell us to be
     // NS_INTRINSICSIZE wide.)
     return nsContainerFrame::IsFrameOfType(aFlags &
       ~(nsIFrame::eReplaced | nsIFrame::eReplacedContainsBlock | eXULBox |
@@ -136,7 +136,7 @@ public:
 #endif
 
   virtual void DidReflow(nsPresContext*           aPresContext,
-                         const nsHTMLReflowState* aReflowState,
+                         const ReflowInput* aReflowInput,
                          nsDidReflowStatus        aStatus) override;
 
   virtual bool HonorPrintBackgroundSettings() override;
@@ -220,7 +220,7 @@ protected:
 private: 
 
 #ifdef DEBUG_LAYOUT
-    nsresult SetDebug(nsPresContext* aPresContext, bool aDebug);
+    nsresult SetXULDebug(nsPresContext* aPresContext, bool aDebug);
     bool GetInitialDebug(bool& aDebug);
     void GetDebugPref();
 

@@ -11,6 +11,7 @@
 #include "nsIScriptSecurityManager.h"
 #include "nsJSPrincipals.h"
 
+#include "mozilla/Attributes.h"
 #include "mozilla/dom/ChromeUtilsBinding.h"
 
 class nsIContentSecurityPolicy;
@@ -22,6 +23,8 @@ class nsExpandedPrincipal;
 
 namespace mozilla {
 
+class GenericOriginAttributes;
+
 // Base OriginAttributes class. This has several subclass flavors, and is not
 // directly constructable itself.
 class OriginAttributes : public dom::OriginAttributesDictionary
@@ -30,10 +33,11 @@ public:
   bool operator==(const OriginAttributes& aOther) const
   {
     return mAppId == aOther.mAppId &&
-           mInBrowser == aOther.mInBrowser &&
+           mInIsolatedMozBrowser == aOther.mInIsolatedMozBrowser &&
            mAddonId == aOther.mAddonId &&
            mUserContextId == aOther.mUserContextId &&
-           mSignedPkg == aOther.mSignedPkg;
+           mPrivateBrowsingId == aOther.mPrivateBrowsingId &&
+           mFirstPartyDomain == aOther.mFirstPartyDomain;
   }
   bool operator!=(const OriginAttributes& aOther) const
   {
@@ -44,12 +48,25 @@ public:
   // |!key1=value1&key2=value2|. If there are no non-default attributes, this
   // returns an empty string.
   void CreateSuffix(nsACString& aStr) const;
-  bool PopulateFromSuffix(const nsACString& aStr);
+
+  // Don't use this method for anything else than debugging!
+  void CreateAnonymizedSuffix(nsACString& aStr) const;
+
+  MOZ_MUST_USE bool PopulateFromSuffix(const nsACString& aStr);
 
   // Populates the attributes from a string like
   // |uri!key1=value1&key2=value2| and returns the uri without the suffix.
-  bool PopulateFromOrigin(const nsACString& aOrigin,
-                          nsACString& aOriginNoSuffix);
+  MOZ_MUST_USE bool PopulateFromOrigin(const nsACString& aOrigin,
+                                       nsACString& aOriginNoSuffix);
+
+  // Helper function to match mIsPrivateBrowsing to existing private browsing
+  // flags. Once all other flags are removed, this can be removed too.
+  void SyncAttributesWithPrivateBrowsing(bool aInPrivateBrowsing);
+
+  void SetFromGenericAttributes(const GenericOriginAttributes& aAttrs);
+
+  // check if "privacy.firstparty.isolate" is enabled.
+  static bool IsFirstPartyEnabled();
 
 protected:
   OriginAttributes() {}
@@ -75,10 +92,10 @@ class PrincipalOriginAttributes : public OriginAttributes
 {
 public:
   PrincipalOriginAttributes() {}
-  PrincipalOriginAttributes(uint32_t aAppId, bool aInBrowser)
+  PrincipalOriginAttributes(uint32_t aAppId, bool aInIsolatedMozBrowser)
   {
     mAppId = aAppId;
-    mInBrowser = aInBrowser;
+    mInIsolatedMozBrowser = aInIsolatedMozBrowser;
   }
 
   // Inheriting OriginAttributes from docshell to document when user navigates.
@@ -90,6 +107,8 @@ public:
 
   // Inherit OriginAttributes from Necko.
   void InheritFromNecko(const NeckoOriginAttributes& aAttrs);
+
+  void StripUserContextIdAndFirstPartyDomain();
 };
 
 // For OriginAttributes stored on docshells / loadcontexts / browsing contexts.
@@ -97,10 +116,10 @@ class DocShellOriginAttributes : public OriginAttributes
 {
 public:
   DocShellOriginAttributes() {}
-  DocShellOriginAttributes(uint32_t aAppId, bool aInBrowser)
+  DocShellOriginAttributes(uint32_t aAppId, bool aInIsolatedMozBrowser)
   {
     mAppId = aAppId;
-    mInBrowser = aInBrowser;
+    mInIsolatedMozBrowser = aInIsolatedMozBrowser;
   }
 
   // Inheriting OriginAttributes from document to child docshell when an
@@ -116,17 +135,21 @@ class NeckoOriginAttributes : public OriginAttributes
 {
 public:
   NeckoOriginAttributes() {}
-  NeckoOriginAttributes(uint32_t aAppId, bool aInBrowser)
+  NeckoOriginAttributes(uint32_t aAppId, bool aInIsolatedMozBrowser)
   {
     mAppId = aAppId;
-    mInBrowser = aInBrowser;
+    mInIsolatedMozBrowser = aInIsolatedMozBrowser;
   }
 
   // Inheriting OriginAttributes from document to necko when a network request
   // is made.
   void InheritFromDocToNecko(const PrincipalOriginAttributes& aAttrs);
 
-  void InheritFromDocShellToNecko(const DocShellOriginAttributes& aAttrs);
+  // Inheriting OriginAttributes from a docshell when loading a top-level
+  // document.
+  void InheritFromDocShellToNecko(const DocShellOriginAttributes& aAttrs,
+                                  const bool aIsTopLevelDocument = false,
+                                  nsIURI* aURI = nullptr);
 };
 
 // For operating on OriginAttributes not associated with any data structure.
@@ -159,7 +182,7 @@ public:
       return false;
     }
 
-    if (mInBrowser.WasPassed() && mInBrowser.Value() != aAttrs.mInBrowser) {
+    if (mInIsolatedMozBrowser.WasPassed() && mInIsolatedMozBrowser.Value() != aAttrs.mInIsolatedMozBrowser) {
       return false;
     }
 
@@ -171,7 +194,47 @@ public:
       return false;
     }
 
-    if (mSignedPkg.WasPassed() && mSignedPkg.Value() != aAttrs.mSignedPkg) {
+    if (mPrivateBrowsingId.WasPassed() && mPrivateBrowsingId.Value() != aAttrs.mPrivateBrowsingId) {
+      return false;
+    }
+
+    if (mFirstPartyDomain.WasPassed() && mFirstPartyDomain.Value() != aAttrs.mFirstPartyDomain) {
+      return false;
+    }
+
+    return true;
+  }
+
+  bool Overlaps(const OriginAttributesPattern& aOther) const
+  {
+    if (mAppId.WasPassed() && aOther.mAppId.WasPassed() &&
+        mAppId.Value() != aOther.mAppId.Value()) {
+      return false;
+    }
+
+    if (mInIsolatedMozBrowser.WasPassed() &&
+        aOther.mInIsolatedMozBrowser.WasPassed() &&
+        mInIsolatedMozBrowser.Value() != aOther.mInIsolatedMozBrowser.Value()) {
+      return false;
+    }
+
+    if (mAddonId.WasPassed() && aOther.mAddonId.WasPassed() &&
+        mAddonId.Value() != aOther.mAddonId.Value()) {
+      return false;
+    }
+
+    if (mUserContextId.WasPassed() && aOther.mUserContextId.WasPassed() &&
+        mUserContextId.Value() != aOther.mUserContextId.Value()) {
+      return false;
+    }
+
+    if (mPrivateBrowsingId.WasPassed() && aOther.mPrivateBrowsingId.WasPassed() &&
+        mPrivateBrowsingId.Value() != aOther.mPrivateBrowsingId.Value()) {
+      return false;
+    }
+
+    if (mFirstPartyDomain.WasPassed() && aOther.mFirstPartyDomain.WasPassed() &&
+        mFirstPartyDomain.Value() != aOther.mFirstPartyDomain.Value()) {
       return false;
     }
 
@@ -203,21 +266,27 @@ public:
   NS_IMETHOD CheckMayLoad(nsIURI* uri, bool report, bool allowIfInheritsPrincipal) final;
   NS_IMETHOD GetCsp(nsIContentSecurityPolicy** aCsp) override;
   NS_IMETHOD SetCsp(nsIContentSecurityPolicy* aCsp) override;
+  NS_IMETHOD EnsureCSP(nsIDOMDocument* aDocument, nsIContentSecurityPolicy** aCSP) override;
   NS_IMETHOD GetPreloadCsp(nsIContentSecurityPolicy** aPreloadCSP) override;
-  NS_IMETHOD SetPreloadCsp(nsIContentSecurityPolicy* aPreloadCSP) override;
+  NS_IMETHOD EnsurePreloadCSP(nsIDOMDocument* aDocument, nsIContentSecurityPolicy** aCSP) override;
   NS_IMETHOD GetCspJSON(nsAString& outCSPinJSON) override;
   NS_IMETHOD GetIsNullPrincipal(bool* aResult) override;
   NS_IMETHOD GetIsCodebasePrincipal(bool* aResult) override;
   NS_IMETHOD GetIsExpandedPrincipal(bool* aResult) override;
   NS_IMETHOD GetIsSystemPrincipal(bool* aResult) override;
-  NS_IMETHOD GetJarPrefix(nsACString& aJarPrefix) final;
   NS_IMETHOD GetOriginAttributes(JSContext* aCx, JS::MutableHandle<JS::Value> aVal) final;
   NS_IMETHOD GetOriginSuffix(nsACString& aOriginSuffix) final;
   NS_IMETHOD GetAppStatus(uint16_t* aAppStatus) final;
   NS_IMETHOD GetAppId(uint32_t* aAppStatus) final;
-  NS_IMETHOD GetIsInBrowserElement(bool* aIsInBrowserElement) final;
+  NS_IMETHOD GetAddonId(nsAString& aAddonId) final;
+  NS_IMETHOD GetIsInIsolatedMozBrowserElement(bool* aIsInIsolatedMozBrowserElement) final;
   NS_IMETHOD GetUnknownAppId(bool* aUnknownAppId) final;
   NS_IMETHOD GetUserContextId(uint32_t* aUserContextId) final;
+  NS_IMETHOD GetPrivateBrowsingId(uint32_t* aPrivateBrowsingId) final;
+
+  bool EqualsIgnoringAddonId(nsIPrincipal *aOther);
+
+  virtual bool AddonHasPermission(const nsAString& aPerm);
 
   virtual bool IsOnCSSUnprefixingWhitelist() override { return false; }
 
@@ -231,7 +300,8 @@ public:
   const PrincipalOriginAttributes& OriginAttributesRef() { return mOriginAttributes; }
   uint32_t AppId() const { return mOriginAttributes.mAppId; }
   uint32_t UserContextId() const { return mOriginAttributes.mUserContextId; }
-  bool IsInBrowserElement() const { return mOriginAttributes.mInBrowser; }
+  uint32_t PrivateBrowsingId() const { return mOriginAttributes.mPrivateBrowsingId; }
+  bool IsInIsolatedMozBrowserElement() const { return mOriginAttributes.mInIsolatedMozBrowser; }
 
   enum PrincipalKind {
     eNullPrincipal,
@@ -242,10 +312,14 @@ public:
 
   virtual PrincipalKind Kind() = 0;
 
+  already_AddRefed<BasePrincipal> CloneStrippingUserContextIdAndFirstPartyDomain();
+
 protected:
   virtual ~BasePrincipal();
 
   virtual nsresult GetOriginInternal(nsACString& aOrigin) = 0;
+  // Note that this does not check OriginAttributes. Callers that depend on
+  // those must call Subsumes instead.
   virtual bool SubsumesInternal(nsIPrincipal* aOther, DocumentDomainConsideration aConsider) = 0;
 
   // Internal, side-effect-free check to determine whether the concrete

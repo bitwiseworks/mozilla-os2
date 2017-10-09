@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -20,9 +20,6 @@ def Binary():
     # haven't set it but should have).
     if CONFIG['STLPORT_LIBS']:
         OS_LIBS += [CONFIG['STLPORT_LIBS']]
-    elif CONFIG['OS_TARGET'] == 'Android':
-        if CONFIG['MOZ_ANDROID_CXX_STL'] == 'mozstlport':
-            USE_LIBS += ['stlport']
 
 
 @template
@@ -64,6 +61,14 @@ def Library(name):
 
 
 @template
+def RustLibrary(name):
+    '''Template for Rust libraries.'''
+    Library(name)
+
+    IS_RUST_LIBRARY = True
+
+
+@template
 def SharedLibrary(name):
     '''Template for shared libraries.'''
     Library(name)
@@ -90,11 +95,17 @@ def HostStdCppCompat():
 
 
 @template
-def HostProgram(name):
+def HostProgram(name, c_only=False):
     '''Template for build tools executables.'''
     HOST_PROGRAM = name
 
-    HostStdCppCompat()
+    # With context-based templates, this won't be needed anymore, and will
+    # work better than relying on the caller setting it, but at the moment,
+    # this is the best we have. And it doesn't matter /that/ much, so there's
+    # really only one place using this, where it does matter to avoid the
+    # extra dependency (because it creates a circular one).
+    if not c_only:
+        HostStdCppCompat()
 
 
 @template
@@ -117,3 +128,4 @@ def HostLibrary(name):
 
 
 include('gecko_templates.mozbuild')
+include('test_templates.mozbuild')

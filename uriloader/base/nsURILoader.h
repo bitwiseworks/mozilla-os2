@@ -35,11 +35,11 @@ protected:
    * Equivalent to nsIURILoader::openChannel, but allows specifying whether the
    * channel is opened already.
    */
-  nsresult OpenChannel(nsIChannel* channel,
-                                   uint32_t aFlags,
-                                   nsIInterfaceRequestor* aWindowContext,
-                                   bool aChannelOpen,
-                                   nsIStreamListener** aListener);
+  MOZ_MUST_USE nsresult OpenChannel(nsIChannel* channel,
+                                    uint32_t aFlags,
+                                    nsIInterfaceRequestor* aWindowContext,
+                                    bool aChannelOpen,
+                                    nsIStreamListener** aListener);
 
   /**
    * we shouldn't need to have an owning ref count on registered
@@ -49,9 +49,9 @@ protected:
   nsCOMArray<nsIWeakReference> m_listeners;
 
   /**
-   * NSPR logging.  The module is called "URILoader"
+   * Logging.  The module is called "URILoader"
    */
-  static PRLogModuleInfo* mLog;
+  static mozilla::LazyLogModule mLog;
   
   friend class nsDocumentOpenInfo;
 };

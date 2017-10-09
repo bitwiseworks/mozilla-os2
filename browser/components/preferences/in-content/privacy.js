@@ -3,6 +3,12 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 Components.utils.import("resource://gre/modules/AppConstants.jsm");
+Components.utils.import("resource://gre/modules/PluralForm.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "ContextualIdentityService",
+                                  "resource://gre/modules/ContextualIdentityService.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "PluralForm",
+                                  "resource://gre/modules/PluralForm.jsm");
 
 var gPrivacyPane = {
 
@@ -16,7 +22,6 @@ var gPrivacyPane = {
    */
   _shouldPromptForRestart: true,
 
-#ifdef NIGHTLY_BUILD
   /**
    * Show the Tracking Protection UI depending on the
    * privacy.trackingprotection.ui.enabled pref, and linkify its Learn More link
@@ -30,9 +35,11 @@ var gPrivacyPane = {
     let url = Services.urlFormatter.formatURLPref("app.support.baseURL") + "tracking-protection";
     link.setAttribute("href", url);
 
+    this.trackingProtectionReadPrefs();
+
     document.getElementById("trackingprotectionbox").hidden = false;
+    document.getElementById("trackingprotectionpbmbox").hidden = true;
   },
-#endif
 
   /**
    * Linkify the Learn More link of the Private Browsing Mode Tracking
@@ -48,19 +55,61 @@ var gPrivacyPane = {
    * Initialize autocomplete to ensure prefs are in sync.
    */
   _initAutocomplete: function () {
-    let unifiedCompletePref = false;
-    try {
-      unifiedCompletePref =
-        Services.prefs.getBoolPref("browser.urlbar.unifiedcomplete");
-    } catch (ex) {}
+    Components.classes["@mozilla.org/autocomplete/search;1?name=unifiedcomplete"]
+              .getService(Components.interfaces.mozIPlacesAutoComplete);
+  },
 
-    if (unifiedCompletePref) {
-      Components.classes["@mozilla.org/autocomplete/search;1?name=unifiedcomplete"]
-                .getService(Components.interfaces.mozIPlacesAutoComplete);
-    } else {
-      Components.classes["@mozilla.org/autocomplete/search;1?name=history"]
-                .getService(Components.interfaces.mozIPlacesAutoComplete);
+  /**
+   * Show the Containers UI depending on the privacy.userContext.ui.enabled pref.
+   */
+  _initBrowserContainers: function () {
+    if (!Services.prefs.getBoolPref("privacy.userContext.ui.enabled")) {
+      return;
     }
+
+    let link = document.getElementById("browserContainersLearnMore");
+    link.href = Services.urlFormatter.formatURLPref("app.support.baseURL") + "containers";
+
+    document.getElementById("browserContainersbox").hidden = false;
+
+    document.getElementById("browserContainersCheckbox").checked =
+      Services.prefs.getBoolPref("privacy.userContext.enabled");
+  },
+
+  _checkBrowserContainers: function(event) {
+    let checkbox = document.getElementById("browserContainersCheckbox");
+    if (checkbox.checked) {
+      Services.prefs.setBoolPref("privacy.userContext.enabled", true);
+      return;
+    }
+
+    let count = ContextualIdentityService.countContainerTabs();
+    if (count == 0) {
+      Services.prefs.setBoolPref("privacy.userContext.enabled", false);
+      return;
+    }
+
+    let bundlePreferences = document.getElementById("bundlePreferences");
+
+    let title = bundlePreferences.getString("disableContainersAlertTitle");
+    let message = PluralForm.get(count, bundlePreferences.getString("disableContainersMsg"))
+                            .replace("#S", count)
+    let okButton = PluralForm.get(count, bundlePreferences.getString("disableContainersOkButton"))
+                             .replace("#S", count)
+    let cancelButton = bundlePreferences.getString("disableContainersButton2");
+
+    let buttonFlags = (Ci.nsIPrompt.BUTTON_TITLE_IS_STRING * Ci.nsIPrompt.BUTTON_POS_0) +
+                      (Ci.nsIPrompt.BUTTON_TITLE_IS_STRING * Ci.nsIPrompt.BUTTON_POS_1);
+
+    let rv = Services.prompt.confirmEx(window, title, message, buttonFlags,
+                                       okButton, cancelButton, null, null, {});
+    if (rv == 0) {
+      ContextualIdentityService.closeAllContainerTabs();
+      Services.prefs.setBoolPref("privacy.userContext.enabled", false);
+      return;
+    }
+
+    checkbox.checked = true;
   },
 
   /**
@@ -80,11 +129,10 @@ var gPrivacyPane = {
     this.updateHistoryModePane();
     this.updatePrivacyMicroControls();
     this.initAutoStartPrivateBrowsingReverter();
-#ifdef NIGHTLY_BUILD
     this._initTrackingProtection();
-#endif
     this._initTrackingProtectionPBM();
     this._initAutocomplete();
+    this._initBrowserContainers();
 
     setEventListener("privacy.sanitize.sanitizeOnShutdown", "change",
                      gPrivacyPane._updateSanitizeSettingsButton);
@@ -108,6 +156,10 @@ var gPrivacyPane = {
       gPrivacyPane.clearPrivateDataNow(true);
       return false;
     });
+    setEventListener("doNotTrackSettings", "click", function () {
+      gPrivacyPane.showDoNotTrackSettings();
+      return false;
+    });
     setEventListener("privateBrowsingAutoStart", "command",
                      gPrivacyPane.updateAutostart);
     setEventListener("cookieExceptions", "command",
@@ -116,8 +168,62 @@ var gPrivacyPane = {
                      gPrivacyPane.showCookies);
     setEventListener("clearDataSettings", "command",
                      gPrivacyPane.showClearPrivateDataSettings);
+    setEventListener("trackingProtectionRadioGroup", "command",
+                     gPrivacyPane.trackingProtectionWritePrefs);
+    setEventListener("trackingProtectionExceptions", "command",
+                     gPrivacyPane.showTrackingProtectionExceptions);
     setEventListener("changeBlockList", "command",
                      gPrivacyPane.showBlockLists);
+    setEventListener("changeBlockListPBM", "command",
+                     gPrivacyPane.showBlockLists);
+    setEventListener("browserContainersCheckbox", "command",
+                     gPrivacyPane._checkBrowserContainers);
+    setEventListener("browserContainersSettings", "command",
+                     gPrivacyPane.showContainerSettings);
+  },
+
+  // TRACKING PROTECTION MODE
+
+  /**
+   * Selects the right item of the Tracking Protection radiogroup.
+   */
+  trackingProtectionReadPrefs() {
+    let enabledPref = document.getElementById("privacy.trackingprotection.enabled");
+    let pbmPref = document.getElementById("privacy.trackingprotection.pbmode.enabled");
+    let radiogroup = document.getElementById("trackingProtectionRadioGroup");
+
+    // Global enable takes precedence over enabled in Private Browsing.
+    if (enabledPref.value) {
+      radiogroup.value = "always";
+    } else if (pbmPref.value) {
+      radiogroup.value = "private";
+    } else {
+      radiogroup.value = "never";
+    }
+  },
+
+  /**
+   * Sets the pref values based on the selected item of the radiogroup.
+   */
+  trackingProtectionWritePrefs() {
+    let enabledPref = document.getElementById("privacy.trackingprotection.enabled");
+    let pbmPref = document.getElementById("privacy.trackingprotection.pbmode.enabled");
+    let radiogroup = document.getElementById("trackingProtectionRadioGroup");
+
+    switch (radiogroup.value) {
+      case "always":
+        enabledPref.value = true;
+        pbmPref.value = true;
+        break;
+      case "private":
+        enabledPref.value = false;
+        pbmPref.value = true;
+        break;
+      case "never":
+        enabledPref.value = false;
+        pbmPref.value = false;
+        break;
+    }
   },
 
   // HISTORY MODE
@@ -332,29 +438,14 @@ var gPrivacyPane = {
         return;
       }
 
-      const Cc = Components.classes, Ci = Components.interfaces;
-      let brandName = document.getElementById("bundleBrand").getString("brandShortName");
-      let bundle = document.getElementById("bundlePreferences");
-      let msg = bundle.getFormattedString(autoStart.checked ?
-                                          "featureEnableRequiresRestart" : "featureDisableRequiresRestart",
-                                          [brandName]);
-      let title = bundle.getFormattedString("shouldRestartTitle", [brandName]);
-      let prompts = Cc["@mozilla.org/embedcomp/prompt-service;1"].getService(Ci.nsIPromptService);
-      let shouldProceed = prompts.confirm(window, title, msg)
-      if (shouldProceed) {
-        let cancelQuit = Cc["@mozilla.org/supports-PRBool;1"]
-                           .createInstance(Ci.nsISupportsPRBool);
-        Services.obs.notifyObservers(cancelQuit, "quit-application-requested",
-                                     "restart");
-        shouldProceed = !cancelQuit.data;
-
-        if (shouldProceed) {
-          pref.value = autoStart.hasAttribute('checked');
-          let appStartup = Cc["@mozilla.org/toolkit/app-startup;1"]
-                             .getService(Ci.nsIAppStartup);
-          appStartup.quit(Ci.nsIAppStartup.eAttemptQuit |  Ci.nsIAppStartup.eRestart);
-          return;
-        }
+      let buttonIndex = confirmRestartPrompt(autoStart.checked, 1,
+                                             true, false);
+      if (buttonIndex == CONFIRM_RESTART_PROMPT_RESTART_NOW) {
+        pref.value = autoStart.hasAttribute('checked');
+        let appStartup = Cc["@mozilla.org/toolkit/app-startup;1"]
+                           .getService(Ci.nsIAppStartup);
+        appStartup.quit(Ci.nsIAppStartup.eAttemptQuit |  Ci.nsIAppStartup.eRestart);
+        return;
       }
 
       this._shouldPromptForRestart = false;
@@ -372,6 +463,28 @@ var gPrivacyPane = {
   },
 
   /**
+   * Displays fine-grained, per-site preferences for tracking protection.
+   */
+  showTrackingProtectionExceptions() {
+    let bundlePreferences = document.getElementById("bundlePreferences");
+    let params = {
+      permissionType: "trackingprotection",
+      hideStatusColumn: true,
+      windowTitle: bundlePreferences.getString("trackingprotectionpermissionstitle"),
+      introText: bundlePreferences.getString("trackingprotectionpermissionstext"),
+    };
+    gSubDialog.open("chrome://browser/content/preferences/permissions.xul",
+                    null, params);
+  },
+
+  /**
+   * Displays container panel for customising and adding containers.
+   */
+  showContainerSettings() {
+    gotoPref("containers");
+  },
+
+  /**
    * Displays the available block lists for tracking protection.
    */
   showBlockLists: function ()
@@ -384,6 +497,14 @@ var gPrivacyPane = {
                    introText: bundlePreferences.getString("blockliststext") };
     gSubDialog.open("chrome://browser/content/preferences/blocklists.xul",
                     null, params);
+  },
+
+  /**
+   * Displays the Do Not Track settings dialog.
+   */
+  showDoNotTrackSettings() {
+    gSubDialog.open("chrome://browser/content/preferences/donottrack.xul",
+                    "resizable=no");
   },
 
   // HISTORY
@@ -434,7 +555,7 @@ var gPrivacyPane = {
 
     acceptThirdPartyLabel.disabled = acceptThirdPartyMenu.disabled = !acceptCookies;
     keepUntil.disabled = menu.disabled = this._autoStartPrivateBrowsing || !acceptCookies;
-    
+
     return acceptCookies;
   },
 
@@ -453,7 +574,7 @@ var gPrivacyPane = {
 
     return accept.checked ? 0 : 2;
   },
-  
+
   /**
    * Converts between network.cookie.cookieBehavior and the third-party cookie UI
    */
@@ -474,7 +595,7 @@ var gPrivacyPane = {
         return undefined;
     }
   },
-  
+
   writeAcceptThirdPartyCookies: function ()
   {
     var accept = document.getElementById("acceptThirdPartyMenu").selectedItem;
@@ -539,22 +660,22 @@ var gPrivacyPane = {
    * Displays a dialog from which individual parts of private data may be
    * cleared.
    */
-  clearPrivateDataNow: function (aClearEverything)
-  {
+  clearPrivateDataNow: function (aClearEverything) {
     var ts = document.getElementById("privacy.sanitize.timeSpan");
     var timeSpanOrig = ts.value;
-    if (aClearEverything)
+
+    if (aClearEverything) {
       ts.value = 0;
+    }
 
-    const Cc = Components.classes, Ci = Components.interfaces;
-    var glue = Cc["@mozilla.org/browser/browserglue;1"]
-                 .getService(Ci.nsIBrowserGlue);
-    glue.sanitize(window);
+    gSubDialog.open("chrome://browser/content/sanitize.xul", "resizable=no", null, () => {
+      // reset the timeSpan pref
+      if (aClearEverything) {
+        ts.value = timeSpanOrig;
+      }
 
-    // reset the timeSpan pref
-    if (aClearEverything)
-      ts.value = timeSpanOrig;
-    Services.obs.notifyObservers(null, "clear-private-data", null);
+      Services.obs.notifyObservers(null, "clear-private-data", null);
+    });
   },
 
   /**
@@ -566,6 +687,26 @@ var gPrivacyPane = {
     var sanitizeOnShutdownPref = document.getElementById("privacy.sanitize.sanitizeOnShutdown");
 
     settingsButton.disabled = !sanitizeOnShutdownPref.value;
+   },
+
+  // CONTAINERS
+
+  /*
+   * preferences:
+   *
+   * privacy.userContext.enabled
+   * - true if containers is enabled
+   */
+
+   /**
+    * Enables/disables the Settings button used to configure containers
+    */
+   readBrowserContainersCheckbox: function ()
+   {
+     var pref = document.getElementById("privacy.userContext.enabled");
+     var settings = document.getElementById("browserContainersSettings");
+
+     settings.disabled = !pref.value;
    }
 
 };

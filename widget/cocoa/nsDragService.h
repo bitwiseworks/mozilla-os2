@@ -14,6 +14,7 @@ extern NSString* const kWildcardPboardType;
 extern NSString* const kCorePboardType_url;
 extern NSString* const kCorePboardType_urld;
 extern NSString* const kCorePboardType_urln;
+extern NSString* const kCustomTypesPboardType;
 
 class nsDragService : public nsBaseDragService
 {
@@ -21,7 +22,7 @@ public:
   nsDragService();
 
   // nsBaseDragService
-  virtual nsresult InvokeDragSessionImpl(nsISupportsArray* anArrayTransferables,
+  virtual nsresult InvokeDragSessionImpl(nsIArray* anArrayTransferables,
                                          nsIScriptableRegion* aRegion,
                                          uint32_t aActionType);
   // nsIDragService
@@ -38,7 +39,7 @@ protected:
 private:
 
   NSImage* ConstructDragImage(nsIDOMNode* aDOMNode,
-                              nsIntRect* aDragRect,
+                              mozilla::LayoutDeviceIntRect* aDragRect,
                               nsIScriptableRegion* aRegion);
   bool IsValidType(NSString* availableType, bool allowFileURL);
   NSString* GetStringForType(NSPasteboardItem* item, const NSString* type,
@@ -46,7 +47,7 @@ private:
   NSString* GetTitleForURL(NSPasteboardItem* item);
   NSString* GetFilePath(NSPasteboardItem* item);
 
-  nsCOMPtr<nsISupportsArray> mDataItems; // only valid for a drag started within gecko
+  nsCOMPtr<nsIArray> mDataItems; // only valid for a drag started within gecko
   NSView* mNativeDragView;
   NSEvent* mNativeDragEvent;
 };

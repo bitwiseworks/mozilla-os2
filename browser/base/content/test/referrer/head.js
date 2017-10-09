@@ -45,7 +45,7 @@ var _referrerTests = [
     fromScheme: "https://",
     toScheme: "http://",
     policy: "origin",
-    result: "https://test1.example.com"  // origin, even on downgrade
+    result: "https://test1.example.com/"  // origin, even on downgrade
   },
   {
     fromScheme: "https://",
@@ -140,15 +140,8 @@ function delayedStartupFinished(aWindow) {
  * @resolves With the tab once it's loaded.
  */
 function someTabLoaded(aWindow) {
-  return new Promise(function(resolve) {
-    aWindow.gBrowser.addEventListener("load", function onLoad(aEvent) {
-      let tab = aWindow.gBrowser._getTabForContentWindow(
-          aEvent.target.defaultView.top);
-      if (tab) {
-        aWindow.gBrowser.removeEventListener("load", onLoad, true);
-        resolve(tab);
-      }
-    }, true);
+  return BrowserTestUtils.waitForNewTab(gTestWindow.gBrowser).then((tab) => {
+    return BrowserTestUtils.browserStopped(tab.linkedBrowser).then(() => tab);
   });
 }
 
@@ -195,7 +188,7 @@ function doContextMenuCommand(aWindow, aMenu, aItemId) {
  * @return {Promise}
  * @resolves When the source url for this test case is loaded.
  */
-function referrerTestCaseLoaded(aTestNumber) {
+function referrerTestCaseLoaded(aTestNumber, aParams) {
   let test = getReferrerTest(aTestNumber);
   let server = rounds == 0 ? REFERRER_POLICYSERVER_URL :
                              REFERRER_POLICYSERVER_URL_ATTRIBUTE;
@@ -203,9 +196,10 @@ function referrerTestCaseLoaded(aTestNumber) {
             "?scheme=" + escape(test.toScheme) +
             "&policy=" + escape(test.policy || "") +
             "&rel=" + escape(test.rel || "");
-  var browser = gTestWindow.gBrowser;
-  browser.selectedTab = browser.addTab(url);
-  return BrowserTestUtils.browserLoaded(browser.selectedBrowser);
+  let browser = gTestWindow.gBrowser;
+  return BrowserTestUtils.openNewForegroundTab(browser, () => {
+    browser.selectedTab = browser.addTab(url, aParams);
+  }, false, true);
 }
 
 /**
@@ -216,7 +210,7 @@ function referrerTestCaseLoaded(aTestNumber) {
  * @param aStartTestCase The callback to start the next test, aTestNumber + 1.
  */
 function checkReferrerAndStartNextTest(aTestNumber, aNewWindow, aNewTab,
-                                       aStartTestCase) {
+                                       aStartTestCase, aParams = {}) {
   referrerResultExtracted(aNewWindow || gTestWindow).then(function(result) {
     // Compare the actual result against the expected one.
     let test = getReferrerTest(aTestNumber);
@@ -232,13 +226,13 @@ function checkReferrerAndStartNextTest(aTestNumber, aNewWindow, aNewTab,
     // Move on to the next test.  Or finish if we're done.
     var nextTestNumber = aTestNumber + 1;
     if (getReferrerTest(nextTestNumber)) {
-      referrerTestCaseLoaded(nextTestNumber).then(function() {
+      referrerTestCaseLoaded(nextTestNumber, aParams).then(function() {
         aStartTestCase(nextTestNumber);
       });
     } else if (rounds == 0) {
       nextTestNumber = 0;
       rounds = 1;
-      referrerTestCaseLoaded(nextTestNumber).then(function() {
+      referrerTestCaseLoaded(nextTestNumber, aParams).then(function() {
         aStartTestCase(nextTestNumber);
       });
     } else {
@@ -253,7 +247,7 @@ function checkReferrerAndStartNextTest(aTestNumber, aNewWindow, aNewTab,
  * the test number - 0, 1, 2... Needs to trigger the navigation from the source
  * page, and call checkReferrerAndStartNextTest() when the target is loaded.
  */
-function startReferrerTest(aStartTestCase) {
+function startReferrerTest(aStartTestCase, params = {}) {
   waitForExplicitFinish();
 
   // Open the window where we'll load the source URLs.
@@ -264,7 +258,7 @@ function startReferrerTest(aStartTestCase) {
 
   // Load and start the first test.
   delayedStartupFinished(gTestWindow).then(function() {
-    referrerTestCaseLoaded(0).then(function() {
+    referrerTestCaseLoaded(0, params).then(function() {
       aStartTestCase(0);
     });
   });

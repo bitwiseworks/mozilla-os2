@@ -24,15 +24,18 @@ class nsIPrefBranch;
 class nsICancelable;
 class nsICookieService;
 class nsIIOService;
-class nsISchedulingContextService;
+class nsIRequestContextService;
 class nsISiteSecurityService;
 class nsIStreamConverterService;
 class nsITimer;
+class nsIUUIDGenerator;
 
-extern mozilla::Atomic<PRThread*, mozilla::Relaxed> gSocketThread;
 
 namespace mozilla {
 namespace net {
+
+extern Atomic<PRThread*, Relaxed> gSocketThread;
+
 class ATokenBucketEvent;
 class EventTokenBucket;
 class Tickler;
@@ -67,8 +70,8 @@ public:
     nsHttpHandler();
 
     nsresult Init();
-    nsresult AddStandardRequestHeaders(nsHttpHeaderArray *, bool isSecure);
-    nsresult AddConnectionHeader(nsHttpHeaderArray *,
+    nsresult AddStandardRequestHeaders(nsHttpRequestHead *, bool isSecure);
+    nsresult AddConnectionHeader(nsHttpRequestHead *,
                                  uint32_t capabilities);
     bool     IsAcceptableEncoding(const char *encoding, bool isSecure);
 
@@ -79,9 +82,10 @@ public:
     uint8_t        ReferrerLevel()           { return mReferrerLevel; }
     bool           SpoofReferrerSource()     { return mSpoofReferrerSource; }
     uint8_t        ReferrerTrimmingPolicy()  { return mReferrerTrimmingPolicy; }
+    uint8_t        ReferrerXOriginTrimmingPolicy() {
+        return mReferrerXOriginTrimmingPolicy;
+    }
     uint8_t        ReferrerXOriginPolicy()   { return mReferrerXOriginPolicy; }
-    bool           SendSecureXSiteReferrer() { return mSendSecureXSiteReferrer; }
-    bool           PackagedAppsEnabled()     { return mPackagedAppsEnabled; }
     uint8_t        RedirectionLimit()        { return mRedirectionLimit; }
     PRIntervalTime IdleTimeout()             { return mIdleTimeout; }
     PRIntervalTime SpdyTimeout()             { return mSpdyTimeout; }
@@ -105,7 +109,6 @@ public:
     bool           AllowExperiments() { return mTelemetryEnabled && mAllowExperiments; }
 
     bool           IsSpdyEnabled() { return mEnableSpdy; }
-    bool           IsSpdyV31Enabled() { return mSpdyV31; }
     bool           IsHttp2Enabled() { return mHttp2Enabled; }
     bool           EnforceHttp2TlsProfile() { return mEnforceHttp2TlsProfile; }
     bool           CoalesceSpdy() { return mCoalesceSpdy; }
@@ -239,14 +242,16 @@ public:
     void UpdateAltServiceMapping(AltSvcMapping *map,
                                  nsProxyInfo *proxyInfo,
                                  nsIInterfaceRequestor *callbacks,
-                                 uint32_t caps)
+                                 uint32_t caps,
+                                 const NeckoOriginAttributes &originAttributes)
     {
-        mConnMgr->UpdateAltServiceMapping(map, proxyInfo, callbacks, caps);
+        mConnMgr->UpdateAltServiceMapping(map, proxyInfo, callbacks, caps,
+                                          originAttributes);
     }
 
-    AltSvcMapping *GetAltServiceMapping(const nsACString &scheme,
-                                        const nsACString &host,
-                                        int32_t port, bool pb)
+    already_AddRefed<AltSvcMapping> GetAltServiceMapping(const nsACString &scheme,
+                                                         const nsACString &host,
+                                                         int32_t port, bool pb)
     {
         return mConnMgr->GetAltServiceMapping(scheme, host, port, pb);
     }
@@ -273,6 +278,12 @@ public:
     void OnModifyRequest(nsIHttpChannel *chan)
     {
         NotifyObservers(chan, NS_HTTP_ON_MODIFY_REQUEST_TOPIC);
+    }
+
+    // Called by the channel and cached in the loadGroup
+    void OnUserAgentRequest(nsIHttpChannel *chan)
+    {
+      NotifyObservers(chan, NS_HTTP_ON_USERAGENT_REQUEST_TOPIC);
     }
 
     // Called by the channel once headers are available
@@ -330,6 +341,13 @@ public:
     SpdyInformation *SpdyInfo() { return &mSpdyInfo; }
     bool IsH2MandatorySuiteEnabled() { return mH2MandatorySuiteEnabled; }
 
+    // Returns true if content-signature test pref is set such that they are
+    // NOT enforced on remote newtabs.
+    bool NewTabContentSignaturesDisabled()
+    {
+      return mNewTabContentSignaturesDisabled;
+    }
+
     // returns true in between Init and Shutdown states
     bool Active() { return mHandlerActive; }
 
@@ -339,9 +357,26 @@ public:
     void SetCacheSkippedUntil(TimeStamp arg) { mCacheSkippedUntil = arg; }
     void ClearCacheSkippedUntil() { mCacheSkippedUntil = TimeStamp(); }
 
-    nsISchedulingContextService *GetSchedulingContextService()
+    nsIRequestContextService *GetRequestContextService()
     {
-        return mSchedulingContextService.get();
+        return mRequestContextService.get();
+    }
+
+    void ShutdownConnectionManager();
+
+    bool KeepEmptyResponseHeadersAsEmtpyString() const
+    {
+        return mKeepEmptyResponseHeadersAsEmtpyString;
+    }
+
+    uint32_t DefaultHpackBuffer() const
+    {
+        return mDefaultHpackBuffer;
+    }
+
+    uint32_t MaxHttpResponseHeaderSize() const
+    {
+        return mMaxHttpResponseHeaderSize;
     }
 
 private:
@@ -376,7 +411,7 @@ private:
     nsHttpAuthCache mPrivateAuthCache;
 
     // the connection manager
-    nsHttpConnectionMgr *mConnMgr;
+    RefPtr<nsHttpConnectionMgr> mConnMgr;
 
     //
     // prefs
@@ -388,6 +423,7 @@ private:
     uint8_t  mReferrerLevel;
     uint8_t  mSpoofReferrerSource;
     uint8_t  mReferrerTrimmingPolicy;
+    uint8_t  mReferrerXOriginTrimmingPolicy;
     uint8_t  mReferrerXOriginPolicy;
 
     bool mFastFallbackToIPv4;
@@ -414,9 +450,6 @@ private:
     PRIntervalTime mPipelineRescheduleTimeout;
     PRIntervalTime mPipelineReadTimeout;
     nsCOMPtr<nsITimer> mPipelineTestTimer;
-
-    // Whether a URL containing !// should be interpreted as a packaged app channel
-    bool mPackagedAppsEnabled = false;
 
     uint8_t  mRedirectionLimit;
 
@@ -463,9 +496,6 @@ private:
 
 
     bool           mPromptTempRedirect;
-    // mSendSecureXSiteReferrer: default is false,
-    // if true allow referrer headers between secure non-matching hosts
-    bool           mSendSecureXSiteReferrer;
 
     // Persistent HTTPS caching flag
     bool           mEnablePersistentHttpsCaching;
@@ -490,7 +520,6 @@ private:
     uint32_t           mDebugObservations : 1;
 
     uint32_t           mEnableSpdy : 1;
-    uint32_t           mSpdyV31 : 1;
     uint32_t           mHttp2Enabled : 1;
     uint32_t           mUseH2Deps : 1;
     uint32_t           mEnforceHttp2TlsProfile : 1;
@@ -552,7 +581,23 @@ private:
     // incorrect content lengths or malformed chunked encodings
     FrameCheckLevel mEnforceH1Framing;
 
-    nsCOMPtr<nsISchedulingContextService> mSchedulingContextService;
+    nsCOMPtr<nsIRequestContextService> mRequestContextService;
+
+    // True if remote newtab content-signature disabled because of the channel.
+    bool mNewTabContentSignaturesDisabled;
+
+    // If it is set to false, headers with empty value will not appear in the
+    // header array - behavior as it used to be. If it is true: empty headers
+    // coming from the network will exits in header array as empty string.
+    // Call SetHeader with an empty value will still delete the header.
+    // (Bug 6699259)
+    bool mKeepEmptyResponseHeadersAsEmtpyString;
+
+    // The default size (in bytes) of the HPACK decompressor table.
+    uint32_t mDefaultHpackBuffer;
+
+    // The max size (in bytes) for received Http response header.
+    uint32_t mMaxHttpResponseHeaderSize;
 
 private:
     // For Rate Pacing Certain Network Events. Only assign this pointer on
@@ -594,8 +639,15 @@ private:
 
 private:
     nsresult SpeculativeConnectInternal(nsIURI *aURI,
+                                        nsIPrincipal *aPrincipal,
                                         nsIInterfaceRequestor *aCallbacks,
                                         bool anonymous);
+
+    // UUID generator for channelIds
+    nsCOMPtr<nsIUUIDGenerator> mUUIDGen;
+
+public:
+    nsresult NewChannelId(nsID *channelId);
 };
 
 extern nsHttpHandler *gHttpHandler;

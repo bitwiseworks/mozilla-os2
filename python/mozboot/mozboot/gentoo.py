@@ -13,9 +13,16 @@ class GentooBootstrapper(BaseBootstrapper):
         self.dist_id = dist_id
 
     def install_system_packages(self):
-        self.run_as_root(['emerge', '--quiet', 'git', 'mercurial'])
+        self.run_as_root(['emerge', '--quiet', 'dev-vcs/git', 'mercurial'])
 
     def install_browser_packages(self):
+        self.ensure_browser_packages()
+
+    def install_browser_artifact_mode_packages(self):
+        self.ensure_browser_packages(artifact_mode=True)
+
+    def ensure_browser_packages(self, artifact_mode=False):
+        # TODO: Figure out what not to install for artifact mode
         self.run_as_root(['emerge', '--onlydeps', '--quiet', 'firefox'])
         self.run_as_root(['emerge', '--quiet', 'gtk+'])
 

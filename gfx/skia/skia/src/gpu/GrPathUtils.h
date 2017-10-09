@@ -9,7 +9,7 @@
 #define GrPathUtils_DEFINED
 
 #include "SkRect.h"
-#include "SkPath.h"
+#include "SkPathPriv.h"
 #include "SkTArray.h"
 
 class SkMatrix;
@@ -56,7 +56,7 @@ namespace GrPathUtils {
     // points of the quadratic.
     class QuadUVMatrix {
     public:
-        QuadUVMatrix() {};
+        QuadUVMatrix() {}
         // Initialize the matrix from the control pts
         QuadUVMatrix(const SkPoint controlPts[3]) { this->set(controlPts); }
         void set(const SkPoint controlPts[3]);
@@ -74,7 +74,7 @@ namespace GrPathUtils {
          * vertices is a pointer to the first vertex.
          */
         template <int N, size_t STRIDE, size_t UV_OFFSET>
-        void apply(const void* vertices) {
+        void apply(const void* vertices) const {
             intptr_t xyPtr = reinterpret_cast<intptr_t>(vertices);
             intptr_t uvPtr = reinterpret_cast<intptr_t>(vertices) + UV_OFFSET;
             float sx = fM[0];
@@ -108,32 +108,33 @@ namespace GrPathUtils {
 
     // Converts a cubic into a sequence of quads. If working in device space
     // use tolScale = 1, otherwise set based on stretchiness of the matrix. The
-    // result is sets of 3 points in quads (TODO: share endpoints in returned
-    // array)
+    // result is sets of 3 points in quads.
+    void convertCubicToQuads(const SkPoint p[4],
+                             SkScalar tolScale,
+                             SkTArray<SkPoint, true>* quads);
+
     // When we approximate a cubic {a,b,c,d} with a quadratic we may have to
     // ensure that the new control point lies between the lines ab and cd. The
     // convex path renderer requires this. It starts with a path where all the
     // control points taken together form a convex polygon. It relies on this
     // property and the quadratic approximation of cubics step cannot alter it.
-    // Setting constrainWithinTangents to true enforces this property. When this
-    // is true the cubic must be simple and dir must specify the orientation of
-    // the cubic. Otherwise, dir is ignored.
-    void convertCubicToQuads(const SkPoint p[4],
-                             SkScalar tolScale,
-                             bool constrainWithinTangents,
-                             SkPath::Direction dir,
-                             SkTArray<SkPoint, true>* quads);
+    // This variation enforces this constraint. The cubic must be simple and dir
+    // must specify the orientation of the contour containing the cubic.
+    void convertCubicToQuadsConstrainToTangents(const SkPoint p[4],
+                                                SkScalar tolScale,
+                                                SkPathPriv::FirstDirection dir,
+                                                SkTArray<SkPoint, true>* quads);
 
     // Chops the cubic bezier passed in by src, at the double point (intersection point)
     // if the curve is a cubic loop. If it is a loop, there will be two parametric values for
     // the double point: ls and ms. We chop the cubic at these values if they are between 0 and 1.
     // Return value:
     // Value of 3: ls and ms are both between (0,1), and dst will contain the three cubics,
-    //             dst[0..3], dst[3..6], and dst[6..9] if dst is not NULL
+    //             dst[0..3], dst[3..6], and dst[6..9] if dst is not nullptr
     // Value of 2: Only one of ls and ms are between (0,1), and dst will contain the two cubics,
-    //             dst[0..3] and dst[3..6] if dst is not NULL
+    //             dst[0..3] and dst[3..6] if dst is not nullptr
     // Value of 1: Neither ls or ms are between (0,1), and dst will contain the one original cubic,
-    //             dst[0..3] if dst is not NULL
+    //             dst[0..3] if dst is not nullptr
     //
     // Optional KLM Calculation:
     // The function can also return the KLM linear functionals for the chopped cubic implicit form
@@ -153,8 +154,8 @@ namespace GrPathUtils {
     // Notice that the klm lines are calculated in the same space as the input control points.
     // If you transform the points the lines will also need to be transformed. This can be done
     // by mapping the lines with the inverse-transpose of the matrix used to map the points.
-    int chopCubicAtLoopIntersection(const SkPoint src[4], SkPoint dst[10] = NULL,
-                                    SkScalar klm[9] = NULL, SkScalar klm_rev[3] = NULL);
+    int chopCubicAtLoopIntersection(const SkPoint src[4], SkPoint dst[10] = nullptr,
+                                    SkScalar klm[9] = nullptr, SkScalar klm_rev[3] = nullptr);
 
     // Input is p which holds the 4 control points of a non-rational cubic Bezier curve.
     // Output is the coefficients of the three linear functionals K, L, & M which
@@ -168,5 +169,12 @@ namespace GrPathUtils {
     // If you transform the points the lines will also need to be transformed. This can be done
     // by mapping the lines with the inverse-transpose of the matrix used to map the points.
     void getCubicKLM(const SkPoint p[4], SkScalar klm[9]);
+
+    // When tessellating curved paths into linear segments, this defines the maximum distance
+    // in screen space which a segment may deviate from the mathmatically correct value.
+    // Above this value, the segment will be subdivided.
+    // This value was chosen to approximate the supersampling accuracy of the raster path (16
+    // samples, or one quarter pixel).
+    static const SkScalar kDefaultTolerance = SkDoubleToScalar(0.25);
 };
 #endif

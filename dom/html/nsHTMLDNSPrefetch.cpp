@@ -97,10 +97,6 @@ nsHTMLDNSPrefetch::Shutdown()
 bool
 nsHTMLDNSPrefetch::IsAllowed (nsIDocument *aDocument)
 {
-  if (NS_IsAppOffline(aDocument->NodePrincipal())) {
-    return false;
-  }
-
   // There is no need to do prefetch on non UI scenarios such as XMLHttpRequest.
   return aDocument->IsDNSPrefetchAllowed() && aDocument->GetWindow();
 }
@@ -320,7 +316,7 @@ nsHTMLDNSPrefetch::nsDeferrals::SubmitQueue()
       if (link && link->HasDeferredDNSPrefetchRequest()) {
         nsCOMPtr<nsIURI> hrefURI(link ? link->GetURI() : nullptr);
         bool isLocalResource = false;
-        nsresult rv;
+        nsresult rv = NS_OK;
 
         hostName.Truncate();
         if (hrefURI) {

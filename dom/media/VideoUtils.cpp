@@ -4,12 +4,13 @@
 
 #include "VideoUtils.h"
 
-#include "mozilla/Preferences.h"
 #include "mozilla/Base64.h"
 #include "mozilla/TaskQueue.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/Function.h"
 
+#include "MediaContentType.h"
+#include "MediaPrefs.h"
 #include "MediaResource.h"
 #include "TimeUnits.h"
 #include "nsMathUtils.h"
@@ -29,12 +30,16 @@
 
 namespace mozilla {
 
+NS_NAMED_LITERAL_CSTRING(kEMEKeySystemClearkey, "org.w3.clearkey");
+NS_NAMED_LITERAL_CSTRING(kEMEKeySystemWidevine, "com.widevine.alpha");
+NS_NAMED_LITERAL_CSTRING(kEMEKeySystemPrimetime, "com.adobe.primetime");
+
 using layers::PlanarYCbCrImage;
 
-static inline CheckedInt64 SaferMultDiv(int64_t aValue, uint32_t aMul, uint32_t aDiv) {
+CheckedInt64 SaferMultDiv(int64_t aValue, uint32_t aMul, uint32_t aDiv) {
   int64_t major = aValue / aDiv;
   int64_t remainder = aValue % aDiv;
-  return CheckedInt64(remainder) * aMul / aDiv + major * aMul;
+  return CheckedInt64(remainder) * aMul / aDiv + CheckedInt64(major) * aMul;
 }
 
 // Converts from number of audio frames to microseconds, given the specified
@@ -140,60 +145,6 @@ media::TimeIntervals GetEstimatedBufferedTimeRanges(mozilla::MediaResource* aStr
   return buffered;
 }
 
-int DownmixAudioToStereo(mozilla::AudioDataValue* buffer,
-                         int channels, uint32_t frames)
-{
-  int outChannels;
-  outChannels = 2;
-#ifdef MOZ_SAMPLE_TYPE_FLOAT32
-  // Downmix matrix. Per-row normalization 1 for rows 3,4 and 2 for rows 5-8.
-  static const float dmatrix[6][8][2]= {
-      /*3*/{{0.5858f,0},{0.4142f,0.4142f},{0,     0.5858f}},
-      /*4*/{{0.4226f,0},{0,      0.4226f},{0.366f,0.2114f},{0.2114f,0.366f}},
-      /*5*/{{0.6510f,0},{0.4600f,0.4600f},{0,     0.6510f},{0.5636f,0.3254f},{0.3254f,0.5636f}},
-      /*6*/{{0.5290f,0},{0.3741f,0.3741f},{0,     0.5290f},{0.4582f,0.2645f},{0.2645f,0.4582f},{0.3741f,0.3741f}},
-      /*7*/{{0.4553f,0},{0.3220f,0.3220f},{0,     0.4553f},{0.3943f,0.2277f},{0.2277f,0.3943f},{0.2788f,0.2788f},{0.3220f,0.3220f}},
-      /*8*/{{0.3886f,0},{0.2748f,0.2748f},{0,     0.3886f},{0.3366f,0.1943f},{0.1943f,0.3366f},{0.3366f,0.1943f},{0.1943f,0.3366f},{0.2748f,0.2748f}},
-  };
-  // Re-write the buffer with downmixed data
-  for (uint32_t i = 0; i < frames; i++) {
-    float sampL = 0.0;
-    float sampR = 0.0;
-    for (int j = 0; j < channels; j++) {
-      sampL+=buffer[i*channels+j]*dmatrix[channels-3][j][0];
-      sampR+=buffer[i*channels+j]*dmatrix[channels-3][j][1];
-    }
-    buffer[i*outChannels]=sampL;
-    buffer[i*outChannels+1]=sampR;
-  }
-#else
-  // Downmix matrix. Per-row normalization 1 for rows 3,4 and 2 for rows 5-8.
-  // Coefficients in Q14.
-  static const int16_t dmatrix[6][8][2]= {
-      /*3*/{{9598, 0},{6786,6786},{0,   9598}},
-      /*4*/{{6925, 0},{0,   6925},{5997,3462},{3462,5997}},
-      /*5*/{{10663,0},{7540,7540},{0,  10663},{9234,5331},{5331,9234}},
-      /*6*/{{8668, 0},{6129,6129},{0,   8668},{7507,4335},{4335,7507},{6129,6129}},
-      /*7*/{{7459, 0},{5275,5275},{0,   7459},{6460,3731},{3731,6460},{4568,4568},{5275,5275}},
-      /*8*/{{6368, 0},{4502,4502},{0,   6368},{5514,3184},{3184,5514},{5514,3184},{3184,5514},{4502,4502}}
-  };
-  // Re-write the buffer with downmixed data
-  for (uint32_t i = 0; i < frames; i++) {
-    int32_t sampL = 0;
-    int32_t sampR = 0;
-    for (int j = 0; j < channels; j++) {
-      sampL+=buffer[i*channels+j]*dmatrix[channels-3][j][0];
-      sampR+=buffer[i*channels+j]*dmatrix[channels-3][j][1];
-    }
-    sampL = (sampL + 8192)>>14;
-    buffer[i*outChannels] = static_cast<mozilla::AudioDataValue>(MOZ_CLIP_TO_15(sampL));
-    sampR = (sampR + 8192)>>14;
-    buffer[i*outChannels+1] = static_cast<mozilla::AudioDataValue>(MOZ_CLIP_TO_15(sampR));
-  }
-#endif
-  return outChannels;
-}
-
 void DownmixStereoToMono(mozilla::AudioDataValue* aBuffer,
                          uint32_t aFrames)
 {
@@ -252,14 +203,13 @@ already_AddRefed<SharedThreadPool> GetMediaThreadPool(MediaThreadType aType)
       name = "MediaPDecoder";
       break;
     default:
-      MOZ_ASSERT(false);
+      MOZ_FALLTHROUGH_ASSERT("Unexpected MediaThreadType");
     case MediaThreadType::PLAYBACK:
       name = "MediaPlayback";
       break;
   }
   return SharedThreadPool::
-    Get(nsDependentCString(name),
-        Preferences::GetUint("media.num-decode-threads", 12));
+    Get(nsDependentCString(name), MediaPrefs::MediaThreadPoolDefaultCount());
 }
 
 bool
@@ -367,14 +317,6 @@ CreateMediaDecodeTaskQueue()
   return queue.forget();
 }
 
-already_AddRefed<FlushableTaskQueue>
-CreateFlushableMediaDecodeTaskQueue()
-{
-  RefPtr<FlushableTaskQueue> queue = new FlushableTaskQueue(
-    GetMediaThreadPool(MediaThreadType::PLATFORM_DECODER));
-  return queue.forget();
-}
-
 void
 SimpleTimer::Cancel() {
   if (mTimer) {
@@ -470,15 +412,6 @@ LogToBrowserConsole(const nsAString& aMsg)
 }
 
 bool
-IsAACCodecString(const nsAString& aCodec)
-{
-  return
-    aCodec.EqualsLiteral("mp4a.40.2") || // MPEG4 AAC-LC
-    aCodec.EqualsLiteral("mp4a.40.5") || // MPEG4 HE-AAC
-    aCodec.EqualsLiteral("mp4a.67"); // MPEG2 AAC-LC}
-}
-
-bool
 ParseCodecsString(const nsAString& aCodecs, nsTArray<nsString>& aOutCodecs)
 {
   aOutCodecs.Clear();
@@ -496,60 +429,98 @@ ParseCodecsString(const nsAString& aCodecs, nsTArray<nsString>& aOutCodecs)
   return true;
 }
 
-static bool
-CheckContentType(const nsAString& aContentType,
-                 mozilla::Function<bool(const nsAString&)> aSubtypeFilter,
-                 mozilla::Function<bool(const nsAString&)> aCodecFilter)
+bool
+ParseMIMETypeString(const nsAString& aMIMEType,
+                    nsString& aOutContainerType,
+                    nsTArray<nsString>& aOutCodecs)
 {
-  nsContentTypeParser parser(aContentType);
-  nsAutoString mimeType;
-  nsresult rv = parser.GetType(mimeType);
-  if (NS_FAILED(rv) || !aSubtypeFilter(mimeType)) {
+  nsContentTypeParser parser(aMIMEType);
+  nsresult rv = parser.GetType(aOutContainerType);
+  if (NS_FAILED(rv)) {
     return false;
   }
 
   nsString codecsStr;
   parser.GetParameter("codecs", codecsStr);
-  nsTArray<nsString> codecs;
-  if (!ParseCodecsString(codecsStr, codecs)) {
-    return false;
-  }
-  for (const nsString& codec : codecs) {
-    if (!aCodecFilter(codec)) {
+  return ParseCodecsString(codecsStr, aOutCodecs);
+}
+
+bool
+IsH264CodecString(const nsAString& aCodec)
+{
+  int16_t profile = 0;
+  int16_t level = 0;
+  return ExtractH264CodecDetails(aCodec, profile, level);
+}
+
+bool
+IsAACCodecString(const nsAString& aCodec)
+{
+  return
+    aCodec.EqualsLiteral("mp4a.40.2") || // MPEG4 AAC-LC
+    aCodec.EqualsLiteral("mp4a.40.5") || // MPEG4 HE-AAC
+    aCodec.EqualsLiteral("mp4a.67") || // MPEG2 AAC-LC
+    aCodec.EqualsLiteral("mp4a.40.29");  // MPEG4 HE-AACv2
+}
+
+bool
+IsVP8CodecString(const nsAString& aCodec)
+{
+  return aCodec.EqualsLiteral("vp8") ||
+         aCodec.EqualsLiteral("vp8.0");
+}
+
+bool
+IsVP9CodecString(const nsAString& aCodec)
+{
+  return aCodec.EqualsLiteral("vp9") ||
+         aCodec.EqualsLiteral("vp9.0");
+}
+
+template <int N>
+static bool
+StartsWith(const nsACString& string, const char (&prefix)[N])
+{
+    if (N - 1 > string.Length()) {
       return false;
     }
+    return memcmp(string.Data(), prefix, N - 1) == 0;
+}
+
+UniquePtr<TrackInfo>
+CreateTrackInfoWithMIMEType(const nsACString& aCodecMIMEType)
+{
+  UniquePtr<TrackInfo> trackInfo;
+  if (StartsWith(aCodecMIMEType, "audio/")) {
+    trackInfo.reset(new AudioInfo());
+    trackInfo->mMimeType = aCodecMIMEType;
+  } else if (StartsWith(aCodecMIMEType, "video/")) {
+    trackInfo.reset(new VideoInfo());
+    trackInfo->mMimeType = aCodecMIMEType;
   }
-  return true;
+  return trackInfo;
 }
 
-bool
-IsH264ContentType(const nsAString& aContentType)
+UniquePtr<TrackInfo>
+CreateTrackInfoWithMIMETypeAndContentTypeExtraParameters(
+  const nsACString& aCodecMIMEType,
+  const MediaContentType& aContentType)
 {
-  return CheckContentType(aContentType,
-    [](const nsAString& type) {
-      return type.EqualsLiteral("video/mp4");
-    },
-    [](const nsAString& codec) {
-      int16_t profile = 0;
-      int16_t level = 0;
-      return ExtractH264CodecDetails(codec, profile, level);
+  UniquePtr<TrackInfo> trackInfo = CreateTrackInfoWithMIMEType(aCodecMIMEType);
+  if (trackInfo) {
+    VideoInfo* videoInfo = trackInfo->GetAsVideoInfo();
+    if (videoInfo) {
+      Maybe<int32_t> maybeWidth = aContentType.GetWidth();
+      if (maybeWidth && *maybeWidth > 0) {
+        videoInfo->mImage.width = *maybeWidth;
+      }
+      Maybe<int32_t> maybeHeight = aContentType.GetHeight();
+      if (maybeHeight && *maybeHeight > 0) {
+        videoInfo->mImage.height = *maybeHeight;
+      }
     }
-  );
-}
-
-bool
-IsAACContentType(const nsAString& aContentType)
-{
-  return CheckContentType(aContentType,
-    [](const nsAString& type) {
-      return type.EqualsLiteral("audio/mp4") ||
-             type.EqualsLiteral("audio/x-m4a");
-    },
-    [](const nsAString& codec) {
-      return codec.EqualsLiteral("mp4a.40.2") || // MPEG4 AAC-LC
-             codec.EqualsLiteral("mp4a.40.5") || // MPEG4 HE-AAC
-             codec.EqualsLiteral("mp4a.67");     // MPEG2 AAC-LC
-    });
+  }
+  return trackInfo;
 }
 
 } // end namespace mozilla

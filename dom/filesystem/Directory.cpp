@@ -6,35 +6,41 @@
 
 #include "mozilla/dom/Directory.h"
 
-#include "CreateDirectoryTask.h"
-#include "CreateFileTask.h"
-#include "FileSystemPermissionRequest.h"
 #include "GetDirectoryListingTask.h"
-#include "GetFileOrDirectoryTask.h"
-#include "RemoveTask.h"
+#include "GetFilesTask.h"
+#include "WorkerPrivate.h"
 
 #include "nsCharSeparatedTokenizer.h"
 #include "nsString.h"
 #include "mozilla/dom/DirectoryBinding.h"
 #include "mozilla/dom/FileSystemBase.h"
 #include "mozilla/dom/FileSystemUtils.h"
-
-// Resolve the name collision of Microsoft's API name with macros defined in
-// Windows header files. Undefine the macro of CreateDirectory to avoid
-// Directory#CreateDirectory being replaced by Directory#CreateDirectoryW.
-#ifdef CreateDirectory
-#undef CreateDirectory
-#endif
-// Undefine the macro of CreateFile to avoid Directory#CreateFile being replaced
-// by Directory#CreateFileW.
-#ifdef CreateFile
-#undef CreateFile
-#endif
+#include "mozilla/dom/OSFileSystem.h"
 
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_0(Directory)
+NS_IMPL_CYCLE_COLLECTION_CLASS(Directory)
+
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(Directory)
+  if (tmp->mFileSystem) {
+    tmp->mFileSystem->Unlink();
+    tmp->mFileSystem = nullptr;
+  }
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mParent)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Directory)
+  if (tmp->mFileSystem) {
+    tmp->mFileSystem->Traverse(cb);
+  }
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mParent)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+
+NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(Directory)
+
 NS_IMPL_CYCLE_COLLECTING_ADDREF(Directory)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(Directory)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Directory)
@@ -42,37 +48,81 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Directory)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
-// static
-already_AddRefed<Promise>
-Directory::GetRoot(FileSystemBase* aFileSystem, ErrorResult& aRv)
+/* static */ bool
+Directory::WebkitBlinkDirectoryPickerEnabled(JSContext* aCx, JSObject* aObj)
 {
-  RefPtr<GetFileOrDirectoryTask> task = new GetFileOrDirectoryTask(
-    aFileSystem, EmptyString(), true, aRv);
-  if (aRv.Failed()) {
-    return nullptr;
+  if (NS_IsMainThread()) {
+    return Preferences::GetBool("dom.webkitBlink.dirPicker.enabled", false);
   }
-  FileSystemPermissionRequest::RequestForTask(task);
-  return task->GetPromise();
+
+  // aCx can be null when this function is called by something else than WebIDL
+  // binding code.
+  workers::WorkerPrivate* workerPrivate =
+    workers::GetCurrentThreadWorkerPrivate();
+  if (!workerPrivate) {
+    return false;
+  }
+
+  return workerPrivate->WebkitBlinkDirectoryPickerEnabled();
 }
 
-Directory::Directory(FileSystemBase* aFileSystem,
-                     const nsAString& aPath)
-  : mFileSystem(aFileSystem)
-  , mPath(aPath)
+/* static */ already_AddRefed<Directory>
+Directory::Constructor(const GlobalObject& aGlobal,
+                       const nsAString& aRealPath,
+                       ErrorResult& aRv)
 {
-  MOZ_ASSERT(aFileSystem, "aFileSystem should not be null.");
-  // Remove the trailing "/".
-  mPath.Trim(FILESYSTEM_DOM_PATH_SEPARATOR, false, true);
+  nsCOMPtr<nsIFile> path;
+  aRv = NS_NewLocalFile(aRealPath, true, getter_AddRefs(path));
+  if (NS_WARN_IF(aRv.Failed())) {
+    return nullptr;
+  }
+
+  return Create(aGlobal.GetAsSupports(), path);
+}
+
+/* static */ already_AddRefed<Directory>
+Directory::Create(nsISupports* aParent, nsIFile* aFile,
+                  FileSystemBase* aFileSystem)
+{
+  MOZ_ASSERT(aParent);
+  MOZ_ASSERT(aFile);
+
+#ifdef DEBUG
+  bool isDir;
+  nsresult rv = aFile->IsDirectory(&isDir);
+  MOZ_ASSERT(NS_SUCCEEDED(rv) && isDir);
+#endif
+
+  RefPtr<Directory> directory = new Directory(aParent, aFile, aFileSystem);
+  return directory.forget();
+}
+
+Directory::Directory(nsISupports* aParent,
+                     nsIFile* aFile,
+                     FileSystemBase* aFileSystem)
+  : mParent(aParent)
+  , mFile(aFile)
+{
+  MOZ_ASSERT(aFile);
+
+  // aFileSystem can be null. In this case we create a OSFileSystem when needed.
+  if (aFileSystem) {
+    // More likely, this is a OSFileSystem. This object keeps a reference of
+    // mParent but it's not cycle collectable and to avoid manual
+    // addref/release, it's better to have 1 object per directory. For this
+    // reason we clone it here.
+    mFileSystem = aFileSystem->Clone();
+  }
 }
 
 Directory::~Directory()
 {
 }
 
-nsPIDOMWindow*
+nsISupports*
 Directory::GetParentObject() const
 {
-  return mFileSystem->GetWindow();
+  return mParent;
 }
 
 JSObject*
@@ -82,171 +132,86 @@ Directory::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 }
 
 void
-Directory::GetName(nsAString& aRetval) const
+Directory::GetName(nsAString& aRetval, ErrorResult& aRv)
 {
   aRetval.Truncate();
 
-  if (mPath.IsEmpty()) {
-    mFileSystem->GetRootName(aRetval);
+  RefPtr<FileSystemBase> fs = GetFileSystem(aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
     return;
   }
 
-  aRetval = Substring(mPath,
-                      mPath.RFindChar(FileSystemUtils::kSeparatorChar) + 1);
-}
-
-already_AddRefed<Promise>
-Directory::CreateFile(const nsAString& aPath, const CreateFileOptions& aOptions,
-                      ErrorResult& aRv)
-{
-  nsresult error = NS_OK;
-  nsAutoString realPath;
-  RefPtr<Blob> blobData;
-  InfallibleTArray<uint8_t> arrayData;
-  bool replace = (aOptions.mIfExists == CreateIfExistsMode::Replace);
-
-  // Get the file content.
-  if (aOptions.mData.WasPassed()) {
-    auto& data = aOptions.mData.Value();
-    if (data.IsString()) {
-      NS_ConvertUTF16toUTF8 str(data.GetAsString());
-      arrayData.AppendElements(reinterpret_cast<const uint8_t *>(str.get()),
-                               str.Length());
-    } else if (data.IsArrayBuffer()) {
-      const ArrayBuffer& buffer = data.GetAsArrayBuffer();
-      buffer.ComputeLengthAndData();
-      arrayData.AppendElements(buffer.Data(), buffer.Length());
-    } else if (data.IsArrayBufferView()){
-      const ArrayBufferView& view = data.GetAsArrayBufferView();
-      view.ComputeLengthAndData();
-      arrayData.AppendElements(view.Data(), view.Length());
-    } else {
-      blobData = data.GetAsBlob();
-    }
-  }
-
-  if (!DOMPathToRealPath(aPath, realPath)) {
-    error = NS_ERROR_DOM_FILESYSTEM_INVALID_PATH_ERR;
-  }
-
-  RefPtr<CreateFileTask> task =
-    new CreateFileTask(mFileSystem, realPath, blobData, arrayData, replace, aRv);
-  if (aRv.Failed()) {
-    return nullptr;
-  }
-  task->SetError(error);
-  FileSystemPermissionRequest::RequestForTask(task);
-  return task->GetPromise();
-}
-
-already_AddRefed<Promise>
-Directory::CreateDirectory(const nsAString& aPath, ErrorResult& aRv)
-{
-  nsresult error = NS_OK;
-  nsAutoString realPath;
-  if (!DOMPathToRealPath(aPath, realPath)) {
-    error = NS_ERROR_DOM_FILESYSTEM_INVALID_PATH_ERR;
-  }
-  RefPtr<CreateDirectoryTask> task = new CreateDirectoryTask(
-    mFileSystem, realPath, aRv);
-  if (aRv.Failed()) {
-    return nullptr;
-  }
-  task->SetError(error);
-  FileSystemPermissionRequest::RequestForTask(task);
-  return task->GetPromise();
-}
-
-already_AddRefed<Promise>
-Directory::Get(const nsAString& aPath, ErrorResult& aRv)
-{
-  nsresult error = NS_OK;
-  nsAutoString realPath;
-  if (!DOMPathToRealPath(aPath, realPath)) {
-    error = NS_ERROR_DOM_FILESYSTEM_INVALID_PATH_ERR;
-  }
-  RefPtr<GetFileOrDirectoryTask> task = new GetFileOrDirectoryTask(
-    mFileSystem, realPath, false, aRv);
-  if (aRv.Failed()) {
-    return nullptr;
-  }
-  task->SetError(error);
-  FileSystemPermissionRequest::RequestForTask(task);
-  return task->GetPromise();
-}
-
-already_AddRefed<Promise>
-Directory::Remove(const StringOrFileOrDirectory& aPath, ErrorResult& aRv)
-{
-  return RemoveInternal(aPath, false, aRv);
-}
-
-already_AddRefed<Promise>
-Directory::RemoveDeep(const StringOrFileOrDirectory& aPath, ErrorResult& aRv)
-{
-  return RemoveInternal(aPath, true, aRv);
-}
-
-already_AddRefed<Promise>
-Directory::RemoveInternal(const StringOrFileOrDirectory& aPath, bool aRecursive,
-                          ErrorResult& aRv)
-{
-  nsresult error = NS_OK;
-  nsAutoString realPath;
-  RefPtr<BlobImpl> blob;
-
-  // Check and get the target path.
-
-  if (aPath.IsFile()) {
-    blob = aPath.GetAsFile().Impl();
-  } else if (aPath.IsString()) {
-    if (!DOMPathToRealPath(aPath.GetAsString(), realPath)) {
-      error = NS_ERROR_DOM_FILESYSTEM_INVALID_PATH_ERR;
-    }
-  } else if (!mFileSystem->IsSafeDirectory(&aPath.GetAsDirectory())) {
-    error = NS_ERROR_DOM_SECURITY_ERR;
-  } else {
-    realPath = aPath.GetAsDirectory().mPath;
-    // The target must be a descendant of this directory.
-    if (!FileSystemUtils::IsDescendantPath(mPath, realPath)) {
-      error = NS_ERROR_DOM_FILESYSTEM_NO_MODIFICATION_ALLOWED_ERR;
-    }
-  }
-
-  RefPtr<RemoveTask> task = new RemoveTask(mFileSystem, mPath, blob, realPath,
-    aRecursive, aRv);
-  if (aRv.Failed()) {
-    return nullptr;
-  }
-  task->SetError(error);
-  FileSystemPermissionRequest::RequestForTask(task);
-  return task->GetPromise();
+  fs->GetDirectoryName(mFile, aRetval, aRv);
 }
 
 void
-Directory::GetPath(nsAString& aRetval) const
+Directory::GetPath(nsAString& aRetval, ErrorResult& aRv)
 {
+  // This operation is expensive. Better to cache the result.
   if (mPath.IsEmpty()) {
-    // The Directory ctor removes any trailing '/'; this is the root directory.
-    aRetval.AssignLiteral(FILESYSTEM_DOM_PATH_SEPARATOR);
-  } else {
-    aRetval = mPath;
+    RefPtr<FileSystemBase> fs = GetFileSystem(aRv);
+    if (NS_WARN_IF(aRv.Failed())) {
+      return;
+    }
+
+    fs->GetDOMPath(mFile, mPath, aRv);
+    if (NS_WARN_IF(aRv.Failed())) {
+      return;
+    }
   }
+
+  aRetval = mPath;
+}
+
+nsresult
+Directory::GetFullRealPath(nsAString& aPath)
+{
+  nsresult rv = mFile->GetPath(aPath);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  return NS_OK;
 }
 
 already_AddRefed<Promise>
-Directory::GetFilesAndDirectories()
+Directory::GetFilesAndDirectories(ErrorResult& aRv)
 {
-  nsresult error = NS_OK;
-  nsString realPath;
-  ErrorResult rv;
-  RefPtr<GetDirectoryListingTask> task =
-    new GetDirectoryListingTask(mFileSystem, mPath, mFilters, rv);
-  if (NS_WARN_IF(rv.Failed())) {
+  RefPtr<FileSystemBase> fs = GetFileSystem(aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
     return nullptr;
   }
-  task->SetError(error);
-  FileSystemPermissionRequest::RequestForTask(task);
+
+  RefPtr<GetDirectoryListingTaskChild> task =
+    GetDirectoryListingTaskChild::Create(fs, this, mFile, mFilters, aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return nullptr;
+  }
+
+  task->Start();
+
+  return task->GetPromise();
+}
+
+already_AddRefed<Promise>
+Directory::GetFiles(bool aRecursiveFlag, ErrorResult& aRv)
+{
+  ErrorResult rv;
+  RefPtr<FileSystemBase> fs = GetFileSystem(rv);
+  if (NS_WARN_IF(rv.Failed())) {
+    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    return nullptr;
+  }
+
+  RefPtr<GetFilesTaskChild> task =
+    GetFilesTaskChild::Create(fs, this, mFile, aRecursiveFlag, rv);
+  if (NS_WARN_IF(rv.Failed())) {
+    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    return nullptr;
+  }
+
+  task->Start();
+
   return task->GetPromise();
 }
 
@@ -257,66 +222,35 @@ Directory::SetContentFilters(const nsAString& aFilters)
 }
 
 FileSystemBase*
-Directory::GetFileSystem() const
+Directory::GetFileSystem(ErrorResult& aRv)
 {
-  return mFileSystem.get();
-}
-
-bool
-Directory::DOMPathToRealPath(const nsAString& aPath, nsAString& aRealPath) const
-{
-  aRealPath.Truncate();
-
-  nsString relativePath;
-  relativePath = aPath;
-
-  // Trim white spaces.
-  static const char kWhitespace[] = "\b\t\r\n ";
-  relativePath.Trim(kWhitespace);
-
-  if (!IsValidRelativePath(relativePath)) {
-    return false;
-  }
-
-  aRealPath = mPath + NS_LITERAL_STRING(FILESYSTEM_DOM_PATH_SEPARATOR) +
-    relativePath;
-
-  return true;
-}
-
-// static
-bool
-Directory::IsValidRelativePath(const nsString& aPath)
-{
-  // We don't allow empty relative path to access the root.
-  if (aPath.IsEmpty()) {
-    return false;
-  }
-
-  // Leading and trailing "/" are not allowed.
-  if (aPath.First() == FileSystemUtils::kSeparatorChar ||
-      aPath.Last() == FileSystemUtils::kSeparatorChar) {
-    return false;
-  }
-
-  NS_NAMED_LITERAL_STRING(kCurrentDir, ".");
-  NS_NAMED_LITERAL_STRING(kParentDir, "..");
-
-  // Split path and check each path component.
-  nsCharSeparatedTokenizer tokenizer(aPath, FileSystemUtils::kSeparatorChar);
-  while (tokenizer.hasMoreTokens()) {
-    nsDependentSubstring pathComponent = tokenizer.nextToken();
-    // The path containing empty components, such as "foo//bar", is invalid.
-    // We don't allow paths, such as "../foo", "foo/./bar" and "foo/../bar",
-    // to walk up the directory.
-    if (pathComponent.IsEmpty() ||
-        pathComponent.Equals(kCurrentDir) ||
-        pathComponent.Equals(kParentDir)) {
-      return false;
+  if (!mFileSystem) {
+    nsAutoString path;
+    aRv = mFile->GetPath(path);
+    if (NS_WARN_IF(aRv.Failed())) {
+      return nullptr;
     }
+
+    RefPtr<OSFileSystem> fs = new OSFileSystem(path);
+    fs->Init(mParent);
+
+    mFileSystem = fs;
   }
 
-  return true;
+  return mFileSystem;
+}
+
+
+bool
+Directory::ClonableToDifferentThreadOrProcess() const
+{
+  // If we don't have a fileSystem we are going to create a OSFileSystem that is
+  // clonable everywhere.
+  if (!mFileSystem) {
+    return true;
+  }
+
+  return mFileSystem->ClonableToDifferentThreadOrProcess();
 }
 
 } // namespace dom

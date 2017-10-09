@@ -27,7 +27,7 @@
 #include "nsIHTMLDocument.h"
 #include "nsIStyleSheetLinkingElement.h"
 #include "nsIDocumentTransformer.h"
-#include "mozilla/CSSStyleSheet.h"
+#include "mozilla/StyleSheetInlines.h"
 #include "mozilla/css/Loader.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/EncodingUtils.h"
@@ -132,10 +132,10 @@ txMozillaXMLOutput::attribute(nsIAtom* aPrefix,
     if (mOpenedElementIsHTML && aNsID == kNameSpaceID_None) {
         nsAutoString lnameStr;
         nsContentUtils::ASCIIToLower(aLocalName, lnameStr);
-        lname = do_GetAtom(lnameStr);
+        lname = NS_Atomize(lnameStr);
     }
     else {
-        lname = do_GetAtom(aLocalName);
+        lname = NS_Atomize(aLocalName);
     }
 
     NS_ENSURE_TRUE(lname, NS_ERROR_OUT_OF_MEMORY);
@@ -237,7 +237,7 @@ txMozillaXMLOutput::endDocument(nsresult aResult)
     }
 
     if (!mRefreshString.IsEmpty()) {
-        nsPIDOMWindow *win = mDocument->GetWindow();
+        nsPIDOMWindowOuter* win = mDocument->GetWindow();
         if (win) {
             nsCOMPtr<nsIRefreshURI> refURI =
                 do_QueryInterface(win->GetDocShell());
@@ -462,10 +462,10 @@ txMozillaXMLOutput::startElement(nsIAtom* aPrefix,
 
         nsAutoString lnameStr;
         nsContentUtils::ASCIIToLower(aLocalName, lnameStr);
-        lname = do_GetAtom(lnameStr);
+        lname = NS_Atomize(lnameStr);
     }
     else {
-        lname = do_GetAtom(aLocalName);
+        lname = NS_Atomize(aLocalName);
     }
 
     // No biggie if we lose the prefix due to OOM
@@ -723,7 +723,7 @@ txMozillaXMLOutput::startHTMLElement(nsIContent* aElement, bool aIsHTML)
         NS_ENSURE_SUCCESS(rv, rv);
 
         // No need to notify since aElement hasn't been inserted yet
-        NS_ASSERTION(!aElement->IsInDoc(), "should not be in doc");
+        NS_ASSERTION(!aElement->IsInUncomposedDoc(), "should not be in doc");
         rv = aElement->AppendChildTo(meta, false);
         NS_ENSURE_SUCCESS(rv, rv);
     }
@@ -756,7 +756,7 @@ txMozillaXMLOutput::endHTMLElement(nsIContent* aElement)
             aElement->GetAttr(kNameSpaceID_None, nsGkAtoms::content, value);
             if (!value.IsEmpty()) {
                 nsContentUtils::ASCIIToLower(httpEquiv);
-                nsCOMPtr<nsIAtom> header = do_GetAtom(httpEquiv);
+                nsCOMPtr<nsIAtom> header = NS_Atomize(httpEquiv);
                 processHTTPEquiv(header, value);
             }
         }
@@ -797,19 +797,23 @@ txMozillaXMLOutput::createResultDocument(const nsSubstring& aName, int32_t aNsID
     MOZ_ASSERT(mDocument->GetReadyStateEnum() ==
                nsIDocument::READYSTATE_UNINITIALIZED, "Bad readyState");
     mDocument->SetReadyStateInternal(nsIDocument::READYSTATE_LOADING);
+    mDocument->SetMayStartLayout(false);
     nsCOMPtr<nsIDocument> source = do_QueryInterface(aSourceDocument);
     NS_ENSURE_STATE(source);
     bool hasHadScriptObject = false;
     nsIScriptGlobalObject* sgo =
       source->GetScriptHandlingObject(hasHadScriptObject);
     NS_ENSURE_STATE(sgo || !hasHadScriptObject);
-    mDocument->SetScriptHandlingObject(sgo);
 
     mCurrentNode = mDocument;
     mNodeInfoManager = mDocument->NodeInfoManager();
 
     // Reset and set up the document
     URIUtils::ResetWithSource(mDocument, aSourceDocument);
+
+    // Make sure we set the script handling object after resetting with the
+    // source, so that we have the right principal.
+    mDocument->SetScriptHandlingObject(sgo);
 
     // Set the charset
     if (!mOutputFormat.mEncoding.IsEmpty()) {
@@ -888,7 +892,7 @@ txMozillaXMLOutput::createResultDocument(const nsSubstring& aName, int32_t aNsID
 
         nsresult rv = nsContentUtils::CheckQName(qName);
         if (NS_SUCCEEDED(rv)) {
-            nsCOMPtr<nsIAtom> doctypeName = do_GetAtom(qName);
+            nsCOMPtr<nsIAtom> doctypeName = NS_Atomize(qName);
             if (!doctypeName) {
                 return NS_ERROR_OUT_OF_MEMORY;
             }
@@ -976,7 +980,7 @@ txTransformNotifier::ScriptEvaluated(nsresult aResult,
 }
 
 NS_IMETHODIMP 
-txTransformNotifier::StyleSheetLoaded(CSSStyleSheet* aSheet,
+txTransformNotifier::StyleSheetLoaded(StyleSheet* aSheet,
                                       bool aWasAlternate,
                                       nsresult aStatus)
 {

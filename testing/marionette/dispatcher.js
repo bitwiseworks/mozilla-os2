@@ -7,10 +7,11 @@
 const {interfaces: Ci, utils: Cu} = Components;
 
 Cu.import("resource://gre/modules/Log.jsm");
+Cu.import("resource://gre/modules/Preferences.jsm");
 Cu.import("resource://gre/modules/Task.jsm");
 
+Cu.import("chrome://marionette/content/assert.js");
 Cu.import("chrome://marionette/content/driver.js");
-Cu.import("chrome://marionette/content/emulator.js");
 Cu.import("chrome://marionette/content/error.js");
 Cu.import("chrome://marionette/content/message.js");
 
@@ -28,11 +29,10 @@ const logger = Log.repository.getLogger("Marionette");
  *     Unique identifier of the connection this dispatcher should handle.
  * @param {DebuggerTransport} transport
  *     Debugger transport connection to the client.
- * @param {function(Emulator): GeckoDriver} driverFactory
- *     A factory function that takes an Emulator as argument and produces
- *     a GeckoDriver.
+ * @param {function(): GeckoDriver} driverFactory
+ *     A factory function that produces a GeckoDriver.
  */
-this.Dispatcher = function(connId, transport, driverFactory) {
+this.Dispatcher = function (connId, transport, driverFactory) {
   this.connId = connId;
   this.conn = transport;
 
@@ -46,8 +46,7 @@ this.Dispatcher = function(connId, transport, driverFactory) {
   // last received/sent message ID
   this.lastId = 0;
 
-  this.emulator = new Emulator(this.sendEmulator.bind(this));
-  this.driver = driverFactory(this.emulator);
+  this.driver = driverFactory();
 
   // lookup of commands sent by server to client by message ID
   this.commands_ = new Map();
@@ -57,8 +56,8 @@ this.Dispatcher = function(connId, transport, driverFactory) {
  * Debugger transport callback that cleans up
  * after a connection is closed.
  */
-Dispatcher.prototype.onClosed = function(reason) {
-  this.driver.sessionTearDown();
+Dispatcher.prototype.onClosed = function (reason) {
+  this.driver.deleteSession();
   if (this.onclose) {
     this.onclose(this);
   }
@@ -76,7 +75,7 @@ Dispatcher.prototype.onClosed = function(reason) {
  *     message type, message ID, method name or error, and parameters
  *     or result.
  */
-Dispatcher.prototype.onPacket = function(data) {
+Dispatcher.prototype.onPacket = function (data) {
   let msg = Message.fromMsg(data);
   msg.origin = MessageOrigin.Client;
   this.log_(msg);
@@ -111,7 +110,7 @@ Dispatcher.prototype.onPacket = function(data) {
  * @param {Command} cmd
  *     The requested command to execute.
  */
-Dispatcher.prototype.execute = function(cmd) {
+Dispatcher.prototype.execute = function (cmd) {
   let resp = new Response(cmd.id, this.send.bind(this));
   let sendResponse = () => resp.sendConditionally(resp => !resp.sent);
   let sendError = resp.sendError.bind(resp);
@@ -120,6 +119,10 @@ Dispatcher.prototype.execute = function(cmd) {
     let fn = this.driver.commands[cmd.name];
     if (typeof fn == "undefined") {
       throw new UnknownCommandError(cmd.name);
+    }
+
+    if (cmd.name !== "newSession") {
+      assert.session(this.driver);
     }
 
     let rv = yield fn.bind(this.driver)(cmd, resp);
@@ -136,7 +139,7 @@ Dispatcher.prototype.execute = function(cmd) {
   req.then(sendResponse, sendError).catch(error.report);
 };
 
-Dispatcher.prototype.sendError = function(err, cmdId) {
+Dispatcher.prototype.sendError = function (err, cmdId) {
   let resp = new Response(cmdId, this.send.bind(this));
   resp.sendError(err);
 };
@@ -158,28 +161,21 @@ Dispatcher.prototype.sayHello = function() {
   this.sendRaw(whatHo);
 };
 
-Dispatcher.prototype.sendEmulator = function(name, params, resCb, errCb) {
-  let cmd = new Command(++this.lastId, name, params);
-  cmd.onresult = resCb;
-  cmd.onerror = errCb;
-  this.send(cmd);
-};
 
 /**
- * Delegates message to client or emulator based on the provided
- * {@code cmdId}.  The message is sent over the debugger transport socket.
+ * Delegates message to client based on the provided  {@code cmdId}.
+ * The message is sent over the debugger transport socket.
  *
  * The command ID is a unique identifier assigned to the client's request
  * that is used to distinguish the asynchronous responses.
  *
  * Whilst responses to commands are synchronous and must be sent in the
- * correct order, emulator callbacks are more transparent and can be sent
- * at any time.  These callbacks won't change the current command state.
+ * correct order.
  *
  * @param {Command,Response} msg
  *     The command or response to send.
  */
-Dispatcher.prototype.send = function(msg) {
+Dispatcher.prototype.send = function (msg) {
   msg.origin = MessageOrigin.Server;
   if (msg instanceof Command) {
     this.commands_.set(msg.id, msg);
@@ -192,22 +188,12 @@ Dispatcher.prototype.send = function(msg) {
 // Low-level methods:
 
 /**
- * Send command to emulator over the debugger transport socket.
- *
- * @param {Command} cmd
- *     The command to issue to the emulator.
- */
-Dispatcher.prototype.sendToEmulator = function(cmd) {
-  this.sendMessage(cmd);
-};
-
-/**
  * Send given response to the client over the debugger transport socket.
  *
  * @param {Response} resp
  *     The response to send back to the client.
  */
-Dispatcher.prototype.sendToClient = function(resp) {
+Dispatcher.prototype.sendToClient = function (resp) {
   this.driver.responseCompleted();
   this.sendMessage(resp);
 };
@@ -218,7 +204,7 @@ Dispatcher.prototype.sendToClient = function(resp) {
  * @param {Command,Response} msg
  *     The message to send.
  */
-Dispatcher.prototype.sendMessage = function(msg) {
+Dispatcher.prototype.sendMessage = function (msg) {
   this.log_(msg);
   let payload = msg.toMsg();
   this.sendRaw(payload);
@@ -231,14 +217,12 @@ Dispatcher.prototype.sendMessage = function(msg) {
  * @param {Object} payload
  *     The payload to ship.
  */
-Dispatcher.prototype.sendRaw = function(payload) {
+Dispatcher.prototype.sendRaw = function (payload) {
   this.conn.send(payload);
 };
 
-Dispatcher.prototype.log_ = function(msg) {
-  if (logger.level > Log.Level.Debug) {
-    return;
-  }
+Dispatcher.prototype.log_ = function (msg) {
   let a = (msg.origin == MessageOrigin.Client ? " -> " : " <- ");
-  logger.debug(this.connId + a + msg);
+  let s = JSON.stringify(msg.toMsg());
+  logger.trace(this.connId + a + s);
 };

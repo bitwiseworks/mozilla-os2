@@ -12,12 +12,15 @@ this.EXPORTED_SYMBOLS = [];
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/AddonManager.jsm");
+/* globals AddonManagerPrivate*/
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/Preferences.jsm");
 Cu.import("resource://gre/modules/osfile.jsm");
+/* globals OS*/
 Cu.import("resource://gre/modules/Log.jsm");
 Cu.import("resource://gre/modules/Task.jsm");
 Cu.import("resource://gre/modules/GMPUtils.jsm");
+/* globals EME_ADOBE_ID, GMP_PLUGIN_IDS, GMPPrefs, GMPUtils, OPEN_H264_ID, WIDEVINE_ID */
 Cu.import("resource://gre/modules/AppConstants.jsm");
 Cu.import("resource://gre/modules/UpdateUtils.jsm");
 
@@ -38,6 +41,7 @@ const CLEARKEY_PLUGIN_ID     = "gmp-clearkey";
 const CLEARKEY_VERSION       = "0.1";
 
 const GMP_LICENSE_INFO       = "gmp_license_info";
+const GMP_PRIVACY_INFO       = "gmp_privacy_info";
 const GMP_LEARN_MORE         = "learn_more_label";
 
 const GMP_PLUGINS = [
@@ -51,8 +55,6 @@ const GMP_PLUGINS = [
     licenseURL:      "chrome://mozapps/content/extensions/OpenH264-license.txt",
     homepageURL:     "http://www.openh264.org/",
     optionsURL:      "chrome://mozapps/content/extensions/gmpPrefs.xul",
-    missingKey:      "VIDEO_OPENH264_GMP_DISAPPEARED",
-    missingFilesKey: "VIDEO_OPENH264_GMP_MISSING_FILES",
   },
   {
     id:              EME_ADOBE_ID,
@@ -67,8 +69,16 @@ const GMP_PLUGINS = [
     homepageURL:     "http://help.adobe.com/en_US/primetime/drm/HTML5_CDM",
     optionsURL:      "chrome://mozapps/content/extensions/gmpPrefs.xul",
     isEME:           true,
-    missingKey:      "VIDEO_ADOBE_GMP_DISAPPEARED",
-    missingFilesKey: "VIDEO_ADOBE_GMP_MISSING_FILES",
+  },
+  {
+    id:              WIDEVINE_ID,
+    name:            "widevine_description",
+    // Describe the purpose of both CDMs in the same way.
+    description:     "eme-adobe_description",
+    licenseURL:      "https://www.google.com/policies/privacy/",
+    homepageURL:     "https://www.widevine.com/",
+    optionsURL:      "chrome://mozapps/content/extensions/gmpPrefs.xul",
+    isEME:           true
   }];
 XPCOMUtils.defineConstant(this, "GMP_PLUGINS", GMP_PLUGINS);
 
@@ -76,8 +86,6 @@ XPCOMUtils.defineLazyGetter(this, "pluginsBundle",
   () => Services.strings.createBundle("chrome://global/locale/plugins.properties"));
 XPCOMUtils.defineLazyGetter(this, "gmpService",
   () => Cc["@mozilla.org/gecko-media-plugin-service;1"].getService(Ci.mozIGeckoMediaPluginChromeService));
-
-XPCOMUtils.defineLazyGetter(this, "telemetryService", () => Services.telemetry);
 
 var messageManager = Cc["@mozilla.org/globalmessagemanager;1"]
                        .getService(Ci.nsIMessageListenerManager);
@@ -149,13 +157,6 @@ GMPWrapper.prototype = {
     return this._gmpPath;
   },
 
-  get missingKey() {
-    return this._plugin.missingKey;
-  },
-  get missingFilesKey() {
-    return this._plugin.missingFilesKey;
-  },
-
   get id() { return this._plugin.id; },
   get type() { return "plugin"; },
   get isGMPlugin() { return true; },
@@ -169,13 +170,17 @@ GMPWrapper.prototype = {
   get version() { return GMPPrefs.get(GMPPrefs.KEY_PLUGIN_VERSION, null,
                                       this._plugin.id); },
 
-  get isActive() { return !this.appDisabled && !this.userDisabled; },
+  get isActive() {
+    return !this.appDisabled &&
+           !this.userDisabled &&
+           !GMPUtils.isPluginHidden(this._plugin);
+  },
   get appDisabled() {
     if (this._plugin.isEME && !GMPPrefs.get(GMPPrefs.KEY_EME_ENABLED, true)) {
       // If "media.eme.enabled" is false, all EME plugins are disabled.
       return true;
     }
-   return false;
+    return false;
   },
 
   get userDisabled() {
@@ -205,7 +210,7 @@ GMPWrapper.prototype = {
   get updateDate() {
     let time = Number(GMPPrefs.get(GMPPrefs.KEY_PLUGIN_LAST_UPDATE, null,
                                    this._plugin.id));
-    if (time !== NaN && this.isInstalled) {
+    if (!isNaN(time) && this.isInstalled) {
       return new Date(time * 1000)
     }
     return null;
@@ -286,8 +291,8 @@ GMPWrapper.prototype = {
       this._log.trace("findUpdates() - updateTask");
       try {
         let installManager = new GMPInstallManager();
-        let gmpAddons = yield installManager.checkForAddons();
-        let update = gmpAddons.find(addon => addon.id === this._plugin.id);
+        let res = yield installManager.checkForAddons();
+        let update = res.gmpAddons.find(addon => addon.id === this._plugin.id);
         if (update && update.isValid && !update.isInstalled) {
           this._log.trace("findUpdates() - found update for " +
                           this._plugin.id + ", installing");
@@ -333,6 +338,9 @@ GMPWrapper.prototype = {
   },
 
   _handleEnabledChanged: function() {
+    this._log.info("_handleEnabledChanged() id=" +
+      this._plugin.id + " isActive=" + this.isActive);
+
     AddonManagerPrivate.callAddonListeners(this.isActive ?
                                            "onEnabling" : "onDisabling",
                                            this, false);
@@ -353,11 +361,17 @@ GMPWrapper.prototype = {
   },
 
   onPrefEMEGlobalEnabledChanged: function() {
+    this._log.info("onPrefEMEGlobalEnabledChanged() id=" + this._plugin.id +
+      " appDisabled=" + this.appDisabled + " isActive=" + this.isActive +
+      " hidden=" + GMPUtils.isPluginHidden(this._plugin));
+
     AddonManagerPrivate.callAddonListeners("onPropertyChanged", this,
                                            ["appDisabled"]);
+    // If EME or the GMP itself are disabled, uninstall the GMP.
+    // Otherwise, check for updates, so we download and install the GMP.
     if (this.appDisabled) {
       this.uninstallPlugin();
-    } else {
+    } else if (!GMPUtils.isPluginHidden(this._plugin)) {
       AddonManagerPrivate.callInstallListeners("onExternalInstall", null, this,
                                                null, false);
       AddonManagerPrivate.callAddonListeners("onInstalling", this, false);
@@ -393,12 +407,12 @@ GMPWrapper.prototype = {
     let parsedData;
     try {
       parsedData = JSON.parse(data);
-    } catch(ex) {
+    } catch (ex) {
       this._log.error("Malformed EME video message with data: " + data);
       return;
     }
     let {status: status, keySystem: keySystem} = parsedData;
-    if (status == "cdm-not-installed" || status == "cdm-insufficient-version") {
+    if (status == "cdm-not-installed") {
       this.checkForUpdates(0);
     }
   },
@@ -444,7 +458,6 @@ GMPWrapper.prototype = {
       gmpService.removeAndDeletePluginDirectory(this.gmpPath);
     }
     GMPPrefs.reset(GMPPrefs.KEY_PLUGIN_VERSION, this.id);
-    GMPPrefs.reset(GMPPrefs.KEY_PLUGIN_TRIAL_CREATE, this.id);
     GMPPrefs.reset(GMPPrefs.KEY_PLUGIN_ABI, this.id);
     GMPPrefs.reset(GMPPrefs.KEY_PLUGIN_LAST_UPDATE, this.id);
     AddonManagerPrivate.callAddonListeners("onUninstalled", this);
@@ -475,19 +488,25 @@ GMPWrapper.prototype = {
 
     let id = this._plugin.id.substring(4);
     let libName = AppConstants.DLL_PREFIX + id + AppConstants.DLL_SUFFIX;
+    let infoName;
+    if (this._plugin.id == WIDEVINE_ID) {
+      infoName = "manifest.json";
+    } else {
+      infoName = id + ".info";
+    }
 
-    return {
-      libraryMissing: !fileExists(this.gmpPath, libName),
-      infoMissing: !fileExists(this.gmpPath, id + ".info"),
-      voucherMissing: this._plugin.id == EME_ADOBE_ID
-                      && !fileExists(this.gmpPath, id + ".voucher"),
-    };
+    return fileExists(this.gmpPath, libName) &&
+           fileExists(this.gmpPath, infoName) &&
+           (this._plugin.id != EME_ADOBE_ID || fileExists(this.gmpPath, id + ".voucher"));
   },
 
   validate: function() {
     if (!this.isInstalled) {
       // Not installed -> Valid.
-      return { installed: false, valid: true };
+      return {
+        installed: false,
+        valid: true
+      };
     }
 
     let abi = GMPPrefs.get(GMPPrefs.KEY_PLUGIN_ABI, UpdateUtils.ABI, this._plugin.id);
@@ -502,30 +521,11 @@ GMPWrapper.prototype = {
     }
 
     // Installed -> Check if files are missing.
-    let status = this._arePluginFilesOnDisk();
-    status.installed = true;
-    status.mismatchedABI = false;
-    status.valid = true;
-    status.missing = [];
-    status.telemetry = 0;
-
-    if (status.libraryMissing) {
-      status.valid = false;
-      status.missing.push('library');
-      status.telemetry += 1;
-    }
-    if (status.infoMissing) {
-      status.valid = false;
-      status.missing.push('info');
-      status.telemetry += 2;
-    }
-    if (status.voucherMissing) {
-      status.valid = false;
-      status.missing.push('voucher');
-      status.telemetry += 4;
-    }
-
-    return status;
+    let filesOnDisk = this._arePluginFilesOnDisk();
+    return {
+      installed: true,
+      valid: filesOnDisk
+    };
   },
 };
 
@@ -538,7 +538,6 @@ var GMPProvider = {
     configureLogging();
     this._log = Log.repository.getLoggerWithMessagePrefix("Toolkit.GMP",
                                                           "GMPProvider.");
-    let telemetry = {};
     this.buildPluginList();
     this.ensureProperCDMInstallState();
 
@@ -559,13 +558,9 @@ var GMPProvider = {
           wrapper.uninstallPlugin();
           continue;
         }
-        if (validation.installed) {
-          telemetryService.getHistogramById(wrapper.missingFilesKey).add(validation.telemetry);
-        }
         if (!validation.valid) {
           this._log.info("startup - gmp " + plugin.id +
-                         " missing [" + validation.missing + "], uninstalling");
-          telemetryService.getHistogramById(wrapper.missingKey).add(true);
+                         " invalid, uninstalling");
           wrapper.uninstallPlugin();
           continue;
         }
@@ -579,39 +574,20 @@ var GMPProvider = {
                          e.name + " - sandboxing not available?", e);
         }
       }
-
-      if (this.isEnabled) {
-        telemetry[id] = {
-          userDisabled: wrapper.userDisabled,
-          version: wrapper.version,
-          applyBackgroundUpdates: wrapper.applyBackgroundUpdates,
-        };
-      }
     }
 
-    var emeEnabled = Preferences.get(GMPPrefs.KEY_EME_ENABLED, false);
-    if (emeEnabled) {
-      try {
-        let greDir = Services.dirsvc.get(NS_GRE_DIR,
-                                         Ci.nsILocalFile);
-        let clearkeyPath = OS.Path.join(greDir.path,
-                                        CLEARKEY_PLUGIN_ID,
-                                        CLEARKEY_VERSION);
-        this._log.info("startup - adding clearkey CDM directory " +
-                       clearkeyPath);
-        gmpService.addPluginDirectory(clearkeyPath);
-      } catch (e) {
-        this._log.warn("startup - adding clearkey CDM failed", e);
-      }
+    try {
+      let greDir = Services.dirsvc.get(NS_GRE_DIR,
+                                       Ci.nsILocalFile);
+      let clearkeyPath = OS.Path.join(greDir.path,
+                                      CLEARKEY_PLUGIN_ID,
+                                      CLEARKEY_VERSION);
+      this._log.info("startup - adding clearkey CDM directory " +
+                     clearkeyPath);
+      gmpService.addPluginDirectory(clearkeyPath);
+    } catch (e) {
+      this._log.warn("startup - adding clearkey CDM failed", e);
     }
-
-    if (Preferences.get("media.gmp-adobe-eme.enabled", false)) {
-      // Gather telemetry on how many Adobe-compatible installs have
-      // disabled EME.
-      telemetryService.getHistogramById("VIDEO_EME_DISABLED").add(!emeEnabled);
-    }
-
-    AddonManagerPrivate.setTelemetryDetails("GMP", telemetry);
   },
 
   shutdown: function() {
@@ -675,7 +651,8 @@ var GMPProvider = {
   generateFullDescription: function(aPlugin) {
     let rv = [];
     for (let [urlProp, labelId] of [["learnMoreURL", GMP_LEARN_MORE],
-                                    ["licenseURL", GMP_LICENSE_INFO]]) {
+                                    ["licenseURL", aPlugin.id == WIDEVINE_ID ?
+                                     GMP_PRIVACY_INFO : GMP_LICENSE_INFO]]) {
       if (aPlugin[urlProp]) {
         let label = pluginsBundle.GetStringFromName(labelId);
         rv.push(`<xhtml:a href="${aPlugin[urlProp]}" target="_blank">${label}</xhtml:a>.`);
@@ -695,8 +672,6 @@ var GMPProvider = {
         optionsURL: aPlugin.optionsURL,
         wrapper: null,
         isEME: aPlugin.isEME,
-        missingKey: aPlugin.missingKey,
-        missingFilesKey: aPlugin.missingFilesKey,
       };
       plugin.fullDescription = this.generateFullDescription(aPlugin);
       plugin.wrapper = new GMPWrapper(plugin);

@@ -59,7 +59,7 @@ namespace ubi {
 using mozilla::devtools::DeserializedEdge;
 
 const char16_t Concrete<DeserializedNode>::concreteTypeName[] =
-  MOZ_UTF16("mozilla::devtools::DeserializedNode");
+  u"mozilla::devtools::DeserializedNode";
 
 const char16_t*
 Concrete<DeserializedNode>::typeName() const
@@ -120,16 +120,15 @@ Concrete<DeserializedNode>::allocationStack() const
 }
 
 
-UniquePtr<EdgeRange>
-Concrete<DeserializedNode>::edges(JSRuntime* rt, bool) const
+js::UniquePtr<EdgeRange>
+Concrete<DeserializedNode>::edges(JSContext* cx, bool) const
 {
-  UniquePtr<DeserializedEdgeRange, JS::DeletePolicy<DeserializedEdgeRange>> range(
-    js_new<DeserializedEdgeRange>(get()));
+  js::UniquePtr<DeserializedEdgeRange> range(js_new<DeserializedEdgeRange>(get()));
 
   if (!range)
     return nullptr;
 
-  return UniquePtr<EdgeRange>(range.release());
+  return js::UniquePtr<EdgeRange>(range.release());
 }
 
 StackFrame

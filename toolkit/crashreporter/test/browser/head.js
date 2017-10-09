@@ -4,7 +4,7 @@ function create_subdir(dir, subdirname) {
   if (subdir.exists()) {
     subdir.remove(true);
   }
-  subdir.create(Ci.nsIFile.DIRECTORY_TYPE, 0755);
+  subdir.create(Ci.nsIFile.DIRECTORY_TYPE, 0o755);
   return subdir;
 }
 
@@ -53,7 +53,7 @@ function make_fake_appdir() {
   // and undefine the old value
   try {
     dirSvc.undefine("UAppData");
-  } catch(ex) {} // it's ok if this fails, the value might not be cached yet
+  } catch (ex) {} // it's ok if this fails, the value might not be cached yet
   return appD.clone();
 }
 
@@ -65,7 +65,7 @@ function cleanup_fake_appdir() {
   // undefine our value so future calls get the real value
   try {
     dirSvc.undefine("UAppData");
-  } catch(ex) {
+  } catch (ex) {
     dump("cleanup_fake_appdir: dirSvc.undefine failed: " + ex.message +"\n");
   }
 }
@@ -86,7 +86,7 @@ function add_fake_crashes(crD, count) {
     let fn = uuid + ".txt";
     let file = submitdir.clone();
     file.append(fn);
-    file.create(Ci.nsIFile.NORMAL_FILE_TYPE, 0666);
+    file.create(Ci.nsIFile.NORMAL_FILE_TYPE, 0o666);
     file.lastModifiedTime = date;
     results.push({'id': uuid, 'date': date, 'pending': false});
 
@@ -94,7 +94,7 @@ function add_fake_crashes(crD, count) {
   }
   // we want them sorted newest to oldest, since that's the order
   // that about:crashes lists them in
-  results.sort((a,b) => b.date - a.date);
+  results.sort((a, b) => b.date - a.date);
   return results;
 }
 

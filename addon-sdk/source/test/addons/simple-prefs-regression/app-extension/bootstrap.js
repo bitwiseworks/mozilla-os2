@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-// @see http://mxr.mozilla.org/mozilla-central/source/js/src/xpconnect/loader/mozJSComponentLoader.cpp
+// @see http://dxr.mozilla.org/mozilla-central/source/js/src/xpconnect/loader/mozJSComponentLoader.cpp
 
 'use strict';
 
@@ -26,7 +26,7 @@ const appInfo = Cc["@mozilla.org/xre/app-info;1"].
 const vc = Cc["@mozilla.org/xpcom/version-comparator;1"].
            getService(Ci.nsIVersionComparator);
 
-const { Services } = Cu.import("resource://gre/modules/Services.jsm");
+const { NetUtil } = Cu.import("resource://gre/modules/NetUtil.jsm");
 
 const REASON = [ 'unknown', 'startup', 'shutdown', 'enable', 'disable',
                  'install', 'uninstall', 'upgrade', 'downgrade' ];
@@ -41,17 +41,11 @@ var nukeTimer = null;
 // Utility function that synchronously reads local resource from the given
 // `uri` and returns content string.
 function readURI(uri) {
-  let ioservice = Cc['@mozilla.org/network/io-service;1'].
-    getService(Ci.nsIIOService);
-  let channel = ioservice.newChannel2(uri,
-                                      'UTF-8',
-                                      null,
-                                      null,      // aLoadingNode
-                                      Services.scriptSecurityManager.getSystemPrincipal(),
-                                      null,      // aTriggeringPrincipal
-                                      Ci.nsILoadInfo.SEC_NORMAL,
-                                      Ci.nsIContentPolicy.TYPE_OTHER);
-  let stream = channel.open();
+  let channel = NetUtil.newChannel({
+    uri: NetUtil.newURI(uri, "UTF-8"),
+    loadUsingSystemPrincipal: true
+  });
+  let stream = channel.open2();
 
   let cstream = Cc['@mozilla.org/intl/converter-input-stream;1'].
     createInstance(Ci.nsIConverterInputStream);
@@ -286,7 +280,7 @@ function loadSandbox(uri) {
 }
 
 function unloadSandbox(sandbox) {
-  if ("nukeSandbox" in Cu)
+  if (Cu.getClassName(sandbox, true) == "Sandbox")
     Cu.nukeSandbox(sandbox);
 }
 

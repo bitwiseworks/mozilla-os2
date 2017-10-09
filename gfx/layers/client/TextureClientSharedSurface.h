@@ -40,21 +40,15 @@ public:
 
   ~SharedSurfaceTextureData();
 
-  virtual bool Lock(OpenMode, FenceHandle*) override { return false; }
+  virtual bool Lock(OpenMode) override { return false; }
 
   virtual void Unlock() override {}
 
-  virtual bool HasInternalBuffer() const override { return false; }
-
-  virtual gfx::SurfaceFormat GetFormat() const override {
-    return gfx::SurfaceFormat::UNKNOWN;
-  }
-
-  virtual gfx::IntSize GetSize() const override;
+  virtual void FillInfo(TextureData::Info& aInfo) const override;
 
   virtual bool Serialize(SurfaceDescriptor& aOutDescriptor) override;
 
-  virtual void Deallocate(ISurfaceAllocator*) override;
+  virtual void Deallocate(LayersIPCChannel*) override;
 
   gl::SharedSurface* Surf() const { return mSurf.get(); }
 };
@@ -64,21 +58,13 @@ class SharedSurfaceTextureClient : public TextureClient
 public:
   SharedSurfaceTextureClient(SharedSurfaceTextureData* aData,
                              TextureFlags aFlags,
-                             ISurfaceAllocator* aAllocator);
+                             LayersIPCChannel* aAllocator);
 
   ~SharedSurfaceTextureClient();
 
   static already_AddRefed<SharedSurfaceTextureClient>
   Create(UniquePtr<gl::SharedSurface> surf, gl::SurfaceFactory* factory,
-         ISurfaceAllocator* aAllocator, TextureFlags aFlags);
-
-  virtual void SetReleaseFenceHandle(const FenceHandle& aReleaseFenceHandle) override;
-
-  virtual FenceHandle GetAndResetReleaseFenceHandle() override;
-
-  virtual void SetAcquireFenceHandle(const FenceHandle& aAcquireFenceHandle) override;
-
-  virtual const FenceHandle& GetAcquireFenceHandle() const override;
+         LayersIPCChannel* aAllocator, TextureFlags aFlags);
 
   gl::SharedSurface* Surf() const {
     return static_cast<const SharedSurfaceTextureData*>(GetInternalData())->Surf();

@@ -6,27 +6,18 @@
 
 window.performance.mark('gecko-shell-loadstart');
 
-Cu.import('resource://gre/modules/ContactService.jsm');
-Cu.import('resource://gre/modules/DataStoreChangeNotifier.jsm');
-Cu.import('resource://gre/modules/AlarmService.jsm');
-Cu.import('resource://gre/modules/ActivitiesService.jsm');
 Cu.import('resource://gre/modules/NotificationDB.jsm');
-Cu.import('resource://gre/modules/Payment.jsm');
 Cu.import("resource://gre/modules/AppsUtils.jsm");
 Cu.import('resource://gre/modules/UserAgentOverrides.jsm');
 Cu.import('resource://gre/modules/Keyboard.jsm');
 Cu.import('resource://gre/modules/ErrorPage.jsm');
 Cu.import('resource://gre/modules/AlertsHelper.jsm');
-Cu.import('resource://gre/modules/RequestSyncService.jsm');
 Cu.import('resource://gre/modules/SystemUpdateService.jsm');
 
 if (isGonk) {
-  Cu.import('resource://gre/modules/MultiscreenHandler.jsm');
   Cu.import('resource://gre/modules/NetworkStatsService.jsm');
   Cu.import('resource://gre/modules/ResourceStatsService.jsm');
 }
-
-Cu.import('resource://gre/modules/KillSwitchMain.jsm');
 
 // Identity
 Cu.import('resource://gre/modules/SignInToWebsite.jsm');
@@ -34,7 +25,6 @@ SignInToWebsiteController.init();
 
 Cu.import('resource://gre/modules/FxAccountsMgmtService.jsm');
 Cu.import('resource://gre/modules/DownloadsAPI.jsm');
-Cu.import('resource://gre/modules/MobileIdentityManager.jsm');
 Cu.import('resource://gre/modules/PresentationDeviceInfoManager.jsm');
 Cu.import('resource://gre/modules/AboutServiceWorkers.jsm');
 
@@ -43,9 +33,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "SystemAppProxy",
 
 XPCOMUtils.defineLazyModuleGetter(this, "Screenshot",
                                   "resource://gre/modules/Screenshot.jsm");
-
-Cu.import('resource://gre/modules/Webapps.jsm');
-DOMApplicationRegistry.allAppsLaunchable = true;
 
 XPCOMUtils.defineLazyServiceGetter(Services, 'env',
                                    '@mozilla.org/process/environment;1',
@@ -75,10 +62,8 @@ XPCOMUtils.defineLazyServiceGetter(Services, 'captivePortalDetector',
                                   '@mozilla.org/toolkit/captive-detector;1',
                                   'nsICaptivePortalDetector');
 
-if (AppConstants.MOZ_SAFE_BROWSING) {
-  XPCOMUtils.defineLazyModuleGetter(this, "SafeBrowsing",
-                "resource://gre/modules/SafeBrowsing.jsm");
-}
+XPCOMUtils.defineLazyModuleGetter(this, "SafeBrowsing",
+              "resource://gre/modules/SafeBrowsing.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "SafeMode",
                                   "resource://gre/modules/SafeMode.jsm");
@@ -263,11 +248,6 @@ var shell = {
   },
 
   bootstrap: function() {
-    if (AppConstants.MOZ_B2GDROID) {
-      Cc["@mozilla.org/b2g/b2gdroid-setup;1"]
-        .getService(Ci.nsIObserver).observe(window, "shell-startup", null);
-    }
-
     window.performance.mark('gecko-shell-bootstrap');
 
     // Before anything, check if we want to start in safe mode.
@@ -368,6 +348,7 @@ var shell = {
       alert(msg);
       return;
     }
+
     let manifestURL = this.manifestURL;
     // <html:iframe id="systemapp"
     //              mozbrowser="true" allowfullscreen="true"
@@ -430,16 +411,15 @@ var shell = {
     window.addEventListener('sizemodechange', this);
     window.addEventListener('unload', this);
     this.contentBrowser.addEventListener('mozbrowserloadstart', this, true);
-    this.contentBrowser.addEventListener('mozbrowserselectionstatechanged', this, true);
     this.contentBrowser.addEventListener('mozbrowserscrollviewchange', this, true);
     this.contentBrowser.addEventListener('mozbrowsercaretstatechanged', this);
 
     CustomEventManager.init();
-    WebappsHelper.init();
     UserAgentOverrides.init();
     CaptivePortalLoginHelper.init();
 
     this.contentBrowser.src = homeURL;
+
     this._isEventListenerReady = false;
 
     window.performance.mark('gecko-shell-system-frame-set');
@@ -450,11 +430,9 @@ var shell = {
     ppmm.addMessageListener("mail-handler", this);
     ppmm.addMessageListener("file-picker", this);
 
-    if (AppConstants.MOZ_SAFE_BROWSING) {
-      setTimeout(function() {
-        SafeBrowsing.init();
-      }, 5000);
-    }
+    setTimeout(function() {
+      SafeBrowsing.init();
+    }, 5000);
   },
 
   stop: function shell_stop() {
@@ -464,7 +442,6 @@ var shell = {
     window.removeEventListener('MozApplicationManifest', this);
     window.removeEventListener('sizemodechange', this);
     this.contentBrowser.removeEventListener('mozbrowserloadstart', this, true);
-    this.contentBrowser.removeEventListener('mozbrowserselectionstatechanged', this, true);
     this.contentBrowser.removeEventListener('mozbrowserscrollviewchange', this, true);
     this.contentBrowser.removeEventListener('mozbrowsercaretstatechanged', this);
     ppmm.removeMessageListener("content-handler", this);
@@ -582,29 +559,6 @@ var shell = {
         this.sendChromeEvent({
           type: 'scrollviewchange',
           detail: evt.detail,
-        });
-        break;
-      case 'mozbrowserselectionstatechanged':
-        // The mozbrowserselectionstatechanged event, may have crossed the chrome-content boundary.
-        // This event always dispatch to shell.js. But the offset we got from this event is
-        // based on tab's coordinate. So get the actual offsets between shell and evt.target.
-        let elt = evt.target;
-        let win = elt.ownerDocument.defaultView;
-        let offsetX = win.mozInnerScreenX - window.mozInnerScreenX;
-        let offsetY = win.mozInnerScreenY - window.mozInnerScreenY;
-
-        let rect = elt.getBoundingClientRect();
-        offsetX += rect.left;
-        offsetY += rect.top;
-
-        let data = evt.detail;
-        data.offsetX = offsetX;
-        data.offsetY = offsetY;
-
-        DoCommandHelper.setEvent(evt);
-        shell.sendChromeEvent({
-          type: 'selectionstatechanged',
-          detail: data,
         });
         break;
       case 'mozbrowsercaretstatechanged':
@@ -753,8 +707,6 @@ var shell = {
 
     Services.obs.notifyObservers(null, 'content-start', null);
 
-    isGonk && Cu.import('resource://gre/modules/OperatorApps.jsm');
-
     if (AppConstants.MOZ_GRAPHENE &&
         Services.prefs.getBoolPref("b2g.nativeWindowGeometry.fullscreen")) {
       window.fullScreen = true;
@@ -765,7 +717,7 @@ var shell = {
 
   handleCmdLine: function() {
     // This isn't supported on devices.
-    if (!isGonk && !AppConstants.MOZ_B2GDROID) {
+    if (!isGonk) {
       let b2gcmds = Cc["@mozilla.org/commandlinehandler/general-startup;1?type=b2gcmds"]
                       .getService(Ci.nsISupports);
       let args = b2gcmds.wrappedJSObject.cmdLine;
@@ -818,15 +770,6 @@ Services.obs.addObserver(function onFullscreenOriginChange(subject, topic, data)
                           fullscreenorigin: data });
 }, "fullscreen-origin-change", false);
 
-DOMApplicationRegistry.registryReady.then(function () {
-  // This event should be sent before System app returns with
-  // system-message-listener-ready mozContentEvent, because it's on
-  // the critical launch path of the app.
-  SystemAppProxy._sendCustomEvent('mozChromeEvent', {
-    type: 'webapps-registry-ready'
-  }, /* noPending */ true);
-});
-
 Services.obs.addObserver(function onBluetoothVolumeChange(subject, topic, data) {
   shell.sendChromeEvent({
     type: "bluetooth-volumeset",
@@ -863,15 +806,6 @@ var CustomEventManager = {
     dump('XXX FIXME : Got a mozContentEvent: ' + detail.type + "\n");
 
     switch(detail.type) {
-      case 'webapps-install-granted':
-      case 'webapps-install-denied':
-      case 'webapps-uninstall-granted':
-      case 'webapps-uninstall-denied':
-        WebappsHelper.handleEvent(detail);
-        break;
-      case 'select-choicechange':
-        FormsHelper.handleEvent(detail);
-        break;
       case 'system-message-listener-ready':
         Services.obs.notifyObservers(null, 'system-message-listener-ready', null);
         break;
@@ -882,9 +816,6 @@ var CustomEventManager = {
       case 'inputregistry-add':
       case 'inputregistry-remove':
         KeyboardHelper.handleEvent(detail);
-        break;
-      case 'do-command':
-        DoCommandHelper.handleEvent(detail.cmd);
         break;
       case 'copypaste-do-command':
         Services.obs.notifyObservers({ wrappedJSObject: shell.contentBrowser },
@@ -928,107 +859,6 @@ var CustomEventManager = {
         break;
       case 'restart':
         restart();
-        break;
-    }
-  }
-}
-
-var DoCommandHelper = {
-  _event: null,
-  setEvent: function docommand_setEvent(evt) {
-    this._event = evt;
-  },
-
-  handleEvent: function docommand_handleEvent(cmd) {
-    if (this._event) {
-      Services.obs.notifyObservers({ wrappedJSObject: this._event.target },
-                                   'copypaste-docommand', cmd);
-      this._event = null;
-    }
-  }
-}
-
-var WebappsHelper = {
-  _installers: {},
-  _count: 0,
-
-  init: function webapps_init() {
-    Services.obs.addObserver(this, "webapps-launch", false);
-    Services.obs.addObserver(this, "webapps-ask-install", false);
-    Services.obs.addObserver(this, "webapps-ask-uninstall", false);
-    Services.obs.addObserver(this, "webapps-close", false);
-  },
-
-  registerInstaller: function webapps_registerInstaller(data) {
-    let id = "installer" + this._count++;
-    this._installers[id] = data;
-    return id;
-  },
-
-  handleEvent: function webapps_handleEvent(detail) {
-    if (!detail || !detail.id)
-      return;
-
-    let installer = this._installers[detail.id];
-    delete this._installers[detail.id];
-    switch (detail.type) {
-      case "webapps-install-granted":
-        DOMApplicationRegistry.confirmInstall(installer);
-        break;
-      case "webapps-install-denied":
-        DOMApplicationRegistry.denyInstall(installer);
-        break;
-      case "webapps-uninstall-granted":
-        DOMApplicationRegistry.confirmUninstall(installer);
-        break;
-      case "webapps-uninstall-denied":
-        DOMApplicationRegistry.denyUninstall(installer);
-        break;
-    }
-  },
-
-  observe: function webapps_observe(subject, topic, data) {
-    let json = JSON.parse(data);
-    json.mm = subject;
-
-    let id;
-
-    switch(topic) {
-      case "webapps-launch":
-        DOMApplicationRegistry.getManifestFor(json.manifestURL).then((aManifest) => {
-          if (!aManifest)
-            return;
-
-          let manifest = new ManifestHelper(aManifest, json.origin,
-                                            json.manifestURL);
-          let payload = {
-            timestamp: json.timestamp,
-            url: manifest.fullLaunchPath(json.startPoint),
-            manifestURL: json.manifestURL
-          };
-          shell.sendCustomEvent("webapps-launch", payload);
-        });
-        break;
-      case "webapps-ask-install":
-        id = this.registerInstaller(json);
-        shell.sendChromeEvent({
-          type: "webapps-ask-install",
-          id: id,
-          app: json.app
-        });
-        break;
-      case "webapps-ask-uninstall":
-        id = this.registerInstaller(json);
-        shell.sendChromeEvent({
-          type: "webapps-ask-uninstall",
-          id: id,
-          app: json.app
-        });
-        break;
-      case "webapps-close":
-        shell.sendCustomEvent("webapps-close", {
-          "manifestURL": json.manifestURL
-        });
         break;
     }
   }
@@ -1115,9 +945,6 @@ window.addEventListener('ContentStart', function cr_onContentStart() {
 });
 
 window.addEventListener('ContentStart', function update_onContentStart() {
-  Cu.import('resource://gre/modules/WebappsUpdater.jsm');
-  WebappsUpdater.handleContentStart(shell);
-
   if (!AppConstants.MOZ_UPDATER) {
     return;
   }
@@ -1134,22 +961,50 @@ window.addEventListener('ContentStart', function update_onContentStart() {
 
   updatePrompt.wrappedJSObject.handleContentStart(shell);
 });
+/* The "GPSChipOn" is to indicate that GPS engine is turned ON by the modem.
+   During this GPS engine is turned ON by the modem, we make the location tracking icon visible to user.
+   Once GPS engine is turned OFF, the location icon will disappear.
+   If GPS engine is not turned ON by the modem or GPS location service is triggered,
+   we let GPS service take over the control of showing the location tracking icon.
+   The regular sequence of the geolocation-device-events is: starting-> GPSStarting-> shutdown-> GPSShutdown
+*/
+
 
 (function geolocationStatusTracker() {
   let gGeolocationActive = false;
+  let GPSChipOn = false;
 
   Services.obs.addObserver(function(aSubject, aTopic, aData) {
     let oldState = gGeolocationActive;
-    if (aData == "starting") {
-      gGeolocationActive = true;
-    } else if (aData == "shutdown") {
-      gGeolocationActive = false;
+    let promptWarning = false;
+    switch (aData) {
+      case "GPSStarting":
+        if (!gGeolocationActive) {
+          gGeolocationActive = true;
+          GPSChipOn = true;
+          promptWarning = true;
+        }
+        break;
+      case "GPSShutdown":
+        if (GPSChipOn) {
+          gGeolocationActive = false;
+          GPSChipOn = false;
+        }
+        break;
+      case "starting":
+        gGeolocationActive = true;
+        GPSChipOn = false;
+        break;
+      case "shutdown":
+        gGeolocationActive = false;
+        break;
     }
 
     if (gGeolocationActive != oldState) {
       shell.sendChromeEvent({
         type: 'geolocation-status',
-        active: gGeolocationActive
+        active: gGeolocationActive,
+        prompt: promptWarning
       });
     }
 }, "geolocation-device-events", false);
@@ -1343,8 +1198,8 @@ if (isGonk) {
 Services.obs.addObserver(function resetProfile(subject, topic, data) {
   Services.obs.removeObserver(resetProfile, topic);
 
-  // Listening for 'profile-before-change2' which is late in the shutdown
-  // sequence, but still has xpcom access.
+  // Listening for 'profile-before-change-telemetry' which is late in the
+  // shutdown sequence, but still has xpcom access.
   Services.obs.addObserver(function clearProfile(subject, topic, data) {
     Services.obs.removeObserver(clearProfile, topic);
     if (isGonk) {
@@ -1384,12 +1239,14 @@ Services.obs.addObserver(function resetProfile(subject, topic, data) {
       }
     }
   },
-  'profile-before-change2', false);
+  'profile-before-change-telemetry', false);
 
   let appStartup = Cc['@mozilla.org/toolkit/app-startup;1']
                      .getService(Ci.nsIAppStartup);
   appStartup.quit(Ci.nsIAppStartup.eForceQuit);
 }, 'b2g-reset-profile', false);
+
+var showInstallScreen;
 
 if (AppConstants.MOZ_GRAPHENE) {
   const restoreWindowGeometry = () => {
@@ -1428,7 +1285,7 @@ if (AppConstants.MOZ_GRAPHENE) {
   const showNativeWindow = () => baseWindow.visibility = true;
   const hideNativeWindow = () => baseWindow.visibility = false;
 
-  const showInstallScreen = () => {
+  showInstallScreen = () => {
     const grapheneStrings =
       Services.strings.createBundle('chrome://b2g-l10n/locale/graphene.properties');
     document.querySelector('#installing > .message').textContent =

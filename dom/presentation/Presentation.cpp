@@ -4,71 +4,53 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "Presentation.h"
+
+#include <ctype.h>
+
 #include "mozilla/dom/PresentationBinding.h"
 #include "mozilla/dom/Promise.h"
+#include "nsContentUtils.h"
 #include "nsCycleCollectionParticipant.h"
+#include "nsIDocShell.h"
 #include "nsIPresentationService.h"
+#include "nsIScriptSecurityManager.h"
+#include "nsJSUtils.h"
+#include "nsNetUtil.h"
+#include "nsPIDOMWindow.h"
+#include "nsSandboxFlags.h"
 #include "nsServiceManagerUtils.h"
-#include "Presentation.h"
 #include "PresentationReceiver.h"
 
-using namespace mozilla;
-using namespace mozilla::dom;
+namespace mozilla {
+namespace dom {
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED(Presentation, DOMEventTargetHelper,
-                                   mDefaultRequest, mReceiver)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(Presentation,
+                                      mWindow,
+                                      mDefaultRequest, mReceiver)
 
-NS_IMPL_ADDREF_INHERITED(Presentation, DOMEventTargetHelper)
-NS_IMPL_RELEASE_INHERITED(Presentation, DOMEventTargetHelper)
+NS_IMPL_CYCLE_COLLECTING_ADDREF(Presentation)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(Presentation)
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(Presentation)
-NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Presentation)
+  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
+  NS_INTERFACE_MAP_ENTRY(nsISupports)
+NS_INTERFACE_MAP_END
 
 /* static */ already_AddRefed<Presentation>
-Presentation::Create(nsPIDOMWindow* aWindow)
+Presentation::Create(nsPIDOMWindowInner* aWindow)
 {
   RefPtr<Presentation> presentation = new Presentation(aWindow);
-  return NS_WARN_IF(!presentation->Init()) ? nullptr : presentation.forget();
+  return presentation.forget();
 }
 
-Presentation::Presentation(nsPIDOMWindow* aWindow)
-  : DOMEventTargetHelper(aWindow)
+Presentation::Presentation(nsPIDOMWindowInner* aWindow)
+  : mWindow(aWindow)
 {
 }
 
 Presentation::~Presentation()
 {
-}
-
-bool
-Presentation::Init()
-{
-  nsCOMPtr<nsIPresentationService> service =
-    do_GetService(PRESENTATION_SERVICE_CONTRACTID);
-  if (NS_WARN_IF(!service)) {
-    return false;
-  }
-
-  if (NS_WARN_IF(!GetOwner())) {
-    return false;
-  }
-
-  // Check if a receiver instance is required now. A session may already be
-  // connecting before the web content gets loaded in a receiving browsing
-  // context.
-  nsAutoString sessionId;
-  nsresult rv = service->GetExistentSessionIdAtLaunch(GetOwner()->WindowID(), sessionId);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return false;
-  }
-  if (!sessionId.IsEmpty()) {
-    mReceiver = PresentationReceiver::Create(GetOwner(), sessionId);
-    if (NS_WARN_IF(!mReceiver)) {
-      return false;
-    }
-  }
-
-  return true;
 }
 
 /* virtual */ JSObject*
@@ -81,6 +63,15 @@ Presentation::WrapObject(JSContext* aCx,
 void
 Presentation::SetDefaultRequest(PresentationRequest* aRequest)
 {
+  nsCOMPtr<nsIDocument> doc = mWindow ? mWindow->GetExtantDoc() : nullptr;
+  if (NS_WARN_IF(!doc)) {
+    return;
+  }
+
+  if (doc->GetSandboxFlags() & SANDBOXED_PRESENTATION) {
+    return;
+  }
+
   mDefaultRequest = aRequest;
 }
 
@@ -92,8 +83,100 @@ Presentation::GetDefaultRequest() const
 }
 
 already_AddRefed<PresentationReceiver>
-Presentation::GetReceiver() const
+Presentation::GetReceiver()
 {
+  // return the same receiver if already created
+  if (mReceiver) {
+    RefPtr<PresentationReceiver> receiver = mReceiver;
+    return receiver.forget();
+  }
+
+  if (!HasReceiverSupport() || !IsInPresentedContent()) {
+    return nullptr;
+  }
+
+  mReceiver = PresentationReceiver::Create(mWindow);
+  if (NS_WARN_IF(!mReceiver)) {
+    MOZ_ASSERT(mReceiver);
+    return nullptr;
+  }
+
   RefPtr<PresentationReceiver> receiver = mReceiver;
   return receiver.forget();
 }
+
+void
+Presentation::SetStartSessionUnsettled(bool aIsUnsettled)
+{
+  mStartSessionUnsettled = aIsUnsettled;
+}
+
+bool
+Presentation::IsStartSessionUnsettled() const
+{
+  return mStartSessionUnsettled;
+}
+
+bool
+Presentation::HasReceiverSupport() const
+{
+  if (!mWindow) {
+    return false;
+  }
+
+  // Grant access to browser receiving pages and their same-origin iframes. (App
+  // pages should be controlled by "presentation" permission in app manifests.)
+  nsCOMPtr<nsIDocShell> docShell = mWindow->GetDocShell();
+  if (!docShell) {
+    return false;
+  }
+
+  if (!Preferences::GetBool("dom.presentation.testing.simulate-receiver") &&
+      !docShell->GetIsInMozBrowserOrApp() &&
+      !docShell->GetIsTopLevelContentDocShell()) {
+    return false;
+  }
+
+  nsAutoString presentationURL;
+  nsContentUtils::GetPresentationURL(docShell, presentationURL);
+
+  if (presentationURL.IsEmpty()) {
+    return false;
+  }
+
+  nsCOMPtr<nsIScriptSecurityManager> securityManager =
+    nsContentUtils::GetSecurityManager();
+  if (!securityManager) {
+    return false;
+  }
+
+  nsCOMPtr<nsIURI> presentationURI;
+  nsresult rv = NS_NewURI(getter_AddRefs(presentationURI), presentationURL);
+  if (NS_FAILED(rv)) {
+    return false;
+  }
+
+  nsCOMPtr<nsIURI> docURI = mWindow->GetDocumentURI();
+  return NS_SUCCEEDED(securityManager->CheckSameOriginURI(presentationURI,
+                                                          docURI,
+                                                          false));
+}
+
+bool
+Presentation::IsInPresentedContent() const
+{
+  if (!mWindow) {
+    return false;
+  }
+
+  nsCOMPtr<nsIDocShell> docShell = mWindow->GetDocShell();
+  MOZ_ASSERT(docShell);
+
+  nsAutoString presentationURL;
+  nsContentUtils::GetPresentationURL(docShell, presentationURL);
+
+  return !presentationURL.IsEmpty();
+}
+
+} // namespace dom
+} // namespace mozilla

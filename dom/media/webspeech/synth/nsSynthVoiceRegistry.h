@@ -7,7 +7,6 @@
 #ifndef mozilla_dom_nsSynthVoiceRegistry_h
 #define mozilla_dom_nsSynthVoiceRegistry_h
 
-#include "nsAutoPtr.h"
 #include "nsISynthVoiceRegistry.h"
 #include "nsRefPtrHashtable.h"
 #include "nsTArray.h"
@@ -63,6 +62,8 @@ public:
   static void RecvSetDefaultVoice(const nsAString& aUri, bool aIsDefault);
 
   static void RecvIsSpeakingChanged(bool aIsSpeaking);
+
+  static void RecvNotifyVoicesChanged();
 
   static void Shutdown();
 

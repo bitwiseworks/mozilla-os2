@@ -50,7 +50,8 @@ public:
 
   NS_IMETHOD WidgetStateChanged(nsIFrame* aFrame, uint8_t aWidgetType, 
                                 nsIAtom* aAttribute,
-                                bool* aShouldRepaint) override;
+                                bool* aShouldRepaint,
+                                const nsAttrValue* aOldValue) override;
 
   NS_IMETHOD ThemeChanged() override;
 
@@ -73,14 +74,16 @@ protected:
   virtual ~nsNativeThemeGTK();
 
 private:
+  GtkTextDirection GetTextDirection(nsIFrame* aFrame);
   gint GetTabMarginPixels(nsIFrame* aFrame);
   bool GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
-                              GtkThemeWidgetType& aGtkWidgetType,
-                              GtkWidgetState* aState, gint* aWidgetFlags);
+                            WidgetNodeType& aGtkWidgetType,
+                            GtkWidgetState* aState, gint* aWidgetFlags);
   bool GetExtraSizeForWidget(nsIFrame* aFrame, uint8_t aWidgetType,
                                nsIntMargin* aExtra);
 
   void RefreshWidgetWindow(nsIFrame* aFrame);
+  WidgetNodeType NativeThemeToGtkTheme(uint8_t aWidgetType, nsIFrame* aFrame);
 
   uint8_t mDisabledWidgetTypes[32];
   uint8_t mSafeWidgetStates[1024];    // 256 widgets * 32 bits per widget

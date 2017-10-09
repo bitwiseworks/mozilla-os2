@@ -34,10 +34,13 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
 
   // nsIWidget
-  NS_IMETHOD Create(nsIWidget* aParent, nsNativeWidget aNativeParent,
-                    const LayoutDeviceIntRect& aRect,
-                    nsWidgetInitData* aInitData = nullptr) override;
-  NS_IMETHOD Destroy() override;
+  using PuppetWidget::Create; // for Create signature not overridden here
+  virtual MOZ_MUST_USE nsresult Create(nsIWidget* aParent,
+                                       nsNativeWidget aNativeParent,
+                                       const LayoutDeviceIntRect& aRect,
+                                       nsWidgetInitData* aInitData = nullptr)
+                                       override;
+  virtual void Destroy() override;
   NS_IMETHOD SetFocus(bool aRaise = false) override;
   NS_IMETHOD SetParent(nsIWidget* aNewParent) override;
 
@@ -66,6 +69,7 @@ private:
   // PuppetWidget does not implement parent apis, but we need
   // them for plugin widgets.
   nsCOMPtr<nsIWidget> mParent;
+  uintptr_t mCachedPluginPort;
 };
 
 } // namespace widget

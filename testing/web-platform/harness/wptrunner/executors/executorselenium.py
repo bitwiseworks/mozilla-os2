@@ -133,7 +133,7 @@ class SeleniumRun(object):
         try:
             self.webdriver.set_script_timeout((timeout + extra_timeout) * 1000)
         except exceptions.ErrorInResponseException:
-            self.logger.error("Lost webdriver connection")
+            self.logger.error("Lost WebDriver connection")
             return Stop
 
         executor = threading.Thread(target=self._run)
@@ -247,7 +247,11 @@ class SeleniumRefTestExecutor(RefTestExecutor):
 
         return self.convert_result(test, result)
 
-    def screenshot(self, test):
+    def screenshot(self, test, viewport_size, dpi):
+        # https://github.com/w3c/wptrunner/issues/166
+        assert viewport_size is None
+        assert dpi is None
+
         return SeleniumRun(self._screenshot,
                            self.protocol.webdriver,
                            self.test_url(test),

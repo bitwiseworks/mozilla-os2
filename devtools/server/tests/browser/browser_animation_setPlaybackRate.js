@@ -7,7 +7,7 @@
 // Check that a player's playbackRate can be changed, and that multiple players
 // can have their rates changed at the same time.
 
-add_task(function*() {
+add_task(function* () {
   let {client, walker, animations} =
     yield initAnimationsFrontForUrl(MAIN_DOMAIN + "animation.html");
 
@@ -46,6 +46,6 @@ add_task(function*() {
     is(state.playbackRate, .5, "The playbackRate was updated");
   }
 
-  yield closeDebuggerClient(client);
+  yield client.close();
   gBrowser.removeCurrentTab();
 });

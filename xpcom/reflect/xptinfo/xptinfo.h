@@ -11,7 +11,7 @@
 #include "nscore.h"
 #include "xpt_struct.h"
 
-// Flyweight wrapper classes for xpt_struct.h structs. 
+// Flyweight wrapper classes for xpt_struct.h structs.
 // Everything here is dependent upon - and sensitive to changes in -
 // xpcom/typelib/xpt/xpt_struct.h!
 
@@ -67,8 +67,8 @@ public:
     bool IsArray() const
         {return TagPart() == T_ARRAY;}
 
-    // 'Dependent' means that params of this type are dependent upon other 
-    // params. e.g. an T_INTERFACE_IS is dependent upon some other param at 
+    // 'Dependent' means that params of this type are dependent upon other
+    // params. e.g. an T_INTERFACE_IS is dependent upon some other param at
     // runtime to say what the interface type of this param really is.
     bool IsDependent() const
         {  switch (TagPart()) {
@@ -187,7 +187,6 @@ public:
     bool IsGetter()      const {return 0 != (XPT_MD_IS_GETTER(flags) );}
     bool IsSetter()      const {return 0 != (XPT_MD_IS_SETTER(flags) );}
     bool IsNotXPCOM()    const {return 0 != (XPT_MD_IS_NOTXPCOM(flags));}
-    bool IsConstructor() const {return 0 != (XPT_MD_IS_CTOR(flags)   );}
     bool IsHidden()      const {return 0 != (XPT_MD_IS_HIDDEN(flags) );}
     bool WantsOptArgc()  const {return 0 != (XPT_MD_WANTS_OPT_ARGC(flags));}
     bool WantsContext()  const {return 0 != (XPT_MD_WANTS_CONTEXT(flags));}

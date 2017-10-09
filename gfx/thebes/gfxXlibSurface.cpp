@@ -12,19 +12,20 @@
 #undef max // Xlibint.h defines this and it breaks std::max
 #undef min // Xlibint.h defines this and it breaks std::min
 
-#include "nsAutoPtr.h"
 #include "nsTArray.h"
 #include "nsAlgorithm.h"
+#include "mozilla/gfx/2D.h"
 #include "mozilla/Preferences.h"
 #include <algorithm>
 #include "mozilla/CheckedInt.h"
 
 using namespace mozilla;
+using namespace mozilla::gfx;
 
 gfxXlibSurface::gfxXlibSurface(Display *dpy, Drawable drawable, Visual *visual)
     : mPixmapTaken(false), mDisplay(dpy), mDrawable(drawable)
 #if defined(GL_PROVIDER_GLX)
-    , mGLXPixmap(None)
+    , mGLXPixmap(X11None)
 #endif
 {
     const gfx::IntSize size = DoSizeQuery();
@@ -35,10 +36,10 @@ gfxXlibSurface::gfxXlibSurface(Display *dpy, Drawable drawable, Visual *visual)
 gfxXlibSurface::gfxXlibSurface(Display *dpy, Drawable drawable, Visual *visual, const gfx::IntSize& size)
     : mPixmapTaken(false), mDisplay(dpy), mDrawable(drawable)
 #if defined(GL_PROVIDER_GLX)
-    , mGLXPixmap(None)
+    , mGLXPixmap(X11None)
 #endif
 {
-    NS_ASSERTION(CheckSurfaceSize(size, XLIB_IMAGE_SIDE_SIZE_LIMIT),
+    NS_ASSERTION(Factory::CheckSurfaceSize(size, XLIB_IMAGE_SIDE_SIZE_LIMIT),
                  "Bad size");
 
     cairo_surface_t *surf = cairo_xlib_surface_create(dpy, drawable, visual, size.width, size.height);
@@ -50,10 +51,10 @@ gfxXlibSurface::gfxXlibSurface(Screen *screen, Drawable drawable, XRenderPictFor
     : mPixmapTaken(false), mDisplay(DisplayOfScreen(screen)),
       mDrawable(drawable)
 #if defined(GL_PROVIDER_GLX)
-      , mGLXPixmap(None)
+      , mGLXPixmap(X11None)
 #endif
 {
-    NS_ASSERTION(CheckSurfaceSize(size, XLIB_IMAGE_SIDE_SIZE_LIMIT),
+    NS_ASSERTION(Factory::CheckSurfaceSize(size, XLIB_IMAGE_SIDE_SIZE_LIMIT),
                  "Bad Size");
 
     cairo_surface_t *surf =
@@ -66,7 +67,7 @@ gfxXlibSurface::gfxXlibSurface(Screen *screen, Drawable drawable, XRenderPictFor
 gfxXlibSurface::gfxXlibSurface(cairo_surface_t *csurf)
     : mPixmapTaken(false)
 #if defined(GL_PROVIDER_GLX)
-      , mGLXPixmap(None)
+      , mGLXPixmap(X11None)
 #endif
 {
     NS_PRECONDITION(cairo_surface_status(csurf) == 0,
@@ -95,10 +96,10 @@ static Drawable
 CreatePixmap(Screen *screen, const gfx::IntSize& size, unsigned int depth,
              Drawable relatedDrawable)
 {
-    if (!gfxASurface::CheckSurfaceSize(size, XLIB_IMAGE_SIDE_SIZE_LIMIT))
-        return None;
+    if (!Factory::CheckSurfaceSize(size, XLIB_IMAGE_SIDE_SIZE_LIMIT))
+        return X11None;
 
-    if (relatedDrawable == None) {
+    if (relatedDrawable == X11None) {
         relatedDrawable = RootWindowOfScreen(screen);
     }
     Display *dpy = DisplayOfScreen(screen);
@@ -273,7 +274,7 @@ gfxXlibSurface::Finish()
 #if defined(GL_PROVIDER_GLX)
     if (mPixmapTaken && mGLXPixmap) {
         gl::sGLXLibrary.DestroyPixmap(mDisplay, mGLXPixmap);
-        mGLXPixmap = None;
+        mGLXPixmap = X11None;
     }
 #endif
     gfxASurface::Finish();
@@ -504,25 +505,25 @@ gfxXlibSurface::FindVisual(Screen *screen, gfxImageFormat format)
     int depth;
     unsigned long red_mask, green_mask, blue_mask;
     switch (format) {
-        case gfxImageFormat::ARGB32:
+        case gfx::SurfaceFormat::A8R8G8B8_UINT32:
             depth = 32;
             red_mask = 0xff0000;
             green_mask = 0xff00;
             blue_mask = 0xff;
             break;
-        case gfxImageFormat::RGB24:
+        case gfx::SurfaceFormat::X8R8G8B8_UINT32:
             depth = 24;
             red_mask = 0xff0000;
             green_mask = 0xff00;
             blue_mask = 0xff;
             break;
-        case gfxImageFormat::RGB16_565:
+        case gfx::SurfaceFormat::R5G6B5_UINT16:
             depth = 16;
             red_mask = 0xf800;
             green_mask = 0x7e0;
             blue_mask = 0x1f;
             break;
-        case gfxImageFormat::A8:
+        case gfx::SurfaceFormat::A8:
         default:
             return nullptr;
     }
@@ -551,11 +552,11 @@ XRenderPictFormat*
 gfxXlibSurface::FindRenderFormat(Display *dpy, gfxImageFormat format)
 {
     switch (format) {
-        case gfxImageFormat::ARGB32:
+        case gfx::SurfaceFormat::A8R8G8B8_UINT32:
             return XRenderFindStandardFormat (dpy, PictStandardARGB32);
-        case gfxImageFormat::RGB24:
+        case gfx::SurfaceFormat::X8R8G8B8_UINT32:
             return XRenderFindStandardFormat (dpy, PictStandardRGB24);
-        case gfxImageFormat::RGB16_565: {
+        case gfx::SurfaceFormat::R5G6B5_UINT16: {
             // PictStandardRGB16_565 is not standard Xrender format
             // we should try to find related visual
             // and find xrender format by visual
@@ -564,7 +565,7 @@ gfxXlibSurface::FindRenderFormat(Display *dpy, gfxImageFormat format)
                 return nullptr;
             return XRenderFindVisualFormat(dpy, visual);
         }
-        case gfxImageFormat::A8:
+        case gfx::SurfaceFormat::A8:
             return XRenderFindStandardFormat (dpy, PictStandardA8);
         default:
             break;

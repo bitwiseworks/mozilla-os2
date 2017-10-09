@@ -13,7 +13,7 @@ const STATE = {
  * restored history around.
  */
 add_task(function* () {
-  yield testSwitchToTab("about:mozilla#fooobar", {ignoreFragment: true});
+  yield testSwitchToTab("about:mozilla#fooobar", {ignoreFragment: "whenComparingAndReplace"});
   yield testSwitchToTab("about:mozilla?foo=bar", {replaceQueryString: true});
 });
 
@@ -40,13 +40,12 @@ var testSwitchToTab = Task.async(function* (url, options) {
   is(browser.currentURI.spec, url, "correct URL loaded");
 
   // Check that we didn't lose any history entries.
-  let count = yield ContentTask.spawn(browser, null, function* () {
+  yield ContentTask.spawn(browser, null, function* () {
     let Ci = Components.interfaces;
     let webNavigation = docShell.QueryInterface(Ci.nsIWebNavigation);
     let history = webNavigation.sessionHistory.QueryInterface(Ci.nsISHistoryInternal);
-    return history && history.count;
+    Assert.equal(history && history.count, 3, "three history entries");
   });
-  is(count, 3, "three history entries");
 
   // Cleanup.
   gBrowser.removeTab(tab);

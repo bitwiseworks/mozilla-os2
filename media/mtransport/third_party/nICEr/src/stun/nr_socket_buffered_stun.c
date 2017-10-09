@@ -66,6 +66,8 @@ typedef struct nr_socket_buffered_stun_ {
   size_t buffer_size;
   size_t bytes_needed;
   size_t bytes_read;
+  NR_async_cb readable_cb;
+  void *readable_cb_arg;
 
   /* Write state */
   nr_p_buf_ctx *p_bufs;
@@ -103,6 +105,15 @@ static nr_socket_vtbl nr_socket_buffered_stun_vtbl={
   nr_socket_buffered_stun_listen,
   nr_socket_buffered_stun_accept
 };
+
+void nr_socket_buffered_stun_set_readable_cb(nr_socket *sock,
+  NR_async_cb readable_cb, void *readable_cb_arg)
+{
+  nr_socket_buffered_stun *buf_sock = (nr_socket_buffered_stun *)sock->obj;
+
+  buf_sock->readable_cb = readable_cb;
+  buf_sock->readable_cb_arg = readable_cb_arg;
+}
 
 int nr_socket_buffered_set_connected_to(nr_socket *sock, nr_transport_addr *remote_addr)
 {
@@ -250,7 +261,15 @@ abort:
 
 static void nr_socket_buffered_stun_failed(nr_socket_buffered_stun *sock)
   {
+    NR_SOCKET fd;
+
     sock->read_state = NR_ICE_SOCKET_READ_FAILED;
+
+    /* Cancel waiting on the socket */
+    if (sock->inner && !nr_socket_getfd(sock->inner, &fd)) {
+      NR_ASYNC_CANCEL(fd, NR_ASYNC_WAIT_WRITE);
+      NR_ASYNC_CANCEL(fd, NR_ASYNC_WAIT_READ);
+    }
   }
 
 static int nr_socket_buffered_stun_recvfrom(void *obj,void * restrict buf,
@@ -266,51 +285,50 @@ static int nr_socket_buffered_stun_recvfrom(void *obj,void * restrict buf,
     ABORT(R_FAILED);
   }
 
-reread:
-  /* Read all the expected bytes */
-  assert(sock->bytes_needed <= sock->buffer_size - sock->bytes_read);
+  while (sock->bytes_needed) {
+    /* Read all the expected bytes */
+    assert(sock->bytes_needed <= sock->buffer_size - sock->bytes_read);
 
-  if(r=nr_socket_read(sock->inner,
-                      sock->buffer + sock->bytes_read,
-                      sock->bytes_needed, &bytes_read, 0))
-    ABORT(r);
+    if(r=nr_socket_read(sock->inner,
+                        sock->buffer + sock->bytes_read,
+                        sock->bytes_needed, &bytes_read, 0))
+      ABORT(r);
 
-  assert(bytes_read <= sock->bytes_needed);
-  sock->bytes_needed -= bytes_read;
-  sock->bytes_read += bytes_read;
+    assert(bytes_read <= sock->bytes_needed);
+    sock->bytes_needed -= bytes_read;
+    sock->bytes_read += bytes_read;
 
-  /* Unfinished */
-  if (sock->bytes_needed)
-    ABORT(R_WOULDBLOCK);
+    /* Unfinished */
+    if (sock->bytes_needed)
+      ABORT(R_WOULDBLOCK);
 
-  /* No more bytes expected */
-  if (sock->read_state == NR_ICE_SOCKET_READ_NONE) {
-    size_t remaining_length;
-    if (sock->framing_type == ICE_TCP_FRAMING) {
-      if (sock->bytes_read < sizeof(nr_frame_header))
+    /* No more bytes expected */
+    if (sock->read_state == NR_ICE_SOCKET_READ_NONE) {
+      size_t remaining_length;
+      if (sock->framing_type == ICE_TCP_FRAMING) {
+        if (sock->bytes_read < sizeof(nr_frame_header))
+          ABORT(R_BAD_DATA);
+        remaining_length = ntohs(frame->frame_length);
+      } else {
+        int tmp_length;
+
+        /* Parse the header */
+        if (r = nr_stun_message_length(sock->buffer, sock->bytes_read, &tmp_length))
+          ABORT(r);
+        assert(tmp_length >= 0);
+        if (tmp_length < 0)
+          ABORT(R_BAD_DATA);
+        remaining_length = tmp_length;
+
+      }
+      /* Check to see if we have enough room */
+      if ((sock->buffer_size - sock->bytes_read) < remaining_length)
         ABORT(R_BAD_DATA);
-      remaining_length = ntohs(frame->frame_length);
-    } else {
-      int tmp_length;
 
-      /* Parse the header */
-      if (r = nr_stun_message_length(sock->buffer, sock->bytes_read, &tmp_length))
-        ABORT(r);
-      assert(tmp_length >= 0);
-      if (tmp_length < 0)
-        ABORT(R_BAD_DATA);
-      remaining_length = tmp_length;
-
+      sock->read_state = NR_ICE_SOCKET_READ_HDR;
+      /* Set ourselves up to read the rest of the data */
+      sock->bytes_needed = remaining_length;
     }
-    /* Check to see if we have enough room */
-    if ((sock->buffer_size - sock->bytes_read) < remaining_length)
-      ABORT(R_BAD_DATA);
-
-    /* Set ourselves up to read the rest of the data */
-    sock->bytes_needed = remaining_length;
-
-    sock->read_state = NR_ICE_SOCKET_READ_HDR;
-    goto reread;
   }
 
   assert(skip_hdr_size <= sock->bytes_read);
@@ -397,13 +415,32 @@ static int nr_socket_buffered_stun_accept(void *obj, nr_transport_addr *addrp, n
 static void nr_socket_buffered_stun_connected_cb(NR_SOCKET s, int how, void *arg)
 {
   nr_socket_buffered_stun *sock = (nr_socket_buffered_stun *)arg;
+  int r, _status;
+  NR_SOCKET fd;
 
   assert(!sock->connected);
 
   sock->connected = 1;
+
+  if ((r=nr_socket_getfd(sock->inner, &fd)))
+    ABORT(r);
+  NR_ASYNC_CANCEL(fd, NR_ASYNC_WAIT_WRITE);
+
+  // once connected arm for read
+  if (sock->readable_cb) {
+    NR_ASYNC_WAIT(fd, NR_ASYNC_WAIT_READ, sock->readable_cb, sock->readable_cb_arg);
+  }
+
   if (sock->pending) {
     r_log(LOG_GENERIC, LOG_INFO, "Invoking writable_cb on connected (%u)", (uint32_t) sock->pending);
     nr_socket_buffered_stun_writable_cb(s, how, arg);
+  }
+
+  _status=0;
+abort:
+  if (_status) {
+    r_log(LOG_GENERIC, LOG_ERR, "Failure in nr_socket_buffered_stun_connected_cb: %d", _status);
+
   }
 }
 
@@ -506,9 +543,10 @@ static int nr_socket_buffered_stun_write(void *obj,const void *msg, size_t len, 
       if ((r=nr_socket_buffered_stun_arm_writable_cb(sock)))
         ABORT(r);
     }
-    r_log(LOG_GENERIC, LOG_INFO, "Write buffer not empty for %s  %u - %s armed (@%p)",
+    r_log(LOG_GENERIC, LOG_INFO, "Write buffer not empty for %s  %u - %s armed (@%p),%s connected",
           sock->remote_addr.as_string, (uint32_t)sock->pending,
-          already_armed ? "already" : "", &sock->pending);
+          already_armed ? "already" : "", &sock->pending,
+          sock->connected ? "" : " not");
   }
 
   *written = original_len;
@@ -523,6 +561,10 @@ static void nr_socket_buffered_stun_writable_cb(NR_SOCKET s, int how, void *arg)
   nr_socket_buffered_stun *sock = (nr_socket_buffered_stun *)arg;
   int r,_status;
   nr_p_buf *n1, *n2;
+
+  if (sock->read_state == NR_ICE_SOCKET_READ_FAILED) {
+    ABORT(R_FAILED);
+  }
 
   /* Try to flush */
   STAILQ_FOREACH_SAFE(n1, &sock->pending_writes, entry, n2) {

@@ -299,35 +299,35 @@ nsMathMLmencloseFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 }
 
 /* virtual */ nsresult
-nsMathMLmencloseFrame::MeasureForWidth(nsRenderingContext& aRenderingContext,
-                                       nsHTMLReflowMetrics& aDesiredSize)
+nsMathMLmencloseFrame::MeasureForWidth(DrawTarget* aDrawTarget,
+                                       ReflowOutput& aDesiredSize)
 {
-  return PlaceInternal(aRenderingContext, false, aDesiredSize, true);
+  return PlaceInternal(aDrawTarget, false, aDesiredSize, true);
 }
 
 /* virtual */ nsresult
-nsMathMLmencloseFrame::Place(nsRenderingContext& aRenderingContext,
+nsMathMLmencloseFrame::Place(DrawTarget*          aDrawTarget,
                              bool                 aPlaceOrigin,
-                             nsHTMLReflowMetrics& aDesiredSize)
+                             ReflowOutput& aDesiredSize)
 {
-  return PlaceInternal(aRenderingContext, aPlaceOrigin, aDesiredSize, false);
+  return PlaceInternal(aDrawTarget, aPlaceOrigin, aDesiredSize, false);
 }
 
 /* virtual */ nsresult
-nsMathMLmencloseFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
+nsMathMLmencloseFrame::PlaceInternal(DrawTarget*          aDrawTarget,
                                      bool                 aPlaceOrigin,
-                                     nsHTMLReflowMetrics& aDesiredSize,
+                                     ReflowOutput& aDesiredSize,
                                      bool                 aWidthOnly)
 {
   ///////////////
   // Measure the size of our content using the base class to format like an
   // inferred mrow.
-  nsHTMLReflowMetrics baseSize(aDesiredSize.GetWritingMode());
+  ReflowOutput baseSize(aDesiredSize.GetWritingMode());
   nsresult rv =
-    nsMathMLContainerFrame::Place(aRenderingContext, false, baseSize);
+    nsMathMLContainerFrame::Place(aDrawTarget, false, baseSize);
 
   if (NS_MATHML_HAS_ERROR(mPresentationData.flags) || NS_FAILED(rv)) {
-      DidReflowChildren(GetFirstPrincipalChild());
+      DidReflowChildren(PrincipalChildList().FirstChild());
       return rv;
     }
 
@@ -344,17 +344,16 @@ nsMathMLmencloseFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
   nscoord onePixel = nsPresContext::CSSPixelsToAppUnits(1);
 
   float fontSizeInflation = nsLayoutUtils::FontSizeInflationFor(this);
-  RefPtr<nsFontMetrics> fm;
-  nsLayoutUtils::GetFontMetricsForFrame(this, getter_AddRefs(fm),
-                                        fontSizeInflation);
-  GetRuleThickness(aRenderingContext, fm, mRuleThickness);
+  RefPtr<nsFontMetrics> fm =
+    nsLayoutUtils::GetFontMetricsForFrame(this, fontSizeInflation);
+  GetRuleThickness(aDrawTarget, fm, mRuleThickness);
   if (mRuleThickness < onePixel) {
     mRuleThickness = onePixel;
   }
 
   char16_t one = '1';
   nsBoundingMetrics bmOne =
-    nsLayoutUtils::AppUnitBoundsOfString(&one, 1, *fm, aRenderingContext);
+    nsLayoutUtils::AppUnitBoundsOfString(&one, 1, *fm, aDrawTarget);
 
   ///////////////
   // General rules: the menclose element takes the size of the enclosed content.
@@ -484,7 +483,7 @@ nsMathMLmencloseFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
   if (IsToDraw(NOTATION_LONGDIV)) {
     if (aWidthOnly) {
         nscoord longdiv_width = mMathMLChar[mLongDivCharIndex].
-          GetMaxWidth(PresContext(), aRenderingContext, fontSizeInflation);
+          GetMaxWidth(PresContext(), aDrawTarget, fontSizeInflation);
 
         // Update horizontal parameters
         dx_left = std::max(dx_left, longdiv_width);
@@ -496,7 +495,7 @@ nsMathMLmencloseFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
       contSize.descent = bmBase.ascent + bmBase.descent + psi;
 
       // height(longdiv) should be >= height(base) + psi + mRuleThickness
-      mMathMLChar[mLongDivCharIndex].Stretch(PresContext(), aRenderingContext,
+      mMathMLChar[mLongDivCharIndex].Stretch(PresContext(), aDrawTarget,
                                              fontSizeInflation,
                                              NS_STRETCH_DIRECTION_VERTICAL,
                                              contSize, bmLongdivChar,
@@ -526,7 +525,7 @@ nsMathMLmencloseFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
     
     if (aWidthOnly) {
       nscoord radical_width = mMathMLChar[mRadicalCharIndex].
-        GetMaxWidth(PresContext(), aRenderingContext, fontSizeInflation);
+        GetMaxWidth(PresContext(), aDrawTarget, fontSizeInflation);
       
       // Update horizontal parameters
       *dx_leading = std::max(*dx_leading, radical_width);
@@ -538,7 +537,7 @@ nsMathMLmencloseFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
       contSize.descent = bmBase.ascent + bmBase.descent + psi;
 
       // height(radical) should be >= height(base) + psi + mRadicalRuleThickness
-      mMathMLChar[mRadicalCharIndex].Stretch(PresContext(), aRenderingContext,
+      mMathMLChar[mRadicalCharIndex].Stretch(PresContext(), aDrawTarget,
                                              fontSizeInflation,
                                              NS_STRETCH_DIRECTION_VERTICAL,
                                              contSize, bmRadicalChar,
@@ -690,7 +689,7 @@ nsMathMLmencloseFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
 }
 
 nscoord
-nsMathMLmencloseFrame::FixInterFrameSpacing(nsHTMLReflowMetrics& aDesiredSize)
+nsMathMLmencloseFrame::FixInterFrameSpacing(ReflowOutput& aDesiredSize)
 {
   nscoord gap = nsMathMLContainerFrame::FixInterFrameSpacing(aDesiredSize);
   if (!gap)
@@ -781,7 +780,7 @@ void nsDisplayNotation::Paint(nsDisplayListBuilder* aBuilder,
   rect.Deflate(strokeWidth / 2.f);
 
   ColorPattern color(ToDeviceColor(
-                       mFrame->GetVisitedDependentColor(eCSSProperty_color)));
+    mFrame->GetVisitedDependentColor(eCSSProperty__webkit_text_fill_color)));
 
   StrokeOptions strokeOptions(strokeWidth);
 

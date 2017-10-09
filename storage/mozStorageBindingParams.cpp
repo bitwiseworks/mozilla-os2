@@ -6,6 +6,7 @@
 
 #include <limits.h>
 
+#include "mozilla/UniquePtrExtensions.h"
 #include "nsString.h"
 
 #include "mozStorageError.h"
@@ -108,6 +109,7 @@ BindingParams::BindingParams(mozIStorageBindingParamsArray *aOwningArray,
 : mLocked(false)
 , mOwningArray(aOwningArray)
 , mOwningStatement(aOwningStatement)
+, mParamCount(0)
 {
   (void)mOwningStatement->GetParameterCount(&mParamCount);
   mParameters.SetCapacity(mParamCount);
@@ -366,11 +368,9 @@ BindingParams::BindAdoptedBlobByName(const nsACString &aName,
                                      uint8_t *aValue,
                                      uint32_t aValueSize)
 {
+  UniqueFreePtr<uint8_t> uniqueValue(aValue);
   NS_ENSURE_ARG_MAX(aValueSize, INT_MAX);
-  std::pair<uint8_t *, int> data(
-    aValue,
-    int(aValueSize)
-  );
+  std::pair<uint8_t *, int> data(uniqueValue.release(), int(aValueSize));
   nsCOMPtr<nsIVariant> value(new AdoptedBlobVariant(data));
 
   return BindByName(aName, value);
@@ -513,11 +513,9 @@ BindingParams::BindAdoptedBlobByIndex(uint32_t aIndex,
                                       uint8_t *aValue,
                                       uint32_t aValueSize)
 {
+  UniqueFreePtr<uint8_t> uniqueValue(aValue);
   NS_ENSURE_ARG_MAX(aValueSize, INT_MAX);
-  std::pair<uint8_t *, int> data(
-    static_cast<uint8_t *>(aValue),
-    int(aValueSize)
-  );
+  std::pair<uint8_t *, int> data(uniqueValue.release(), int(aValueSize));
   nsCOMPtr<nsIVariant> value(new AdoptedBlobVariant(data));
 
   return BindByIndex(aIndex, value);

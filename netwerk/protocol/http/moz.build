@@ -1,10 +1,11 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 XPIDL_SOURCES += [
+    'nsIHstsPrimingCallback.idl',
     'nsIHttpActivityObserver.idl',
     'nsIHttpAuthenticableChannel.idl',
     'nsIHttpAuthenticator.idl',
@@ -16,6 +17,7 @@ XPIDL_SOURCES += [
     'nsIHttpEventSink.idl',
     'nsIHttpHeaderVisitor.idl',
     'nsIHttpProtocolHandler.idl',
+    'nsIWellKnownOpportunisticUtils.idl',
 ]
 
 XPIDL_MODULE = 'necko_http'
@@ -30,13 +32,13 @@ EXPORTS += [
 ]
 
 EXPORTS.mozilla.net += [
+    'AltDataOutputStreamChild.h',
+    'AltDataOutputStreamParent.h',
     'HttpBaseChannel.h',
     'HttpChannelChild.h',
     'HttpChannelParent.h',
     'HttpInfo.h',
     'NullHttpChannel.h',
-    'PackagedAppService.h',
-    'PackagedAppVerifier.h',
     'PHttpChannelParams.h',
     'PSpdyPush.h',
     'TimingStruct.h',
@@ -52,7 +54,11 @@ SOURCES += [
 ]
 
 UNIFIED_SOURCES += [
+    'AltDataOutputStreamChild.cpp',
+    'AltDataOutputStreamParent.cpp',
+    'CacheControlParser.cpp',
     'ConnectionDiagnostics.cpp',
+    'HSTSPrimerListener.cpp',
     'Http2Compression.cpp',
     'Http2Push.cpp',
     'Http2Session.cpp',
@@ -82,12 +88,6 @@ UNIFIED_SOURCES += [
     'nsHttpTransaction.cpp',
     'NullHttpChannel.cpp',
     'NullHttpTransaction.cpp',
-    'PackagedAppService.cpp',
-    'PackagedAppVerifier.cpp',
-    'SpdyPush31.cpp',
-    'SpdySession31.cpp',
-    'SpdyStream31.cpp',
-    'SpdyZlibReporter.cpp',
     'TunnelUtils.cpp',
 ]
 
@@ -97,6 +97,7 @@ SOURCES += [
 ]
 
 IPDL_SOURCES += [
+    'PAltDataOutputStream.ipdl',
     'PHttpChannel.ipdl',
 ]
 
@@ -115,6 +116,6 @@ LOCAL_INCLUDES += [
 ]
 
 EXTRA_COMPONENTS += [
-    'PackagedAppUtils.js',
-    'PackagedAppUtils.manifest',
+    'WellKnownOpportunisticUtils.js',
+    'WellKnownOpportunisticUtils.manifest',
 ]

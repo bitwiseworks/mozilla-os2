@@ -49,11 +49,14 @@ public:
     return MakeAndAddRef<SourceSurfaceDual>(mA, mB);
   }
   virtual IntSize GetSize() override { return mA->GetSize(); }
-     
+
+  virtual void DetachAllSnapshots() override;
+
   FORWARD_FUNCTION(Flush)
   FORWARD_FUNCTION1(PushClip, const Path *, aPath)
   FORWARD_FUNCTION1(PushClipRect, const Rect &, aRect)
   FORWARD_FUNCTION(PopClip)
+  FORWARD_FUNCTION(PopLayer)
   FORWARD_FUNCTION1(ClearRect, const Rect &, aRect)
 
   virtual void SetTransform(const Matrix &aTransform) override {
@@ -104,7 +107,13 @@ public:
                           const GlyphRenderingOptions *aRenderingOptions) override;
   
   virtual void Mask(const Pattern &aSource, const Pattern &aMask, const DrawOptions &aOptions) override;
-     
+
+  virtual void PushLayer(bool aOpaque, Float aOpacity,
+                         SourceSurface* aMask,
+                         const Matrix& aMaskTransform,
+                         const IntRect& aBounds = IntRect(),
+                         bool aCopyBackground = false) override;
+
   virtual already_AddRefed<SourceSurface>
     CreateSourceSurfaceFromData(unsigned char *aData,
                                 const IntSize &aSize,
@@ -155,6 +164,8 @@ public:
   {
     return true;
   }
+
+  virtual bool IsCurrentGroupOpaque() override { return mA->IsCurrentGroupOpaque(); }
      
 private:
   RefPtr<DrawTarget> mA;

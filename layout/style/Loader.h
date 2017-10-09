@@ -20,11 +20,15 @@
 #include "nsURIHashKey.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/CORSMode.h"
-#include "mozilla/CSSStyleSheet.h"
+#include "mozilla/StyleSheetInlines.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/StyleBackendType.h"
+#include "mozilla/StyleSheet.h"
 #include "mozilla/net/ReferrerPolicy.h"
 
 class nsICSSLoaderObserver;
+class nsIConsoleReportCollector;
 class nsIContent;
 class nsIDocument;
 class nsMediaList;
@@ -183,38 +187,11 @@ enum StyleSheetState {
   eSheetComplete
 };
 
-/**
- * Enum defining the mode in which a sheet is to be parsed.  This is
- * usually, but not always, the same as the cascade level at which the
- * sheet will apply (see nsStyleSet.h).  Most of the Loader APIs only
- * support loading of author sheets.
- *
- * Author sheets are the normal case: styles embedded in or linked
- * from HTML pages.  They are also the most restricted.
- *
- * User sheets can do anything author sheets can do, and also get
- * access to a few CSS extensions that are not yet suitable for
- * exposure on the public Web, but are very useful for expressing
- * user style overrides, such as @-moz-document rules.
- *
- * Agent sheets have access to all author- and user-sheet features
- * plus more extensions that are necessary for internal use but,
- * again, not yet suitable for exposure on the public Web.  Some of
- * these are outright unsafe to expose; in particular, incorrect
- * styling of anonymous box pseudo-elements can violate layout
- * invariants.
- */
-enum SheetParsingMode {
-  eAuthorSheetFeatures = 0,
-  eUserSheetFeatures,
-  eAgentSheetFeatures
-};
-
 class Loader final {
   typedef mozilla::net::ReferrerPolicy ReferrerPolicy;
 
 public:
-  Loader();
+  explicit Loader(StyleBackendType aType);
   explicit Loader(nsIDocument*);
 
  private:
@@ -313,7 +290,7 @@ public:
    * @param aSavedSheets any saved style sheets which could be reused
    *              for this load
    */
-  nsresult LoadChildSheet(CSSStyleSheet* aParentSheet,
+  nsresult LoadChildSheet(StyleSheet* aParentSheet,
                           nsIURI* aURL,
                           nsMediaList* aMedia,
                           ImportRule* aRule,
@@ -344,13 +321,13 @@ public:
   nsresult LoadSheetSync(nsIURI* aURL,
                          SheetParsingMode aParsingMode,
                          bool aUseSystemPrincipal,
-                         CSSStyleSheet** aSheet);
+                         RefPtr<StyleSheet>* aSheet);
 
   /**
    * As above, but defaults aParsingMode to eAuthorSheetFeatures and
    * aUseSystemPrincipal to false.
    */
-  nsresult LoadSheetSync(nsIURI* aURL, CSSStyleSheet** aSheet) {
+  nsresult LoadSheetSync(nsIURI* aURL, RefPtr<StyleSheet>* aSheet) {
     return LoadSheetSync(aURL, eAuthorSheetFeatures, false, aSheet);
   }
 
@@ -379,7 +356,7 @@ public:
                      nsIPrincipal* aOriginPrincipal,
                      const nsCString& aCharset,
                      nsICSSLoaderObserver* aObserver,
-                     CSSStyleSheet** aSheet);
+                     RefPtr<StyleSheet>* aSheet);
 
   /**
    * Same as above, to be used when the caller doesn't care about the
@@ -468,20 +445,10 @@ public:
 private:
   friend class SheetLoadData;
 
-  static PLDHashOperator
-  RemoveEntriesWithURI(URIPrincipalReferrerPolicyAndCORSModeHashKey* aKey,
-                       RefPtr<CSSStyleSheet>& aSheet,
-                       void* aUserData);
-
-  // Note: null aSourcePrincipal indicates that the content policy and
-  // CheckLoadURI checks should be skipped.
-  // aIsPreload indicates whether the html parser preloads that
-  // stylesheet or if it is a regular load.
-  nsresult CheckLoadAllowed(nsIPrincipal* aSourcePrincipal,
-                            nsIURI* aTargetURI,
-                            nsISupports* aContext,
-                            bool aIsPreload);
-
+  nsresult CheckContentPolicy(nsIPrincipal* aSourcePrincipal,
+                              nsIURI* aTargetURI,
+                              nsISupports* aContext,
+                              bool aIsPreload);
 
   // For inline style, the aURI param is null, but the aLinkingContent
   // must be non-null then.  The loader principal must never be null
@@ -490,6 +457,7 @@ private:
   nsresult CreateSheet(nsIURI* aURI,
                        nsIContent* aLinkingContent,
                        nsIPrincipal* aLoaderPrincipal,
+                       css::SheetParsingMode aParsingMode,
                        CORSMode aCORSMode,
                        ReferrerPolicy aReferrerPolicy,
                        const nsAString& aIntegrity,
@@ -498,24 +466,24 @@ private:
                        const nsAString& aTitle,
                        StyleSheetState& aSheetState,
                        bool *aIsAlternate,
-                       CSSStyleSheet** aSheet);
+                       RefPtr<StyleSheet>* aSheet);
 
   // Pass in either a media string or the nsMediaList from the
   // CSSParser.  Don't pass both.
   // This method will set the sheet's enabled state based on isAlternate
-  void PrepareSheet(CSSStyleSheet* aSheet,
+  void PrepareSheet(StyleSheet* aSheet,
                     const nsAString& aTitle,
                     const nsAString& aMediaString,
                     nsMediaList* aMediaList,
                     dom::Element* aScopeElement,
                     bool isAlternate);
 
-  nsresult InsertSheetInDoc(CSSStyleSheet* aSheet,
+  nsresult InsertSheetInDoc(StyleSheet* aSheet,
                             nsIContent* aLinkingContent,
                             nsIDocument* aDocument);
 
-  nsresult InsertChildSheet(CSSStyleSheet* aSheet,
-                            CSSStyleSheet* aParentSheet,
+  nsresult InsertChildSheet(StyleSheet* aSheet,
+                            StyleSheet* aParentSheet,
                             ImportRule* aParentRule);
 
   nsresult InternalLoadNonDocumentSheet(nsIURI* aURL,
@@ -524,7 +492,7 @@ private:
                                         bool aUseSystemPrincipal,
                                         nsIPrincipal* aOriginPrincipal,
                                         const nsCString& aCharset,
-                                        CSSStyleSheet** aSheet,
+                                        RefPtr<StyleSheet>* aSheet,
                                         nsICSSLoaderObserver* aObserver,
                                         CORSMode aCORSMode = CORS_NONE,
                                         ReferrerPolicy aReferrerPolicy = mozilla::net::RP_Default,
@@ -538,7 +506,7 @@ private:
   // sheet was loaded from (may be null for inline sheets).  aElement is the
   // owning element for this sheet.
   nsresult PostLoadEvent(nsIURI* aURI,
-                         CSSStyleSheet* aSheet,
+                         StyleSheet* aSheet,
                          nsICSSLoaderObserver* aObserver,
                          bool aWasAlternate,
                          nsIStyleSheetLinkingElement* aElement);
@@ -573,9 +541,12 @@ private:
   void DoSheetComplete(SheetLoadData* aLoadData, nsresult aStatus,
                        LoadDataArray& aDatasToNotify);
 
+  StyleBackendType GetStyleBackendType() const;
+
   struct Sheets {
-    nsRefPtrHashtable<URIPrincipalReferrerPolicyAndCORSModeHashKey, CSSStyleSheet>
-                      mCompleteSheets;
+    nsBaseHashtable<URIPrincipalReferrerPolicyAndCORSModeHashKey,
+                    RefPtr<StyleSheet>,
+                    StyleSheet*> mCompleteSheets;
     nsDataHashtable<URIPrincipalReferrerPolicyAndCORSModeHashKey, SheetLoadData*>
                       mLoadingDatas; // weak refs
     nsDataHashtable<URIPrincipalReferrerPolicyAndCORSModeHashKey, SheetLoadData*>
@@ -585,7 +556,7 @@ private:
 
   // We're not likely to have many levels of @import...  But likely to have
   // some.  Allocate some storage, what the hell.
-  nsAutoTArray<SheetLoadData*, 8> mParsingDatas;
+  AutoTArray<SheetLoadData*, 8> mParsingDatas;
 
   // The array of posted stylesheet loaded events (SheetLoadDatas) we have.
   // Note that these are rare.
@@ -608,7 +579,13 @@ private:
   nsCompatibility   mCompatMode;
   nsString          mPreferredSheet;  // title of preferred sheet
 
+  // Set explicitly when the Loader(StyleBackendType) constructor is used, or
+  // taken from the document when the Loader(nsIDocument*) constructor is used.
+  mozilla::Maybe<StyleBackendType> mStyleBackendType;
+
   bool              mEnabled; // is enabled to load new styles
+
+  nsCOMPtr<nsIConsoleReportCollector> mReporter;
 
 #ifdef DEBUG
   bool              mSyncCallback;

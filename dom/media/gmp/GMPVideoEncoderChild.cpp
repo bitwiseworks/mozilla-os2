@@ -6,7 +6,7 @@
 #include "GMPVideoEncoderChild.h"
 #include "GMPContentChild.h"
 #include <stdio.h>
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "GMPVideoEncodedFrameImpl.h"
 #include "GMPVideoi420FrameImpl.h"
 #include "runnable_utils.h"
@@ -206,9 +206,10 @@ GMPVideoEncoderChild::Alloc(size_t aSize,
   ++mNeedShmemIntrCount;
   rv = CallNeedShmem(aSize, aMem);
   --mNeedShmemIntrCount;
-  if (mPendingEncodeComplete) {
-    auto t = NewRunnableMethod(this, &GMPVideoEncoderChild::RecvEncodingComplete);
-    mPlugin->GMPMessageLoop()->PostTask(FROM_HERE, t);
+  if (mPendingEncodeComplete && mNeedShmemIntrCount == 0) {
+    mPendingEncodeComplete = false;
+    mPlugin->GMPMessageLoop()->PostTask(
+      NewRunnableMethod(this, &GMPVideoEncoderChild::RecvEncodingComplete));
   }
 #else
 #ifdef GMP_SAFE_SHMEM

@@ -8,7 +8,6 @@
 #include "VolumeManager.h"
 #include "VolumeServiceIOThread.h"
 
-#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsDependentSubstring.h"
 #include "nsIDOMWakeLockListener.h"
@@ -29,6 +28,7 @@
 #include "nsXULAppAPI.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/Services.h"
+#include "base/task.h"
 
 #undef VOLUME_MANAGER_LOG_TAG
 #define VOLUME_MANAGER_LOG_TAG  "nsVolumeService"
@@ -80,7 +80,6 @@ nsVolumeService::Shutdown()
   }
 
   XRE_GetIOMessageLoop()->PostTask(
-      FROM_HERE,
       NewRunnableFunction(ShutdownVolumeServiceIOThread));
 
   sSingleton = nullptr;
@@ -101,7 +100,6 @@ nsVolumeService::nsVolumeService()
   // Startup the IOThread side of things. The actual volume changes
   // are captured by the IOThread and forwarded to main thread.
   XRE_GetIOMessageLoop()->PostTask(
-      FROM_HERE,
       NewRunnableFunction(InitVolumeServiceIOThread, this));
 
   nsCOMPtr<nsIPowerManagerService> pmService =
@@ -505,7 +503,7 @@ nsVolumeService::RemoveVolumeByName(const nsAString& aName)
 * The UpdateVolumeRunnable creates an nsVolume and updates the main thread
 * data structure while running on the main thread.
 */
-class UpdateVolumeRunnable : public nsRunnable
+class UpdateVolumeRunnable : public Runnable
 {
 public:
   UpdateVolumeRunnable(nsVolumeService* aVolumeService, const Volume* aVolume)
@@ -515,7 +513,7 @@ public:
     MOZ_ASSERT(MessageLoop::current() == XRE_GetIOMessageLoop());
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(NS_IsMainThread());
     DBG("UpdateVolumeRunnable::Run '%s' state %s gen %d locked %d "

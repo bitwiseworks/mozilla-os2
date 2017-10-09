@@ -15,22 +15,19 @@ Cu.import("resource://gre/modules/PlacesUtils.jsm");
 
 this.EXPORTED_SYMBOLS = [ "PlacesDBUtils" ];
 
-////////////////////////////////////////////////////////////////////////////////
-//// Constants
+// Constants
 
 const FINISHED_MAINTENANCE_TOPIC = "places-maintenance-finished";
 
 const BYTES_PER_MEBIBYTE = 1048576;
 
-////////////////////////////////////////////////////////////////////////////////
-//// Smart getters
+// Smart getters
 
 XPCOMUtils.defineLazyGetter(this, "DBConn", function() {
   return PlacesUtils.history.QueryInterface(Ci.nsPIPlacesDatabase).DBConnection;
 });
 
-////////////////////////////////////////////////////////////////////////////////
-//// PlacesDBUtils
+// PlacesDBUtils
 
 this.PlacesDBUtils = {
   /**
@@ -291,7 +288,8 @@ this.PlacesDBUtils = {
     // efficiently select all annos with a 'weave/' prefix.
     let deleteObsoleteAnnos = DBConn.createAsyncStatement(
       `DELETE FROM moz_annos
-       WHERE anno_attribute_id IN (
+       WHERE type = 4
+          OR anno_attribute_id IN (
          SELECT id FROM moz_anno_attributes
          WHERE name BETWEEN 'weave/' AND 'weave0'
        )`);
@@ -300,7 +298,8 @@ this.PlacesDBUtils = {
     // A.2 remove obsolete annotations from moz_items_annos.
     let deleteObsoleteItemsAnnos = DBConn.createAsyncStatement(
       `DELETE FROM moz_items_annos
-       WHERE anno_attribute_id IN (
+       WHERE type = 4
+          OR anno_attribute_id IN (
          SELECT id FROM moz_anno_attributes
          WHERE name = 'sync/children'
             OR name = 'placesInternal/GUID'
@@ -396,7 +395,7 @@ this.PlacesDBUtils = {
     let fixUnsortedBookmarksTitle = DBConn.createAsyncStatement(updateRootTitleSql);
     fixUnsortedBookmarksTitle.params["root_id"] = PlacesUtils.unfiledBookmarksFolderId;
     fixUnsortedBookmarksTitle.params["title"] =
-      PlacesUtils.getString("UnsortedBookmarksFolderTitle");
+      PlacesUtils.getString("OtherBookmarksFolderTitle");
     cleanupStatements.push(fixUnsortedBookmarksTitle);
     // tags
     let fixTagsRootTitle = DBConn.createAsyncStatement(updateRootTitleSql);
@@ -688,13 +687,13 @@ this.PlacesDBUtils = {
     let fixVisitStats = DBConn.createAsyncStatement(
       `UPDATE moz_places
        SET visit_count = (SELECT count(*) FROM moz_historyvisits
-                          WHERE place_id = moz_places.id AND visit_type NOT IN (0,4,7,8)),
+                          WHERE place_id = moz_places.id AND visit_type NOT IN (0,4,7,8,9)),
            last_visit_date = (SELECT MAX(visit_date) FROM moz_historyvisits
                               WHERE place_id = moz_places.id)
        WHERE id IN (
          SELECT h.id FROM moz_places h
          WHERE visit_count <> (SELECT count(*) FROM moz_historyvisits v
-                               WHERE v.place_id = h.id AND visit_type NOT IN (0,4,7,8))
+                               WHERE v.place_id = h.id AND visit_type NOT IN (0,4,7,8,9))
             OR last_visit_date <> (SELECT MAX(visit_date) FROM moz_historyvisits v
                                    WHERE v.place_id = h.id)
        )`);
@@ -716,8 +715,14 @@ this.PlacesDBUtils = {
     // L.4 recalculate foreign_count.
     let fixForeignCount = DBConn.createAsyncStatement(
       `UPDATE moz_places SET foreign_count =
-       (SELECT count(*) FROM moz_bookmarks WHERE fk = moz_places.id )`);
+         (SELECT count(*) FROM moz_bookmarks WHERE fk = moz_places.id ) +
+         (SELECT count(*) FROM moz_keywords WHERE place_id = moz_places.id )`);
     cleanupStatements.push(fixForeignCount);
+
+    // L.5 recalculate missing hashes.
+    let fixMissingHashes = DBConn.createAsyncStatement(
+      `UPDATE moz_places SET url_hash = hash(url) WHERE url_hash = 0`);
+    cleanupStatements.push(fixMissingHashes);
 
     // MAINTENANCE STATEMENTS SHOULD GO ABOVE THIS POINT!
 
@@ -821,7 +826,7 @@ this.PlacesDBUtils = {
       let limitURIs = Services.prefs.getIntPref(
         "places.history.expiration.transient_current_max_pages");
       tasks.log("History can store a maximum of " + limitURIs + " unique pages");
-    } catch(ex) {}
+    } catch (ex) {}
 
     let stmt = DBConn.createStatement(
       "SELECT name FROM sqlite_master WHERE type = :type");
@@ -852,26 +857,14 @@ this.PlacesDBUtils = {
   },
 
   /**
-   * Collects telemetry data.
-   *
-   * There are essentially two modes of collection and the mode is
-   * determined by the presence of aHealthReportCallback. If
-   * aHealthReportCallback is not defined (the default) then we are in
-   * "Telemetry" mode. Results will be reported to Telemetry. If we are
-   * in "Health Report" mode only the probes with a true healthreport
-   * flag will be collected and the results will be reported to the
-   * aHealthReportCallback.
+   * Collects telemetry data and reports it to Telemetry.
    *
    * @param [optional] aTasks
    *        Tasks object to execute.
-   * @param [optional] aHealthReportCallback
-   *        Function to receive data relevant for Firefox Health Report.
    */
-  telemetry: function PDBU_telemetry(aTasks, aHealthReportCallback=null)
+  telemetry: function PDBU_telemetry(aTasks)
   {
     let tasks = new Tasks(aTasks);
-
-    let isTelemetry = !aHealthReportCallback;
 
     // This will be populated with one integer property for each probe result,
     // using the histogram name as key.
@@ -889,19 +882,15 @@ this.PlacesDBUtils = {
     //             histogram. If a query is also present, its result is passed
     //             as the first argument of the function.  If the function
     //             raises an exception, no data is added to the histogram.
-    //  healthreport: Boolean indicating whether this probe is relevant
-    //                to Firefox Health Report.
     //
     // Since all queries are executed in order by the database backend, the
     // callbacks can also use the result of previous queries stored in the
     // probeValues object.
     let probes = [
       { histogram: "PLACES_PAGES_COUNT",
-        healthreport: true,
         query:     "SELECT count(*) FROM moz_places" },
 
       { histogram: "PLACES_BOOKMARKS_COUNT",
-        healthreport: true,
         query:     `SELECT count(*) FROM moz_bookmarks b
                     JOIN moz_bookmarks t ON t.id = b.parent
                     AND t.parent <> :tags_folder
@@ -987,14 +976,8 @@ this.PlacesDBUtils = {
       places_root: PlacesUtils.placesRootId
     };
 
-    let outstandingProbes = [];
-
     for (let i = 0; i < probes.length; i++) {
       let probe = probes[i];
-
-      if (!isTelemetry && !probe.healthreport) {
-        continue;
-      }
 
       let promiseDone = new Promise((resolve, reject) => {
         if (!("query" in probe)) {
@@ -1018,14 +1001,14 @@ this.PlacesDBUtils = {
             },
             handleCompletion: function () {}
           });
-        } finally{
+        } finally {
           stmt.finalize();
         }
       });
 
       // Report the result of the probe through Telemetry.
       // The resulting promise cannot reject.
-      promiseDone = promiseDone.then(
+      promiseDone.then(
         // On success
         ([aProbe, aValue]) => {
           let value = aValue;
@@ -1043,14 +1026,6 @@ this.PlacesDBUtils = {
         },
         // On failure
         this._handleError);
-
-      outstandingProbes.push(promiseDone);
-    }
-
-    if (aHealthReportCallback) {
-      Promise.all(outstandingProbes).then(() =>
-        aHealthReportCallback(probeValues)
-      );
     }
 
     PlacesDBUtils._executeTasks(tasks);

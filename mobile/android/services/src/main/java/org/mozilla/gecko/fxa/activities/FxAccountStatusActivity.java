@@ -10,7 +10,6 @@ import android.accounts.AccountManagerCallback;
 import android.accounts.AccountManagerFuture;
 import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
-import android.app.ActionBar;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Dialog;
@@ -18,13 +17,17 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
+import android.support.v7.app.ActionBar;
+import android.support.v7.widget.Toolbar;
 import android.util.TypedValue;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
+import android.view.View;
+import android.view.Window;
 import android.widget.Toast;
 import org.mozilla.gecko.AppConstants;
-import org.mozilla.gecko.Locales.LocaleAwareFragmentActivity;
+import org.mozilla.gecko.Locales.LocaleAwareAppCompatActivity;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.background.common.log.Logger;
 import org.mozilla.gecko.background.fxa.FxAccountUtils;
@@ -36,7 +39,7 @@ import org.mozilla.gecko.sync.Utils;
 /**
  * Activity which displays account status.
  */
-public class FxAccountStatusActivity extends LocaleAwareFragmentActivity {
+public class FxAccountStatusActivity extends LocaleAwareAppCompatActivity {
   private static final String LOG_TAG = FxAccountStatusActivity.class.getSimpleName();
 
   protected FxAccountStatusFragment statusFragment;
@@ -67,10 +70,11 @@ public class FxAccountStatusActivity extends LocaleAwareFragmentActivity {
       Logger.debug(LOG_TAG, "Not enabling home button; version too low.");
       return;
     }
-    final ActionBar actionBar = getActionBar();
+    final ActionBar actionBar = getSupportActionBar();
     if (actionBar != null) {
       Logger.debug(LOG_TAG, "Enabling home button.");
       actionBar.setHomeButtonEnabled(true);
+      actionBar.setDisplayHomeAsUpEnabled(true);
       return;
     }
     Logger.debug(LOG_TAG, "Not enabling home button.");
@@ -139,13 +143,9 @@ public class FxAccountStatusActivity extends LocaleAwareFragmentActivity {
      * See http://stackoverflow.com/questions/14910536/android-dialog-theme-makes-icon-too-light/14910945#14910945.
      */
     final int icon;
-    if (AppConstants.Versions.feature11Plus) {
-      final TypedValue typedValue = new TypedValue();
-      activity.getTheme().resolveAttribute(android.R.attr.alertDialogIcon, typedValue, true);
-      icon = typedValue.resourceId;
-    } else {
-      icon = android.R.drawable.ic_dialog_alert;
-    }
+    final TypedValue typedValue = new TypedValue();
+    activity.getTheme().resolveAttribute(android.R.attr.alertDialogIcon, typedValue, true);
+    icon = typedValue.resourceId;
 
     final AlertDialog dialog = new AlertDialog.Builder(activity)
       .setTitle(R.string.fxaccount_remove_account_dialog_title)
@@ -206,4 +206,23 @@ public class FxAccountStatusActivity extends LocaleAwareFragmentActivity {
     }
     return super.onCreateOptionsMenu(menu);
   };
+
+  @Override
+  public void openOptionsMenu() {
+    // This is a workaround of an Android bug:
+    // https://code.google.com/p/android/issues/detail?id=185217
+    // openOptionsMenu isn't overriden by WindowDecorActionBar, which is used by AppCompatActivity,
+    // meaning getSupportActionbar().openOptionsMenu doesn't work.
+    // Based loosely on the code in:
+    // http://androidxref.com/6.0.1_r10/xref/frameworks/support/v7/appcompat/src/android/support/v7/internal/app/WindowDecorActionBar.java#getDecorToolbar
+
+    final Window window = getWindow();
+    final View decor = window.getDecorView();
+    final View view = decor.findViewById(R.id.action_bar);
+
+    if (view instanceof Toolbar) {
+      final Toolbar toolbar = (Toolbar) view;
+      toolbar.showOverflowMenu();
+    }
+  }
 }

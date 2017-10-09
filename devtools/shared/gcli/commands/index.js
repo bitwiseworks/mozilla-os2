@@ -5,7 +5,7 @@
 "use strict";
 
 const { createSystem, connectFront, disconnectFront } = require("gcli/system");
-const { GcliFront } = require("devtools/server/actors/gcli");
+const { GcliFront } = require("devtools/shared/fronts/gcli");
 
 /**
  * This is the basic list of modules that should be loaded into each
@@ -65,6 +65,7 @@ exports.devtoolsModules = [
   "devtools/shared/gcli/commands/inject",
   "devtools/shared/gcli/commands/jsb",
   "devtools/shared/gcli/commands/listen",
+  "devtools/shared/gcli/commands/mdn",
   "devtools/shared/gcli/commands/measure",
   "devtools/shared/gcli/commands/media",
   "devtools/shared/gcli/commands/pagemod",
@@ -74,7 +75,6 @@ exports.devtoolsModules = [
   "devtools/shared/gcli/commands/rulers",
   "devtools/shared/gcli/commands/screenshot",
   "devtools/shared/gcli/commands/security",
-  "devtools/shared/gcli/commands/tools",
 ];
 
 /**
@@ -82,11 +82,11 @@ exports.devtoolsModules = [
  * The map/reduce incantation squashes the array of arrays to a single array.
  */
 try {
-  const defaultTools = require("devtools/client/definitions").defaultTools;
+  const { defaultTools } = require("devtools/client/definitions");
   exports.devtoolsToolModules = defaultTools.map(def => def.commands || [])
                                    .reduce((prev, curr) => prev.concat(curr), []);
-} catch(e) {
-  // "definitions" is only accessible from Firefox
+} catch (e) {
+  // "devtools/client/definitions" is only accessible from Firefox
   exports.devtoolsToolModules = [];
 }
 
@@ -96,11 +96,11 @@ try {
  * single array.
  */
 try {
-  const { ToolboxButtons } = require("devtools/client/framework/toolbox");
+  const { ToolboxButtons } = require("devtools/client/definitions");
   exports.devtoolsButtonModules = ToolboxButtons.map(def => def.commands || [])
                                      .reduce((prev, curr) => prev.concat(curr), []);
-} catch(e) {
-  // "devtools/framework/toolbox" is only accessible from Firefox
+} catch (e) {
+  // "devtools/client/definitions" is only accessible from Firefox
   exports.devtoolsButtonModules = [];
 }
 

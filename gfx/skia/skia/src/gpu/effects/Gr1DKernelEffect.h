@@ -31,17 +31,24 @@ public:
     Gr1DKernelEffect(GrTexture* texture,
                      Direction direction,
                      int radius)
-        : GrSingleTextureEffect(texture, MakeDivByTextureWHMatrix(texture))
+        : INHERITED(texture, nullptr, GrCoordTransform::MakeDivByTextureWHMatrix(texture))
         , fDirection(direction)
         , fRadius(radius) {}
 
-    virtual ~Gr1DKernelEffect() {};
+    virtual ~Gr1DKernelEffect() {}
 
     static int WidthFromRadius(int radius) { return 2 * radius + 1; }
 
     int radius() const { return fRadius; }
     int width() const { return WidthFromRadius(fRadius); }
     Direction direction() const { return fDirection; }
+
+    SkString dumpInfo() const override {
+        SkString str;
+        str.appendf("Direction: %s, Radius: %d ", kX_Direction == fDirection ? "X" : "Y", fRadius);
+        str.append(INHERITED::dumpInfo());
+        return str;
+    }
 
 private:
 

@@ -129,6 +129,9 @@ public:
       case IDBTransaction::READ_WRITE_FLUSH:
         AppendLiteral("\"readwriteflush\"");
         break;
+      case IDBTransaction::CLEANUP:
+        AppendLiteral("\"cleanup\"");
+        break;
       case IDBTransaction::VERSION_CHANGE:
         AppendLiteral("\"versionchange\"");
         break;
@@ -198,6 +201,8 @@ public:
       nsAutoString str;
       aKey.ToString(str);
       AppendPrintf("\"%s\"", NS_ConvertUTF16toUTF8(str).get());
+    } else if (aKey.IsBinary()) {
+      AssignLiteral("[object ArrayBuffer]");
     } else {
       MOZ_ASSERT(aKey.IsArray());
       AssignLiteral("[...]");
@@ -262,7 +267,7 @@ public:
     nsString eventType;
 
     if (aEvent) {
-      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(aEvent->GetType(eventType)));
+      MOZ_ALWAYS_SUCCEEDS(aEvent->GetType(eventType));
     } else {
       eventType = nsDependentString(aDefault);
     }

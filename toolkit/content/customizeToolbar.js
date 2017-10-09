@@ -417,7 +417,7 @@ function restoreItemForToolbar(aItem, aWrapper)
     let commandID = aWrapper.getAttribute("itemcommand");
     aItem.setAttribute("command", commandID);
 
-    //XXX Bug 309953 - toolbarbuttons aren't in sync with their commands after customizing
+    // XXX Bug 309953 - toolbarbuttons aren't in sync with their commands after customizing
     let command = gToolboxDocument.getElementById(commandID);
     if (command && command.hasAttribute("disabled"))
       aItem.setAttribute("disabled", command.getAttribute("disabled"));
@@ -618,8 +618,7 @@ function isToolbarItem(aElt)
          aElt.localName == "toolbarspacer";
 }
 
-///////////////////////////////////////////////////////////////////////////
-//// Drag and Drop observers
+// Drag and Drop observers
 
 function onToolbarDragExit(aEvent)
 {
@@ -655,7 +654,7 @@ function onToolbarDragOver(aEvent)
   }
 
   var documentId = gToolboxDocument.documentElement.id;
-  if (!aEvent.dataTransfer.types.contains("text/toolbarwrapper-id/" + documentId.toLowerCase()))
+  if (!aEvent.dataTransfer.types.includes("text/toolbarwrapper-id/" + documentId.toLowerCase()))
     return;
 
   var toolbar = aEvent.target;
@@ -729,7 +728,7 @@ function onToolbarDrop(aEvent)
     // The wrapper has been dragged from the toolbar.
     // Get the wrapper from the toolbar document and make sure that
     // it isn't being dropped on itself.
-    var wrapper = gToolboxDocument.getElementById("wrapper-"+draggedItemId);
+    let wrapper = gToolboxDocument.getElementById("wrapper-"+draggedItemId);
     if (wrapper == gCurrentDragOverItem)
        return;
 
@@ -756,7 +755,7 @@ function onToolbarDrop(aEvent)
     // The item has been dragged from the palette
 
     // Create a new wrapper for the item. We don't know the id yet.
-    var wrapper = createWrapper("", gToolboxDocument);
+    let wrapper = createWrapper("", gToolboxDocument);
 
     // Ask the toolbar to clone the item's template, place it inside the wrapper, and insert it in the toolbar.
     var newItem = toolbar.insertItem(draggedItemId, gCurrentDragOverItem == toolbar ? null : gCurrentDragOverItem, wrapper);
@@ -776,7 +775,7 @@ function onToolbarDrop(aEvent)
   gCurrentDragOverItem = null;
 
   toolboxChanged();
-};
+}
 
 function onPaletteDragOver(aEvent)
 {
@@ -784,7 +783,7 @@ function onPaletteDragOver(aEvent)
     return;
   }
   var documentId = gToolboxDocument.documentElement.id;
-  if (aEvent.dataTransfer.types.contains("text/toolbarwrapper-id/" + documentId.toLowerCase()))
+  if (aEvent.dataTransfer.types.includes("text/toolbarwrapper-id/" + documentId.toLowerCase()))
     aEvent.preventDefault();
 }
 

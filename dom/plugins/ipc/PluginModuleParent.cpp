@@ -4,10 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifdef MOZ_WIDGET_QT
-#include "PluginHelperQt.h"
-#endif
-
 #include "mozilla/plugins/PluginModuleParent.h"
 
 #include "base/process_util.h"
@@ -17,6 +13,7 @@
 #include "mozilla/dom/PCrashReporterParent.h"
 #include "mozilla/ipc/GeckoChildProcessHost.h"
 #include "mozilla/ipc/MessageChannel.h"
+#include "mozilla/ipc/ProtocolUtils.h"
 #include "mozilla/plugins/BrowserStreamParent.h"
 #include "mozilla/plugins/PluginAsyncSurrogate.h"
 #include "mozilla/plugins/PluginBridge.h"
@@ -28,7 +25,7 @@
 #include "mozilla/ProcessHangMonitor.h"
 #include "mozilla/Services.h"
 #include "mozilla/Telemetry.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsAutoPtr.h"
 #include "nsCRT.h"
 #include "nsIFile.h"
@@ -47,6 +44,7 @@
 #include "mozilla/plugins/PluginSurfaceParent.h"
 #include "mozilla/widget/AudioSession.h"
 #include "PluginHangUIParent.h"
+#include "PluginUtilsWin.h"
 #endif
 
 #ifdef MOZ_ENABLE_PROFILER_SPS
@@ -95,14 +93,6 @@ static const char kHangUIMinDisplayPref[] = "dom.ipc.plugins.hangUIMinDisplaySec
 #define CHILD_TIMEOUT_PREF kChildTimeoutPref
 #endif
 
-template<>
-struct RunnableMethodTraits<mozilla::plugins::PluginModuleParent>
-{
-    typedef mozilla::plugins::PluginModuleParent Class;
-    static void RetainCallee(Class* obj) { }
-    static void ReleaseCallee(Class* obj) { }
-};
-
 bool
 mozilla::plugins::SetupBridge(uint32_t aPluginId,
                               dom::ContentParent* aContentParent,
@@ -123,11 +113,18 @@ mozilla::plugins::SetupBridge(uint32_t aPluginId,
         return true;
     }
     PluginModuleChromeParent* chromeParent = static_cast<PluginModuleChromeParent*>(plugin->GetLibrary());
+    /*
+     *  We can't accumulate BLOCKED_ON_PLUGIN_MODULE_INIT_MS until here because
+     *  its histogram key is not available until *after* NP_Initialize.
+     */
+    chromeParent->AccumulateModuleInitBlockedTime();
     *rv = chromeParent->GetRunID(runID);
     if (NS_FAILED(*rv)) {
         return true;
     }
-    chromeParent->SetContentParent(aContentParent);
+    if (chromeParent->IsStartingAsync()) {
+        chromeParent->SetContentParent(aContentParent);
+    }
     if (!aForceBridgeNow && chromeParent->IsStartingAsync() &&
         PluginModuleChromeParent::DidInstantiate()) {
         // We'll handle the bridging asynchronously
@@ -142,7 +139,7 @@ mozilla::plugins::SetupBridge(uint32_t aPluginId,
 /**
  * Use for executing CreateToolhelp32Snapshot off main thread
  */
-class mozilla::plugins::FinishInjectorInitTask : public CancelableTask
+class mozilla::plugins::FinishInjectorInitTask : public mozilla::CancelableRunnable
 {
 public:
     FinishInjectorInitTask()
@@ -161,34 +158,31 @@ public:
 
     void PostToMainThread()
     {
+        RefPtr<Runnable> self = this;
         mSnapshot.own(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0));
-        bool deleteThis = false;
         {   // Scope for lock
             mozilla::MutexAutoLock lock(mMutex);
             if (mMainThreadMsgLoop) {
-                mMainThreadMsgLoop->PostTask(FROM_HERE, this);
-            } else {
-                deleteThis = true;
+                mMainThreadMsgLoop->PostTask(self.forget());
             }
-        }
-        if (deleteThis) {
-            delete this;
         }
     }
 
-    void Run() override
+    NS_IMETHOD Run() override
     {
         mParent->DoInjection(mSnapshot);
         // We don't need to hold this lock during DoInjection, but we do need
         // to obtain it before returning from Run() to ensure that
         // PostToMainThread has completed before we return.
         mozilla::MutexAutoLock lock(mMutex);
+        return NS_OK;
     }
 
-    void Cancel() override
+    nsresult Cancel() override
     {
         mozilla::MutexAutoLock lock(mMutex);
         mMainThreadMsgLoop = nullptr;
+        return NS_OK;
     }
 
 private:
@@ -356,24 +350,50 @@ bool PluginModuleMapping::sIsLoadModuleOnStack = false;
 
 } // namespace
 
+static PluginModuleChromeParent*
+PluginModuleChromeParentForId(const uint32_t aPluginId)
+{
+  MOZ_ASSERT(XRE_IsParentProcess());
+
+  RefPtr<nsPluginHost> host = nsPluginHost::GetInst();
+  nsPluginTag* pluginTag = host->PluginWithId(aPluginId);
+  if (!pluginTag || !pluginTag->mPlugin) {
+    return nullptr;
+  }
+  RefPtr<nsNPAPIPlugin> plugin = pluginTag->mPlugin;
+
+  return static_cast<PluginModuleChromeParent*>(plugin->GetLibrary());
+}
+
+void
+mozilla::plugins::TakeFullMinidump(uint32_t aPluginId,
+                                   base::ProcessId aContentProcessId,
+                                   const nsAString& aBrowserDumpId,
+                                   nsString& aDumpId)
+{
+  PluginModuleChromeParent* chromeParent =
+    PluginModuleChromeParentForId(aPluginId);
+
+  if (chromeParent) {
+    chromeParent->TakeFullMinidump(aContentProcessId, aBrowserDumpId, aDumpId);
+  }
+}
+
 void
 mozilla::plugins::TerminatePlugin(uint32_t aPluginId,
+                                  base::ProcessId aContentProcessId,
                                   const nsCString& aMonitorDescription,
-                                  const nsAString& aBrowserDumpId)
+                                  const nsAString& aDumpId)
 {
-    MOZ_ASSERT(XRE_IsParentProcess());
+  PluginModuleChromeParent* chromeParent =
+    PluginModuleChromeParentForId(aPluginId);
 
-    RefPtr<nsPluginHost> host = nsPluginHost::GetInst();
-    nsPluginTag* pluginTag = host->PluginWithId(aPluginId);
-    if (!pluginTag || !pluginTag->mPlugin) {
-        return;
-    }
-    RefPtr<nsNPAPIPlugin> plugin = pluginTag->mPlugin;
-    PluginModuleChromeParent* chromeParent =
-        static_cast<PluginModuleChromeParent*>(plugin->GetLibrary());
+  if (chromeParent) {
     chromeParent->TerminateChildProcess(MessageLoop::current(),
+                                        aContentProcessId,
                                         aMonitorDescription,
-                                        aBrowserDumpId);
+                                        aDumpId);
+  }
 }
 
 /* static */ PluginLibrary*
@@ -396,13 +416,16 @@ PluginModuleContentParent::LoadModule(uint32_t aPluginId,
     dom::ContentChild* cp = dom::ContentChild::GetSingleton();
     nsresult rv;
     uint32_t runID;
+    TimeStamp sendLoadPluginStart = TimeStamp::Now();
     if (!cp->SendLoadPlugin(aPluginId, &rv, &runID) ||
         NS_FAILED(rv)) {
         return nullptr;
     }
+    TimeStamp sendLoadPluginEnd = TimeStamp::Now();
 
     PluginModuleContentParent* parent = mapping->GetModule();
     MOZ_ASSERT(parent);
+    parent->mTimeBlocked += (sendLoadPluginEnd - sendLoadPluginStart);
 
     if (!mapping->IsChannelOpened()) {
         // mapping is linked into PluginModuleMapping::sModuleListHead and is
@@ -473,7 +496,8 @@ PluginModuleContentParent::OnLoadPluginResult(const uint32_t& aPluginId,
 void
 PluginModuleChromeParent::SetContentParent(dom::ContentParent* aContentParent)
 {
-    MOZ_ASSERT(aContentParent);
+    // mContentParent is to be used ONLY during async plugin init!
+    MOZ_ASSERT(aContentParent && mIsStartingAsync);
     mContentParent = aContentParent;
 }
 
@@ -491,33 +515,15 @@ PluginModuleChromeParent::LoadModule(const char* aFilePath, uint32_t aPluginId,
 {
     PLUGIN_LOG_DEBUG_FUNCTION;
 
-    int32_t sandboxLevel = 0;
-#if defined(XP_WIN) && defined(MOZ_SANDBOX)
-    nsAutoCString sandboxPref("dom.ipc.plugins.sandbox-level.");
-    sandboxPref.Append(aPluginTag->GetNiceFileName());
-    if (NS_FAILED(Preferences::GetInt(sandboxPref.get(), &sandboxLevel))) {
-      sandboxLevel = Preferences::GetInt("dom.ipc.plugins.sandbox-level.default");
-    }
-
-#if defined(_AMD64_)
-    // As level 2 is now the default NPAPI sandbox level for 64-bit flash, we
-    // don't want to allow a lower setting unless this environment variable is
-    // set. This should be changed if the firefox.js pref file is changed.
-    if (aPluginTag->mIsFlashPlugin &&
-        !PR_GetEnv("MOZ_ALLOW_WEAKER_SANDBOX") && sandboxLevel < 2) {
-        sandboxLevel = 2;
-    }
-#endif
-#endif
-
     nsAutoPtr<PluginModuleChromeParent> parent(
-            new PluginModuleChromeParent(aFilePath, aPluginId, sandboxLevel,
+            new PluginModuleChromeParent(aFilePath, aPluginId,
+                                         aPluginTag->mSandboxLevel,
                                          aPluginTag->mSupportsAsyncInit));
     UniquePtr<LaunchCompleteTask> onLaunchedRunnable(new LaunchedTask(parent));
     parent->mSubprocess->SetCallRunnableImmediately(!parent->mIsStartingAsync);
     TimeStamp launchStart = TimeStamp::Now();
     bool launched = parent->mSubprocess->Launch(Move(onLaunchedRunnable),
-                                                sandboxLevel);
+                                                aPluginTag->mSandboxLevel);
     if (!launched) {
         // We never reached open
         parent->mShutdown = true;
@@ -673,22 +679,18 @@ PluginModuleParent::PluginModuleParent(bool aIsChrome, bool aAllowAsyncInit)
     , mNPPIface(nullptr)
     , mPlugin(nullptr)
     , mTaskFactory(this)
+    , mSandboxLevel(0)
     , mIsFlashPlugin(false)
     , mIsStartingAsync(false)
     , mNPInitialized(false)
     , mIsNPShutdownPending(false)
     , mAsyncNewRv(NS_ERROR_NOT_INITIALIZED)
 {
-#if defined(XP_WIN) || defined(XP_MACOSX) || defined(MOZ_WIDGET_GTK)
-    mIsStartingAsync = aAllowAsyncInit &&
-                       Preferences::GetBool(kAsyncInitPref, false) &&
-                       !BrowserTabsRemoteAutostart();
 #if defined(MOZ_CRASHREPORTER)
     CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("AsyncPluginInit"),
                                        mIsStartingAsync ?
                                            NS_LITERAL_CSTRING("1") :
                                            NS_LITERAL_CSTRING("0"));
-#endif
 #endif
 }
 
@@ -713,9 +715,6 @@ PluginModuleContentParent::PluginModuleContentParent(bool aAllowAsyncInit)
 
 PluginModuleContentParent::~PluginModuleContentParent()
 {
-    XRE_GetIOMessageLoop()->PostTask(FROM_HERE,
-                                     new DeleteTask<Transport>(GetTransport()));
-
     Preferences::UnregisterCallback(TimeoutChanged, kContentTimeoutPref, this);
 }
 
@@ -730,13 +729,11 @@ PluginModuleChromeParent::PluginModuleChromeParent(const char* aFilePath,
     , mPluginId(aPluginId)
     , mChromeTaskFactory(this)
     , mHangAnnotationFlags(0)
-    , mHangAnnotatorMutex("PluginModuleChromeParent::mHangAnnotatorMutex")
 #ifdef XP_WIN
     , mPluginCpuUsageOnHang()
     , mHangUIParent(nullptr)
     , mHangUIEnabled(true)
     , mIsTimerReset(true)
-    , mSandboxLevel(aSandboxLevel)
 #ifdef MOZ_CRASHREPORTER
     , mCrashReporterMutex("PluginModuleChromeParent::mCrashReporterMutex")
     , mCrashReporter(nullptr)
@@ -754,6 +751,7 @@ PluginModuleChromeParent::PluginModuleChromeParent(const char* aFilePath,
 {
     NS_ASSERTION(mSubprocess, "Out of memory!");
     sInstantiated = true;
+    mSandboxLevel = aSandboxLevel;
     mRunID = GeckoChildProcessHost::GetUniqueID();
 
 #ifdef MOZ_ENABLE_PROFILER_SPS
@@ -771,6 +769,12 @@ PluginModuleChromeParent::~PluginModuleChromeParent()
 
 #ifdef MOZ_ENABLE_PROFILER_SPS
     ShutdownPluginProfiling();
+#endif
+
+#ifdef XP_WIN
+    // If we registered for audio notifications, stop.
+    mozilla::plugins::PluginUtilsWin::RegisterForAudioDeviceChanges(this,
+                                                                    false);
 #endif
 
     if (!mShutdown) {
@@ -909,7 +913,6 @@ PluginModuleChromeParent::CleanupFromTimeout(const bool aFromHangUI)
     if (!OkToCleanup()) {
         // there's still plugin code on the C++ stack, try again
         MessageLoop::current()->PostDelayedTask(
-            FROM_HERE,
             mChromeTaskFactory.NewRunnableMethod(
                 &PluginModuleChromeParent::CleanupFromTimeout, aFromHangUI), 10);
         return;
@@ -997,40 +1000,6 @@ GetProcessCpuUsage(const InfallibleTArray<base::ProcessHandle>& processHandles, 
 
 #endif // #ifdef XP_WIN
 
-void
-PluginModuleChromeParent::OnEnteredCall()
-{
-    mozilla::ipc::IProtocol* protocol = GetInvokingProtocol();
-    MOZ_ASSERT(protocol);
-    mozilla::MutexAutoLock lock(mHangAnnotatorMutex);
-    mProtocolCallStack.AppendElement(protocol);
-}
-
-void
-PluginModuleChromeParent::OnExitedCall()
-{
-    mozilla::MutexAutoLock lock(mHangAnnotatorMutex);
-    MOZ_ASSERT(!mProtocolCallStack.IsEmpty());
-    mProtocolCallStack.RemoveElementAt(mProtocolCallStack.Length() - 1);
-}
-
-void
-PluginModuleChromeParent::OnEnteredSyncSend()
-{
-    mozilla::ipc::IProtocol* protocol = GetInvokingProtocol();
-    MOZ_ASSERT(protocol);
-    mozilla::MutexAutoLock lock(mHangAnnotatorMutex);
-    mProtocolCallStack.AppendElement(protocol);
-}
-
-void
-PluginModuleChromeParent::OnExitedSyncSend()
-{
-    mozilla::MutexAutoLock lock(mHangAnnotatorMutex);
-    MOZ_ASSERT(!mProtocolCallStack.IsEmpty());
-    mProtocolCallStack.RemoveElementAt(mProtocolCallStack.Length() - 1);
-}
-
 /**
  * This function converts the topmost routing id on the call stack (as recorded
  * by the MessageChannel) into a pointer to a IProtocol object.
@@ -1067,8 +1036,7 @@ PluginInstanceParent*
 PluginModuleChromeParent::GetManagingInstance(mozilla::ipc::IProtocol* aProtocol)
 {
     MOZ_ASSERT(aProtocol);
-    mozilla::ipc::MessageListener* listener =
-        static_cast<mozilla::ipc::MessageListener*>(aProtocol);
+    mozilla::ipc::IProtocol* listener = aProtocol;
     switch (listener->GetProtocolTypeId()) {
         case PPluginInstanceMsgStart:
             // In this case, aProtocol is the instance itself. Just cast it.
@@ -1152,24 +1120,6 @@ PluginModuleChromeParent::AnnotateHang(mozilla::HangMonitor::HangAnnotations& aA
         aAnnotations.AddAnnotation(NS_LITERAL_STRING("pluginName"), mPluginName);
         aAnnotations.AddAnnotation(NS_LITERAL_STRING("pluginVersion"),
                                    mPluginVersion);
-        if (mIsFlashPlugin) {
-            bool isWhitelistedForShumway = false;
-            { // Scope for lock
-                mozilla::MutexAutoLock lock(mHangAnnotatorMutex);
-                if (!mProtocolCallStack.IsEmpty()) {
-                    mozilla::ipc::IProtocol* topProtocol =
-                        mProtocolCallStack.LastElement();
-                    PluginInstanceParent* instance =
-                        GetManagingInstance(topProtocol);
-                    if (instance) {
-                        isWhitelistedForShumway =
-                            instance->IsWhitelistedForShumway();
-                    }
-                }
-            }
-            aAnnotations.AddAnnotation(NS_LITERAL_STRING("pluginIsWhitelistedForShumway"),
-                                       isWhitelistedForShumway);
-        }
     }
 }
 
@@ -1192,7 +1142,6 @@ PluginModuleChromeParent::ShouldContinueFromReplyTimeout()
 {
     if (mIsFlashPlugin) {
         MessageLoop::current()->PostTask(
-            FROM_HERE,
             mTaskFactory.NewRunnableMethod(
                 &PluginModuleChromeParent::NotifyFlashHang));
     }
@@ -1206,6 +1155,7 @@ PluginModuleChromeParent::ShouldContinueFromReplyTimeout()
     FinishHangUI();
 #endif // XP_WIN
     TerminateChildProcess(MessageLoop::current(),
+                          mozilla::ipc::kInvalidProcessId,
                           NS_LITERAL_CSTRING("ModalHangUI"),
                           EmptyString());
     GetIPCChannel()->CloseWithTimeout();
@@ -1230,37 +1180,19 @@ PluginModuleContentParent::OnExitedSyncSend()
 }
 
 void
-PluginModuleChromeParent::TerminateChildProcess(MessageLoop* aMsgLoop,
-                                                const nsCString& aMonitorDescription,
-                                                const nsAString& aBrowserDumpId)
+PluginModuleChromeParent::TakeFullMinidump(base::ProcessId aContentPid,
+                                           const nsAString& aBrowserDumpId,
+                                           nsString& aDumpId)
 {
 #ifdef MOZ_CRASHREPORTER
 #ifdef XP_WIN
     mozilla::MutexAutoLock lock(mCrashReporterMutex);
-    CrashReporterParent* crashReporter = mCrashReporter;
+#endif // XP_WIN
+
+    CrashReporterParent* crashReporter = CrashReporter();
     if (!crashReporter) {
-        // If mCrashReporter is null then the hang has ended, the plugin module
-        // is shutting down. There's nothing to do here.
         return;
     }
-#else
-    CrashReporterParent* crashReporter = CrashReporter();
-#endif
-    crashReporter->AnnotateCrashReport(NS_LITERAL_CSTRING("PluginHang"),
-                                       NS_LITERAL_CSTRING("1"));
-    crashReporter->AnnotateCrashReport(NS_LITERAL_CSTRING("HangMonitorDescription"),
-                                       aMonitorDescription);
-#ifdef XP_WIN
-    if (mHangUIParent) {
-        unsigned int hangUIDuration = mHangUIParent->LastShowDurationMs();
-        if (hangUIDuration) {
-            nsPrintfCString strHangUIDuration("%u", hangUIDuration);
-            crashReporter->AnnotateCrashReport(
-                    NS_LITERAL_CSTRING("PluginHangUIDuration"),
-                    strHangUIDuration);
-        }
-    }
-#endif // XP_WIN
 
     bool reportsReady = false;
 
@@ -1297,6 +1229,7 @@ PluginModuleChromeParent::TerminateChildProcess(MessageLoop* aMsgLoop,
         // Important to set this here, it tells the ActorDestroy handler
         // that we have an existing crash report that needs to be finalized.
         mPluginDumpID = crashReporter->ChildDumpID();
+        aDumpId = mPluginDumpID;
         PLUGIN_LOG_DEBUG(
                 ("generated paired browser/plugin minidumps: %s)",
                  NS_ConvertUTF16toUTF8(mPluginDumpID).get()));
@@ -1315,10 +1248,10 @@ PluginModuleChromeParent::TerminateChildProcess(MessageLoop* aMsgLoop,
                                      NS_LITERAL_CSTRING("flash2"))) {
                 additionalDumps.AppendLiteral(",flash2");
             }
-#endif
-            if (mContentParent) {
+#endif // MOZ_CRASHREPORTER_INJECTOR
+            if (aContentPid != mozilla::ipc::kInvalidProcessId) {
                 // Include the content process minidump
-                if (CreatePluginMinidump(mContentParent->OtherPid(), 0,
+                if (CreatePluginMinidump(aContentPid, 0,
                                          pluginDumpFile,
                                          NS_LITERAL_CSTRING("content"))) {
                     additionalDumps.AppendLiteral(",content");
@@ -1331,7 +1264,51 @@ PluginModuleChromeParent::TerminateChildProcess(MessageLoop* aMsgLoop,
     } else {
         NS_WARNING("failed to capture paired minidumps from hang");
     }
-#endif
+#endif // MOZ_CRASHREPORTER
+}
+
+void
+PluginModuleChromeParent::TerminateChildProcess(MessageLoop* aMsgLoop,
+                                                base::ProcessId aContentPid,
+                                                const nsCString& aMonitorDescription,
+                                                const nsAString& aDumpId)
+{
+#ifdef MOZ_CRASHREPORTER
+    // Start by taking a full minidump if necessary, this is done early
+    // because it also needs to lock the mCrashReporterMutex and Mutex doesn't
+    // support recrusive locking.
+    nsAutoString dumpId;
+    if (aDumpId.IsEmpty()) {
+        TakeFullMinidump(aContentPid, EmptyString(), dumpId);
+    }
+
+#ifdef XP_WIN
+    mozilla::MutexAutoLock lock(mCrashReporterMutex);
+    CrashReporterParent* crashReporter = mCrashReporter;
+    if (!crashReporter) {
+        // If mCrashReporter is null then the hang has ended, the plugin module
+        // is shutting down. There's nothing to do here.
+        return;
+    }
+#else
+    CrashReporterParent* crashReporter = CrashReporter();
+#endif // XP_WIN
+    crashReporter->AnnotateCrashReport(NS_LITERAL_CSTRING("PluginHang"),
+                                       NS_LITERAL_CSTRING("1"));
+    crashReporter->AnnotateCrashReport(NS_LITERAL_CSTRING("HangMonitorDescription"),
+                                       aMonitorDescription);
+#ifdef XP_WIN
+    if (mHangUIParent) {
+        unsigned int hangUIDuration = mHangUIParent->LastShowDurationMs();
+        if (hangUIDuration) {
+            nsPrintfCString strHangUIDuration("%u", hangUIDuration);
+            crashReporter->AnnotateCrashReport(
+                    NS_LITERAL_CSTRING("PluginHangUIDuration"),
+                    strHangUIDuration);
+        }
+    }
+#endif // XP_WIN
+#endif // MOZ_CRASHREPORTER
 
     mozilla::ipc::ScopedProcessHandle geckoChildProcess;
     bool childOpened = base::OpenProcessHandle(OtherPid(),
@@ -1368,7 +1345,6 @@ PluginModuleChromeParent::TerminateChildProcess(MessageLoop* aMsgLoop,
     // or not at all
     bool isFromHangUI = aMsgLoop != MessageLoop::current();
     aMsgLoop->PostTask(
-        FROM_HERE,
         mChromeTaskFactory.NewRunnableMethod(
             &PluginModuleChromeParent::CleanupFromTimeout, isFromHangUI));
 
@@ -1392,6 +1368,7 @@ PluginModuleParent::GetPluginDetails()
     mPluginVersion = pluginTag->Version();
     mPluginFilename = pluginTag->FileName();
     mIsFlashPlugin = pluginTag->mIsFlashPlugin;
+    mSandboxLevel = pluginTag->mSandboxLevel;
     return true;
 }
 
@@ -1617,7 +1594,6 @@ PluginModuleParent::ActorDestroy(ActorDestroyReason why)
         // and potentially modify the actor child list while enumerating it.
         if (mPlugin)
             MessageLoop::current()->PostTask(
-                FROM_HERE,
                 mTaskFactory.NewRunnableMethod(
                     &PluginModuleParent::NotifyPluginCrashed));
         break;
@@ -1673,7 +1649,6 @@ PluginModuleParent::NotifyPluginCrashed()
     if (!OkToCleanup()) {
         // there's still plugin code on the C++ stack.  try again
         MessageLoop::current()->PostDelayedTask(
-            FROM_HERE,
             mTaskFactory.NewRunnableMethod(
                 &PluginModuleParent::NotifyPluginCrashed), 10);
         return;
@@ -1898,6 +1873,26 @@ PluginModuleParent::NPP_SetValue(NPP instance, NPNVariable variable,
 }
 
 bool
+PluginModuleChromeParent::AnswerNPN_SetValue_NPPVpluginRequiresAudioDeviceChanges(
+    const bool& shouldRegister, NPError* result)
+{
+#ifdef XP_WIN
+    *result = NPERR_NO_ERROR;
+    nsresult err =
+      mozilla::plugins::PluginUtilsWin::RegisterForAudioDeviceChanges(this,
+                                                               shouldRegister);
+    if (err != NS_OK) {
+      *result = NPERR_GENERIC_ERROR;
+    }
+    return true;
+#else
+    NS_RUNTIMEABORT("NPPVpluginRequiresAudioDeviceChanges is not valid on this platform.");
+    *result = NPERR_GENERIC_ERROR;
+    return true;
+#endif
+}
+
+bool
 PluginModuleParent::RecvBackUpXResources(const FileDescriptor& aXSocketFd)
 {
 #ifndef MOZ_X11
@@ -1905,9 +1900,9 @@ PluginModuleParent::RecvBackUpXResources(const FileDescriptor& aXSocketFd)
 #else
     MOZ_ASSERT(0 > mPluginXSocketFdDup.get(),
                "Already backed up X resources??");
-    mPluginXSocketFdDup.forget();
     if (aXSocketFd.IsValid()) {
-      mPluginXSocketFdDup.reset(aXSocketFd.PlatformHandle());
+      auto rawFD = aXSocketFd.ClonePlatformHandle();
+      mPluginXSocketFdDup.reset(rawFD.release());
     }
 #endif
     return true;
@@ -1997,25 +1992,46 @@ PluginModuleParent::SetBackgroundUnknown(NPP instance)
 nsresult
 PluginModuleParent::BeginUpdateBackground(NPP instance,
                                           const nsIntRect& aRect,
-                                          gfxContext** aCtx)
+                                          DrawTarget** aDrawTarget)
 {
     PluginInstanceParent* i = PluginInstanceParent::Cast(instance);
     if (!i)
         return NS_ERROR_FAILURE;
 
-    return i->BeginUpdateBackground(aRect, aCtx);
+    return i->BeginUpdateBackground(aRect, aDrawTarget);
 }
 
 nsresult
-PluginModuleParent::EndUpdateBackground(NPP instance,
-                                        gfxContext* aCtx,
-                                        const nsIntRect& aRect)
+PluginModuleParent::EndUpdateBackground(NPP instance, const nsIntRect& aRect)
 {
     PluginInstanceParent* i = PluginInstanceParent::Cast(instance);
     if (!i)
         return NS_ERROR_FAILURE;
 
-    return i->EndUpdateBackground(aCtx, aRect);
+    return i->EndUpdateBackground(aRect);
+}
+
+#if defined(XP_WIN)
+nsresult
+PluginModuleParent::GetScrollCaptureContainer(NPP aInstance,
+                                              mozilla::layers::ImageContainer** aContainer)
+{
+    PluginInstanceParent* inst = PluginInstanceParent::Cast(aInstance);
+    return !inst ? NS_ERROR_FAILURE : inst->GetScrollCaptureContainer(aContainer);
+}
+#endif
+
+nsresult
+PluginModuleParent::HandledWindowedPluginKeyEvent(
+                        NPP aInstance,
+                        const NativeEventData& aNativeKeyData,
+                        bool aIsConsumed)
+{
+    PluginInstanceParent* parent = PluginInstanceParent::Cast(aInstance);
+    if (NS_WARN_IF(!parent)) {
+        return NS_ERROR_FAILURE;
+    }
+    return parent->HandledWindowedPluginKeyEvent(aNativeKeyData, aIsConsumed);
 }
 
 void
@@ -2038,27 +2054,27 @@ PluginModuleParent::OnInitFailure()
     }
 }
 
-class OfflineObserver final : public nsIObserver
+class PluginOfflineObserver final : public nsIObserver
 {
 public:
     NS_DECL_ISUPPORTS
     NS_DECL_NSIOBSERVER
 
-    explicit OfflineObserver(PluginModuleChromeParent* pmp)
+    explicit PluginOfflineObserver(PluginModuleChromeParent* pmp)
       : mPmp(pmp)
     {}
 
 private:
-    ~OfflineObserver() {}
+    ~PluginOfflineObserver() {}
     PluginModuleChromeParent* mPmp;
 };
 
-NS_IMPL_ISUPPORTS(OfflineObserver, nsIObserver)
+NS_IMPL_ISUPPORTS(PluginOfflineObserver, nsIObserver)
 
 NS_IMETHODIMP
-OfflineObserver::Observe(nsISupports *aSubject,
-                         const char *aTopic,
-                         const char16_t *aData)
+PluginOfflineObserver::Observe(nsISupports *aSubject,
+                               const char *aTopic,
+                               const char16_t *aData)
 {
     MOZ_ASSERT(!strcmp(aTopic, "ipc:network:set-offline"));
     mPmp->CachedSettingChanged();
@@ -2078,8 +2094,8 @@ PluginModuleChromeParent::RegisterSettingsCallbacks()
 
     nsCOMPtr<nsIObserverService> observerService = mozilla::services::GetObserverService();
     if (observerService) {
-        mOfflineObserver = new OfflineObserver(this);
-        observerService->AddObserver(mOfflineObserver, "ipc:network:set-offline", false);
+        mPluginOfflineObserver = new PluginOfflineObserver(this);
+        observerService->AddObserver(mPluginOfflineObserver, "ipc:network:set-offline", false);
     }
 }
 
@@ -2092,8 +2108,8 @@ PluginModuleChromeParent::UnregisterSettingsCallbacks()
 
     nsCOMPtr<nsIObserverService> observerService = mozilla::services::GetObserverService();
     if (observerService) {
-        observerService->RemoveObserver(mOfflineObserver, "ipc:network:set-offline");
-        mOfflineObserver = nullptr;
+        observerService->RemoveObserver(mPluginOfflineObserver, "ipc:network:set-offline");
+        mPluginOfflineObserver = nullptr;
     }
 }
 
@@ -2259,7 +2275,9 @@ PluginModuleChromeParent::RecvNP_InitializeResult(const NPError& aError)
         }
     }
     mNPInitialized = initOk;
-    return mContentParent->SendLoadPluginResult(mPluginId, initOk);
+    bool result = mContentParent->SendLoadPluginResult(mPluginId, initOk);
+    mContentParent = nullptr;
+    return result;
 }
 
 #else
@@ -2366,16 +2384,17 @@ PluginModuleChromeParent::RecvNP_InitializeResult(const NPError& aError)
         if ((ok = SendAssociatePluginId())) {
             ok = mContentParent->SendLoadPluginResult(mPluginId,
                                                       aError == NPERR_NO_ERROR);
+            mContentParent = nullptr;
         }
     } else if (aError == NPERR_NO_ERROR) {
-        // Initialization steps when e10s is disabled
+        // Initialization steps for (e10s && !asyncInit) || !e10s
 #if defined XP_WIN
         if (mIsStartingAsync) {
             SetPluginFuncs(mNPPIface);
         }
 
-        // Send the info needed to join the chrome process's audio session to the
-        // plugin process
+        // Send the info needed to join the browser process's audio session to the
+        // plugin process.
         nsID id;
         nsString sessionName;
         nsString iconPath;
@@ -2635,6 +2654,18 @@ public:
   }
 };
 
+void
+PluginModuleParent::AccumulateModuleInitBlockedTime()
+{
+    if (mPluginName.IsEmpty()) {
+        GetPluginDetails();
+    }
+    Telemetry::Accumulate(Telemetry::BLOCKED_ON_PLUGIN_MODULE_INIT_MS,
+                          GetHistogramKey(),
+                          static_cast<uint32_t>(mTimeBlocked.ToMilliseconds()));
+    mTimeBlocked = TimeDuration();
+}
+
 nsresult
 PluginModuleParent::NPP_NewInternal(NPMIMEType pluginType, NPP instance,
                                     uint16_t mode,
@@ -2642,6 +2673,7 @@ PluginModuleParent::NPP_NewInternal(NPMIMEType pluginType, NPP instance,
                                     InfallibleTArray<nsCString>& values,
                                     NPSavedData* saved, NPError* error)
 {
+    MOZ_ASSERT(names.Length() == values.Length());
     if (mPluginName.IsEmpty()) {
         GetPluginDetails();
         InitQuirksModes(nsDependentCString(pluginType));
@@ -2649,12 +2681,9 @@ PluginModuleParent::NPP_NewInternal(NPMIMEType pluginType, NPP instance,
          *  on plugin module initialization. As implemented, this is the sum of
          *  plugin-container launch + toolhelp32 snapshot + NP_Initialize.
          *  We don't accumulate its value until here because the plugin info
-         *  is not available until *after* NP_Initialize.
+         *  for its histogram key is not available until *after* NP_Initialize.
          */
-        Telemetry::Accumulate(Telemetry::BLOCKED_ON_PLUGIN_MODULE_INIT_MS,
-                              GetHistogramKey(),
-                              static_cast<uint32_t>(mTimeBlocked.ToMilliseconds()));
-        mTimeBlocked = TimeDuration();
+        AccumulateModuleInitBlockedTime();
     }
 
     nsCaseInsensitiveUTF8StringArrayComparator comparator;
@@ -2671,6 +2700,37 @@ PluginModuleParent::NPP_NewInternal(NPMIMEType pluginType, NPP instance,
 
     if (mIsFlashPlugin) {
         parentInstance->InitMetadata(strPluginType, srcAttribute);
+#ifdef XP_WIN
+        bool supportsAsyncRender =
+          Preferences::GetBool("dom.ipc.plugins.asyncdrawing.enabled", false);
+        if (supportsAsyncRender) {
+          // Prefs indicates we want async plugin rendering, make sure
+          // the flash module has support.
+          CallModuleSupportsAsyncRender(&supportsAsyncRender);
+        }
+#ifdef _WIN64
+        // For 64-bit builds force windowless if the flash library doesn't support
+        // async rendering regardless of sandbox level.
+        if (!supportsAsyncRender) {
+#else
+        // For 32-bit builds force windowless if the flash library doesn't support
+        // async rendering and the sandbox level is 2 or greater.
+        if (!supportsAsyncRender && mSandboxLevel >= 2) {
+#endif
+           NS_NAMED_LITERAL_CSTRING(wmodeAttributeName, "wmode");
+           NS_NAMED_LITERAL_CSTRING(opaqueAttributeValue, "opaque");
+           auto wmodeAttributeIndex =
+               names.IndexOf(wmodeAttributeName, 0, comparator);
+           if (wmodeAttributeIndex != names.NoIndex) {
+               if (!values[wmodeAttributeIndex].EqualsLiteral("transparent")) {
+                   values[wmodeAttributeIndex].Assign(opaqueAttributeValue);
+               }
+           } else {
+               names.AppendElement(wmodeAttributeName);
+               values.AppendElement(opaqueAttributeValue);
+           }
+        }
+#endif
     }
 
     // Release the surrogate reference that was in pdata
@@ -2774,7 +2834,8 @@ PluginModuleParent::IsRemoteDrawingCoreAnimation(NPP instance, bool *aDrawing)
 
     return i->IsRemoteDrawingCoreAnimation(aDrawing);
 }
-
+#endif
+#if defined(XP_MACOSX) || defined(XP_WIN)
 nsresult
 PluginModuleParent::ContentsScaleFactorChanged(NPP instance, double aContentsScaleFactor)
 {
@@ -2786,18 +2847,7 @@ PluginModuleParent::ContentsScaleFactorChanged(NPP instance, double aContentsSca
 }
 #endif // #if defined(XP_MACOSX)
 
-#if defined(MOZ_WIDGET_QT)
-bool
-PluginModuleParent::AnswerProcessSomeEvents()
-{
-    PLUGIN_LOG_DEBUG(("Spinning mini nested loop ..."));
-    PluginHelperQt::AnswerProcessSomeEvents();
-    PLUGIN_LOG_DEBUG(("... quitting mini nested loop"));
-
-    return true;
-}
-
-#elif defined(XP_MACOSX)
+#if defined(XP_MACOSX)
 bool
 PluginModuleParent::AnswerProcessSomeEvents()
 {
@@ -3056,12 +3106,32 @@ PluginModuleParent::RecvReturnSitesWithData(nsTArray<nsCString>&& aSites,
 }
 
 layers::TextureClientRecycleAllocator*
-PluginModuleParent::EnsureTextureAllocator()
+PluginModuleParent::EnsureTextureAllocatorForDirectBitmap()
 {
-    if (!mTextureAllocator) {
-        mTextureAllocator = new TextureClientRecycleAllocator(ImageBridgeChild::GetSingleton());
+    if (!mTextureAllocatorForDirectBitmap) {
+        mTextureAllocatorForDirectBitmap = new TextureClientRecycleAllocator(ImageBridgeChild::GetSingleton().get());
     }
-    return mTextureAllocator;
+    return mTextureAllocatorForDirectBitmap;
+}
+
+layers::TextureClientRecycleAllocator*
+PluginModuleParent::EnsureTextureAllocatorForDXGISurface()
+{
+    if (!mTextureAllocatorForDXGISurface) {
+        mTextureAllocatorForDXGISurface = new TextureClientRecycleAllocator(ImageBridgeChild::GetSingleton().get());
+    }
+    return mTextureAllocatorForDXGISurface;
+}
+
+
+bool
+PluginModuleParent::AnswerNPN_SetValue_NPPVpluginRequiresAudioDeviceChanges(
+                                        const bool& shouldRegister,
+                                        NPError* result) {
+    NS_RUNTIMEABORT("SetValue_NPPVpluginRequiresAudioDeviceChanges is only valid "
+      "with PluginModuleChromeParent");
+    *result = NPERR_GENERIC_ERROR;
+    return true;
 }
 
 #ifdef MOZ_CRASHREPORTER_INJECTOR
@@ -3114,7 +3184,6 @@ PluginModuleChromeParent::InitializeInjector()
     mFinishInitTask->Init(this);
     if (!::QueueUserWorkItem(&PluginModuleChromeParent::GetToolhelpSnapshot,
                              mFinishInitTask, WT_EXECUTEDEFAULT)) {
-        delete mFinishInitTask;
         mFinishInitTask = nullptr;
         return;
     }
@@ -3296,4 +3365,20 @@ PluginModuleChromeParent::RecvProfile(const nsCString& aProfile)
     return true;
 }
 
+bool
+PluginModuleParent::AnswerGetKeyState(const int32_t& aVirtKey, int16_t* aRet)
+{
+    return false;
+}
 
+bool
+PluginModuleChromeParent::AnswerGetKeyState(const int32_t& aVirtKey,
+                                            int16_t* aRet)
+{
+#if defined(XP_WIN)
+    *aRet = ::GetKeyState(aVirtKey);
+    return true;
+#else
+    return PluginModuleParent::AnswerGetKeyState(aVirtKey, aRet);
+#endif
+}

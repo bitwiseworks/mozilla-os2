@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -22,10 +22,15 @@ FINAL_LIBRARY = 'gkmedias'
 DEFINES['THEORA_DISABLE_ENCODE'] = True
 
 # Suppress warnings in third-party code.
-if CONFIG['GNU_CC']:
+if CONFIG['GNU_CC'] or CONFIG['CLANG_CL']:
     CFLAGS += ['-Wno-type-limits']
-    if CONFIG['CLANG_CXX']:
-        CFLAGS += ['-Wno-tautological-compare']
+if CONFIG['CLANG_CXX'] or CONFIG['CLANG_CL']:
+    CFLAGS += ['-Wno-tautological-compare']
+if CONFIG['CLANG_CL']:
+    CFLAGS += [
+        '-Wno-pointer-sign',
+        '-Wno-shift-op-parentheses',
+    ]
 
 UNIFIED_SOURCES += [
     'lib/apiwrapper.c',
@@ -47,12 +52,18 @@ LOCAL_INCLUDES += ['include']
 
 if '86' in CONFIG['OS_TEST']:
     if CONFIG['OS_ARCH'] != 'SunOS':
-        if CONFIG['OS_ARCH'] != 'WINNT' or CONFIG['OS_TEST'] != 'x86_64':
+        if CONFIG['CLANG_CL']:
+            # clang-cl can't handle libtheora's inline asm.
+            pass
+        elif CONFIG['OS_ARCH'] != 'WINNT' or CONFIG['OS_TEST'] != 'x86_64':
             DEFINES['OC_X86_ASM'] = True
             if '64' in CONFIG['OS_TEST']:
                 DEFINES['OC_X86_64_ASM'] = True
     if CONFIG['_MSC_VER']:
-        if '64' not in CONFIG['OS_TEST']:
+        if CONFIG['CLANG_CL']:
+            # clang-cl can't handle libtheora's inline asm.
+            pass
+        elif '64' not in CONFIG['OS_TEST']:
             SOURCES += [
                 'lib/x86_vc/mmxfrag.c',
                 'lib/x86_vc/mmxidct.c',
@@ -86,7 +97,7 @@ if CONFIG['GNU_AS']:
         if CONFIG['OS_TARGET'] == 'Android':
             DEFINES['__linux__'] = True
 
-        SOURCES += [ '!%s.%s' % (f, CONFIG['ASM_SUFFIX']) for f in [
+        SOURCES += [ '!%s.s' % f for f in [
             'armbits-gnu',
             'armfrag-gnu',
             'armidct-gnu',
@@ -97,5 +108,10 @@ if CONFIG['GNU_AS']:
         # opcodes; actual arch detection is done at runtime.
         ASFLAGS += [
             '-march=armv7-a',
-            '-mfpu=neon',
         ]
+        ASFLAGS += CONFIG['NEON_FLAGS']
+
+        if CONFIG['CLANG_CXX']:
+            ASFLAGS += [
+                '-no-integrated-as',
+            ]

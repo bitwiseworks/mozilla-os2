@@ -1,6 +1,6 @@
 #!/bin/python
 
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
@@ -12,7 +12,7 @@ This script runs the preprocessor on a input template and writes
 updated files into the source directory.
 
 To update the themed views, update the input template
-(ThemedView.java.frag) and run the script.  Use version control to
+(ThemedView.java.frag) and run the script using 'mach python <script.py>'.  Use version control to
 examine the differences, and don't forget to commit the changes to the
 template and the outputs.
 '''
@@ -41,7 +41,8 @@ views = [
     dict(VIEW_NAME_SUFFIX='ImageButton',
          BASE_TYPE='android.widget.ImageButton',
          STYLE_CONSTRUCTOR=1,
-         TINT_FOREGROUND_DRAWABLE=1),
+         TINT_FOREGROUND_DRAWABLE=1,
+         BOOKMARK_NO_TINT=1),
     dict(VIEW_NAME_SUFFIX='ImageView',
          BASE_TYPE='android.widget.ImageView',
          STYLE_CONSTRUCTOR=1,

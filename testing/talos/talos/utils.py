@@ -9,13 +9,15 @@ import time
 import urlparse
 import string
 import urllib
-import logging
 import json
 import re
 import platform
 
+from mozlog import get_proxy_logger
+
 # directory of this file for use with interpolatePath()
 here = os.path.dirname(os.path.realpath(__file__))
+LOG = get_proxy_logger()
 
 
 def _get_platform():
@@ -30,6 +32,12 @@ def _get_platform():
         elif '6.1' in platform.version():  # w7
             return 'w7_'
         elif '6.2' in platform.version():  # w8
+            return 'w8_'
+        # Bug 1264325 - FIXME: with python 2.7.11: reports win8 instead of 8.1
+        elif '6.3' in platform.version():
+            return 'w8_'
+        # Bug 1264325 - FIXME: with python 2.7.11: reports win8 instead of 10
+        elif '10.0' in platform.version():
             return 'w8_'
         else:
             raise TalosError('unsupported windows version')
@@ -51,13 +59,6 @@ class Timer(object):
     def elapsed(self):
         seconds = time.time() - self._start_time
         return time.strftime("%H:%M:%S", time.gmtime(seconds))
-
-
-def startLogger(levelChoice):
-    # declare and define global logger object to send logging messages to
-    log_levels = {'debug': logging.DEBUG, 'info': logging.INFO}
-    logging.basicConfig(format='%(asctime)-15s %(levelname)s : %(message)s',
-                        level=log_levels[levelChoice])
 
 
 class TalosError(Exception):
@@ -175,11 +176,6 @@ def GenerateBrowserCommandLine(browser_path, extra_args, profile_dir,
 
     command_args.extend(url.split(' '))
 
-    # Handle media performance tests
-    if url.find('media_manager.py') != -1:
-        command_args = url.split(' ')
-
-    logging.debug("command line: %s", ' '.join(command_args))
     return command_args
 
 

@@ -2,18 +2,22 @@
 
 const URL = "http://example.com/browser_switch_remoteness_";
 
-function countHistoryEntries(browser) {
-  return ContentTask.spawn(browser, null, function* () {
+function countHistoryEntries(browser, expected) {
+  return ContentTask.spawn(browser, { expected }, function* (args) {
     let Ci = Components.interfaces;
     let webNavigation = docShell.QueryInterface(Ci.nsIWebNavigation);
     let history = webNavigation.sessionHistory.QueryInterface(Ci.nsISHistoryInternal);
-    return history && history.count;
+    Assert.equal(history && history.count, args.expected,
+      "correct number of shistory entries");
   });
 }
 
 add_task(function* () {
+  // Open a new window.
+  let win = yield promiseNewWindowLoaded();
+
   // Add a new tab.
-  let tab = gBrowser.addTab("about:blank");
+  let tab = win.gBrowser.addTab("about:blank");
   let browser = tab.linkedBrowser;
   yield promiseBrowserLoaded(browser);
   ok(browser.isRemoteBrowser, "browser is remote");
@@ -30,8 +34,7 @@ add_task(function* () {
   }
 
   // Check we have the right number of shistory entries.
-  let count = yield countHistoryEntries(browser);
-  is(count, MAX_BACK + 2, "correct number of shistory entries");
+  yield countHistoryEntries(browser, MAX_BACK + 2);
 
   // Load a non-remote page.
   browser.loadURI("about:robots");
@@ -39,9 +42,8 @@ add_task(function* () {
   ok(!browser.isRemoteBrowser, "browser is not remote anymore");
 
   // Check that we didn't lose any shistory entries.
-  count = yield countHistoryEntries(browser);
-  is(count, MAX_BACK + 3, "correct number of shistory entries");
+  yield countHistoryEntries(browser, MAX_BACK + 3);
 
   // Cleanup.
-  gBrowser.removeTab(tab);
+  yield BrowserTestUtils.closeWindow(win);
 });

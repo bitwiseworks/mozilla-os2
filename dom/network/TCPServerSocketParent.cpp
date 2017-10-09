@@ -9,7 +9,7 @@
 #include "TCPServerSocketParent.h"
 #include "nsJSUtils.h"
 #include "TCPSocketParent.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/AppProcessChecker.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/TabParent.h"
@@ -72,15 +72,15 @@ TCPServerSocketParent::GetAppId()
   } else {
     return nsIScriptSecurityManager::UNKNOWN_APP_ID;
   }
-};
+}
 
 bool
-TCPServerSocketParent::GetInBrowser()
+TCPServerSocketParent::GetInIsolatedMozBrowser()
 {
   const PContentParent *content = Manager()->Manager();
   if (PBrowserParent* browser = SingleManagedOrNull(content->ManagedPBrowserParent())) {
     TabParent *tab = TabParent::GetFrom(browser);
-    return tab->IsBrowserElement();
+    return tab->IsIsolatedMozBrowserElement();
   } else {
     return false;
   }
@@ -113,7 +113,7 @@ TCPServerSocketParent::SendCallbackAccept(TCPSocketParent *socket)
     }
     else {
       NS_ERROR("Sending data from PTCPSocketParent was failed.");
-    };
+    }
   }
   else {
     NS_ERROR("The member value for NeckoParent is wrong.");
@@ -150,7 +150,7 @@ void
 TCPServerSocketParent::OnConnect(TCPServerSocketEvent* event)
 {
   RefPtr<TCPSocket> socket = event->Socket();
-  socket->SetAppIdAndBrowser(GetAppId(), GetInBrowser());
+  socket->SetAppIdAndBrowser(GetAppId(), GetInIsolatedMozBrowser());
 
   RefPtr<TCPSocketParent> socketParent = new TCPSocketParent();
   socketParent->SetSocket(socket);

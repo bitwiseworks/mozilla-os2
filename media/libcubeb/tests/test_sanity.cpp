@@ -18,16 +18,11 @@
 #include "TestHarness.h"
 #endif
 
-#if (defined(_WIN32) || defined(__WIN32__))
-#define __func__ __FUNCTION__
-#endif
-
-#define ARRAY_LENGTH(_x) (sizeof(_x) / sizeof(_x[0]))
 #define BEGIN_TEST fprintf(stderr, "START %s\n", __func__)
 #define END_TEST fprintf(stderr, "END %s\n", __func__)
 
-#define STREAM_LATENCY 100
 #define STREAM_RATE 44100
+#define STREAM_LATENCY 100 * STREAM_RATE / 1000
 #define STREAM_CHANNELS 1
 #if (defined(_WIN32) || defined(__WIN32__))
 #define STREAM_FORMAT CUBEB_SAMPLE_FLOAT32LE
@@ -35,18 +30,25 @@
 #define STREAM_FORMAT CUBEB_SAMPLE_S16LE
 #endif
 
+template<typename T, size_t N>
+constexpr size_t
+ARRAY_LENGTH(T(&)[N])
+{
+  return N;
+}
+
 static int dummy;
 static uint64_t total_frames_written;
 static int delay_callback;
 
 static long
-test_data_callback(cubeb_stream * stm, void * user_ptr, void * p, long nframes)
+test_data_callback(cubeb_stream * stm, void * user_ptr, const void * /*inputbuffer*/, void * outputbuffer, long nframes)
 {
-  assert(stm && user_ptr == &dummy && p && nframes > 0);
+  assert(stm && user_ptr == &dummy && outputbuffer && nframes > 0);
 #if (defined(_WIN32) || defined(__WIN32__))
-  memset(p, 0, nframes * sizeof(float));
+  memset(outputbuffer, 0, nframes * sizeof(float));
 #else
-  memset(p, 0, nframes * sizeof(short));
+  memset(outputbuffer, 0, nframes * sizeof(short));
 #endif
 
   total_frames_written += nframes;
@@ -57,7 +59,7 @@ test_data_callback(cubeb_stream * stm, void * user_ptr, void * p, long nframes)
 }
 
 void
-test_state_callback(cubeb_stream * stm, void * user_ptr, cubeb_state state)
+test_state_callback(cubeb_stream * /*stm*/, void * /*user_ptr*/, cubeb_state /*state*/)
 {
 }
 
@@ -124,6 +126,9 @@ test_context_variables(void)
   params.channels = STREAM_CHANNELS;
   params.format = STREAM_FORMAT;
   params.rate = STREAM_RATE;
+#if defined(__ANDROID__)
+  params.stream_type = CUBEB_STREAM_TYPE_MUSIC;
+#endif
   r = cubeb_get_min_latency(ctx, params, &value);
   assert(r == CUBEB_OK || r == CUBEB_ERROR_NOT_SUPPORTED);
   if (r == CUBEB_OK) {
@@ -157,8 +162,11 @@ test_init_destroy_stream(void)
   params.format = STREAM_FORMAT;
   params.rate = STREAM_RATE;
   params.channels = STREAM_CHANNELS;
+#if defined(__ANDROID__)
+  params.stream_type = CUBEB_STREAM_TYPE_MUSIC;
+#endif
 
-  r = cubeb_stream_init(ctx, &stream, "test", params, STREAM_LATENCY,
+  r = cubeb_stream_init(ctx, &stream, "test", NULL, NULL, NULL, &params, STREAM_LATENCY,
                         test_data_callback, test_state_callback, &dummy);
   assert(r == 0 && stream);
 
@@ -185,9 +193,12 @@ test_init_destroy_multiple_streams(void)
   params.format = STREAM_FORMAT;
   params.rate = STREAM_RATE;
   params.channels = STREAM_CHANNELS;
+#if defined(__ANDROID__)
+  params.stream_type = CUBEB_STREAM_TYPE_MUSIC;
+#endif
 
   for (i = 0; i < ARRAY_LENGTH(stream); ++i) {
-    r = cubeb_stream_init(ctx, &stream[i], "test", params, STREAM_LATENCY,
+    r = cubeb_stream_init(ctx, &stream[i], "test", NULL, NULL, NULL, &params, STREAM_LATENCY,
                           test_data_callback, test_state_callback, &dummy);
     assert(r == 0);
     assert(stream[i]);
@@ -218,8 +229,11 @@ test_configure_stream(void)
   params.format = STREAM_FORMAT;
   params.rate = STREAM_RATE;
   params.channels = 2; // panning
+#if defined(__ANDROID__)
+  params.stream_type = CUBEB_STREAM_TYPE_MUSIC;
+#endif
 
-  r = cubeb_stream_init(ctx, &stream, "test", params, STREAM_LATENCY,
+  r = cubeb_stream_init(ctx, &stream, "test", NULL, NULL, NULL, &params, STREAM_LATENCY,
                         test_data_callback, test_state_callback, &dummy);
   assert(r == 0 && stream);
 
@@ -251,9 +265,12 @@ test_init_start_stop_destroy_multiple_streams(int early, int delay_ms)
   params.format = STREAM_FORMAT;
   params.rate = STREAM_RATE;
   params.channels = STREAM_CHANNELS;
+#if defined(__ANDROID__)
+  params.stream_type = CUBEB_STREAM_TYPE_MUSIC;
+#endif
 
   for (i = 0; i < ARRAY_LENGTH(stream); ++i) {
-    r = cubeb_stream_init(ctx, &stream[i], "test", params, STREAM_LATENCY,
+    r = cubeb_stream_init(ctx, &stream[i], "test", NULL, NULL, NULL, &params, STREAM_LATENCY,
                           test_data_callback, test_state_callback, &dummy);
     assert(r == 0);
     assert(stream[i]);
@@ -311,13 +328,16 @@ test_init_destroy_multiple_contexts_and_streams(void)
   params.format = STREAM_FORMAT;
   params.rate = STREAM_RATE;
   params.channels = STREAM_CHANNELS;
+#if defined(__ANDROID__)
+  params.stream_type = CUBEB_STREAM_TYPE_MUSIC;
+#endif
 
   for (i = 0; i < ARRAY_LENGTH(ctx); ++i) {
     r = cubeb_init(&ctx[i], "test_sanity");
     assert(r == 0 && ctx[i]);
 
     for (j = 0; j < streams_per_ctx; ++j) {
-      r = cubeb_stream_init(ctx[i], &stream[i * streams_per_ctx + j], "test", params, STREAM_LATENCY,
+      r = cubeb_stream_init(ctx[i], &stream[i * streams_per_ctx + j], "test", NULL, NULL, NULL, &params, STREAM_LATENCY,
                             test_data_callback, test_state_callback, &dummy);
       assert(r == 0);
       assert(stream[i * streams_per_ctx + j]);
@@ -351,8 +371,11 @@ test_basic_stream_operations(void)
   params.format = STREAM_FORMAT;
   params.rate = STREAM_RATE;
   params.channels = STREAM_CHANNELS;
+#if defined(__ANDROID__)
+  params.stream_type = CUBEB_STREAM_TYPE_MUSIC;
+#endif
 
-  r = cubeb_stream_init(ctx, &stream, "test", params, STREAM_LATENCY,
+  r = cubeb_stream_init(ctx, &stream, "test", NULL, NULL, NULL, &params, STREAM_LATENCY,
                         test_data_callback, test_state_callback, &dummy);
   assert(r == 0 && stream);
 
@@ -400,8 +423,11 @@ test_stream_position(void)
   params.format = STREAM_FORMAT;
   params.rate = STREAM_RATE;
   params.channels = STREAM_CHANNELS;
+#if defined(__ANDROID__)
+  params.stream_type = CUBEB_STREAM_TYPE_MUSIC;
+#endif
 
-  r = cubeb_stream_init(ctx, &stream, "test", params, STREAM_LATENCY,
+  r = cubeb_stream_init(ctx, &stream, "test", NULL, NULL, NULL, &params, STREAM_LATENCY,
                         test_data_callback, test_state_callback, &dummy);
   assert(r == 0 && stream);
 
@@ -445,6 +471,21 @@ test_stream_position(void)
     delay(500);
   }
 
+  /* test that the position is valid even when starting and
+   * stopping the stream.  */
+  for (i = 0; i < 5; ++i) {
+    r = cubeb_stream_stop(stream);
+    assert(r == 0);
+    r = cubeb_stream_get_position(stream, &position);
+    assert(r == 0);
+    assert(last_position < position);
+    last_position = position;
+    delay(500);
+    r = cubeb_stream_start(stream);
+    assert(r == 0);
+    delay(500);
+  }
+
   assert(last_position != 0);
 
   /* stream position should not advance after stopping playback */
@@ -474,22 +515,26 @@ static int do_drain;
 static int got_drain;
 
 static long
-test_drain_data_callback(cubeb_stream * stm, void * user_ptr, void * p, long nframes)
+test_drain_data_callback(cubeb_stream * stm, void * user_ptr, const void * /*inputbuffer*/, void * outputbuffer, long nframes)
 {
-  assert(stm && user_ptr == &dummy && p && nframes > 0);
+  assert(stm && user_ptr == &dummy && outputbuffer && nframes > 0);
   if (do_drain == 1) {
     do_drain = 2;
     return 0;
   }
   /* once drain has started, callback must never be called again */
   assert(do_drain != 2);
-  memset(p, 0, nframes * sizeof(short));
+#if (defined(_WIN32) || defined(__WIN32__))
+  memset(outputbuffer, 0, nframes * sizeof(float));
+#else
+  memset(outputbuffer, 0, nframes * sizeof(short));
+#endif
   total_frames_written += nframes;
   return nframes;
 }
 
 void
-test_drain_state_callback(cubeb_stream * stm, void * user_ptr, cubeb_state state)
+test_drain_state_callback(cubeb_stream * /*stm*/, void * /*user_ptr*/, cubeb_state state)
 {
   if (state == CUBEB_STATE_DRAINED) {
     assert(!got_drain);
@@ -516,8 +561,11 @@ test_drain(void)
   params.format = STREAM_FORMAT;
   params.rate = STREAM_RATE;
   params.channels = STREAM_CHANNELS;
+#if defined(__ANDROID__)
+  params.stream_type = CUBEB_STREAM_TYPE_MUSIC;
+#endif
 
-  r = cubeb_stream_init(ctx, &stream, "test", params, STREAM_LATENCY,
+  r = cubeb_stream_init(ctx, &stream, "test", NULL, NULL, NULL, &params, STREAM_LATENCY,
                         test_drain_data_callback, test_drain_state_callback, &dummy);
   assert(r == 0 && stream);
 
@@ -581,7 +629,7 @@ int is_windows_7()
 }
 
 int
-main(int argc, char * argv[])
+main(int /*argc*/, char * /*argv*/[])
 {
 #ifdef CUBEB_GECKO_BUILD
   ScopedXPCOM xpcom("test_sanity");

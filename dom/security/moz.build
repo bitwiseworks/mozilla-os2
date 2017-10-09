@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -7,20 +7,24 @@
 TEST_DIRS += ['test']
 
 EXPORTS.mozilla.dom += [
+    'ContentVerifier.h',
     'nsContentSecurityManager.h',
     'nsCSPContext.h',
     'nsCSPService.h',
     'nsCSPUtils.h',
     'nsMixedContentBlocker.h',
     'SRICheck.h',
+    'SRILogHelper.h',
     'SRIMetadata.h',
 ]
 
 EXPORTS += [
     'nsContentSecurityManager.h',
+    'nsMixedContentBlocker.h',
 ]
 
 UNIFIED_SOURCES += [
+    'ContentVerifier.cpp',
     'nsContentSecurityManager.cpp',
     'nsCSPContext.cpp',
     'nsCSPParser.cpp',
@@ -40,5 +44,5 @@ LOCAL_INCLUDES += [
 ]
 
 if CONFIG['GNU_CC']:
-    CFLAGS += ['-Wshadow', '-Wformat-security']
-    CXXFLAGS += ['-Wshadow', '-Wformat-security']
+    CFLAGS += ['-Wformat-security']
+    CXXFLAGS += ['-Wformat-security']

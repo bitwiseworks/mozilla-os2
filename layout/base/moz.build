@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -40,9 +40,8 @@ with Files('nsChangeHint.h'):
 with Files('nsBidi*'):
     BUG_COMPONENT = ('Core', 'Layout: Text')
 
-for caret_file in ('AccessibleCaret*', 'TouchCaret*', 'SelectionCarets*'):
-    with Files(caret_file):
-        BUG_COMPONENT = ('Core', 'Selection')
+with Files('AccessibleCaret*'):
+    BUG_COMPONENT = ('Core', 'Selection')
 
 XPIDL_SOURCES += [
     'nsIStyleSheetService.idl',
@@ -59,6 +58,7 @@ EXPORTS += [
     'ActiveLayerTracker.h',
     'CaretAssociationHint.h',
     'DisplayItemClip.h',
+    'DisplayItemScrollClip.h',
     'DisplayListClipState.h',
     'FrameLayerBuilder.h',
     'FramePropertyTable.h',
@@ -91,6 +91,7 @@ EXPORTS += [
     'nsPresState.h',
     'nsRefreshDriver.h',
     'nsStyleChangeList.h',
+    'nsStyleSheetService.h',
     'ScrollbarStyles.h',
     'StackArena.h',
     'Units.h',
@@ -103,8 +104,15 @@ EXPORTS.mozilla += [
     'ArenaRefPtr.h',
     'ArenaRefPtrInlines.h',
     'GeometryUtils.h',
+    'OverflowChangedTracker.h',
     'PaintTracker.h',
     'RestyleLogging.h',
+    'RestyleManager.h',
+    'RestyleManagerBase.h',
+    'RestyleManagerHandle.h',
+    'RestyleManagerHandleInlines.h',
+    'ServoRestyleManager.h',
+    'StaticPresData.h',
 ]
 
 UNIFIED_SOURCES += [
@@ -112,15 +120,17 @@ UNIFIED_SOURCES += [
     'AccessibleCaretEventHub.cpp',
     'AccessibleCaretManager.cpp',
     'ActiveLayerTracker.cpp',
+    'DashedCornerFinder.cpp',
     'DisplayItemClip.cpp',
+    'DisplayItemScrollClip.cpp',
     'DisplayListClipState.cpp',
+    'DottedCornerFinder.cpp',
     'FrameLayerBuilder.cpp',
     'FramePropertyTable.cpp',
     'GeometryUtils.cpp',
     'LayoutLogging.cpp',
     'MaskLayerImageCache.cpp',
     'MobileViewportManager.cpp',
-    'nsBidi.cpp',
     'nsBidiPresUtils.cpp',
     'nsCaret.cpp',
     'nsCounterManager.cpp',
@@ -145,14 +155,30 @@ UNIFIED_SOURCES += [
     'PaintTracker.cpp',
     'PositionedEventTargeting.cpp',
     'RestyleManager.cpp',
+    'RestyleManagerBase.cpp',
     'RestyleTracker.cpp',
     'ScrollbarStyles.cpp',
-    'SelectionCarets.cpp',
+    'ServoRestyleManager.cpp',
     'StackArena.cpp',
-    'TouchCaret.cpp',
+    'StaticPresData.cpp',
     'TouchManager.cpp',
     'ZoomConstraintsClient.cpp',
 ]
+
+if CONFIG['ENABLE_INTL_API']:
+    EXPORTS += [
+        'nsBidi_ICU.h',
+    ]
+    UNIFIED_SOURCES += [
+        'nsBidi_ICU.cpp',
+    ]
+else:
+    EXPORTS += [
+        'nsBidi_noICU.h',
+    ]
+    UNIFIED_SOURCES += [
+        'nsBidi_noICU.cpp',
+    ]
 
 # nsPresArena.cpp needs to be built separately because it uses plarena.h.
 # nsRefreshDriver.cpp needs to be built separately because of name clashes in the OS X headers
@@ -184,10 +210,24 @@ LOCAL_INCLUDES += [
     '/view',
 ]
 
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
+    LOCAL_INCLUDES += [
+        '/widget/android',
+    ]
+
 FINAL_LIBRARY = 'xul'
 
+BROWSER_CHROME_MANIFESTS += ['tests/browser.ini']
+MARIONETTE_LAYOUT_MANIFESTS += ['tests/marionette/manifest.ini']
 MOCHITEST_MANIFESTS += ['tests/mochitest.ini']
 MOCHITEST_CHROME_MANIFESTS += ['tests/chrome/chrome.ini']
-BROWSER_CHROME_MANIFESTS += ['tests/browser.ini']
 
 CXXFLAGS += CONFIG['MOZ_CAIRO_CFLAGS']
+
+if CONFIG['_MSC_VER']:
+    # This is intended as a temporary hack to support building with VS2015.
+    # 'type cast': conversion from 'unsigned int' to 'void *' of greater size
+    CXXFLAGS += ['-wd4312']
+
+if CONFIG['GNU_CXX']:
+    CXXFLAGS += ['-Wno-error=shadow']

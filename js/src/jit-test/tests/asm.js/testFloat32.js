@@ -1,4 +1,3 @@
-// |jit-test| test-also-noasmjs
 load(libdir + "asm.js");
 const TO_FLOAT32 = "var toF = glob.Math.fround;";
 const HEAP32 = "var f32 = new glob.Float32Array(heap);";
@@ -48,6 +47,8 @@ assertEq(asmLink(asmCompile('glob', USE_ASM + TO_FLOAT32 + "function f() { retur
 assertAsmTypeFail('glob', USE_ASM + TO_FLOAT32 + "function f() { var i = toF(5.); i = 5; return toF(i); } return f");
 assertAsmTypeFail('glob', USE_ASM + TO_FLOAT32 + "function f() { var i = toF(5.); i = 6.; return toF(i); } return f");
 
+assertEq(asmLink(asmCompile('glob', USE_ASM + TO_FLOAT32 + "function f() { var i = toF(-0.); return toF(i); } return f"), this)(), -0);
+assertEq(asmLink(asmCompile('glob', USE_ASM + TO_FLOAT32 + "function f() { var i = toF(0.); return toF(i); } return f"), this)(), 0);
 assertEq(asmLink(asmCompile('glob', USE_ASM + TO_FLOAT32 + "function f() { var i = toF(5.); return toF(i); } return f"), this)(), 5);
 assertEq(asmLink(asmCompile('glob', USE_ASM + TO_FLOAT32 + "function f() { var i = toF(5.); i = toF(42); return toF(i); } return f"), this)(), 42);
 assertEq(asmLink(asmCompile('glob', USE_ASM + TO_FLOAT32 + "function f() { var i = toF(5.); i = toF(6.); return toF(i); } return f"), this)(), 6);

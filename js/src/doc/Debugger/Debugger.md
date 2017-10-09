@@ -15,7 +15,7 @@ its prototype:
 
 `enabled`
 :   A boolean value indicating whether this `Debugger` instance's handlers,
-    breakpoints, watchpoints, and the like are currently enabled. It is an
+    breakpoints, and the like are currently enabled. It is an
     accessor property with a getter and setter: assigning to it enables or
     disables this `Debugger` instance; reading it produces true if the
     instance is enabled, or false otherwise. This property is initially
@@ -57,7 +57,7 @@ its prototype:
 
 `uncaughtExceptionHook`
 :   Either `null` or a function that SpiderMonkey calls when a call to a
-    debug event handler, breakpoint handler, watchpoint handler, or similar
+    debug event handler, breakpoint handler, or similar
     function throws some exception, which we refer to as
     <i>debugger-exception</i> here. Exceptions thrown in the debugger are
     not propagated to debuggee code; instead, SpiderMonkey calls this
@@ -117,7 +117,9 @@ compartment.
 
 <code>onNewPromise(<i>promise</i>)</code>
 :   A new Promise object, referenced by the [`Debugger.Object`][object] instance
-    *promise*, has been allocated in the scope of the debuggees.
+    *promise*, has been allocated in the scope of the debuggees. The Promise's
+    allocation stack can be obtained using the *promiseAllocationStack*
+    accessor property of the [`Debugger.Object`][object] instance *promise*.
 
     This handler method should return a [resumption value][rv] specifying how
     the debuggee's execution should proceed. However, note that a <code>{
@@ -127,9 +129,10 @@ compartment.
 <code>onPromiseSettled(<i>promise</i>)</code>
 :   A Promise object, referenced by the [`Debugger.Object`][object] instance
     *promise* that was allocated within a debuggee scope, has settled (either
-    fulfilled or rejected). The Promise's state and fulfillment or rejection
-    value can be obtained via the
-    [PromiseDebugging webidl interface][promise-debugging].
+    fulfilled or rejected). The Promise's state, fulfillment or rejection
+    value, and the allocation and resolution stacks can be obtained using the
+    Promise-related accessor properties of the [`Debugger.Object`][object]
+    instance *promise*.
 
     This handler method should return a [resumption value][rv] specifying how
     the debuggee's execution should proceed. However, note that a <code>{
@@ -150,29 +153,6 @@ compartment.
 
     SpiderMonkey only calls `onEnterFrame` to report
     [visible][vf], non-`"debugger"` frames.
-
-<code>onThrow(<i>frame</i>, <i>value</i>) <i>(future plan)</i></code>
-:   The exception <i>value</i> is being thrown by <i>frame</i>, which is
-    running debuggee code. This method should return a
-    [resumption value][rv] specifying how the debuggee's execution should
-    proceed. If it returns `undefined`, the exception is thrown as normal.
-
-    A call to the `onThrow` handler is typically followed by one or more
-    calls to the `onExceptionUnwind` handler.
-
-    *(pending discussion)* If the debuggee executes
-    `try { throw 0; } finally { f(); }` and `f()` executes without error,
-    the `onThrow` handler is called only once. The debugger is not notified
-    when the exception is set aside in order to execute the `finally` block,
-    nor when it is restored after the `finally` block completes normally.
-
-    *(An alternative design here would be: onException(status, frame, value)
-    where status is one of the strings "throw", "unwind", "catch",
-    "finally", "rethrow". JS\_SaveExceptionState would trigger a "finally"
-    event, JS\_RestoreExceptionState would trigger a "rethrow",
-    JS\_ClearPendingException would trigger a "catch"; not sure what
-    JS\_DropExceptionState or a return/throw from a finally block should
-    do.)*
 
 <code>onExceptionUnwind(<i>frame</i>, <i>value</i>)</code>
 :   The exception <i>value</i> has been thrown, and has propagated to
@@ -253,45 +233,6 @@ compartment.
     within the JavaScript system (the "JSRuntime", in SpiderMonkey terms),
     thereby escaping the capability-based limits. For this reason,
     `onNewGlobalObject` is only available to privileged code.
-
-<code>onIonCompilation(<i>graph</i>)</code>
-:   A new IonMonkey compilation result is attached to a script instance of
-    the Debuggee, the <i>graph</i> contains the internal intermediate
-    representations of the compiler.
-
-    The value <i>graph</i> is an object composed of the following properties:
-
-    `json`
-    :   String containing a JSON of the intermediate representation used by
-        the compiler. This JSON string content is composed of 2 intermediate
-        representation of the graph, a `mir` (Middle-level IR), and a
-        `lir` (Low-level IR).
-
-        Both have a property `blocks`, which is an array of basic
-        blocks in [SSA form][ssa-form] which are used to construct the
-        control flow graph. All elements of these arrays are objects which
-        have a `number`, and an `instructions` properties.
-
-        The MIR blocks have additional properties such as the
-        `predecessors` and `successors` of each block, which can
-        be used to reconstruct the control flow graph, with the
-        `number` properties of the blocks.
-
-        The `instructions` properties are array of objects which have
-        an `id` and an `opcode`. The `id` corresponds to the
-        [SSA form][ssa-form] identifier (number) of each instruction, and the
-        `opcode` is a string which represents the instruction.
-
-        This JSON string contains even more detailed internal information
-        which remains undocummented, as it is potentially subject to
-        frequent modifications.
-
-    `scripts`
-    :   Array of [`Debugger.Script`][script] instances. For a block at
-        `mir.blocks[i]` or `lir.blocks[i]` in the JSON, `scripts[i]` is the
-        [`Debugger.Script`][script] containing that block's code.
-
-    This method's return value is ignored.
 
 
 
@@ -504,9 +445,6 @@ other kinds of objects.
 `clearAllBreakpoints()`
 :   Remove all breakpoints set using this `Debugger` instance.
 
-`clearAllWatchpoints()` <i>(future plan)</i>
-:   Clear all watchpoints owned by this `Debugger` instance.
-
 `findAllGlobals()`
 :   Return an array of [`Debugger.Object`][object] instances referring to all the
     global objects present in this JavaScript instance.
@@ -536,3 +474,23 @@ other kinds of objects.
     `TypeError`. Determine which global is designated by <i>global</i>
     using the same rules as [`Debugger.prototype.addDebuggee`][add].
 
+<code>adoptDebuggeeValue(<i>value</i>)</code>
+:    Given a debuggee value `value` owned by an arbitrary `Debugger`, return an
+     equivalent debuggee value owned by this `Debugger`.
+
+     If `value` is a primitive value, return it unchanged. If `value` is a
+     `Debugger.Object` owned by an arbitrary `Debugger`, return an equivalent
+     `Debugger.Object` owned by this `Debugger`. Otherwise, if `value` is some
+     other kind of object, and hence not a proper debuggee value, throw a
+     TypeError instead.
+
+## Static methods of the Debugger Object
+
+The functions described below are not called with a `this` value.
+
+<code id="isCompilableUnit">isCompilableUnit(<i>source</i>)</code>
+:   Given a string of source code, designated by <i>source</i>, return false if
+    the string might become a valid JavaScript statement with the addition of
+    more lines. Otherwise return true. The intent is to support interactive
+    compilation - accumulate lines in a buffer until isCompilableUnit is true,
+    then pass it to the compiler.

@@ -4,7 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/dom/ContentChild.h"
 #include "nsScreenManagerProxy.h"
 #include "nsServiceManagerUtils.h"
@@ -199,9 +199,7 @@ nsScreenManagerProxy::InvalidateCacheOnNextTick()
 
   mCacheWillInvalidate = true;
 
-  nsCOMPtr<nsIRunnable> r =
-    NS_NewRunnableMethod(this, &nsScreenManagerProxy::InvalidateCache);
-  nsContentUtils::RunInStableState(r.forget());
+  nsContentUtils::RunInStableState(NewRunnableMethod(this, &nsScreenManagerProxy::InvalidateCache));
 }
 
 void

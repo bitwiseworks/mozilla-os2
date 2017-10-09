@@ -20,7 +20,7 @@
 #include "nsIDocument.h"
 #include "mozilla/net/ChannelDiverterParent.h"
 
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 
 using namespace mozilla::ipc;
 
@@ -34,18 +34,23 @@ NS_IMPL_ISUPPORTS_INHERITED(ExternalHelperAppParent,
                             nsIMultiPartChannel,
                             nsIPrivateBrowsingChannel,
                             nsIResumableChannel,
-                            nsIStreamListener)
+                            nsIStreamListener,
+                            nsIExternalHelperAppParent)
 
 ExternalHelperAppParent::ExternalHelperAppParent(
     const OptionalURIParams& uri,
-    const int64_t& aContentLength)
+    const int64_t& aContentLength,
+    const bool& aWasFileChannel)
   : mURI(DeserializeURI(uri))
   , mPending(false)
+#ifdef DEBUG
   , mDiverted(false)
+#endif
   , mIPCClosed(false)
   , mLoadFlags(0)
   , mStatus(NS_OK)
   , mContentLength(aContentLength)
+  , mWasFileChannel(aWasFileChannel)
 {
 }
 
@@ -159,7 +164,9 @@ ExternalHelperAppParent::RecvDivertToParentUsing(PChannelDiverterParent* diverte
   MOZ_ASSERT(diverter);
   auto p = static_cast<mozilla::net::ChannelDiverterParent*>(diverter);
   p->DivertTo(this);
+#ifdef DEBUG
   mDiverted = true;
+#endif
   Unused << p->Send__delete__(p);
   return true;
 }
@@ -497,18 +504,6 @@ ExternalHelperAppParent::GetPartID(uint32_t* aPartID)
 
 NS_IMETHODIMP
 ExternalHelperAppParent::GetIsLastPart(bool* aIsLastPart)
-{
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
-ExternalHelperAppParent::GetPreamble(nsACString & aPreamble)
-{
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
-ExternalHelperAppParent::GetOriginalResponseHeader(nsACString & aOriginalResponseHeader)
 {
   return NS_ERROR_NOT_IMPLEMENTED;
 }

@@ -9,10 +9,9 @@ import android.app.AlertDialog;
 import android.app.Dialog;
 import android.content.Context;
 import android.content.DialogInterface;
-import android.graphics.Bitmap;
-import android.graphics.drawable.BitmapDrawable;
 import android.text.Html;
 import android.text.Spanned;
+import android.text.TextUtils;
 import android.text.method.PasswordTransformationMethod;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -23,13 +22,15 @@ import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
-import ch.boye.httpclientandroidlib.util.TextUtils;
+
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.json.JSONArray;
 import org.mozilla.gecko.R;
-import org.mozilla.gecko.favicons.Favicons;
-import org.mozilla.gecko.favicons.OnFaviconLoadedListener;
+import org.mozilla.gecko.Telemetry;
+import org.mozilla.gecko.TelemetryContract;
+
+import java.util.Locale;
 
 public class LoginDoorHanger extends DoorHanger {
     private static final String LOGTAG = "LoginDoorHanger";
@@ -77,10 +78,13 @@ public class LoginDoorHanger extends DoorHanger {
     }
 
     @Override
-    protected OnClickListener makeOnButtonClickListener(final int id) {
+    protected OnClickListener makeOnButtonClickListener(final int id, final String telemetryExtra) {
         return new Button.OnClickListener() {
             @Override
             public void onClick(View v) {
+                final String expandedExtra = mType.toString().toLowerCase(Locale.US) + "-" + telemetryExtra;
+                Telemetry.sendUIEvent(TelemetryContract.Event.ACTION, TelemetryContract.Method.DOORHANGER, expandedExtra);
+
                 final JSONObject response = new JSONObject();
                 try {
                     response.put("callback", id);

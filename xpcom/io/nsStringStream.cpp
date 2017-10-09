@@ -25,6 +25,8 @@
 #include "nsIIPCSerializableInputStream.h"
 
 using namespace mozilla::ipc;
+using mozilla::Maybe;
+using mozilla::Some;
 
 //-----------------------------------------------------------------------------
 // nsIStringInputStream implementation
@@ -192,6 +194,14 @@ nsStringInputStream::ShareData(const char* aData, int32_t aDataLen)
   return NS_OK;
 }
 
+NS_IMETHODIMP_(size_t)
+nsStringInputStream::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf)
+{
+  size_t n = aMallocSizeOf(this);
+  n += mData.SizeOfExcludingThisIfUnshared(aMallocSizeOf);
+  return n;
+}
+
 /////////
 // nsIInputStream implementation
 /////////
@@ -354,6 +364,12 @@ nsStringInputStream::Deserialize(const InputStreamParams& aParams,
   return true;
 }
 
+Maybe<uint64_t>
+nsStringInputStream::ExpectedSerializedLength()
+{
+  return Some(static_cast<uint64_t>(Length()));
+}
+
 /////////
 // nsICloneableInputStream implementation
 /////////
@@ -404,14 +420,6 @@ NS_NewByteInputStream(nsIInputStream** aStreamResult,
 
   stream.forget(aStreamResult);
   return NS_OK;
-}
-
-nsresult
-NS_NewStringInputStream(nsIInputStream** aStreamResult,
-                        const nsAString& aStringToRead)
-{
-  NS_LossyConvertUTF16toASCII data(aStringToRead); // truncates high-order bytes
-  return NS_NewCStringInputStream(aStreamResult, data);
 }
 
 nsresult

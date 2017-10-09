@@ -40,15 +40,14 @@ dictionary ComputedTimingProperties : AnimationEffectTimingProperties {
   unrestricted double   endTime = 0.0;
   unrestricted double   activeDuration = 0.0;
   double?               localTime = null;
-  unrestricted double?  progress = null;
+  double?               progress = null;
   unrestricted double?  currentIteration = null;
 };
 
 [Func="nsDocument::IsWebAnimationsEnabled"]
 interface AnimationEffectReadOnly {
-  // Not yet implemented:
-  // readonly attribute AnimationEffectTimingReadOnly timing;
-
+  [Cached, Constant]
+  readonly attribute AnimationEffectTimingReadOnly timing;
   [BinaryName="getComputedTimingAsDict"]
   ComputedTimingProperties getComputedTiming();
 };

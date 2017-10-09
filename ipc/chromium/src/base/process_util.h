@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 // Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -72,7 +74,8 @@ enum ProcessArchitecture {
   PROCESS_ARCH_X86_64 = 0x2,
   PROCESS_ARCH_PPC = 0x4,
   PROCESS_ARCH_ARM = 0x8,
-  PROCESS_ARCH_MIPS = 0x10
+  PROCESS_ARCH_MIPS = 0x10,
+  PROCESS_ARCH_ARM64 = 0x20
 };
 
 inline ProcessArchitecture GetCurrentProcessArchitecture()
@@ -88,6 +91,8 @@ inline ProcessArchitecture GetCurrentProcessArchitecture()
   currentArchitecture = base::PROCESS_ARCH_ARM;
 #elif defined(ARCH_CPU_MIPS)
   currentArchitecture = base::PROCESS_ARCH_MIPS;
+#elif defined(ARCH_CPU_ARM64)
+  currentArchitecture = base::PROCESS_ARCH_ARM64;
 #endif
   return currentArchitecture;
 }

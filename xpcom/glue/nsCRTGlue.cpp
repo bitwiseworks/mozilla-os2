@@ -14,7 +14,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 
-#include "mozilla/Snprintf.h"
+#include "mozilla/Sprintf.h"
 
 #ifdef XP_WIN
 #include <io.h>
@@ -321,7 +321,7 @@ set_stderr_callback(StderrCallback aCallback)
   sStderrCallback = aCallback;
 }
 
-#if defined(ANDROID) && !defined(RELEASE_BUILD)
+#if defined(ANDROID) && !defined(RELEASE_OR_BETA)
 static FILE* sStderrCopy = nullptr;
 
 void

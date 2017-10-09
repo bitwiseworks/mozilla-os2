@@ -7,9 +7,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/Sprintf.h"
 #include "XRemoteClient.h"
 #include "prmem.h"
-#include "prprf.h"
 #include "plstr.h"
 #include "prsystem.h"
 #include "mozilla/Logging.h"
@@ -62,9 +62,12 @@ XRemoteClient::XRemoteClient()
   mInitialized = false;
   mMozVersionAtom = 0;
   mMozLockAtom = 0;
+  mMozCommandLineAtom = 0;
   mMozResponseAtom = 0;
   mMozWMStateAtom = 0;
   mMozUserAtom = 0;
+  mMozProfileAtom = 0;
+  mMozProgramAtom = 0;
   mLockData = 0;
   if (!sRemoteLm)
     sRemoteLm = PR_NewLogModule("XRemoteClient");
@@ -290,7 +293,7 @@ XRemoteClient::GetLock(Window aWindow, bool *aDestroyed)
     
     char pidstr[32];
     char sysinfobuf[SYS_INFO_BUFFER_LENGTH];
-    PR_snprintf(pidstr, sizeof(pidstr), "pid%d@", getpid());
+    SprintfLiteral(pidstr, "pid%d@", getpid());
     PRStatus status;
     status = PR_GetSystemInfo(PR_SI_HOSTNAME, sysinfobuf,
 			      SYS_INFO_BUFFER_LENGTH);

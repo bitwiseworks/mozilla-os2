@@ -1,4 +1,4 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -7,9 +7,7 @@
 #ifndef __mozilla_widget_nsShmImage_h__
 #define __mozilla_widget_nsShmImage_h__
 
-#include "mozilla/ipc/SharedMemorySysV.h"
-
-#if defined(MOZ_X11) && defined(MOZ_HAVE_SHAREDMEMORYSYSV)
+#if defined(MOZ_X11)
 #  define MOZ_HAVE_SHMIMAGE
 #endif
 
@@ -17,71 +15,59 @@
 
 #include "mozilla/gfx/2D.h"
 #include "nsIWidget.h"
-#include "nsAutoPtr.h"
+#include "Units.h"
 
-#include "mozilla/X11Util.h"
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
-#include <X11/extensions/XShm.h>
-
-#ifdef MOZ_WIDGET_QT
-class QRect;
-class QWindow;
-#endif
+#include <X11/Xlib-xcb.h>
+#include <xcb/shm.h>
 
 class nsShmImage {
-    // bug 1168843, compositor thread may create shared memory instances that are destroyed by main thread on shutdown, so this must use thread-safe RC to avoid hitting assertion
-    NS_INLINE_DECL_THREADSAFE_REFCOUNTING(nsShmImage)
-
-    typedef mozilla::ipc::SharedMemorySysV SharedMemorySysV;
+  // bug 1168843, compositor thread may create shared memory instances that are destroyed by main thread on shutdown, so this must use thread-safe RC to avoid hitting assertion
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(nsShmImage)
 
 public:
-    static bool UseShm();
-    static already_AddRefed<nsShmImage>
-        Create(const mozilla::gfx::IntSize& aSize,
-               Display* aDisplay, Visual* aVisual, unsigned int aDepth);
-    static already_AddRefed<mozilla::gfx::DrawTarget>
-        EnsureShmImage(const mozilla::gfx::IntSize& aSize,
-                       Display* aDisplay, Visual* aVisual, unsigned int aDepth,
-                       RefPtr<nsShmImage>& aImage);
+  static bool UseShm();
+
+  already_AddRefed<mozilla::gfx::DrawTarget>
+    CreateDrawTarget(const mozilla::LayoutDeviceIntRegion& aRegion);
+
+  void Put(const mozilla::LayoutDeviceIntRegion& aRegion);
+
+  nsShmImage(Display* aDisplay,
+             Drawable aWindow,
+             Visual* aVisual,
+             unsigned int aDepth);
 
 private:
-    ~nsShmImage() {
-        if (mImage) {
-            mozilla::FinishX(mDisplay);
-            if (mXAttached) {
-                XShmDetach(mDisplay, &mInfo);
-            }
-            XDestroyImage(mImage);
-        }
-    }
+  ~nsShmImage();
 
-public:
-    already_AddRefed<mozilla::gfx::DrawTarget> CreateDrawTarget();
+  bool InitExtension();
 
-#ifdef MOZ_WIDGET_GTK
-    void Put(Display* aDisplay, Drawable aWindow, const nsIntRegion& aRegion);
-#elif defined(MOZ_WIDGET_QT)
-    void Put(QWindow* aWindow, QRect& aRect);
-#endif
+  bool CreateShmSegment();
+  void DestroyShmSegment();
 
-    mozilla::gfx::IntSize Size() const { return mSize; }
+  bool CreateImage(const mozilla::gfx::IntSize& aSize);
+  void DestroyImage();
 
-private:
-    nsShmImage()
-        : mImage(nullptr)
-        , mDisplay(nullptr)
-        , mFormat(mozilla::gfx::SurfaceFormat::UNKNOWN)
-        , mXAttached(false)
-    { mInfo.shmid = SharedMemorySysV::NULLHandle(); }
+  void WaitIfPendingReply();
 
-    RefPtr<SharedMemorySysV>   mSegment;
-    XImage*                      mImage;
-    Display*                     mDisplay;
-    XShmSegmentInfo              mInfo;
-    mozilla::gfx::IntSize        mSize;
-    mozilla::gfx::SurfaceFormat  mFormat;
-    bool                         mXAttached;
+  Display*                     mDisplay;
+  xcb_connection_t*            mConnection;
+  Window                       mWindow;
+  Visual*                      mVisual;
+  unsigned int                 mDepth;
+
+  mozilla::gfx::SurfaceFormat  mFormat;
+  mozilla::gfx::IntSize        mSize;
+  int                          mStride;
+
+  xcb_pixmap_t                 mPixmap;
+  xcb_gcontext_t               mGC;
+  xcb_get_input_focus_cookie_t mSyncRequest;
+  bool                         mRequestPending;
+
+  xcb_shm_seg_t                mShmSeg;
+  int                          mShmId;
+  uint8_t*                     mShmAddr;
 };
 
 #endif // MOZ_HAVE_SHMIMAGE

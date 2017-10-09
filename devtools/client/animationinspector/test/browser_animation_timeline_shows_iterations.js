@@ -9,44 +9,39 @@ requestLongerTimeout(2);
 // Check that the timeline is displays as many iteration elements as there are
 // iterations in an animation.
 
-add_task(function*() {
-  yield addTab(TEST_URL_ROOT + "doc_simple_animation.html");
+add_task(function* () {
+  yield addTab(URL_ROOT + "doc_simple_animation.html");
   let {inspector, panel} = yield openAnimationInspector();
 
   info("Selecting the test node");
-  yield selectNode(".delayed", inspector);
+  yield selectNodeAndWaitForAnimations(".delayed", inspector);
 
   info("Getting the animation element from the panel");
-  let timelineEl = panel.animationsTimelineComponent.rootWrapperEl;
+  const timelineComponent = panel.animationsTimelineComponent;
+  const timelineEl = timelineComponent.rootWrapperEl;
   let animation = timelineEl.querySelector(".time-block");
-  let iterations = animation.querySelector(".iterations");
-
-  // Iterations are rendered with a repeating linear-gradient, so we need to
-  // calculate how many iterations are represented by looking at the background
-  // size.
-  let iterationCount = getIterationCountFromBackground(iterations);
+  // Get iteration count from summary graph path.
+  let iterationCount = getIterationCount(animation);
 
   is(iterationCount, 10,
      "The animation timeline contains the right number of iterations");
-  ok(!iterations.classList.contains("infinite"),
-     "The iteration element doesn't have the infinite class");
+  ok(!animation.querySelector(".infinity"),
+     "The summary graph does not have any elements "
+     + " that have infinity class");
 
   info("Selecting another test node with an infinite animation");
-  yield selectNode(".animated", inspector);
+  yield selectNodeAndWaitForAnimations(".animated", inspector);
 
   info("Getting the animation element from the panel again");
   animation = timelineEl.querySelector(".time-block");
-  iterations = animation.querySelector(".iterations");
-
-  iterationCount = getIterationCountFromBackground(iterations);
+  iterationCount = getIterationCount(animation);
 
   is(iterationCount, 1,
-     "The animation timeline contains just one iteration");
-  ok(iterations.classList.contains("infinite"),
-     "The iteration element has the infinite class");
+     "The animation timeline contains one iteration");
+  ok(animation.querySelector(".infinity"),
+     "The summary graph has an element that has infinity class");
 });
 
-function getIterationCountFromBackground(el) {
-  let backgroundSize = parseFloat(el.style.backgroundSize.split(" ")[0]);
-  return Math.round(100 / backgroundSize);
+function getIterationCount(timeblockEl) {
+  return timeblockEl.querySelectorAll(".iteration-path").length;
 }

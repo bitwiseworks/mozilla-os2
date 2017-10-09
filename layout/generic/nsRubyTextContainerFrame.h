@@ -11,8 +11,6 @@
 
 #include "nsBlockFrame.h"
 
-typedef nsContainerFrame nsRubyTextContainerFrameSuper;
-
 /**
  * Factory function.
  * @return a newly allocated nsRubyTextContainerFrame (infallible)
@@ -20,7 +18,7 @@ typedef nsContainerFrame nsRubyTextContainerFrameSuper;
 nsContainerFrame* NS_NewRubyTextContainerFrame(nsIPresShell* aPresShell,
                                                nsStyleContext* aContext);
 
-class nsRubyTextContainerFrame final : public nsRubyTextContainerFrameSuper
+class nsRubyTextContainerFrame final : public nsContainerFrame
 {
 public:
   NS_DECL_FRAMEARENA_HELPERS
@@ -31,8 +29,8 @@ public:
   virtual nsIAtom* GetType() const override;
   virtual bool IsFrameOfType(uint32_t aFlags) const override;
   virtual void Reflow(nsPresContext* aPresContext,
-                      nsHTMLReflowMetrics& aDesiredSize,
-                      const nsHTMLReflowState& aReflowState,
+                      ReflowOutput& aDesiredSize,
+                      const ReflowInput& aReflowInput,
                       nsReflowStatus& aStatus) override;
 
 #ifdef DEBUG_FRAME_DUMP
@@ -59,7 +57,7 @@ protected:
     NS_NewRubyTextContainerFrame(nsIPresShell* aPresShell,
                                  nsStyleContext* aContext);
   explicit nsRubyTextContainerFrame(nsStyleContext* aContext)
-    : nsRubyTextContainerFrameSuper(aContext)
+    : nsContainerFrame(aContext)
     , mISize(0) {}
 
   void UpdateSpanFlag();

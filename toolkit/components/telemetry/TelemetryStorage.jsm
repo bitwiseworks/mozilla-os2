@@ -20,6 +20,7 @@ Cu.import("resource://gre/modules/osfile.jsm", this);
 Cu.import("resource://gre/modules/Task.jsm", this);
 Cu.import("resource://gre/modules/TelemetryUtils.jsm", this);
 Cu.import("resource://gre/modules/Promise.jsm", this);
+Cu.import("resource://gre/modules/Preferences.jsm", this);
 
 const LOGGER_NAME = "Toolkit.Telemetry";
 const LOGGER_PREFIX = "TelemetryStorage::";
@@ -49,7 +50,7 @@ XPCOMUtils.defineLazyGetter(this, "gDeletionPingFilePath", function() {
 XPCOMUtils.defineLazyModuleGetter(this, "CommonUtils",
                                   "resource://services-common/utils.js");
 // Maxmimum time, in milliseconds, archive pings should be retained.
-const MAX_ARCHIVED_PINGS_RETENTION_MS = 180 * 24 * 60 * 60 * 1000;  // 180 days
+const MAX_ARCHIVED_PINGS_RETENTION_MS = 60 * 24 * 60 * 60 * 1000;  // 60 days
 
 // Maximum space the archive can take on disk (in Bytes).
 const ARCHIVE_QUOTA_BYTES = 120 * 1024 * 1024; // 120 MB
@@ -118,6 +119,15 @@ function waitForAll(it) {
   let dummy = () => {};
   let promises = Array.from(it, p => p.catch(dummy));
   return Promise.all(promises);
+}
+
+/**
+ * Permanently intern the given string. This is mainly used for the ping.type
+ * strings that can be excessively duplicated in the _archivedPings map. Do not
+ * pass large or temporary strings to this function.
+ */
+function internString(str) {
+  return Symbol.keyFor(Symbol.for(str));
 }
 
 this.TelemetryStorage = {
@@ -414,6 +424,15 @@ this.TelemetryStorage = {
   }),
 
   /**
+   * Remove FHR database files. This is temporary and will be dropped in
+   * the future.
+   * @return {Promise} Resolved when the database files are deleted.
+   */
+  removeFHRDatabase: function() {
+    return TelemetryStorageImpl.removeFHRDatabase();
+  },
+
+  /**
    * Only used in tests, builds an archived ping path from the ping metadata.
    * @param {String} aPingId The ping id.
    * @param {Object} aDate The ping creation date.
@@ -437,6 +456,13 @@ this.TelemetryStorage = {
   _testGetArchivedPingDataFromFileName: function(aFileName) {
     return TelemetryStorageImpl._getArchivedPingDataFromFileName(aFileName);
   },
+
+  /**
+   * Only used in tests, this helper allows cleaning up the pending ping storage.
+   */
+  testClearPendingPings: function() {
+    return TelemetryStorageImpl.runRemovePendingPingsTask();
+  }
 };
 
 /**
@@ -638,23 +664,23 @@ var TelemetryStorageImpl = {
       if (data.timestampCreated > creationDate.getTime()) {
         this._log.error("saveArchivedPing - trying to overwrite newer ping with the same id");
         return Promise.reject(new Error("trying to overwrite newer ping with the same id"));
-      } else {
-        this._log.warn("saveArchivedPing - overwriting older ping with the same id");
       }
+      this._log.warn("saveArchivedPing - overwriting older ping with the same id");
     }
 
     // Get the archived ping path and append the lz4 suffix to it (so we have 'jsonlz4').
     const filePath = getArchivedPingPath(ping.id, creationDate, ping.type) + "lz4";
     yield OS.File.makeDir(OS.Path.dirname(filePath), { ignoreExisting: true,
                                                        from: OS.Constants.Path.profileDir });
-    yield this.savePingToFile(ping, filePath, /*overwrite*/ true, /*compressed*/ true);
+    yield this.savePingToFile(ping, filePath, /* overwrite*/ true, /* compressed*/ true);
 
     this._archivedPings.set(ping.id, {
       timestampCreated: creationDate.getTime(),
-      type: ping.type,
+      type: internString(ping.type),
     });
 
     Telemetry.getHistogramById("TELEMETRY_ARCHIVE_SESSION_PING_COUNT").add();
+    return undefined;
   }),
 
   /**
@@ -691,7 +717,7 @@ var TelemetryStorageImpl = {
       // Try to load a compressed version of the archived ping first.
       this._log.trace("loadArchivedPing - loading ping from: " + pathCompressed);
       yield* checkSize(pathCompressed);
-      return yield this.loadPingFile(pathCompressed, /*compressed*/ true);
+      return yield this.loadPingFile(pathCompressed, /* compressed*/ true);
     } catch (ex) {
       if (!ex.becauseNoSuchFile) {
         throw ex;
@@ -699,7 +725,7 @@ var TelemetryStorageImpl = {
       // If that fails, look for the uncompressed version.
       this._log.trace("loadArchivedPing - compressed ping not found, loading: " + path);
       yield* checkSize(path);
-      return yield this.loadPingFile(path, /*compressed*/ false);
+      return yield this.loadPingFile(path, /* compressed*/ false);
     }
   }),
 
@@ -717,7 +743,7 @@ var TelemetryStorageImpl = {
     let filePath = OS.Path.join(gDataReportingDir, SESSION_STATE_FILE_NAME);
     try {
       yield CommonUtils.writeJSON(sessionData, filePath);
-    } catch(e) {
+    } catch (e) {
       this._log.error("_saveSessionData - Failed to write session data to " + filePath, e);
       Telemetry.getHistogramById("TELEMETRY_SESSIONDATA_FAILED_SAVE").add(1);
     }
@@ -805,6 +831,7 @@ var TelemetryStorageImpl = {
     const startTimeStamp = nowDate.getTime();
     let dirIterator = new OS.File.DirectoryIterator(gPingsArchivePath);
     let subdirs = (yield dirIterator.nextBatch()).filter(e => e.isDir);
+    dirIterator.close();
 
     // Keep track of the newest removed month to update the cache, if needed.
     let newestRemovedMonthTimestamp = null;
@@ -1016,6 +1043,7 @@ var TelemetryStorageImpl = {
     } finally {
       this._enforcePendingPingsQuotaTask = null;
     }
+    return undefined;
   }),
 
   /**
@@ -1170,12 +1198,14 @@ var TelemetryStorageImpl = {
     let dirIterator = new OS.File.DirectoryIterator(gPingsArchivePath);
     let subdirs =
       (yield dirIterator.nextBatch()).filter(e => e.isDir).filter(e => isValidArchiveDir(e.name));
+    dirIterator.close();
 
     // Walk through the monthly subdirs of the form <YYYY-MM>/
     for (let dir of subdirs) {
       this._log.trace("_scanArchive - checking in subdir: " + dir.path);
       let pingIterator = new OS.File.DirectoryIterator(dir.path);
       let pings = (yield pingIterator.nextBatch()).filter(e => !e.isDir);
+      pingIterator.close();
 
       // Now process any ping files of the form "<timestamp>.<uuid>.<type>.[json|jsonlz4]".
       for (let p of pings) {
@@ -1200,7 +1230,7 @@ var TelemetryStorageImpl = {
 
         this._archivedPings.set(data.id, {
           timestampCreated: data.timestamp,
-          type: data.type,
+          type: internString(data.type),
         });
       }
     }
@@ -1233,7 +1263,7 @@ var TelemetryStorageImpl = {
         options.compression = "lz4";
       }
       yield OS.File.writeAtomic(filePath, pingString, options);
-    } catch(e) {
+    } catch (e) {
       if (!e.becauseExists) {
         throw e;
       }
@@ -1321,7 +1351,7 @@ var TelemetryStorageImpl = {
     let ping;
     try {
       ping = yield this.loadPingFile(info.path, false);
-    } catch(e) {
+    } catch (e) {
       // If we failed to load the ping, check what happened and update the histogram.
       if (e instanceof PingReadError) {
         Telemetry.getHistogramById("TELEMETRY_PENDING_LOAD_FAILURE_READ").add();
@@ -1332,7 +1362,7 @@ var TelemetryStorageImpl = {
       this._pendingPings.delete(id);
       // Then propagate the rejection.
       throw e;
-    };
+    }
 
     return ping;
   }),
@@ -1392,6 +1422,7 @@ var TelemetryStorageImpl = {
     } finally {
       this._removePendingPingsTask = null;
     }
+    return undefined;
   }),
 
   removePendingPings: Task.async(function*() {
@@ -1459,55 +1490,55 @@ var TelemetryStorageImpl = {
     let iter = new OS.File.DirectoryIterator(directory);
     let exists = yield iter.exists();
 
-    if (!exists) {
-      yield iter.close();
-      return [];
-    }
-
-    let files = (yield iter.nextBatch()).filter(e => !e.isDir);
-
-    for (let file of files) {
-      if (this._shutdown) {
-        yield iter.close();
+    try {
+      if (!exists) {
         return [];
       }
 
-      let info;
-      try {
-        info = yield OS.File.stat(file.path);
-      } catch (ex) {
-        this._log.error("_scanPendingPings - failed to stat file " + file.path, ex);
-        continue;
-      }
+      let files = (yield iter.nextBatch()).filter(e => !e.isDir);
 
-      // Enforce a maximum file size limit on pending pings.
-      if (info.size > PING_FILE_MAXIMUM_SIZE_BYTES) {
-        this._log.error("_scanPendingPings - removing file exceeding size limit " + file.path);
+      for (let file of files) {
+        if (this._shutdown) {
+          return [];
+        }
+
+        let info;
         try {
-          yield OS.File.remove(file.path);
+          info = yield OS.File.stat(file.path);
         } catch (ex) {
-          this._log.error("_scanPendingPings - failed to remove file " + file.path, ex);
-        } finally {
-          Telemetry.getHistogramById("TELEMETRY_DISCARDED_PENDING_PINGS_SIZE_MB")
-                   .add(Math.floor(info.size / 1024 / 1024));
-          Telemetry.getHistogramById("TELEMETRY_PING_SIZE_EXCEEDED_PENDING").add();
+          this._log.error("_scanPendingPings - failed to stat file " + file.path, ex);
           continue;
         }
-      }
 
-      let id = OS.Path.basename(file.path);
-      if (!UUID_REGEX.test(id)) {
-        this._log.trace("_scanPendingPings - filename is not a UUID: " + id);
-        id = Utils.generateUUID();
-      }
+        // Enforce a maximum file size limit on pending pings.
+        if (info.size > PING_FILE_MAXIMUM_SIZE_BYTES) {
+          this._log.error("_scanPendingPings - removing file exceeding size limit " + file.path);
+          try {
+            yield OS.File.remove(file.path);
+          } catch (ex) {
+            this._log.error("_scanPendingPings - failed to remove file " + file.path, ex);
+          } finally {
+            Telemetry.getHistogramById("TELEMETRY_DISCARDED_PENDING_PINGS_SIZE_MB")
+                     .add(Math.floor(info.size / 1024 / 1024));
+            Telemetry.getHistogramById("TELEMETRY_PING_SIZE_EXCEEDED_PENDING").add();
+            continue;
+          }
+        }
 
-      this._pendingPings.set(id, {
-        path: file.path,
-        lastModificationDate: info.lastModificationDate.getTime(),
-      });
+        let id = OS.Path.basename(file.path);
+        if (!UUID_REGEX.test(id)) {
+          this._log.trace("_scanPendingPings - filename is not a UUID: " + id);
+          id = Utils.generateUUID();
+        }
+
+        this._pendingPings.set(id, {
+          path: file.path,
+          lastModificationDate: info.lastModificationDate.getTime(),
+        });
+      }
+    } finally {
+      yield iter.close();
     }
-
-    yield iter.close();
 
     // Explicitly load the deletion ping from its known path, if it's there.
     if (yield OS.File.exists(gDeletionPingFilePath)) {
@@ -1556,7 +1587,7 @@ var TelemetryStorageImpl = {
     let array;
     try {
       array = yield OS.File.read(aFilePath, options);
-    } catch(e) {
+    } catch (e) {
       this._log.trace("loadPingfile - unreadable ping " + aFilePath, e);
       throw new PingReadError(e.message, e.becauseNoSuchFile);
     }
@@ -1566,10 +1597,6 @@ var TelemetryStorageImpl = {
     let ping;
     try {
       ping = JSON.parse(string);
-      // The ping's payload used to be stringified JSON.  Deal with that.
-      if (typeof(ping.payload) == "string") {
-        ping.payload = JSON.parse(ping.payload);
-      }
     } catch (e) {
       this._log.trace("loadPingfile - unparseable ping " + aFilePath, e);
       yield OS.File.remove(aFilePath).catch((ex) => {
@@ -1718,9 +1745,45 @@ var TelemetryStorageImpl = {
 
     return true;
   },
+
+  /**
+   * Remove FHR database files. This is temporary and will be dropped in
+   * the future.
+   * @return {Promise} Resolved when the database files are deleted.
+   */
+  removeFHRDatabase: Task.async(function*() {
+    this._log.trace("removeFHRDatabase");
+
+    // Let's try to remove the FHR DB with the default filename first.
+    const FHR_DB_DEFAULT_FILENAME = "healthreport.sqlite";
+
+    // Even if it's uncommon, there may be 2 additional files: - a "write ahead log"
+    // (-wal) file and a "shared memory file" (-shm). We need to remove them as well.
+    let FILES_TO_REMOVE = [
+      OS.Path.join(OS.Constants.Path.profileDir, FHR_DB_DEFAULT_FILENAME),
+      OS.Path.join(OS.Constants.Path.profileDir, FHR_DB_DEFAULT_FILENAME + "-wal"),
+      OS.Path.join(OS.Constants.Path.profileDir, FHR_DB_DEFAULT_FILENAME + "-shm"),
+    ];
+
+    // FHR could have used either the default DB file name or a custom one
+    // through this preference.
+    const FHR_DB_CUSTOM_FILENAME =
+      Preferences.get("datareporting.healthreport.dbName", undefined);
+    if (FHR_DB_CUSTOM_FILENAME) {
+      FILES_TO_REMOVE.push(
+        OS.Path.join(OS.Constants.Path.profileDir, FHR_DB_CUSTOM_FILENAME),
+        OS.Path.join(OS.Constants.Path.profileDir, FHR_DB_CUSTOM_FILENAME + "-wal"),
+        OS.Path.join(OS.Constants.Path.profileDir, FHR_DB_CUSTOM_FILENAME + "-shm"));
+    }
+
+    for (let f of FILES_TO_REMOVE) {
+      yield OS.File.remove(f, {ignoreAbsent: true})
+                   .catch(e => this._log.error("removeFHRDatabase - failed to remove " + f, e));
+    }
+  }),
 };
 
-///// Utility functions
+// Utility functions
 
 function pingFilePath(ping) {
   // Support legacy ping formats, who don't have an "id" field, but a "slug" field.

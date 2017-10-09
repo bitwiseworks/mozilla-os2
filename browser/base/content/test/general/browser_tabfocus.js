@@ -8,14 +8,32 @@ var testPage3 = "<html id='html3'><body id='body3'><button id='button3'>Tab 3</b
 
 const fm = Services.focus;
 
+function EventStore() {
+  this["main-window"] = [];
+  this["window1"] = [];
+  this["window2"] = [];
+}
+
+EventStore.prototype = {
+  "push": function (event) {
+    if (event.indexOf("1") > -1) {
+      this["window1"].push(event);
+    } else if (event.indexOf("2") > -1) {
+      this["window2"].push(event);
+    } else {
+      this["main-window"].push(event);
+    }
+  }
+}
+
 var tab1 = null;
 var tab2 = null;
 var browser1 = null;
 var browser2 = null;
-var _browser_tabfocus_test_lastfocus;
-var _browser_tabfocus_test_lastfocuswindow = null;
-var actualEvents = [];
-var expectedEvents = [];
+var _lastfocus;
+var _lastfocuswindow = null;
+var actualEvents = new EventStore();
+var expectedEvents = new EventStore();
 var currentTestName = "";
 var _expectedElement = null;
 var _expectedWindow = null;
@@ -38,16 +56,14 @@ function* getFocusedElementForBrowser(browser, dontCheckExtraFocus = false)
         { dontCheckExtraFocus : dontCheckExtraFocus });
     });
   }
-  else {
-    var focusedWindow = {};
-    var node = fm.getFocusedElementForWindow(browser.contentWindow, false, focusedWindow);
-    return "Focus is " + (node ? node.id : "<none>");
-  }
+  var focusedWindow = {};
+  var node = fm.getFocusedElementForWindow(browser.contentWindow, false, focusedWindow);
+  return "Focus is " + (node ? node.id : "<none>");
 }
 
 function focusInChild()
 {
-  var fm = Components.classes["@mozilla.org/focus-manager;1"].
+  var contentFM = Components.classes["@mozilla.org/focus-manager;1"].
                       getService(Components.interfaces.nsIFocusManager);
 
   function getWindowDocId(target)
@@ -75,24 +91,24 @@ function focusInChild()
 
   addMessageListener("Browser:GetFocusedElement", function getFocusedElement(message) {
     var focusedWindow = {};
-    var node = fm.getFocusedElementForWindow(content, false, focusedWindow);
+    var node = contentFM.getFocusedElementForWindow(content, false, focusedWindow);
     var details = "Focus is " + (node ? node.id : "<none>");
 
     /* Check focus manager properties. Add an error onto the string if they are
        not what is expected which will cause matching to fail in the parent process. */
     let doc = content.document;
     if (!message.data.dontCheckExtraFocus) {
-      if (fm.focusedElement != node) {
+      if (contentFM.focusedElement != node) {
         details += "<ERROR: focusedElement doesn't match>";
       }
-      if (fm.focusedWindow && fm.focusedWindow != content) {
+      if (contentFM.focusedWindow && contentFM.focusedWindow != content) {
         details += "<ERROR: focusedWindow doesn't match>";
       }
-      if ((fm.focusedWindow == content) != doc.hasFocus()) {
+      if ((contentFM.focusedWindow == content) != doc.hasFocus()) {
         details += "<ERROR: child hasFocus() is not correct>";
       }
-      if ((fm.focusedElement && doc.activeElement != fm.focusedElement) ||
-          (!fm.focusedElement && doc.activeElement != doc.body)) {
+      if ((contentFM.focusedElement && doc.activeElement != contentFM.focusedElement) ||
+          (!contentFM.focusedElement && doc.activeElement != doc.body)) {
         details += "<ERROR: child activeElement is not correct>";
       }
     }
@@ -130,7 +146,6 @@ add_task(function*() {
   gURLBar.focus();
   yield SimpleTest.promiseFocus();
 
-  var messages = "";
   if (gMultiProcessBrowser) {
     messageManager.addMessageListener("Browser:FocusChanged", message => {
       actualEvents.push(message.data.details);
@@ -138,14 +153,13 @@ add_task(function*() {
     });
   }
 
-  _browser_tabfocus_test_lastfocus = "urlbar";
-  _browser_tabfocus_test_lastfocuswindow = "main-window";
+  _lastfocus = "urlbar";
+  _lastfocuswindow = "main-window";
 
   window.addEventListener("focus", _browser_tabfocus_test_eventOccured, true);
   window.addEventListener("blur", _browser_tabfocus_test_eventOccured, true);
 
   // make sure that the focus initially starts out blank
-  var fm = Services.focus;
   var focusedWindow = {};
 
   let focused = yield getFocusedElementForBrowser(browser1);
@@ -329,9 +343,9 @@ add_task(function*() {
   // Document navigation with F6 does not yet work in mutli-process browsers.
   if (!gMultiProcessBrowser) {
     gURLBar.focus();
-    actualEvents = [];
-    _browser_tabfocus_test_lastfocus = "urlbar";
-    _browser_tabfocus_test_lastfocuswindow = "main-window";
+    actualEvents = new EventStore();
+    _lastfocus = "urlbar";
+    _lastfocuswindow = "main-window";
 
     yield expectFocusShift(() => EventUtils.synthesizeKey("VK_F6", { }),
                            "window1", "html1",
@@ -358,19 +372,19 @@ add_task(function*() {
   finish();
 });
 
-function getWindowDocId(target)
-{
-  if (target == browser1.contentWindow || target == browser1.contentDocument) {
-    return "window1";
-  }
-  if (target == browser2.contentWindow || target == browser2.contentDocument) {
-    return "window2";
-  }
-  return "main-window";
-}
-
 function _browser_tabfocus_test_eventOccured(event)
 {
+  function getWindowDocId(target)
+  {
+    if (target == browser1.contentWindow || target == browser1.contentDocument) {
+      return "window1";
+    }
+    if (target == browser2.contentWindow || target == browser2.contentDocument) {
+      return "window2";
+    }
+    return "main-window";
+  }
+
   var id;
 
   // Some focus events from the child bubble up? Ignore them.
@@ -416,26 +430,19 @@ function compareFocusResults()
   if (!currentPromiseResolver)
     return;
 
-  if (actualEvents.length < expectedEvents.length)
-    return;
+  let winIds = ["main-window", "window1", "window2"];
 
-  for (let e = 0; e < expectedEvents.length; e++) {
-    // When remote browsers are used, the child process events can occur before or after the
-    // browser focusing. Allow either order.
-    if (gMultiProcessBrowser && actualEvents[e] != expectedEvents[e] &&
-        actualEvents[e].startsWith("focus: browser")) {
-
-      // Ensure that this event is expected later, and remove the later expected event and
-      // reinsert it at the current index.
-      let foundLaterIndex = expectedEvents.indexOf(actualEvents[e], e + 1);
-      if (foundLaterIndex > e) {
-        expectedEvents.splice(e, 0, expectedEvents.splice(foundLaterIndex, 1)[0]);
-      }
-    }
-
-    is(actualEvents[e], expectedEvents[e], currentTestName + " events [event " + e + "]");
+  for (let winId of winIds) {
+    if (actualEvents[winId].length < expectedEvents[winId].length)
+      return;
   }
-  actualEvents = [];
+
+  for (let winId of winIds) {
+    for (let e = 0; e < expectedEvents.length; e++) {
+      is(actualEvents[winId][e], expectedEvents[winId][e], currentTestName + " events [event " + e + "]");
+    }
+    actualEvents[winId] = [];
+  }
 
   // Use executeSoon as this will be called during a focus/blur event handler
   executeSoon(() => {
@@ -480,7 +487,7 @@ function* expectFocusShift(callback, expectedWindow, expectedElement, focusChang
   currentPromiseResolver = null;
   currentTestName = testid;
 
-  expectedEvents = [];
+  expectedEvents = new EventStore();
 
   if (focusChanged) {
     _expectedElement = expectedElement;
@@ -498,34 +505,34 @@ function* expectFocusShift(callback, expectedWindow, expectedElement, focusChang
       _expectedWindow = "main-window";
     }
 
-    if (gMultiProcessBrowser && _browser_tabfocus_test_lastfocuswindow != "main-window" &&
-        _browser_tabfocus_test_lastfocuswindow != expectedWindow) {
-      let browserid = _browser_tabfocus_test_lastfocuswindow == "window1" ? "browser1" : "browser2";
+    if (gMultiProcessBrowser && _lastfocuswindow != "main-window" &&
+        _lastfocuswindow != expectedWindow) {
+      let browserid = _lastfocuswindow == "window1" ? "browser1" : "browser2";
       expectedEvents.push("blur: " + browserid);
     }
 
     var newElementIsFocused = (expectedElement && !expectedElement.startsWith("html"));
     if (newElementIsFocused && gMultiProcessBrowser &&
-        _browser_tabfocus_test_lastfocuswindow != "main-window" &&
+        _lastfocuswindow != "main-window" &&
         expectedWindow == "main-window") {
       // When switching from a child to a chrome element, the focus on the element will arrive first.
       expectedEvents.push("focus: " + expectedElement);
       newElementIsFocused = false;
     }
 
-    if (_browser_tabfocus_test_lastfocus && _browser_tabfocus_test_lastfocus != _expectedElement)
-      expectedEvents.push("blur: " + _browser_tabfocus_test_lastfocus);
+    if (_lastfocus && _lastfocus != _expectedElement)
+      expectedEvents.push("blur: " + _lastfocus);
 
-    if (_browser_tabfocus_test_lastfocuswindow &&
-        _browser_tabfocus_test_lastfocuswindow != expectedWindow) {
+    if (_lastfocuswindow &&
+        _lastfocuswindow != expectedWindow) {
 
-      if (!gMultiProcessBrowser || _browser_tabfocus_test_lastfocuswindow != "main-window") {
-        expectedEvents.push("blur: " + _browser_tabfocus_test_lastfocuswindow + "-document");
-        expectedEvents.push("blur: " + _browser_tabfocus_test_lastfocuswindow + "-window");
+      if (!gMultiProcessBrowser || _lastfocuswindow != "main-window") {
+        expectedEvents.push("blur: " + _lastfocuswindow + "-document");
+        expectedEvents.push("blur: " + _lastfocuswindow + "-window");
       }
     }
 
-    if (expectedWindow && _browser_tabfocus_test_lastfocuswindow != expectedWindow) {
+    if (expectedWindow && _lastfocuswindow != expectedWindow) {
       if (gMultiProcessBrowser && expectedWindow != "main-window") {
         let browserid = expectedWindow == "window1" ? "browser1" : "browser2";
         expectedEvents.push("focus: " + browserid);
@@ -541,8 +548,8 @@ function* expectFocusShift(callback, expectedWindow, expectedElement, focusChang
       expectedEvents.push("focus: " + expectedElement);
     }
 
-    _browser_tabfocus_test_lastfocus = expectedElement;
-    _browser_tabfocus_test_lastfocuswindow = expectedWindow;
+    _lastfocus = expectedElement;
+    _lastfocuswindow = expectedWindow;
   }
 
   return new Promise((resolve, reject) => {
@@ -550,10 +557,9 @@ function* expectFocusShift(callback, expectedWindow, expectedElement, focusChang
     callback();
 
     // No events are expected, so resolve the promise immediately.
-    if (!expectedEvents.length) {
+    if (expectedEvents["main-window"].length + expectedEvents["window1"].length + expectedEvents["window2"].length == 0) {
       currentPromiseResolver();
       currentPromiseResolver = null;
     }
   });
 }
-

@@ -39,7 +39,7 @@ class DrawTarget;
 } // namespace gfx
 
 namespace layers {
-class ISurfaceAllocator;
+class LayersIPCChannel;
 class SharedSurfaceTextureClient;
 enum class TextureFlags : uint32_t;
 class SurfaceDescriptor;
@@ -60,15 +60,16 @@ public:
 
     const SharedSurfaceType mType;
     const AttachmentType mAttachType;
-    GLContext* const mGL;
+    const WeakPtr<GLContext> mGL;
     const gfx::IntSize mSize;
     const bool mHasAlpha;
     const bool mCanRecycle;
 protected:
     bool mIsLocked;
     bool mIsProducerAcquired;
-    bool mIsConsumerAcquired;
-    DebugOnly<nsIThread* const> mOwningThread;
+#ifdef DEBUG
+    nsIThread* const mOwningThread;
+#endif
 
     SharedSurface(SharedSurfaceType type,
                   AttachmentType attachType,
@@ -85,9 +86,8 @@ public:
     // are required by the SharedSurface backend.
     virtual layers::TextureFlags GetTextureFlags() const;
 
-    bool IsLocked() const {
-        return mIsLocked;
-    }
+    bool IsLocked() const { return mIsLocked; }
+    bool IsProducerAcquired() const { return mIsProducerAcquired; }
 
     // This locks the SharedSurface as the production buffer for the context.
     // This is needed by backends which use PBuffers and/or EGLSurfaces.
@@ -100,16 +100,10 @@ protected:
     virtual void LockProdImpl() = 0;
     virtual void UnlockProdImpl() = 0;
 
-    virtual void ProducerAcquireImpl() {}
-    virtual void ProducerReleaseImpl() {
-        Fence();
-    }
-    virtual void ProducerReadAcquireImpl() {}
-    virtual void ProducerReadReleaseImpl() {}
-    virtual void ConsumerAcquireImpl() {
-        WaitSync();
-    }
-    virtual void ConsumerReleaseImpl() {}
+    virtual void ProducerAcquireImpl() = 0;
+    virtual void ProducerReleaseImpl() = 0;
+    virtual void ProducerReadAcquireImpl() { ProducerAcquireImpl(); }
+    virtual void ProducerReadReleaseImpl() { ProducerReleaseImpl(); }
 
 public:
     void ProducerAcquire() {
@@ -132,39 +126,7 @@ public:
         ProducerReadReleaseImpl();
         mIsProducerAcquired = false;
     }
-    void ConsumerAcquire() {
-        MOZ_ASSERT(!mIsConsumerAcquired);
-        ConsumerAcquireImpl();
-        mIsConsumerAcquired = true;
-    }
-    void ConsumerRelease() {
-        MOZ_ASSERT(mIsConsumerAcquired);
-        ConsumerReleaseImpl();
-        mIsConsumerAcquired = false;
-    }
 
-    virtual void Fence() = 0;
-    virtual bool WaitSync() = 0;
-    virtual bool PollSync() = 0;
-
-    // Use these if you can. They can only be called from the Content
-    // thread, though!
-    void Fence_ContentThread();
-    bool WaitSync_ContentThread();
-    bool PollSync_ContentThread();
-
-protected:
-    virtual void Fence_ContentThread_Impl() {
-        Fence();
-    }
-    virtual bool WaitSync_ContentThread_Impl() {
-        return WaitSync();
-    }
-    virtual bool PollSync_ContentThread_Impl() {
-        return PollSync();
-    }
-
-public:
     // This function waits until the buffer is no longer being used.
     // To optimize the performance, some implementaions recycle SharedSurfaces
     // even when its buffer is still being used.
@@ -178,12 +140,12 @@ public:
 
     virtual GLuint ProdTexture() {
         MOZ_ASSERT(mAttachType == AttachmentType::GLTexture);
-        MOZ_CRASH("Did you forget to override this function?");
+        MOZ_CRASH("GFX: Did you forget to override this function?");
     }
 
     virtual GLuint ProdRenderbuffer() {
         MOZ_ASSERT(mAttachType == AttachmentType::GLRenderbuffer);
-        MOZ_CRASH("Did you forget to override this function?");
+        MOZ_CRASH("GFX: Did you forget to override this function?");
     }
 
     virtual bool CopyTexImage2D(GLenum target, GLint level, GLenum internalformat, GLint x,
@@ -305,7 +267,7 @@ public:
     const SharedSurfaceType mType;
     GLContext* const mGL;
     const SurfaceCaps mCaps;
-    const RefPtr<layers::ISurfaceAllocator> mAllocator;
+    const RefPtr<layers::LayersIPCChannel> mAllocator;
     const layers::TextureFlags mFlags;
     const GLFormats mFormats;
     Mutex mMutex;
@@ -316,7 +278,7 @@ protected:
     RefSet<layers::SharedSurfaceTextureClient> mRecycleTotalPool;
 
     SurfaceFactory(SharedSurfaceType type, GLContext* gl, const SurfaceCaps& caps,
-                   const RefPtr<layers::ISurfaceAllocator>& allocator,
+                   const RefPtr<layers::LayersIPCChannel>& allocator,
                    const layers::TextureFlags& flags);
 
 public:

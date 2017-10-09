@@ -42,6 +42,7 @@ function run_test() {
 
   let cacheTemplateFile = do_get_file("data/search.json");
   cacheTemplate = readJSONFile(cacheTemplateFile);
+  cacheTemplate.buildID = getAppInfo().platformBuildID;
 
   let engineFile = gProfD.clone();
   engineFile.append("searchplugins");
@@ -53,26 +54,17 @@ function run_test() {
   engineTemplateFile.copyTo(engineFile.parent, "test-search-engine.xml");
 
   // The list of visibleDefaultEngines needs to match or the cache will be ignored.
-  let chan = NetUtil.ioService.newChannel2("resource://search-plugins/list.txt",
-                                           null, // aOriginCharset
-                                           null, // aBaseURI
-                                           null, // aLoadingNode
-                                           Services.scriptSecurityManager.getSystemPrincipal(),
-                                           null, // aTriggeringPrincipal
-                                           Ci.nsILoadInfo.SEC_NORMAL,
-                                           Ci.nsIContentPolicy.TYPE_OTHER);
-  let visibleDefaultEngines = [];
+  let chan = NetUtil.newChannel({
+    uri: "resource://search-plugins/list.json",
+    loadUsingSystemPrincipal: true
+  });
   let sis = Cc["@mozilla.org/scriptableinputstream;1"].
               createInstance(Ci.nsIScriptableInputStream);
-  sis.init(chan.open());
+  sis.init(chan.open2());
   let list = sis.read(sis.available());
-  let names = list.split("\n").filter(n => !!n);
-  for (let name of names) {
-    if (name.endsWith(":hidden"))
-      continue;
-    visibleDefaultEngines.push(name);
-  }
-  cacheTemplate.visibleDefaultEngines = visibleDefaultEngines;
+  let searchSettings = JSON.parse(list);
+
+  cacheTemplate.visibleDefaultEngines = searchSettings["default"]["visibleDefaultEngines"];
 
   run_next_test();
 }
@@ -90,7 +82,7 @@ add_test(function prepare_test_data() {
 add_test(function test_cached_engine_properties() {
   do_print("init search service");
 
-  let search = Services.search.init(function initComplete(aResult) {
+  Services.search.init(function initComplete(aResult) {
     do_print("init'd search service");
     do_check_true(Components.isSuccessCode(aResult));
 
@@ -147,7 +139,7 @@ add_test(function test_cache_write() {
     };
     Services.obs.addObserver(cacheWriteObserver, "browser-search-service", false);
 
-    Services.search.QueryInterface(Ci.nsIObserver).observe(null, "browser-search-engine-modified" , "engine-removed");
+    Services.search.QueryInterface(Ci.nsIObserver).observe(null, "browser-search-engine-modified", "engine-removed");
   });
 });
 
@@ -216,11 +208,6 @@ var EXPECTED_ENGINE = {
               "name": "q",
               "value": "{searchTerms}",
               "purpose": undefined,
-            },
-            {
-              "name": "channel",
-              "value": "none",
-              "purpose": "",
             },
             {
               "name": "channel",

@@ -11,71 +11,76 @@
 #include <string>
 #include "mozilla/Attributes.h"
 
-class FakeDecryptor : public GMPDecryptor {
+class FakeDecryptor : public GMPDecryptor7 {
 public:
 
   explicit FakeDecryptor(GMPDecryptorHost* aHost);
 
-  virtual void Init(GMPDecryptorCallback* aCallback) override {
+  void Init(GMPDecryptorCallback* aCallback) override {
     mCallback = aCallback;
   }
 
-  virtual void CreateSession(uint32_t aCreateSessionToken,
-                             uint32_t aPromiseId,
-                             const char* aInitDataType,
-                             uint32_t aInitDataTypeSize,
-                             const uint8_t* aInitData,
-                             uint32_t aInitDataSize,
-                             GMPSessionType aSessionType) override
+  void CreateSession(uint32_t aCreateSessionToken,
+                     uint32_t aPromiseId,
+                     const char* aInitDataType,
+                     uint32_t aInitDataTypeSize,
+                     const uint8_t* aInitData,
+                     uint32_t aInitDataSize,
+                     GMPSessionType aSessionType) override
   {
   }
 
-  virtual void LoadSession(uint32_t aPromiseId,
-                           const char* aSessionId,
-                           uint32_t aSessionIdLength) override
+  void LoadSession(uint32_t aPromiseId,
+                   const char* aSessionId,
+                   uint32_t aSessionIdLength) override
   {
   }
 
-  virtual void UpdateSession(uint32_t aPromiseId,
-                             const char* aSessionId,
-                             uint32_t aSessionIdLength,
-                             const uint8_t* aResponse,
-                             uint32_t aResponseSize) override;
+  void UpdateSession(uint32_t aPromiseId,
+                     const char* aSessionId,
+                     uint32_t aSessionIdLength,
+                     const uint8_t* aResponse,
+                     uint32_t aResponseSize) override;
 
-  virtual void CloseSession(uint32_t aPromiseId,
-                            const char* aSessionId,
-                            uint32_t aSessionIdLength) override
+  void CloseSession(uint32_t aPromiseId,
+                    const char* aSessionId,
+                    uint32_t aSessionIdLength) override
   {
   }
 
-  virtual void RemoveSession(uint32_t aPromiseId,
-                             const char* aSessionId,
-                             uint32_t aSessionIdLength) override
+  void RemoveSession(uint32_t aPromiseId,
+                     const char* aSessionId,
+                     uint32_t aSessionIdLength) override
   {
   }
 
-  virtual void SetServerCertificate(uint32_t aPromiseId,
-                                    const uint8_t* aServerCert,
-                                    uint32_t aServerCertSize) override
+  void SetServerCertificate(uint32_t aPromiseId,
+                            const uint8_t* aServerCert,
+                            uint32_t aServerCertSize) override
   {
   }
 
-  virtual void Decrypt(GMPBuffer* aBuffer,
-                       GMPEncryptedBufferMetadata* aMetadata) override
+  void Decrypt(GMPBuffer* aBuffer,
+               GMPEncryptedBufferMetadata* aMetadata) override
   {
   }
 
-  virtual void DecryptingComplete() override;
+  void DecryptingComplete() override;
 
   static void Message(const std::string& aMessage);
 
   void ProcessRecordNames(GMPRecordIterator* aRecordIterator,
                           GMPErr aStatus);
 
+  static void SetNodeId(const char* aNodeId, uint32_t aLength) {
+    sNodeId = std::string(aNodeId, aNodeId + aLength);
+  }
+
 private:
 
   virtual ~FakeDecryptor() {}
   static FakeDecryptor* sInstance;
+  static std::string sNodeId;
 
   void TestStorage();
 
@@ -89,7 +94,7 @@ public:
     : mHost(aHost)
   {
   }
-  virtual void BeginShutdown() override;
+  void BeginShutdown() override;
 private:
   GMPAsyncShutdownHost* mHost;
 };

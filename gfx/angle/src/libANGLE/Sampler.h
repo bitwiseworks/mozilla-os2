@@ -11,22 +11,26 @@
 #define LIBANGLE_SAMPLER_H_
 
 #include "libANGLE/angletypes.h"
+#include "libANGLE/Debug.h"
 #include "libANGLE/RefCountObject.h"
 
 namespace rx
 {
-class ImplFactory;
+class GLImplFactory;
 class SamplerImpl;
 }
 
 namespace gl
 {
 
-class Sampler final : public RefCountObject
+class Sampler final : public RefCountObject, public LabeledObject
 {
   public:
-    Sampler(rx::ImplFactory *factory, GLuint id);
+    Sampler(rx::GLImplFactory *factory, GLuint id);
     ~Sampler() override;
+
+    void setLabel(const std::string &label) override;
+    const std::string &getLabel() const override;
 
     void setMinFilter(GLenum minFilter);
     GLenum getMinFilter() const;
@@ -58,13 +62,17 @@ class Sampler final : public RefCountObject
     void setCompareFunc(GLenum compareFunc);
     GLenum getCompareFunc() const;
 
+    void setSRGBDecode(GLenum sRGBDecode);
+    GLenum getSRGBDecode() const;
+
     const SamplerState &getSamplerState() const;
 
-    const rx::SamplerImpl *getImplementation() const;
-    rx::SamplerImpl *getImplementation();
+    rx::SamplerImpl *getImplementation() const;
 
   private:
     rx::SamplerImpl *mImpl;
+
+    std::string mLabel;
 
     SamplerState mSamplerState;
 };

@@ -25,11 +25,11 @@ struct ExposedPropertiesOnly;
 class ChromeObjectWrapper : public ChromeObjectWrapperBase
 {
   public:
-    MOZ_CONSTEXPR ChromeObjectWrapper() : ChromeObjectWrapperBase(0) {}
+    constexpr ChromeObjectWrapper() : ChromeObjectWrapperBase(0) {}
 
     virtual bool defineProperty(JSContext* cx, JS::Handle<JSObject*> wrapper,
                                 JS::Handle<jsid> id,
-                                JS::Handle<JSPropertyDescriptor> desc,
+                                JS::Handle<JS::PropertyDescriptor> desc,
                                 JS::ObjectOpResult& result) const override;
     virtual bool set(JSContext* cx, JS::HandleObject wrapper, JS::HandleId id,
                      JS::HandleValue v, JS::HandleValue receiver,

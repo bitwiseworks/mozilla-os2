@@ -431,6 +431,7 @@ MozInputMethod.prototype = {
     cpmm.addWeakMessageListener('Keyboard:SelectionChange', this);
     cpmm.addWeakMessageListener('Keyboard:GetContext:Result:OK', this);
     cpmm.addWeakMessageListener('Keyboard:SupportsSwitchingTypesChange', this);
+    cpmm.addWeakMessageListener('Keyboard:ReceiveHardwareKeyEvent', this);
     cpmm.addWeakMessageListener('InputRegistry:Result:OK', this);
     cpmm.addWeakMessageListener('InputRegistry:Result:Error', this);
 
@@ -455,6 +456,7 @@ MozInputMethod.prototype = {
     cpmm.removeWeakMessageListener('Keyboard:SelectionChange', this);
     cpmm.removeWeakMessageListener('Keyboard:GetContext:Result:OK', this);
     cpmm.removeWeakMessageListener('Keyboard:SupportsSwitchingTypesChange', this);
+    cpmm.removeWeakMessageListener('Keyboard:ReceiveHardwareKeyEvent', this);
     cpmm.removeWeakMessageListener('InputRegistry:Result:OK', this);
     cpmm.removeWeakMessageListener('InputRegistry:Result:Error', this);
     this.setActive(false);
@@ -508,7 +510,24 @@ MozInputMethod.prototype = {
       case 'Keyboard:SupportsSwitchingTypesChange':
         this._supportsSwitchingTypes = data.types;
         break;
+      case 'Keyboard:ReceiveHardwareKeyEvent':
+        if (!Ci.nsIHardwareKeyHandler) {
+          break;
+        }
 
+        let defaultPrevented = Ci.nsIHardwareKeyHandler.NO_DEFAULT_PREVENTED;
+
+        // |event.preventDefault()| is allowed to be called only when
+        // |event.cancelable| is true
+        if (this._inputcontext && data.keyDict.cancelable) {
+          defaultPrevented |= this._inputcontext.forwardHardwareKeyEvent(data);
+        }
+
+        cpmmSendAsyncMessageWithKbID(this, 'Keyboard:ReplyHardwareKeyEvent', {
+                                       type: data.type,
+                                       defaultPrevented: defaultPrevented
+                                     });
+        break;
       case 'InputRegistry:Result:OK':
         resolver.resolve();
 
@@ -676,15 +695,24 @@ MozInputMethod.prototype = {
     cpmm.sendAsyncMessage('System:RemoveFocus', {});
   },
 
+  // Only the system app needs that, so instead of testing a permission which
+  // is allowed for all chrome:// url, we explicitly test that this is the
+  // system app's start URL.
   _hasInputManagePerm: function(win) {
-    let principal = win.document.nodePrincipal;
-    let perm = Services.perms.testExactPermissionFromPrincipal(principal,
-                                                               "input-manage");
-    return (perm === Ci.nsIPermissionManager.ALLOW_ACTION);
+    let url = win.location.href;
+    let systemAppIndex;
+    try {
+      systemAppIndex = Services.prefs.getCharPref('b2g.system_startup_url');
+    } catch(e) {
+      dump('MozKeyboard.jsm: no system app startup url set (pref is b2g.system_startup_url)');
+    }
+
+    dump(`MozKeyboard.jsm expecting ${systemAppIndex}\n`);
+    return url == systemAppIndex;
   }
 };
 
- /**
+/**
  * ==============================================
  * InputContextDOMRequestIpcHelper
  * ==============================================
@@ -739,24 +767,80 @@ InputContextDOMRequestIpcHelper.prototype = {
   }
 };
 
- /**
+function MozInputContextSelectionChangeEventDetail(ctx, ownAction) {
+  this._ctx = ctx;
+  this.ownAction = ownAction;
+}
+
+MozInputContextSelectionChangeEventDetail.prototype = {
+  classID: Components.ID("ef35443e-a400-4ae3-9170-c2f4e05f7aed"),
+  QueryInterface: XPCOMUtils.generateQI([]),
+
+  ownAction: false,
+
+  get selectionStart() {
+    return this._ctx.selectionStart;
+  },
+
+  get selectionEnd() {
+    return this._ctx.selectionEnd;
+  }
+};
+
+function MozInputContextSurroundingTextChangeEventDetail(ctx, ownAction) {
+  this._ctx = ctx;
+  this.ownAction = ownAction;
+}
+
+MozInputContextSurroundingTextChangeEventDetail.prototype = {
+  classID: Components.ID("1c50fdaf-74af-4b2e-814f-792caf65a168"),
+  QueryInterface: XPCOMUtils.generateQI([]),
+
+  ownAction: false,
+
+  get text() {
+    return this._ctx.text;
+  },
+
+  get textBeforeCursor() {
+    return this._ctx.textBeforeCursor;
+  },
+
+  get textAfterCursor() {
+    return this._ctx.textAfterCursor;
+  }
+};
+
+/**
+ * ==============================================
+ * HardwareInput
+ * ==============================================
+ */
+function MozHardwareInput() {
+}
+
+MozHardwareInput.prototype = {
+  classID: Components.ID("{1e38633d-d08b-4867-9944-afa5c648adb6}"),
+  QueryInterface: XPCOMUtils.generateQI([]),
+};
+
+/**
  * ==============================================
  * InputContext
  * ==============================================
  */
-function MozInputContext(ctx) {
+function MozInputContext(data) {
   this._context = {
-    type: ctx.type,
-    inputType: ctx.inputType,
-    inputMode: ctx.inputMode,
-    lang: ctx.lang,
-    selectionStart: ctx.selectionStart,
-    selectionEnd: ctx.selectionEnd,
-    textBeforeCursor: ctx.textBeforeCursor,
-    textAfterCursor: ctx.textAfterCursor
+    type: data.type,
+    inputType: data.inputType,
+    inputMode: data.inputMode,
+    lang: data.lang,
+    selectionStart: data.selectionStart,
+    selectionEnd: data.selectionEnd,
+    text: data.value
   };
 
-  this._contextId = ctx.contextId;
+  this._contextId = data.contextId;
 }
 
 MozInputContext.prototype = {
@@ -764,6 +848,8 @@ MozInputContext.prototype = {
   _context: null,
   _contextId: -1,
   _ipcHelper: null,
+  _hardwareinput: null,
+  _wrappedhardwareinput: null,
 
   classID: Components.ID("{1e38633d-d08b-4867-9944-afa5c648adb6}"),
 
@@ -777,6 +863,9 @@ MozInputContext.prototype = {
 
     this._ipcHelper = WindowMap.getInputContextIpcHelper(win);
     this._ipcHelper.attachInputContext(this);
+    this._hardwareinput = new MozHardwareInput();
+    this._wrappedhardwareinput =
+      this._window.MozHardwareInput._create(this._window, this._hardwareinput);
   },
 
   destroy: function ic_destroy() {
@@ -794,6 +883,8 @@ MozInputContext.prototype = {
     this._ipcHelper = null;
 
     this._window = null;
+    this._hardwareinput = null;
+    this._wrappedhardwareinput = null;
   },
 
   receiveMessage: function ic_receiveMessage(msg) {
@@ -849,46 +940,43 @@ MozInputContext.prototype = {
     }
   },
 
-  updateSelectionContext: function ic_updateSelectionContext(ctx, ownAction) {
+  updateSelectionContext: function ic_updateSelectionContext(data, ownAction) {
     if (!this._context) {
       return;
     }
 
-    let selectionDirty = this._context.selectionStart !== ctx.selectionStart ||
-          this._context.selectionEnd !== ctx.selectionEnd;
-    let surroundDirty = this._context.textBeforeCursor !== ctx.textBeforeCursor ||
-          this._context.textAfterCursor !== ctx.textAfterCursor;
+    let selectionDirty =
+      this._context.selectionStart !== data.selectionStart ||
+      this._context.selectionEnd !== data.selectionEnd;
+    let surroundDirty = selectionDirty || data.text !== this._contextId.text;
 
-    this._context.selectionStart = ctx.selectionStart;
-    this._context.selectionEnd = ctx.selectionEnd;
-    this._context.textBeforeCursor = ctx.textBeforeCursor;
-    this._context.textAfterCursor = ctx.textAfterCursor;
+    this._context.text = data.text;
+    this._context.selectionStart = data.selectionStart;
+    this._context.selectionEnd = data.selectionEnd;
 
     if (selectionDirty) {
-      this._fireEvent("selectionchange", {
-        selectionStart: ctx.selectionStart,
-        selectionEnd: ctx.selectionEnd,
-        ownAction: ownAction
-      });
+      let selectionChangeDetail =
+        new MozInputContextSelectionChangeEventDetail(this, ownAction);
+      let wrappedSelectionChangeDetail =
+        this._window.MozInputContextSelectionChangeEventDetail
+          ._create(this._window, selectionChangeDetail);
+      let selectionChangeEvent = new this._window.CustomEvent("selectionchange",
+        { cancelable: false, detail: wrappedSelectionChangeDetail });
+
+      this.__DOM_IMPL__.dispatchEvent(selectionChangeEvent);
     }
 
     if (surroundDirty) {
-      this._fireEvent("surroundingtextchange", {
-        beforeString: ctx.textBeforeCursor,
-        afterString: ctx.textAfterCursor,
-        ownAction: ownAction
-      });
+      let surroundingTextChangeDetail =
+        new MozInputContextSurroundingTextChangeEventDetail(this, ownAction);
+      let wrappedSurroundingTextChangeDetail =
+        this._window.MozInputContextSurroundingTextChangeEventDetail
+          ._create(this._window, surroundingTextChangeDetail);
+      let selectionChangeEvent = new this._window.CustomEvent("surroundingtextchange",
+        { cancelable: false, detail: wrappedSurroundingTextChangeDetail });
+
+      this.__DOM_IMPL__.dispatchEvent(selectionChangeEvent);
     }
-  },
-
-  _fireEvent: function ic_fireEvent(eventName, aDetail) {
-    let detail = {
-      detail: aDetail
-    };
-
-    let event = new this._window.CustomEvent(eventName,
-                                             Cu.cloneInto(detail, this._window));
-    this.__DOM_IMPL__.dispatchEvent(event);
   },
 
   // tag name of the input field
@@ -910,15 +998,16 @@ MozInputContext.prototype = {
   },
 
   getText: function ic_getText(offset, length) {
-    let self = this;
-    return this._sendPromise(function(resolverId) {
-      cpmmSendAsyncMessageWithKbID(self, 'Keyboard:GetText', {
-        contextId: self._contextId,
-        requestId: resolverId,
-        offset: offset,
-        length: length
-      });
-    });
+    let text;
+    if (offset && length) {
+      text = this._context.text.substr(offset, length);
+    } else if (offset) {
+      text = this._context.text.substr(offset);
+    } else {
+      text = this._context.text;
+    }
+
+    return this._window.Promise.resolve(text);
   },
 
   get selectionStart() {
@@ -929,12 +1018,27 @@ MozInputContext.prototype = {
     return this._context.selectionEnd;
   },
 
+  get text() {
+    return this._context.text;
+  },
+
   get textBeforeCursor() {
-    return this._context.textBeforeCursor;
+    let text = this._context.text;
+    let start = this._context.selectionStart;
+    return (start < 100) ?
+      text.substr(0, start) :
+      text.substr(start - 100, 100);
   },
 
   get textAfterCursor() {
-    return this._context.textAfterCursor;
+    let text = this._context.text;
+    let start = this._context.selectionStart;
+    let end = this._context.selectionEnd;
+    return text.substr(start, end - start + 100);
+  },
+
+  get hardwareinput() {
+    return this._wrappedhardwareinput;
   },
 
   setSelectionRange: function ic_setSelectionRange(start, length) {
@@ -1057,6 +1161,45 @@ MozInputContext.prototype = {
         keyboardEventDict: this._getkeyboardEventDict(dict)
       });
     });
+  },
+
+  // Generate a new keyboard event by the received keyboard dictionary
+  // and return defaultPrevented's result of the event after dispatching.
+  forwardHardwareKeyEvent: function ic_forwardHardwareKeyEvent(data) {
+    if (!Ci.nsIHardwareKeyHandler) {
+      return;
+    }
+
+    if (!this._context) {
+      return Ci.nsIHardwareKeyHandler.NO_DEFAULT_PREVENTED;
+    }
+    let evt = new this._window.KeyboardEvent(data.type,
+                                             Cu.cloneInto(data.keyDict,
+                                                          this._window));
+    this._hardwareinput.__DOM_IMPL__.dispatchEvent(evt);
+    return this._getDefaultPreventedValue(evt);
+  },
+
+  _getDefaultPreventedValue: function(evt) {
+    if (!Ci.nsIHardwareKeyHandler) {
+      return;
+    }
+
+    let flags = Ci.nsIHardwareKeyHandler.NO_DEFAULT_PREVENTED;
+
+    if (evt.defaultPrevented) {
+      flags |= Ci.nsIHardwareKeyHandler.DEFAULT_PREVENTED;
+    }
+
+    if (evt.defaultPreventedByChrome) {
+      flags |= Ci.nsIHardwareKeyHandler.DEFAULT_PREVENTED_BY_CHROME;
+    }
+
+    if (evt.defaultPreventedByContent) {
+      flags |= Ci.nsIHardwareKeyHandler.DEFAULT_PREVENTED_BY_CONTENT;
+    }
+
+    return flags;
   },
 
   _sendPromise: function(callback) {

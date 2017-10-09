@@ -6,6 +6,7 @@
 #ifndef FRAMELAYERBUILDER_H_
 #define FRAMELAYERBUILDER_H_
 
+#include "nsAutoPtr.h"
 #include "nsTHashtable.h"
 #include "nsHashKeys.h"
 #include "nsTArray.h"
@@ -15,6 +16,7 @@
 #include "mozilla/gfx/MatrixFwd.h"
 #include "mozilla/layers/LayersTypes.h"
 #include "LayerState.h"
+#include "Layers.h"
 #include "LayerUserData.h"
 
 class nsDisplayListBuilder;
@@ -22,8 +24,10 @@ class nsDisplayList;
 class nsDisplayItem;
 class gfxContext;
 class nsDisplayItemGeometry;
+class nsDisplayMask;
 
 namespace mozilla {
+class DisplayItemScrollClip;
 namespace layers {
 class ContainerLayer;
 class LayerManager;
@@ -54,22 +58,28 @@ struct ContainerLayerParameters {
     , mYScale(1)
     , mLayerContentsVisibleRect(nullptr)
     , mBackgroundColor(NS_RGBA(0,0,0,0))
+    , mScrollClip(nullptr)
+    , mScrollClipForPerspectiveChild(nullptr)
     , mInTransformedSubtree(false)
     , mInActiveTransformedSubtree(false)
     , mDisableSubpixelAntialiasingInDescendants(false)
     , mInLowPrecisionDisplayPort(false)
-    , mForEventsOnly(false)
+    , mForEventsAndPluginsOnly(false)
+    , mLayerCreationHint(layers::LayerManager::NONE)
   {}
   ContainerLayerParameters(float aXScale, float aYScale)
     : mXScale(aXScale)
     , mYScale(aYScale)
     , mLayerContentsVisibleRect(nullptr)
     , mBackgroundColor(NS_RGBA(0,0,0,0))
+    , mScrollClip(nullptr)
+    , mScrollClipForPerspectiveChild(nullptr)
     , mInTransformedSubtree(false)
     , mInActiveTransformedSubtree(false)
     , mDisableSubpixelAntialiasingInDescendants(false)
     , mInLowPrecisionDisplayPort(false)
-    , mForEventsOnly(false)
+    , mForEventsAndPluginsOnly(false)
+    , mLayerCreationHint(layers::LayerManager::NONE)
   {}
   ContainerLayerParameters(float aXScale, float aYScale,
                            const nsIntPoint& aOffset,
@@ -79,11 +89,14 @@ struct ContainerLayerParameters {
     , mLayerContentsVisibleRect(nullptr)
     , mOffset(aOffset)
     , mBackgroundColor(aParent.mBackgroundColor)
+    , mScrollClip(aParent.mScrollClip)
+    , mScrollClipForPerspectiveChild(aParent.mScrollClipForPerspectiveChild)
     , mInTransformedSubtree(aParent.mInTransformedSubtree)
     , mInActiveTransformedSubtree(aParent.mInActiveTransformedSubtree)
     , mDisableSubpixelAntialiasingInDescendants(aParent.mDisableSubpixelAntialiasingInDescendants)
     , mInLowPrecisionDisplayPort(aParent.mInLowPrecisionDisplayPort)
-    , mForEventsOnly(aParent.mForEventsOnly)
+    , mForEventsAndPluginsOnly(aParent.mForEventsAndPluginsOnly)
+    , mLayerCreationHint(aParent.mLayerCreationHint)
   {}
 
   float mXScale, mYScale;
@@ -108,11 +121,18 @@ struct ContainerLayerParameters {
   }
 
   nscolor mBackgroundColor;
+  const DisplayItemScrollClip* mScrollClip;
+
+  // usually nullptr, except when building children of an nsDisplayPerspective
+  const DisplayItemScrollClip* mScrollClipForPerspectiveChild;
+
   bool mInTransformedSubtree;
   bool mInActiveTransformedSubtree;
   bool mDisableSubpixelAntialiasingInDescendants;
   bool mInLowPrecisionDisplayPort;
-  bool mForEventsOnly;
+  bool mForEventsAndPluginsOnly;
+  layers::LayerManager::PaintedLayerCreationHint mLayerCreationHint;
+
   /**
    * When this is false, PaintedLayer coordinates are drawn to with an integer
    * translation and the scale in mXScale/mYScale.
@@ -199,8 +219,6 @@ public:
   void DidEndTransaction();
 
   enum {
-    CONTAINER_NOT_CLIPPED_BY_ANCESTORS = 0x01,
-
     /**
      * Set this when pulling an opaque background color from behind the
      * container layer into the container doesn't change the visual results,
@@ -208,7 +226,7 @@ public:
      * For example, this is compatible with opacity or clipping/masking, but
      * not with non-OVER blend modes or filters.
      */
-    CONTAINER_ALLOW_PULL_BACKGROUND_COLOR = 0x02
+    CONTAINER_ALLOW_PULL_BACKGROUND_COLOR = 0x01
   };
   /**
    * Build a container layer for a display item that contains a child
@@ -312,14 +330,12 @@ public:
    * @param aLayer Layer that the display item will be rendered into
    * @param aItem Display item to be drawn.
    * @param aLayerState What LayerState the item is using.
-   * @param aTopLeft offset from active scrolled root to reference frame
    * @param aManager If the layer is in the LAYER_INACTIVE state,
    * then this is the temporary layer manager to draw with.
    */
   void AddLayerDisplayItem(Layer* aLayer,
                            nsDisplayItem* aItem,
                            LayerState aLayerState,
-                           const nsPoint& aTopLeft,
                            BasicLayerManager* aManager);
 
   /**
@@ -355,7 +371,7 @@ public:
    * frame's display items (i.e. zero, or more than one).
    * This function is for testing purposes and not performance sensitive.
    */
-  static Layer* GetDebugSingleOldLayerForFrame(nsIFrame* aFrame);
+  static PaintedLayer* GetDebugSingleOldPaintedLayerForFrame(nsIFrame* aFrame);
 
   /**
    * Destroy any stored LayerManagerDataProperty and the associated data for
@@ -407,6 +423,7 @@ public:
   void StoreOptimizedLayerForFrame(nsDisplayItem* aItem, Layer* aLayer);
   
   NS_DECLARE_FRAME_PROPERTY_WITH_FRAME_IN_DTOR(LayerManagerDataProperty,
+                                               nsTArray<DisplayItemData*>,
                                                RemoveFrameFromLayerManager)
 
   /**
@@ -485,7 +502,7 @@ public:
     RefPtr<Layer> mLayer;
     RefPtr<Layer> mOptLayer;
     RefPtr<BasicLayerManager> mInactiveManager;
-    nsAutoTArray<nsIFrame*, 1> mFrameList;
+    AutoTArray<nsIFrame*, 1> mFrameList;
     nsAutoPtr<nsDisplayItemGeometry> mGeometry;
     DisplayItemClip mClip;
     uint32_t        mDisplayItemKey;
@@ -497,7 +514,7 @@ public:
      * BeginUpdate and EndUpdate.
      */
     nsDisplayItem* mItem;
-    nsAutoTArray<nsIFrame*, 1> mFrameListChanges;
+    AutoTArray<nsIFrame*, 1> mFrameListChanges;
 
     /**
      * Used to track if data currently stored in mFramesWithLayers (from an existing
@@ -511,7 +528,8 @@ protected:
 
   friend class LayerManagerData;
 
-  static void RemoveFrameFromLayerManager(nsIFrame* aFrame, void* aPropertyValue);
+  static void RemoveFrameFromLayerManager(const nsIFrame* aFrame,
+                                          nsTArray<DisplayItemData*>* aArray);
 
   /**
    * Given a frame and a display item key that uniquely identifies a

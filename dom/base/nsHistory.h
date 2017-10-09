@@ -8,6 +8,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/ErrorResult.h"
+#include "mozilla/dom/HistoryBinding.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsIDOMHistory.h"
@@ -18,7 +19,7 @@
 class nsIDocShell;
 class nsISHistory;
 class nsIWeakReference;
-class nsPIDOMWindow;
+class nsPIDOMWindowInner;
 
 // Script "History" object
 class nsHistory final : public nsIDOMHistory, // Empty, needed for extension
@@ -30,12 +31,15 @@ public:
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(nsHistory)
 
 public:
-  explicit nsHistory(nsPIDOMWindow* aInnerWindow);
+  explicit nsHistory(nsPIDOMWindowInner* aInnerWindow);
 
-  nsPIDOMWindow* GetParentObject() const;
+  nsPIDOMWindowInner* GetParentObject() const;
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   uint32_t GetLength(mozilla::ErrorResult& aRv) const;
+  mozilla::dom::ScrollRestoration GetScrollRestoration(mozilla::ErrorResult& aRv);
+  void SetScrollRestoration(mozilla::dom::ScrollRestoration aMode,
+                            mozilla::ErrorResult& aRv);
   void GetState(JSContext* aCx, JS::MutableHandle<JS::Value> aResult,
                 mozilla::ErrorResult& aRv) const;
   void Go(int32_t aDelta, mozilla::ErrorResult& aRv);

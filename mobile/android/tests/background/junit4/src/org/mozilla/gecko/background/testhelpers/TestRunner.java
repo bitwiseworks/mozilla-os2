@@ -25,7 +25,7 @@
 package org.mozilla.gecko.background.testhelpers;
 
 import org.junit.runners.model.InitializationError;
-import org.robolectric.RobolectricGradleTestRunner;
+import org.robolectric.RobolectricTestRunner;
 import org.robolectric.annotation.Config;
 import org.robolectric.manifest.AndroidManifest;
 import org.robolectric.res.FileFsFile;
@@ -46,7 +46,7 @@ import org.robolectric.util.ReflectionHelpers;
  * that uses a Gradle `buildConfigField` to find build outputs.
  * See https://github.com/robolectric/robolectric/issues/1648#issuecomment-113731011.
  */
-public class TestRunner extends RobolectricGradleTestRunner {
+public class TestRunner extends RobolectricTestRunner {
     private FsFile buildFolder;
 
     public TestRunner(Class<?> klass) throws InitializationError {
@@ -67,25 +67,16 @@ public class TestRunner extends RobolectricGradleTestRunner {
         final String flavor = getFlavor(config);
         final String packageName = getPackageName(config);
 
-        final FsFile res;
-        final FsFile assets;
-        final FsFile manifest;
+        final FsFile assets = buildFolder.join("assets", flavor, type);;
+        final FsFile manifest = buildFolder.join("manifests", "full", flavor, type, "AndroidManifest.xml");
 
-        if (areResourcesFromLibrary()) {
-            FsFile bundlesFolder = buildFolder.join("bundles", flavor, type);
-            res = bundlesFolder.join("res");
-            assets = bundlesFolder.join("assets");
-            manifest = bundlesFolder.join("AndroidManifest.xml");
+        final FsFile res;
+        if (buildFolder.join("res", "merged").exists()) {
+            res = buildFolder.join("res", "merged", flavor, type);
+        } else if(buildFolder.join("res").exists()) {
+            res = buildFolder.join("res", flavor, type);
         } else {
-            if (buildFolder.join("res", "merged").exists()) {
-                res = buildFolder.join("res", "merged", flavor, type);
-            } else if(buildFolder.join("res").exists()) {
-                res = buildFolder.join("res", flavor, type);
-            } else {
-                throw new IllegalStateException("No resource folder found");
-            }
-            assets = buildFolder.join("assets", flavor, type);
-            manifest = buildFolder.join("manifests", "full", flavor, type, "AndroidManifest.xml");
+            throw new IllegalStateException("No resource folder found");
         }
 
         Logger.debug("Robolectric assets directory: " + assets.getPath());
@@ -93,10 +84,6 @@ public class TestRunner extends RobolectricGradleTestRunner {
         Logger.debug("   Robolectric manifest path: " + manifest.getPath());
         Logger.debug("    Robolectric package name: " + packageName);
         return new AndroidManifest(manifest, res, assets, packageName);
-    }
-
-    private boolean areResourcesFromLibrary() {
-        return buildFolder.join("bundles").exists();
     }
 
     private static String getType(Config config) {

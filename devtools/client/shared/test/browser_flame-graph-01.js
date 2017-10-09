@@ -1,24 +1,29 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 // Tests that flame graph widget works properly.
 
-var {FlameGraph} = require("devtools/client/shared/widgets/FlameGraph");
+const {FlameGraph} = require("devtools/client/shared/widgets/FlameGraph");
 
-add_task(function*() {
+add_task(function* () {
   yield addTab("about:blank");
   yield performTest();
   gBrowser.removeCurrentTab();
 });
 
 function* performTest() {
-  let [host, win, doc] = yield createHost();
-  doc.body.setAttribute("style", "position: fixed; width: 100%; height: 100%; margin: 0;");
+  let [host,, doc] = yield createHost();
+  doc.body.setAttribute("style",
+                        "position: fixed; width: 100%; height: 100%; margin: 0;");
 
   let graph = new FlameGraph(doc.body);
 
   let readyEventEmitted;
-  graph.once("ready", () => readyEventEmitted = true);
+  graph.once("ready", () => {
+    readyEventEmitted = true;
+  });
 
   yield graph.ready();
   ok(readyEventEmitted, "The 'ready' event should have been emitted");

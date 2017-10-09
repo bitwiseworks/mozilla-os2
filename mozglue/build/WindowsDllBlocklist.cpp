@@ -3,6 +3,17 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifdef MOZ_MEMORY
+#define MOZ_MEMORY_IMPL
+#include "mozmemory_wrap.h"
+#define MALLOC_FUNCS MALLOC_FUNCS_MALLOC
+// See mozmemory_wrap.h for more details. This file is part of libmozglue, so
+// it needs to use _impl suffixes.
+#define MALLOC_DECL(name, return_type, ...) \
+  extern "C" MOZ_MEMORY_API return_type name ## _impl(__VA_ARGS__);
+#include "malloc_decls.h"
+#endif
+
 #include <windows.h>
 #include <winternl.h>
 #include <io.h>
@@ -12,12 +23,13 @@
 #include <map>
 #pragma warning( pop )
 
-#define MOZ_NO_MOZALLOC
 #include "nsAutoPtr.h"
 
 #include "nsWindowsDllInterceptor.h"
+#include "mozilla/UniquePtr.h"
 #include "mozilla/WindowsVersion.h"
 #include "nsWindowsHelpers.h"
+#include "WindowsDllBlocklist.h"
 
 using namespace mozilla;
 
@@ -65,19 +77,21 @@ static DllBlockInfo sWindowsDllBlocklist[] = {
   // { "uxtheme.dll", ALL_VERSIONS },
   // { "uxtheme.dll", 0x0000123400000000ULL },
   // The DLL name must be in lowercase!
-  
+  // The version field is a maximum, that is, we block anything that is
+  // less-than or equal to that version.
+
   // NPFFAddon - Known malware
   { "npffaddon.dll", ALL_VERSIONS},
 
   // AVG 8 - Antivirus vendor AVG, old version, plugin already blocklisted
   {"avgrsstx.dll", MAKE_VERSION(8,5,0,401)},
-  
+
   // calc.dll - Suspected malware
   {"calc.dll", MAKE_VERSION(1,0,0,1)},
 
   // hook.dll - Suspected malware
   {"hook.dll", ALL_VERSIONS},
-  
+
   // GoogleDesktopNetwork3.dll - Extremely old, unversioned instances
   // of this DLL cause crashes
   {"googledesktopnetwork3.dll", UNVERSIONED},
@@ -87,7 +101,7 @@ static DllBlockInfo sWindowsDllBlocklist[] = {
 
   // fgjk4wvb.dll - Suspected malware
   {"fgjk4wvb.dll", MAKE_VERSION(8,8,8,8)},
-  
+
   // radhslib.dll - Naomi internet filter - unmaintained since 2006
   {"radhslib.dll", UNVERSIONED},
 
@@ -114,9 +128,6 @@ static DllBlockInfo sWindowsDllBlocklist[] = {
 
   // sprotector.dll crashes, bug 957258
   {"sprotector.dll", ALL_VERSIONS},
-
-  // Topcrash with Websense Endpoint, bug 828184
-  {"qipcap.dll", MAKE_VERSION(7, 6, 815, 1)},
 
   // leave these two in always for tests
   { "mozdllblockingtest.dll", ALL_VERSIONS },
@@ -187,6 +198,36 @@ static DllBlockInfo sWindowsDllBlocklist[] = {
   { "grabdll.dll", MAKE_VERSION(2, 6, 1, 0) },
   { "grabkernel.dll", MAKE_VERSION(1, 0, 0, 1) },
 
+  // ESET, bug 1229252
+  { "eoppmonitor.dll", ALL_VERSIONS },
+
+  // SS2OSD, bug 1262348
+  { "ss2osd.dll", ALL_VERSIONS },
+  { "ss2devprops.dll", ALL_VERSIONS },
+
+  // NHASUSSTRIXOSD.DLL, bug 1269244
+  { "nhasusstrixosd.dll", ALL_VERSIONS },
+  { "nhasusstrixdevprops.dll", ALL_VERSIONS },
+
+  // Crashes with PremierOpinion/RelevantKnowledge, bug 1277846
+  { "opls.dll", ALL_VERSIONS },
+  { "opls64.dll", ALL_VERSIONS },
+  { "pmls.dll", ALL_VERSIONS },
+  { "pmls64.dll", ALL_VERSIONS },
+  { "prls.dll", ALL_VERSIONS },
+  { "prls64.dll", ALL_VERSIONS },
+  { "rlls.dll", ALL_VERSIONS },
+  { "rlls64.dll", ALL_VERSIONS },
+
+  // Vorbis DirectShow filters, bug 1239690.
+  { "vorbis.acm", MAKE_VERSION(0, 0, 3, 6) },
+
+  // AhnLab Internet Security, bug 1311969
+  { "nzbrcom.dll", ALL_VERSIONS },
+
+  // K7TotalSecurity, bug 1339083.
+  { "k7pswsen.dll", MAKE_VERSION(15, 2, 2, 95) },
+
   { nullptr, 0 }
 };
 
@@ -210,6 +251,7 @@ static const int kUser32BeforeBlocklistParameterLen =
   sizeof(kUser32BeforeBlocklistParameter) - 1;
 
 static DWORD sThreadLoadingXPCOMModule;
+static bool sBlocklistInitAttempted;
 static bool sBlocklistInitFailed;
 static bool sUser32BeforeBlocklist;
 
@@ -364,7 +406,7 @@ public:
     mReentered = mPreviousDllName && !stricmp(mPreviousDllName, dllName);
     (*sThreadMap)[currentThreadId] = dllName;
   }
-    
+
   ~ReentrancySentinel()
   {
     DWORD currentThreadId = GetCurrentThreadId();
@@ -376,7 +418,7 @@ public:
   {
     return mReentered;
   };
-    
+
   static void InitializeStatics()
   {
     InitializeCriticalSection(&sLock);
@@ -478,14 +520,17 @@ DllBlockSet::Write(HANDLE file)
   ::LeaveCriticalSection(&sLock);
 }
 
-static
-wchar_t* getFullPath (PWCHAR filePath, wchar_t* fname)
+static UniquePtr<wchar_t[]>
+getFullPath (PWCHAR filePath, wchar_t* fname)
 {
   // In Windows 8, the first parameter seems to be used for more than just the
   // path name.  For example, its numerical value can be 1.  Passing a non-valid
   // pointer to SearchPathW will cause a crash, so we need to check to see if we
   // are handed a valid pointer, and otherwise just pass nullptr to SearchPathW.
-  PWCHAR sanitizedFilePath = (intptr_t(filePath) < 4096) ? nullptr : filePath;
+  PWCHAR sanitizedFilePath = nullptr;
+  if ((uintptr_t(filePath) >= 65536) && ((uintptr_t(filePath) & 1) == 0)) {
+    sanitizedFilePath = filePath;
+  }
 
   // figure out the length of the string that we need
   DWORD pathlen = SearchPathW(sanitizedFilePath, fname, L".dll", 0, nullptr,
@@ -494,14 +539,14 @@ wchar_t* getFullPath (PWCHAR filePath, wchar_t* fname)
     return nullptr;
   }
 
-  wchar_t* full_fname = new wchar_t[pathlen+1];
+  auto full_fname = MakeUnique<wchar_t[]>(pathlen+1);
   if (!full_fname) {
     // couldn't allocate memory?
     return nullptr;
   }
 
   // now actually grab it
-  SearchPathW(sanitizedFilePath, fname, L".dll", pathlen + 1, full_fname,
+  SearchPathW(sanitizedFilePath, fname, L".dll", pathlen + 1, full_fname.get(),
               nullptr);
   return full_fname;
 }
@@ -529,7 +574,7 @@ patched_LdrLoadDll (PWCHAR filePath, PULONG flags, PUNICODE_STRING moduleFileNam
 
   int len = moduleFileName->Length / 2;
   wchar_t *fname = moduleFileName->Buffer;
-  nsAutoArrayPtr<wchar_t> full_fname;
+  UniquePtr<wchar_t[]> full_fname;
 
   // The filename isn't guaranteed to be null terminated, but in practice
   // it always will be; ensure that this is so, and bail if not.
@@ -652,23 +697,23 @@ patched_LdrLoadDll (PWCHAR filePath, PULONG flags, PUNICODE_STRING moduleFileNam
       }
 
       if (info->flags & DllBlockInfo::USE_TIMESTAMP) {
-        fVersion = GetTimestamp(full_fname);
+        fVersion = GetTimestamp(full_fname.get());
         if (fVersion > info->maxVersion) {
           load_ok = true;
         }
       } else {
         DWORD zero;
-        DWORD infoSize = GetFileVersionInfoSizeW(full_fname, &zero);
+        DWORD infoSize = GetFileVersionInfoSizeW(full_fname.get(), &zero);
 
         // If we failed to get the version information, we block.
 
         if (infoSize != 0) {
-          nsAutoArrayPtr<unsigned char> infoData(new unsigned char[infoSize]);
+          auto infoData = MakeUnique<unsigned char[]>(infoSize);
           VS_FIXEDFILEINFO *vInfo;
           UINT vInfoLen;
 
-          if (GetFileVersionInfoW(full_fname, 0, infoSize, infoData) &&
-              VerQueryValueW(infoData, L"\\", (LPVOID*) &vInfo, &vInfoLen))
+          if (GetFileVersionInfoW(full_fname.get(), 0, infoSize, infoData.get()) &&
+              VerQueryValueW(infoData.get(), L"\\", (LPVOID*) &vInfo, &vInfoLen))
           {
             fVersion =
               ((unsigned long long)vInfo->dwFileVersionMS) << 32 |
@@ -704,7 +749,7 @@ continue_loading:
       return STATUS_DLL_NOT_FOUND;
     }
 
-    if (IsVistaOrLater() && !CheckASLR(full_fname)) {
+    if (IsVistaOrLater() && !CheckASLR(full_fname.get())) {
       printf_stderr("LdrLoadDll: Blocking load of '%s'.  XPCOM components must support ASLR.\n", dllName);
       return STATUS_DLL_NOT_FOUND;
     }
@@ -717,23 +762,13 @@ WindowsDllInterceptor NtDllIntercept;
 
 } // namespace
 
-NS_EXPORT void
+MFBT_API void
 DllBlocklist_Initialize()
 {
-#if defined(_MSC_VER) && _MSC_VER < 1900 && defined(_M_X64)
-  // The code below is not blocklist-related, but is the best place for it.
-  // This is the earliest place where msvcr120.dll is loaded, and this
-  // codepath is used by both firefox.exe and plugin-container.exe processes.
-
-  // Disable CRT use of FMA3 on non-AVX2 CPUs and on Win7RTM due to bug 1160148
-  int cpuid0[4] = {0};
-  int cpuid7[4] = {0};
-  __cpuid(cpuid0, 0); // Get the maximum supported CPUID function
-  __cpuid(cpuid7, 7); // AVX2 is function 7, subfunction 0, EBX, bit 5
-  if (cpuid0[0] < 7 || !(cpuid7[1] & 0x20) || !IsWin7SP1OrLater()) {
-    _set_FMA3_enable(0);
+  if (sBlocklistInitAttempted) {
+    return;
   }
-#endif
+  sBlocklistInitAttempted = true;
 
   if (GetModuleHandleA("user32.dll")) {
     sUser32BeforeBlocklist = true;
@@ -756,7 +791,7 @@ DllBlocklist_Initialize()
   }
 }
 
-NS_EXPORT void
+MFBT_API void
 DllBlocklist_SetInXPCOMLoadOnMainThread(bool inXPCOMLoadOnMainThread)
 {
   if (inXPCOMLoadOnMainThread) {
@@ -767,7 +802,7 @@ DllBlocklist_SetInXPCOMLoadOnMainThread(bool inXPCOMLoadOnMainThread)
   }
 }
 
-NS_EXPORT void
+MFBT_API void
 DllBlocklist_WriteNotes(HANDLE file)
 {
   DWORD nBytes;
@@ -785,4 +820,12 @@ DllBlocklist_WriteNotes(HANDLE file)
     WriteFile(file, kUser32BeforeBlocklistParameter,
               kUser32BeforeBlocklistParameterLen, &nBytes, nullptr);
   }
+}
+
+MFBT_API bool
+DllBlocklist_CheckStatus()
+{
+  if (sBlocklistInitFailed || sUser32BeforeBlocklist)
+    return false;
+  return true;
 }

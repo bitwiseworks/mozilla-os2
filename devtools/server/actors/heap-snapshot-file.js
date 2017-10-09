@@ -4,14 +4,16 @@
 
 "use strict";
 
-const protocol = require("devtools/server/protocol");
+const protocol = require("devtools/shared/protocol");
 const { method, Arg } = protocol;
 const Services = require("Services");
+const { Task } = require("devtools/shared/task");
+
+const { heapSnapshotFileSpec } = require("devtools/shared/specs/heap-snapshot-file");
 
 loader.lazyRequireGetter(this, "DevToolsUtils",
                          "devtools/shared/DevToolsUtils");
 loader.lazyRequireGetter(this, "OS", "resource://gre/modules/osfile.jsm", true);
-loader.lazyRequireGetter(this, "Task", "resource://gre/modules/Task.jsm", true);
 loader.lazyRequireGetter(this, "HeapSnapshotFileUtils",
                          "devtools/shared/heapsnapshot/HeapSnapshotFileUtils");
 
@@ -21,13 +23,9 @@ loader.lazyRequireGetter(this, "HeapSnapshotFileUtils",
  * because child processes are sandboxed and do not have access to the file
  * system.
  */
-exports.HeapSnapshotFileActor = protocol.ActorClass({
-  typeName: "heapSnapshotFile",
-
+exports.HeapSnapshotFileActor = protocol.ActorClassWithSpec(heapSnapshotFileSpec, {
   initialize: function (conn, parent) {
-    if (Services.appInfo &&
-        (Services.appInfo.processType !==
-         Services.appInfo.PROCESS_TYPE_DEFAULT)) {
+    if (Services.appinfo.processType !== Services.appinfo.PROCESS_TYPE_DEFAULT) {
       const err = new Error("Attempt to create a HeapSnapshotFileActor in a " +
                             "child process! The HeapSnapshotFileActor *MUST* " +
                             "be in the parent process!");
@@ -42,7 +40,7 @@ exports.HeapSnapshotFileActor = protocol.ActorClass({
   /**
    * @see MemoryFront.prototype.transferHeapSnapshot
    */
-  transferHeapSnapshot: method(Task.async(function* (snapshotId) {
+  transferHeapSnapshot: Task.async(function* (snapshotId) {
     const snapshotFilePath =
           HeapSnapshotFileUtils.getHeapSnapshotTempFilePath(snapshotId);
     if (!snapshotFilePath) {
@@ -64,10 +62,6 @@ exports.HeapSnapshotFileActor = protocol.ActorClass({
       yield bulk.copyFrom(stream);
     } finally {
       stream.close();
-    }
-  }), {
-    request: {
-      snapshotId: Arg(0, "string")
     }
   }),
 

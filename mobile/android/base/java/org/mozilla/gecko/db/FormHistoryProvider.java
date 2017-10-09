@@ -8,7 +8,6 @@ import java.lang.IllegalArgumentException;
 import java.util.HashMap;
 
 import org.mozilla.gecko.GeckoAppShell;
-import org.mozilla.gecko.GeckoEvent;
 import org.mozilla.gecko.db.BrowserContract.FormHistory;
 import org.mozilla.gecko.db.BrowserContract.DeletedFormHistory;
 import org.mozilla.gecko.db.BrowserContract;
@@ -126,7 +125,7 @@ public class FormHistoryProvider extends SQLiteBridgeContentProvider {
 
     @Override
     public void initGecko() {
-        GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("FormHistory:Init", null));
+        GeckoAppShell.notifyObservers("FormHistory:Init", null);
     }
 
     @Override
@@ -151,7 +150,7 @@ public class FormHistoryProvider extends SQLiteBridgeContentProvider {
     public void onPostQuery(Cursor cursor, Uri uri, SQLiteBridge db) { }
 
     @Override
-    protected String getDBName(){
+    protected String getDBName() {
         return DB_FILENAME;
     }
 
@@ -161,7 +160,7 @@ public class FormHistoryProvider extends SQLiteBridgeContentProvider {
     }
 
     @Override
-    protected int getDBVersion(){
+    protected int getDBVersion() {
         return DB_VERSION;
     }
 }

@@ -10,25 +10,25 @@ const { computeHash } = Components.utils.import("resource://gre/modules/addons/P
 
 BootstrapMonitor.init();
 
-const featureDir = FileUtils.getDir("ProfD", ["features"], false);
+const updatesDir = FileUtils.getDir("ProfD", ["features"], false);
 
-function getCurrentFeatureDir() {
-  let dir = featureDir.clone();
+function getCurrentUpdatesDir() {
+  let dir = updatesDir.clone();
   let set = JSON.parse(Services.prefs.getCharPref(PREF_SYSTEM_ADDON_SET));
   dir.append(set.directory);
   return dir;
 }
 
-function clearFeatureDir() {
+function clearUpdatesDir() {
   // Delete any existing directories
-  if (featureDir.exists())
-    featureDir.remove(true);
+  if (updatesDir.exists())
+    updatesDir.remove(true);
 
   Services.prefs.clearUserPref(PREF_SYSTEM_ADDON_SET);
 }
 
-function buildPrefilledFeatureDir() {
-  clearFeatureDir();
+function buildPrefilledUpdatesDir() {
+  clearUpdatesDir();
 
   // Build the test set
   let dir = FileUtils.getDir("ProfD", ["features", "prefilled"], true);
@@ -81,87 +81,30 @@ function makeUUID() {
   return uuidGen.generateUUID().toString();
 }
 
-function* serve_update(xml, perform_update) {
-  testserver.registerPathHandler("/data/update.xml", (request, response) => {
-    response.write(xml);
-  });
-
-  try {
-    yield perform_update();
-  }
-  finally {
-    testserver.registerPathHandler("/data/update.xml", null);
-  }
-}
-
-// Runs an update check making it use the passed in xml string. Uses the direct
-// call to the update function so we get rejections on failure.
-function* install_system_addons(xml) {
-  do_print("Triggering system add-on update check.");
-
-  yield serve_update(xml, function*() {
-    let { XPIProvider } = Components.utils.import("resource://gre/modules/addons/XPIProvider.jsm");
-    yield XPIProvider.updateSystemAddons();
-  });
-}
-
-// Runs a full add-on update check which will in some cases do a system add-on
-// update check. Always succeeds.
-function* update_all_addons(xml) {
-  do_print("Triggering full add-on update check.");
-
-  yield serve_update(xml, function() {
-    return new Promise(resolve => {
-      Services.obs.addObserver(function() {
-        Services.obs.removeObserver(arguments.callee, "addons-background-update-complete");
-
-        resolve();
-      }, "addons-background-update-complete", false);
-
-      // Trigger the background update timer handler
-      gInternalManager.notify(null);
-    });
-  });
-}
-
-// Builds an update.xml file for an update check based on the data passed.
-function* build_xml(addons) {
-  let xml = `<?xml version="1.0" encoding="UTF-8"?>\n\n<updates>\n`;
-  if (addons) {
-    xml += `  <addons>\n`;
-    for (let addon of addons) {
-      xml += `    <addon id="${addon.id}" URL="${root + addon.path}" version="${addon.version}"`;
-      if (addon.size)
-        xml += ` size="${addon.size}"`;
-      if (addon.hashFunction)
-        xml += ` hashFunction="${addon.hashFunction}"`;
-      if (addon.hashValue)
-        xml += ` hashValue="${addon.hashValue}"`;
-      xml += `/>\n`;
-    }
-    xml += `  </addons>\n`;
-  }
-  xml += `</updates>\n`;
-
-  return xml;
-}
-
-function* check_installed(inProfile, ...versions) {
-  let expectedDir = inProfile ? getCurrentFeatureDir() : distroDir;
-
-  for (let i = 0; i < versions.length; i++) {
+function* check_installed(conditions) {
+  for (let i = 0; i < conditions.length; i++) {
+    let condition = conditions[i];
     let id = "system" + (i + 1) + "@tests.mozilla.org";
     let addon = yield promiseAddonByID(id);
 
-    if (versions[i]) {
-      do_print(`Checking state of add-on ${id}, expecting version ${versions[i]}`);
+    if (!("isUpgrade" in condition) || !("version" in condition)) {
+      throw Error("condition must contain isUpgrade and version");
+    }
+    let isUpgrade = conditions[i].isUpgrade;
+    let version = conditions[i].version;
+
+    let expectedDir = isUpgrade ? getCurrentUpdatesDir() : distroDir;
+
+    if (version) {
+      do_print(`Checking state of add-on ${id}, expecting version ${version}`);
 
       // Add-on should be installed
       do_check_neq(addon, null);
-      do_check_eq(addon.version, versions[i]);
+      do_check_eq(addon.version, version);
       do_check_true(addon.isActive);
       do_check_false(addon.foreignInstall);
       do_check_true(addon.hidden);
+      do_check_true(addon.isSystem);
 
       // Verify the add-ons file is in the right place
       let file = expectedDir.clone();
@@ -173,23 +116,19 @@ function* check_installed(inProfile, ...versions) {
       do_check_true(uri instanceof AM_Ci.nsIFileURL);
       do_check_eq(uri.file.path, file.path);
 
-      if (inProfile) {
+      if (isUpgrade) {
         do_check_eq(addon.signedState, AddonManager.SIGNEDSTATE_SYSTEM);
       }
 
       // Verify the add-on actually started
-      BootstrapMonitor.checkAddonStarted(id, versions[i]);
+      BootstrapMonitor.checkAddonStarted(id, version);
     }
     else {
       do_print(`Checking state of add-on ${id}, expecting it to be missing`);
 
-      if (inProfile) {
+      if (isUpgrade) {
         // Add-on should not be installed
         do_check_eq(addon, null);
-      }
-      else {
-        // Either add-on should not be installed or it shouldn't be active
-        do_check_true(!addon || !addon.isActive);
       }
 
       BootstrapMonitor.checkAddonNotStarted(id);
@@ -214,37 +153,60 @@ const TEST_CONDITIONS = {
   // Runs tests with no updated or default system add-ons initially installed
   blank: {
     setup: function*() {
-      clearFeatureDir();
+      clearUpdatesDir();
       distroDir.leafName = "empty";
     },
-    initialState: [false, null, null, null, null, null],
+    initialState: [
+      { isUpgrade: false, version: null},
+      { isUpgrade: false, version: null},
+      { isUpgrade: false, version: null},
+      { isUpgrade: false, version: null},
+      { isUpgrade: false, version: null}
+    ],
   },
-
   // Runs tests with default system add-ons installed
   withAppSet: {
     setup: function*() {
-      clearFeatureDir();
+      clearUpdatesDir();
       distroDir.leafName = "prefilled";
     },
-    initialState: [false, null, "2.0", "2.0", null, null],
+    initialState: [
+      { isUpgrade: false, version: null},
+      { isUpgrade: false, version: "2.0"},
+      { isUpgrade: false, version: "2.0"},
+      { isUpgrade: false, version: null},
+      { isUpgrade: false, version: null}
+    ]
   },
 
   // Runs tests with updated system add-ons installed
   withProfileSet: {
     setup: function*() {
-      buildPrefilledFeatureDir();
+      buildPrefilledUpdatesDir();
       distroDir.leafName = "empty";
     },
-    initialState: [true, null, "2.0", "2.0", null, null],
+    initialState: [
+      { isUpgrade: false, version: null},
+      { isUpgrade: true, version: "2.0"},
+      { isUpgrade: true, version: "2.0"},
+      { isUpgrade: false, version: null},
+      { isUpgrade: false, version: null}
+    ]
   },
 
   // Runs tests with both default and updated system add-ons installed
   withBothSets: {
     setup: function*() {
-      buildPrefilledFeatureDir();
+      buildPrefilledUpdatesDir();
       distroDir.leafName = "hidden";
     },
-    initialState: [true, null, "2.0", "2.0", null, null],
+    initialState: [
+      { isUpgrade: false, version: "1.0"},
+      { isUpgrade: true, version: "2.0"},
+      { isUpgrade: true, version: "2.0"},
+      { isUpgrade: false, version: null},
+      { isUpgrade: false, version: null}
+    ]
   },
 };
 
@@ -262,37 +224,82 @@ const TEST_CONDITIONS = {
  *             if missing the test condition's initialState is used.
  */
 const TESTS = {
-  // Test that an error response does nothing
-  error: {
-    test: function*() {
-      try {
-        yield install_system_addons("foobar");
-        do_throw("Expected to fail the update check");
-      }
-      catch (e) {
-        do_check_true(true, "Expected to fail the update check");
-      }
-    },
-  },
-
   // Test that a blank response does nothing
   blank: {
     updateList: null,
   },
 
-  // Test that an empty list updates to an empty set of system add-ons
+  // Test that an empty list removes existing updates, leaving defaults.
   empty: {
     updateList: [],
-    finalState: [true, null, null, null, null, null]
+    finalState: {
+      blank: [
+        { isUpgrade: false, version: null},
+        { isUpgrade: false, version: null},
+        { isUpgrade: false, version: null},
+        { isUpgrade: false, version: null},
+        { isUpgrade: false, version: null}
+      ],
+      withAppSet: [
+        { isUpgrade: false, version: null},
+        { isUpgrade: false, version: "2.0"},
+        { isUpgrade: false, version: "2.0"},
+        { isUpgrade: false, version: null},
+        { isUpgrade: false, version: null}
+      ],
+      withProfileSet: [
+        { isUpgrade: false, version: null},
+        { isUpgrade: false, version: null},
+        { isUpgrade: false, version: null},
+        { isUpgrade: false, version: null},
+        { isUpgrade: false, version: null}
+      ],
+      withBothSets: [
+        { isUpgrade: false, version: "1.0"},
+        { isUpgrade: false, version: "1.0"},
+        { isUpgrade: false, version: null},
+        { isUpgrade: false, version: null},
+        // Set this to `true` to so `verify_state()` expects a blank profile dir
+        { isUpgrade: true, version: null}
+      ]
+    },
   },
-
   // Tests that a new set of system add-ons gets installed
   newset: {
     updateList: [
       { id: "system4@tests.mozilla.org", version: "1.0", path: "system4_1.xpi" },
       { id: "system5@tests.mozilla.org", version: "1.0", path: "system5_1.xpi" }
     ],
-    finalState: [true, null, null, null, "1.0", "1.0"]
+    finalState: {
+      blank: [
+        { isUpgrade: false, version: null},
+        { isUpgrade: false, version: null},
+        { isUpgrade: false, version: null},
+        { isUpgrade: true, version: "1.0"},
+        { isUpgrade: true, version: "1.0"}
+      ],
+      withAppSet: [
+        { isUpgrade: false, version: null},
+        { isUpgrade: false, version: "2.0"},
+        { isUpgrade: false, version: "2.0"},
+        { isUpgrade: true, version: "1.0"},
+        { isUpgrade: true, version: "1.0"}
+      ],
+      withProfileSet: [
+        { isUpgrade: false, version: null},
+        { isUpgrade: false, version: null},
+        { isUpgrade: false, version: null},
+        { isUpgrade: true, version: "1.0"},
+        { isUpgrade: true, version: "1.0"}
+      ],
+      withBothSets: [
+        { isUpgrade: false, version: "1.0"},
+        { isUpgrade: false, version: "1.0"},
+        { isUpgrade: false, version: null},
+        { isUpgrade: true, version: "1.0"},
+        { isUpgrade: true, version: "1.0"}
+      ]
+    }
   },
 
   // Tests that an upgraded set of system add-ons gets installed
@@ -301,18 +308,76 @@ const TESTS = {
       { id: "system2@tests.mozilla.org", version: "3.0", path: "system2_3.xpi" },
       { id: "system3@tests.mozilla.org", version: "3.0", path: "system3_3.xpi" }
     ],
-    finalState: [true, null, "3.0", "3.0", null, null]
+    finalState: {
+      blank: [
+        { isUpgrade: false, version: null},
+        { isUpgrade: true, version: "3.0"},
+        { isUpgrade: true, version: "3.0"},
+        { isUpgrade: false, version: null},
+        { isUpgrade: false, version: null}
+      ],
+      withAppSet: [
+        { isUpgrade: false, version: null},
+        { isUpgrade: true, version: "3.0"},
+        { isUpgrade: true, version: "3.0"},
+        { isUpgrade: false, version: null},
+        { isUpgrade: false, version: null}
+      ],
+      withProfileSet: [
+        { isUpgrade: false, version: null},
+        { isUpgrade: true, version: "3.0"},
+        { isUpgrade: true, version: "3.0"},
+        { isUpgrade: false, version: null},
+        { isUpgrade: false, version: null}
+      ],
+      withBothSets: [
+        { isUpgrade: false, version: "1.0"},
+        { isUpgrade: true, version: "3.0"},
+        { isUpgrade: true, version: "3.0"},
+        { isUpgrade: false, version: null},
+        { isUpgrade: false, version: null}
+      ]
+    }
   },
 
   // Tests that a set of system add-ons, some new, some existing gets installed
   overlapping: {
     updateList: [
-      { id: "system1@tests.mozilla.org", version: "1.0", path: "system1_2.xpi" },
-      { id: "system2@tests.mozilla.org", version: "1.0", path: "system2_2.xpi" },
-      { id: "system3@tests.mozilla.org", version: "1.0", path: "system3_3.xpi" },
+      { id: "system1@tests.mozilla.org", version: "2.0", path: "system1_2.xpi" },
+      { id: "system2@tests.mozilla.org", version: "2.0", path: "system2_2.xpi" },
+      { id: "system3@tests.mozilla.org", version: "3.0", path: "system3_3.xpi" },
       { id: "system4@tests.mozilla.org", version: "1.0", path: "system4_1.xpi" }
     ],
-    finalState: [true, "2.0", "2.0", "3.0", "1.0", null]
+    finalState: {
+      blank: [
+        { isUpgrade: true, version: "2.0"},
+        { isUpgrade: true, version: "2.0"},
+        { isUpgrade: true, version: "3.0"},
+        { isUpgrade: true, version: "1.0"},
+        { isUpgrade: false, version: null}
+      ],
+      withAppSet: [
+        { isUpgrade: true, version: "2.0"},
+        { isUpgrade: true, version: "2.0"},
+        { isUpgrade: true, version: "3.0"},
+        { isUpgrade: true, version: "1.0"},
+        { isUpgrade: false, version: null}
+      ],
+      withProfileSet: [
+        { isUpgrade: true, version: "2.0"},
+        { isUpgrade: true, version: "2.0"},
+        { isUpgrade: true, version: "3.0"},
+        { isUpgrade: true, version: "1.0"},
+        { isUpgrade: false, version: null}
+      ],
+      withBothSets: [
+        { isUpgrade: true, version: "2.0"},
+        { isUpgrade: true, version: "2.0"},
+        { isUpgrade: true, version: "3.0"},
+        { isUpgrade: true, version: "1.0"},
+        { isUpgrade: false, version: null}
+      ]
+    }
   },
 
   // Specifying an incorrect version should stop us updating anything
@@ -345,11 +410,40 @@ const TESTS = {
   // Correct sizes and hashes should work
   checkSizeHash: {
     updateList: [
-      { id: "system2@tests.mozilla.org", version: "3.0", path: "system2_3.xpi", size: 4672 },
-      { id: "system3@tests.mozilla.org", version: "3.0", path: "system3_3.xpi", hashFunction: "sha1", hashValue: "2df604b37b13766c0e04f1b7f59800e038f46cd5" },
-      { id: "system5@tests.mozilla.org", version: "1.0", path: "system5_1.xpi", size: 4671, hashFunction: "sha1", hashValue: "f13dcaa8bfacaa222189bcbb0074972c05ceb621" }
+      { id: "system2@tests.mozilla.org", version: "3.0", path: "system2_3.xpi", size: 4697 },
+      { id: "system3@tests.mozilla.org", version: "3.0", path: "system3_3.xpi", hashFunction: "sha1", hashValue: "a4c7198d56deb315511c02937fd96c696de6cb84" },
+      { id: "system5@tests.mozilla.org", version: "1.0", path: "system5_1.xpi", size: 4691, hashFunction: "sha1", hashValue: "6887b916a1a9a5338b0df4181f6187f5396861eb" }
     ],
-    finalState: [true, null, "3.0", "3.0", null, "1.0"]
+    finalState: {
+      blank: [
+        { isUpgrade: false, version: null},
+        { isUpgrade: true, version: "3.0"},
+        { isUpgrade: true, version: "3.0"},
+        { isUpgrade: false, version: null},
+        { isUpgrade: true, version: "1.0"}
+      ],
+      withAppSet: [
+        { isUpgrade: false, version: null},
+        { isUpgrade: true, version: "3.0"},
+        { isUpgrade: true, version: "3.0"},
+        { isUpgrade: false, version: null},
+        { isUpgrade: true, version: "1.0"}
+      ],
+      withProfileSet: [
+        { isUpgrade: false, version: null},
+        { isUpgrade: true, version: "3.0"},
+        { isUpgrade: true, version: "3.0"},
+        { isUpgrade: false, version: null},
+        { isUpgrade: true, version: "1.0"}
+      ],
+      withBothSets: [
+        { isUpgrade: false, version: "1.0"},
+        { isUpgrade: true, version: "3.0"},
+        { isUpgrade: true, version: "3.0"},
+        { isUpgrade: false, version: null},
+        { isUpgrade: true, version: "1.0"}
+      ]
+    }
   },
 
   // A bad certificate should stop updates
@@ -357,6 +451,33 @@ const TESTS = {
     fails: true,
     updateList: [
       { id: "system1@tests.mozilla.org", version: "1.0", path: "system1_1_badcert.xpi" },
+      { id: "system3@tests.mozilla.org", version: "1.0", path: "system3_1.xpi" }
+    ],
+  },
+
+  // An unpacked add-on should stop updates.
+  notPacked: {
+    fails: true,
+    updateList: [
+      { id: "system6@tests.mozilla.org", version: "1.0", path: "system6_1_unpack.xpi" },
+      { id: "system3@tests.mozilla.org", version: "1.0", path: "system3_1.xpi" }
+    ],
+  },
+
+  // A non-bootstrap add-on should stop updates.
+  notBootstrap: {
+    fails: true,
+    updateList: [
+      { id: "system6@tests.mozilla.org", version: "1.0", path: "system6_2_notBootstrap.xpi" },
+      { id: "system3@tests.mozilla.org", version: "1.0", path: "system3_1.xpi" }
+    ],
+  },
+
+  // A non-multiprocess add-on should stop updates.
+  notMultiprocess: {
+    fails: true,
+    updateList: [
+      { id: "system6@tests.mozilla.org", version: "1.0", path: "system6_3_notMultiprocess.xpi" },
       { id: "system3@tests.mozilla.org", version: "1.0", path: "system3_1.xpi" }
     ],
   }
@@ -371,8 +492,8 @@ add_task(function* setup() {
 function* get_directories() {
   let subdirs = [];
 
-  if (yield OS.File.exists(featureDir.path)) {
-    let iterator = new OS.File.DirectoryIterator(featureDir.path);
+  if (yield OS.File.exists(updatesDir.path)) {
+    let iterator = new OS.File.DirectoryIterator(updatesDir.path);
     yield iterator.forEach(entry => {
       if (entry.isDir) {
         subdirs.push(entry);
@@ -398,24 +519,30 @@ function* setup_conditions(setup) {
 
   // Make sure the initial state is correct
   do_print("Checking initial state.");
-  yield check_installed(...setup.initialState);
+  yield check_installed(setup.initialState);
 }
 
-function* verify_state(initialState, finalState = undefined) {
+function* verify_state(initialState, finalState = undefined, alreadyUpgraded = false) {
   let expectedDirs = 0;
 
   // If the initial state was using the profile set then that directory will
   // still exist.
-  if (initialState[0])
+
+  if (initialState.some(a => a.isUpgrade)) {
     expectedDirs++;
+  }
 
   if (finalState == undefined) {
     finalState = initialState;
   }
-  else {
+  else if (finalState.some(a => a.isUpgrade)) {
     // If the new state is using the profile then that directory will exist.
-    if (finalState[0])
-      expectedDirs++;
+    expectedDirs++;
+  }
+
+  // Since upgrades are restartless now, the previous update dir hasn't been removed.
+  if (alreadyUpgraded) {
+    expectedDirs++;
   }
 
   do_print("Checking final state.");
@@ -423,15 +550,17 @@ function* verify_state(initialState, finalState = undefined) {
   let dirs = yield get_directories();
   do_check_eq(dirs.length, expectedDirs);
 
-  // Bug 1204156: Currently switching to the new state requires a restart
-  // yield check_installed(...finalState);
+  yield check_installed(...finalState);
 
   // Check that the new state is active after a restart
   yield promiseRestartManager();
-  yield check_installed(...finalState);
+  yield check_installed(finalState);
 }
 
-function* exec_test(setup, test) {
+function* exec_test(setupName, testName) {
+  let setup = TEST_CONDITIONS[setupName];
+  let test = TESTS[testName];
+
   yield setup_conditions(setup);
 
   try {
@@ -439,7 +568,7 @@ function* exec_test(setup, test) {
       yield test.test();
     }
     else {
-      yield install_system_addons(yield build_xml(test.updateList));
+      yield installSystemAddons(yield buildSystemAddonUpdates(test.updateList, root), testserver);
     }
 
     if (test.fails) {
@@ -452,35 +581,46 @@ function* exec_test(setup, test) {
     }
   }
 
-  yield verify_state(setup.initialState, test.finalState);
+  // some tests have a different expected combination of default
+  // and updated add-ons.
+  if (test.finalState && setupName in test.finalState) {
+    yield verify_state(setup.initialState, test.finalState[setupName]);
+  }
+  else {
+    yield verify_state(setup.initialState, test.finalState);
+  }
 
   yield promiseShutdownManager();
 }
 
-for (let setup of Object.keys(TEST_CONDITIONS)) {
-  for (let test of Object.keys(TESTS)) {
-    add_task(function*() {
-      do_print("Running test " + setup + " " + test);
+add_task(function*() {
+  for (let setup of Object.keys(TEST_CONDITIONS)) {
+    for (let test of Object.keys(TESTS)) {
+        do_print("Running test " + setup + " " + test);
 
-      yield exec_test(TEST_CONDITIONS[setup], TESTS[test]);
-    });
+        yield exec_test(setup, test);
+    }
   }
-}
+});
 
 // Some custom tests
-
 // Test that the update check is performed as part of the regular add-on update
 // check
 add_task(function* test_addon_update() {
   yield setup_conditions(TEST_CONDITIONS.blank);
 
-  yield update_all_addons(yield build_xml([
+  yield updateAllSystemAddons(yield buildSystemAddonUpdates([
     { id: "system2@tests.mozilla.org", version: "2.0", path: "system2_2.xpi" },
     { id: "system3@tests.mozilla.org", version: "2.0", path: "system3_2.xpi" }
-  ]));
+  ], root), testserver);
 
-  yield verify_state(TEST_CONDITIONS.blank.initialState,
-                     [true, null, "2.0", "2.0", null, null]);
+  yield verify_state(TEST_CONDITIONS.blank.initialState, [
+    {isUpgrade: false, version: null},
+    {isUpgrade: true, version: "2.0"},
+    {isUpgrade: true, version: "2.0"},
+    {isUpgrade: false, version: null},
+    {isUpgrade: false, version: null}
+  ]);
 
   yield promiseShutdownManager();
 });
@@ -490,10 +630,10 @@ add_task(function* test_app_update_disabled() {
   yield setup_conditions(TEST_CONDITIONS.blank);
 
   Services.prefs.setBoolPref(PREF_APP_UPDATE_ENABLED, false);
-  yield update_all_addons(yield build_xml([
+  yield updateAllSystemAddons(yield buildSystemAddonUpdates([
     { id: "system2@tests.mozilla.org", version: "2.0", path: "system2_2.xpi" },
     { id: "system3@tests.mozilla.org", version: "2.0", path: "system3_2.xpi" }
-  ]));
+  ], root), testserver);
   Services.prefs.clearUserPref(PREF_APP_UPDATE_ENABLED);
 
   yield verify_state(TEST_CONDITIONS.blank.initialState);
@@ -508,10 +648,10 @@ add_task(function* test_safe_mode() {
   yield setup_conditions(TEST_CONDITIONS.blank);
 
   Services.prefs.setBoolPref(PREF_APP_UPDATE_ENABLED, false);
-  yield update_all_addons(yield build_xml([
+  yield updateAllSystemAddons(yield buildSystemAddonUpdates([
     { id: "system2@tests.mozilla.org", version: "2.0", path: "system2_2.xpi" },
     { id: "system3@tests.mozilla.org", version: "2.0", path: "system3_2.xpi" }
-  ]));
+  ], root), testserver);
   Services.prefs.clearUserPref(PREF_APP_UPDATE_ENABLED);
 
   yield verify_state(TEST_CONDITIONS.blank.initialState);
@@ -525,10 +665,10 @@ add_task(function* test_safe_mode() {
 add_task(function* test_match_default() {
   yield setup_conditions(TEST_CONDITIONS.withAppSet);
 
-  yield install_system_addons(yield build_xml([
+  yield installSystemAddons(yield buildSystemAddonUpdates([
     { id: "system2@tests.mozilla.org", version: "2.0", path: "system2_2.xpi" },
     { id: "system3@tests.mozilla.org", version: "2.0", path: "system3_2.xpi" }
-  ]));
+  ], root), testserver);
 
   // Shouldn't have installed an updated set
   yield verify_state(TEST_CONDITIONS.withAppSet.initialState);
@@ -540,15 +680,20 @@ add_task(function* test_match_default() {
 add_task(function* test_match_default_revert() {
   yield setup_conditions(TEST_CONDITIONS.withBothSets);
 
-  yield install_system_addons(yield build_xml([
+  yield installSystemAddons(yield buildSystemAddonUpdates([
     { id: "system1@tests.mozilla.org", version: "1.0", path: "system1_1.xpi" },
     { id: "system2@tests.mozilla.org", version: "1.0", path: "system2_1.xpi" }
-  ]));
+  ], root), testserver);
 
   // This should revert to the default set instead of installing new versions
   // into an updated set.
-  yield verify_state(TEST_CONDITIONS.withBothSets.initialState,
-                     [false, "1.0", "1.0", null, null, null]);
+  yield verify_state(TEST_CONDITIONS.withBothSets.initialState, [
+    {isUpgrade: false, version: "1.0"},
+    {isUpgrade: false, version: "1.0"},
+    {isUpgrade: false, version: null},
+    {isUpgrade: false, version: null},
+    {isUpgrade: false, version: null}
+  ]);
 
   yield promiseShutdownManager();
 });
@@ -557,10 +702,10 @@ add_task(function* test_match_default_revert() {
 add_task(function* test_match_current() {
   yield setup_conditions(TEST_CONDITIONS.withBothSets);
 
-  yield install_system_addons(yield build_xml([
+  yield installSystemAddons(yield buildSystemAddonUpdates([
     { id: "system2@tests.mozilla.org", version: "2.0", path: "system2_2.xpi" },
     { id: "system3@tests.mozilla.org", version: "2.0", path: "system3_2.xpi" }
-  ]));
+  ], root), testserver);
 
   // This should remain with the current set instead of creating a new copy
   let set = JSON.parse(Services.prefs.getCharPref(PREF_SYSTEM_ADDON_SET));
@@ -576,13 +721,18 @@ add_task(function* test_no_download() {
   yield setup_conditions(TEST_CONDITIONS.withBothSets);
 
   // The missing file here is unneeded since there is a local version already
-  yield install_system_addons(yield build_xml([
+  yield installSystemAddons(yield buildSystemAddonUpdates([
     { id: "system2@tests.mozilla.org", version: "2.0", path: "missing.xpi" },
     { id: "system4@tests.mozilla.org", version: "1.0", path: "system4_1.xpi" }
-  ]));
+  ], root), testserver);
 
-  yield verify_state(TEST_CONDITIONS.withBothSets.initialState,
-                     [true, null, "2.0", null, "1.0", null]);
+  yield verify_state(TEST_CONDITIONS.withBothSets.initialState, [
+    {isUpgrade: false, version: "1.0"},
+    {isUpgrade: true, version: "2.0"},
+    {isUpgrade: false, version: null},
+    {isUpgrade: true, version: "1.0"},
+    {isUpgrade: false, version: null}
+  ]);
 
   yield promiseShutdownManager();
 });
@@ -591,18 +741,23 @@ add_task(function* test_no_download() {
 add_task(function* test_double_update() {
   yield setup_conditions(TEST_CONDITIONS.withAppSet);
 
-  yield install_system_addons(yield build_xml([
+  yield installSystemAddons(yield buildSystemAddonUpdates([
     { id: "system2@tests.mozilla.org", version: "2.0", path: "system2_2.xpi" },
     { id: "system3@tests.mozilla.org", version: "1.0", path: "system3_1.xpi" }
-  ]));
+  ], root), testserver);
 
-  yield install_system_addons(yield build_xml([
+  yield installSystemAddons(yield buildSystemAddonUpdates([
     { id: "system3@tests.mozilla.org", version: "2.0", path: "system3_2.xpi" },
     { id: "system4@tests.mozilla.org", version: "1.0", path: "system4_1.xpi" }
-  ]));
+  ], root), testserver);
 
-  yield verify_state(TEST_CONDITIONS.withAppSet.initialState,
-                     [true, null, null, "2.0", "1.0", null]);
+  yield verify_state(TEST_CONDITIONS.withAppSet.initialState, [
+    {isUpgrade: false, version: null},
+    {isUpgrade: false, version: "2.0"},
+    {isUpgrade: true, version: "2.0"},
+    {isUpgrade: true, version: "1.0"},
+    {isUpgrade: false, version: null}
+  ], true);
 
   yield promiseShutdownManager();
 });
@@ -611,19 +766,23 @@ add_task(function* test_double_update() {
 add_task(function* test_update_purges() {
   yield setup_conditions(TEST_CONDITIONS.withBothSets);
 
-  yield install_system_addons(yield build_xml([
+  yield installSystemAddons(yield buildSystemAddonUpdates([
     { id: "system2@tests.mozilla.org", version: "2.0", path: "system2_2.xpi" },
     { id: "system3@tests.mozilla.org", version: "1.0", path: "system3_1.xpi" }
-  ]));
+  ], root), testserver);
 
-  yield verify_state(TEST_CONDITIONS.withBothSets.initialState,
-                     [true, null, "2.0", "1.0", null, null]);
+  yield verify_state(TEST_CONDITIONS.withBothSets.initialState, [
+    {isUpgrade: false, version: "1.0"},
+    {isUpgrade: true, version: "2.0"},
+    {isUpgrade: true, version: "1.0"},
+    {isUpgrade: false, version: null},
+    {isUpgrade: false, version: null}
+  ]);
 
-  yield install_system_addons(yield build_xml(null));
+  yield installSystemAddons(yield buildSystemAddonUpdates(null), testserver);
 
   let dirs = yield get_directories();
   do_check_eq(dirs.length, 1);
 
   yield promiseShutdownManager();
 });
-

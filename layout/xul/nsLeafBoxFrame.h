@@ -16,11 +16,11 @@ public:
 
   friend nsIFrame* NS_NewLeafBoxFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 
-  virtual nsSize GetPrefSize(nsBoxLayoutState& aState) override;
-  virtual nsSize GetMinSize(nsBoxLayoutState& aState) override;
-  virtual nsSize GetMaxSize(nsBoxLayoutState& aState) override;
-  virtual nscoord GetFlex(nsBoxLayoutState& aState) override;
-  virtual nscoord GetBoxAscent(nsBoxLayoutState& aState) override;
+  virtual nsSize GetXULPrefSize(nsBoxLayoutState& aState) override;
+  virtual nsSize GetXULMinSize(nsBoxLayoutState& aState) override;
+  virtual nsSize GetXULMaxSize(nsBoxLayoutState& aState) override;
+  virtual nscoord GetXULFlex() override;
+  virtual nscoord GetXULBoxAscent(nsBoxLayoutState& aState) override;
 
   virtual nsIAtom* GetType() const override;
   virtual bool IsFrameOfType(uint32_t aFlags) const override
@@ -43,18 +43,18 @@ public:
 
   // Our auto size is that provided by nsFrame, not nsLeafFrame
   virtual mozilla::LogicalSize
-  ComputeAutoSize(nsRenderingContext *aRenderingContext,
-                  mozilla::WritingMode aWritingMode,
+  ComputeAutoSize(nsRenderingContext*         aRenderingContext,
+                  mozilla::WritingMode        aWM,
                   const mozilla::LogicalSize& aCBSize,
-                  nscoord aAvailableISize,
+                  nscoord                     aAvailableISize,
                   const mozilla::LogicalSize& aMargin,
                   const mozilla::LogicalSize& aBorder,
                   const mozilla::LogicalSize& aPadding,
-                  bool aShrinkWrap) override;
+                  ComputeSizeFlags            aFlags) override;
 
   virtual void Reflow(nsPresContext*           aPresContext,
-                      nsHTMLReflowMetrics&     aDesiredSize,
-                      const nsHTMLReflowState& aReflowState,
+                      ReflowOutput&     aDesiredSize,
+                      const ReflowInput& aReflowInput,
                       nsReflowStatus&          aStatus) override;
 
   virtual nsresult CharacterDataChanged(CharacterDataChangeInfo* aInfo) override;
@@ -75,7 +75,7 @@ public:
 
 protected:
 
-  NS_IMETHOD DoLayout(nsBoxLayoutState& aState) override;
+  NS_IMETHOD DoXULLayout(nsBoxLayoutState& aState) override;
 
 #ifdef DEBUG_LAYOUT
   virtual void GetBoxName(nsAutoString& aName) override;

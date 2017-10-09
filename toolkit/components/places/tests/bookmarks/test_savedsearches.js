@@ -37,17 +37,17 @@ add_test(function test_savedsearches_bookmarks() {
   // query for the test root, expandQueries=0
   // the query should show up as a regular bookmark
   try {
-    var options = PlacesUtils.history.getNewQueryOptions();
+    let options = PlacesUtils.history.getNewQueryOptions();
     options.expandQueries = 0;
-    var query = PlacesUtils.history.getNewQuery();
+    let query = PlacesUtils.history.getNewQuery();
     query.setFolders([testRoot], 1);
-    var result = PlacesUtils.history.executeQuery(query, options);
-    var rootNode = result.root;
+    let result = PlacesUtils.history.executeQuery(query, options);
+    let rootNode = result.root;
     rootNode.containerOpen = true;
-    var cc = rootNode.childCount;
+    let cc = rootNode.childCount;
     do_check_eq(cc, 1);
-    for (var i = 0; i < cc; i++) {
-      var node = rootNode.getChild(i);
+    for (let i = 0; i < cc; i++) {
+      let node = rootNode.getChild(i);
       // test that queries have valid itemId
       do_check_true(node.itemId > 0);
       // test that the container is closed
@@ -56,7 +56,7 @@ add_test(function test_savedsearches_bookmarks() {
     }
     rootNode.containerOpen = false;
   }
-  catch(ex) {
+  catch (ex) {
     do_throw("expandQueries=0 query error: " + ex);
   }
 
@@ -64,17 +64,17 @@ add_test(function test_savedsearches_bookmarks() {
   // query for the test root, expandQueries=1
   // the query should show up as a query container, with 1 child
   try {
-    var options = PlacesUtils.history.getNewQueryOptions();
+    let options = PlacesUtils.history.getNewQueryOptions();
     options.expandQueries = 1;
-    var query = PlacesUtils.history.getNewQuery();
+    let query = PlacesUtils.history.getNewQuery();
     query.setFolders([testRoot], 1);
-    var result = PlacesUtils.history.executeQuery(query, options);
-    var rootNode = result.root;
+    let result = PlacesUtils.history.executeQuery(query, options);
+    let rootNode = result.root;
     rootNode.containerOpen = true;
-    var cc = rootNode.childCount;
+    let cc = rootNode.childCount;
     do_check_eq(cc, 1);
-    for (var i = 0; i < cc; i++) {
-      var node = rootNode.getChild(i);
+    for (let i = 0; i < cc; i++) {
+      let node = rootNode.getChild(i);
       // test that query node type is container when expandQueries=1
       do_check_eq(node.type, node.RESULT_TYPE_QUERY);
       // test that queries (as containers) have valid itemId
@@ -92,14 +92,14 @@ add_test(function test_savedsearches_bookmarks() {
       do_check_eq(item.itemId, bookmarkId);
 
       // XXX - FAILING - test live-update of query results - add a bookmark that matches the query
-      //var tmpBmId = PlacesUtils.bookmarks.insertBookmark(
+      // var tmpBmId = PlacesUtils.bookmarks.insertBookmark(
       //  root, uri("http://" + searchTerm + ".com"),
       //  PlacesUtils.bookmarks.DEFAULT_INDEX, searchTerm + "blah");
-      //do_check_eq(query.childCount, 2);
+      // do_check_eq(query.childCount, 2);
 
       // XXX - test live-update of query results - delete a bookmark that matches the query
-      //PlacesUtils.bookmarks.removeItem(tmpBMId);
-      //do_check_eq(query.childCount, 1);
+      // PlacesUtils.bookmarks.removeItem(tmpBMId);
+      // do_check_eq(query.childCount, 1);
 
       // test live-update of query results - add a folder that matches the query
       PlacesUtils.bookmarks.createFolder(
@@ -113,7 +113,7 @@ add_test(function test_savedsearches_bookmarks() {
     }
     rootNode.containerOpen = false;
   }
-  catch(ex) {
+  catch (ex) {
     do_throw("expandQueries=1 bookmarks query: " + ex);
   }
 
@@ -196,14 +196,14 @@ add_task(function* test_savedsearches_history() {
     // test live-update of deleted queries
     PlacesUtils.bookmarks.removeItem(searchId);
     try {
-      var tmpFolderNode = root.getChild(1);
+      tmpFolderNode = root.getChild(1);
       do_throw("query was not removed");
-    } catch(ex) {}
+    } catch (ex) {}
 
     tmpFolderNode.containerOpen = false;
     rootNode.containerOpen = false;
   }
-  catch(ex) {
+  catch (ex) {
     do_throw("expandQueries=1 bookmarks query: " + ex);
   }
 });

@@ -50,18 +50,16 @@ this.EXPORTED_SYMBOLS = [
   "DownloadPDFSaver",
 ];
 
-////////////////////////////////////////////////////////////////////////////////
-//// Globals
+// Globals
 
 const Cc = Components.classes;
 const Ci = Components.interfaces;
 const Cu = Components.utils;
 const Cr = Components.results;
 
+Cu.import("resource://gre/modules/Integration.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "DownloadIntegration",
-                                  "resource://gre/modules/DownloadIntegration.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
                                   "resource://gre/modules/FileUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
@@ -89,6 +87,9 @@ XPCOMUtils.defineLazyServiceGetter(this, "gExternalHelperAppService",
 XPCOMUtils.defineLazyServiceGetter(this, "gPrintSettingsService",
            "@mozilla.org/gfx/printsettings-service;1",
            Ci.nsIPrintSettingsService);
+
+Integration.downloads.defineModuleGetter(this, "DownloadIntegration",
+            "resource://gre/modules/DownloadIntegration.jsm");
 
 const BackgroundFileSaverStreamListener = Components.Constructor(
       "@mozilla.org/network/background-file-saver;1?mode=streamlistener",
@@ -140,8 +141,7 @@ function deserializeUnknownProperties(aObject, aSerializable, aFilterFn)
  */
 const kProgressUpdateIntervalMs = 400;
 
-////////////////////////////////////////////////////////////////////////////////
-//// Download
+// Download
 
 /**
  * Represents a single download, with associated state and actions.  This object
@@ -420,10 +420,12 @@ this.Download.prototype = {
 
       let changeMade = false;
 
-      if ("contentType" in aOptions &&
-          this.contentType != aOptions.contentType) {
-        this.contentType = aOptions.contentType;
-        changeMade = true;
+      for (let property of ["contentType", "progress", "hasPartialData",
+                            "hasBlockedData"]) {
+        if (property in aOptions && this[property] != aOptions[property]) {
+          this[property] = aOptions[property];
+          changeMade = true;
+        }
       }
 
       if (changeMade) {
@@ -458,6 +460,12 @@ this.Download.prototype = {
         // Disallow download if parental controls service restricts it.
         if (yield DownloadIntegration.shouldBlockForParentalControls(this)) {
           throw new DownloadError({ becauseBlockedByParentalControls: true });
+        }
+
+        // Disallow download if needed runtime permissions have not been granted
+        // by user.
+        if (yield DownloadIntegration.shouldBlockForRuntimePermissions()) {
+          throw new DownloadError({ becauseBlockedByRuntimePermissions: true });
         }
 
         // We should check if we have been canceled in the meantime, after all
@@ -499,7 +507,12 @@ this.Download.prototype = {
         this.progress = 100;
         this.succeeded = true;
         this.hasPartialData = false;
-      } catch (ex) {
+      } catch (originalEx) {
+        // We may choose a different exception to propagate in the code below,
+        // or wrap the original one. We do this mutation in a different variable
+        // because of the "no-ex-assign" ESLint rule.
+        let ex = originalEx;
+
         // Fail with a generic status code on cancellation, so that the caller
         // is forced to actually check the status properties to see if the
         // download was canceled or failed because of other reasons.
@@ -996,10 +1009,9 @@ this.Download.prototype = {
       // cancellation to be completed before resolving the promise it returns.
       this.cancel();
       return this.removePartialData();
-    } else {
-      // Just cancel the download, in case it is currently in progress.
-      return this.cancel();
     }
+    // Just cancel the download, in case it is currently in progress.
+    return this.cancel();
   },
 
   /**
@@ -1091,8 +1103,9 @@ this.Download.prototype = {
     };
 
     let saver = this.saver.toSerializable();
-    if (!saver) {
-      // If we are unable to serialize the saver, we won't persist the download.
+    if (!serializable.source || !saver) {
+      // If we are unable to serialize either the source or the saver,
+      // we won't persist the download.
       return null;
     }
 
@@ -1234,8 +1247,7 @@ Download.fromSerializable = function (aSerializable) {
   return download;
 };
 
-////////////////////////////////////////////////////////////////////////////////
-//// DownloadSource
+// DownloadSource
 
 /**
  * Represents the source of a download, for example a document or an URI.
@@ -1262,12 +1274,34 @@ this.DownloadSource.prototype = {
   referrer: null,
 
   /**
+   * For downloads handled by the (default) DownloadCopySaver, this function
+   * can adjust the network channel before it is opened, for example to change
+   * the HTTP headers or to upload a stream as POST data.
+   *
+   * @note If this is defined this object will not be serializable, thus the
+   *       Download object will not be persisted across sessions.
+   *
+   * @param aChannel
+   *        The nsIChannel to be adjusted.
+   *
+   * @return {Promise}
+   * @resolves When the channel has been adjusted and can be opened.
+   * @rejects JavaScript exception that will cause the download to fail.
+   */
+   adjustChannel: null,
+
+  /**
    * Returns a static representation of the current object state.
    *
    * @return A JavaScript object that can be serialized to JSON.
    */
   toSerializable: function ()
   {
+    if (this.adjustChannel) {
+      // If the callback was used, we can't reproduce this across sessions.
+      return null;
+    }
+
     // Simplify the representation if we don't have other details.
     if (!this.isPrivate && !this.referrer && !this._unknownProperties) {
       return this.url;
@@ -1300,6 +1334,10 @@ this.DownloadSource.prototype = {
  *          referrer: String containing the referrer URI of the download source.
  *                    Can be omitted or null if no referrer should be sent or
  *                    the download source is not HTTP.
+ *          adjustChannel: For downloads handled by (default) DownloadCopySaver,
+ *                         this function can adjust the network channel before
+ *                         it is opened, for example to change the HTTP headers
+ *                         or to upload a stream as POST data.  Optional.
  *        }
  *
  * @return The newly created DownloadSource object.
@@ -1324,6 +1362,9 @@ this.DownloadSource.fromSerializable = function (aSerializable) {
     if ("referrer" in aSerializable) {
       source.referrer = aSerializable.referrer;
     }
+    if ("adjustChannel" in aSerializable) {
+      source.adjustChannel = aSerializable.adjustChannel;
+    }
 
     deserializeUnknownProperties(source, aSerializable, property =>
       property != "url" && property != "isPrivate" && property != "referrer");
@@ -1332,8 +1373,7 @@ this.DownloadSource.fromSerializable = function (aSerializable) {
   return source;
 };
 
-////////////////////////////////////////////////////////////////////////////////
-//// DownloadTarget
+// DownloadTarget
 
 /**
  * Represents the target of a download, for example a file in the global
@@ -1461,8 +1501,7 @@ this.DownloadTarget.fromSerializable = function (aSerializable) {
   return target;
 };
 
-////////////////////////////////////////////////////////////////////////////////
-//// DownloadError
+// DownloadError
 
 /**
  * Provides detailed information about a download failure.
@@ -1495,7 +1534,8 @@ this.DownloadError = function (aProperties)
     this.message = aProperties.message;
   } else if (aProperties.becauseBlocked ||
              aProperties.becauseBlockedByParentalControls ||
-             aProperties.becauseBlockedByReputationCheck) {
+             aProperties.becauseBlockedByReputationCheck ||
+             aProperties.becauseBlockedByRuntimePermissions) {
     this.message = "Download blocked.";
   } else {
     let exception = new Components.Exception("", this.result);
@@ -1522,6 +1562,10 @@ this.DownloadError = function (aProperties)
   } else if (aProperties.becauseBlockedByReputationCheck) {
     this.becauseBlocked = true;
     this.becauseBlockedByReputationCheck = true;
+    this.reputationCheckVerdict = aProperties.reputationCheckVerdict || "";
+  } else if (aProperties.becauseBlockedByRuntimePermissions) {
+    this.becauseBlocked = true;
+    this.becauseBlockedByRuntimePermissions = true;
   } else if (aProperties.becauseBlocked) {
     this.becauseBlocked = true;
   }
@@ -1532,6 +1576,16 @@ this.DownloadError = function (aProperties)
 
   this.stack = new Error().stack;
 }
+
+/**
+ * These constants are used by the reputationCheckVerdict property and indicate
+ * the detailed reason why a download is blocked.
+ *
+ * @note These values should not be changed because they can be serialized.
+ */
+this.DownloadError.BLOCK_VERDICT_MALWARE = "Malware";
+this.DownloadError.BLOCK_VERDICT_POTENTIALLY_UNWANTED = "PotentiallyUnwanted";
+this.DownloadError.BLOCK_VERDICT_UNCOMMON = "Uncommon";
 
 this.DownloadError.prototype = {
   __proto__: Error.prototype,
@@ -1570,6 +1624,24 @@ this.DownloadError.prototype = {
   becauseBlockedByReputationCheck: false,
 
   /**
+   * Indicates the download was blocked because a runtime permission required to
+   * download files was not granted.
+   *
+   * This does not apply to all systems. On Android this flag is set to true if
+   * a needed runtime permission (storage) has not been granted by the user.
+   */
+  becauseBlockedByRuntimePermissions: false,
+
+  /**
+   * If becauseBlockedByReputationCheck is true, indicates the detailed reason
+   * why the download was blocked, according to the "BLOCK_VERDICT_" constants.
+   *
+   * If the download was not blocked or the reason for the block is unknown,
+   * this will be an empty string.
+   */
+  reputationCheckVerdict: "",
+
+  /**
    * If this DownloadError was caused by an exception this property will
    * contain the original exception. This will not be serialized when saving
    * to the store.
@@ -1591,6 +1663,8 @@ this.DownloadError.prototype = {
       becauseBlocked: this.becauseBlocked,
       becauseBlockedByParentalControls: this.becauseBlockedByParentalControls,
       becauseBlockedByReputationCheck: this.becauseBlockedByReputationCheck,
+      becauseBlockedByRuntimePermissions: this.becauseBlockedByRuntimePermissions,
+      reputationCheckVerdict: this.reputationCheckVerdict,
     };
 
     serializeUnknownProperties(this, serializable);
@@ -1615,13 +1689,14 @@ this.DownloadError.fromSerializable = function (aSerializable) {
     property != "becauseTargetFailed" &&
     property != "becauseBlocked" &&
     property != "becauseBlockedByParentalControls" &&
-    property != "becauseBlockedByReputationCheck");
+    property != "becauseBlockedByReputationCheck" &&
+    property != "becauseBlockedByRuntimePermissions" &&
+    property != "reputationCheckVerdict");
 
   return e;
 };
 
-////////////////////////////////////////////////////////////////////////////////
-//// DownloadSaver
+// DownloadSaver
 
 /**
  * Template for an object that actually transfers the data for the download.
@@ -1712,7 +1787,7 @@ this.DownloadSaver.prototype = {
       gDownloadHistory.addDownload(sourceUri, referrerUri, startPRTime,
                                    targetUri);
     }
-    catch(ex) {
+    catch (ex) {
       if (!(ex instanceof Components.Exception) ||
           ex.result != Cr.NS_ERROR_NOT_AVAILABLE) {
         throw ex;
@@ -1779,8 +1854,7 @@ this.DownloadSaver.fromSerializable = function (aSerializable) {
   return saver;
 };
 
-////////////////////////////////////////////////////////////////////////////////
-//// DownloadCopySaver
+// DownloadCopySaver
 
 /**
  * Saver object that simply copies the entire source file to the target.
@@ -1961,9 +2035,14 @@ this.DownloadCopySaver.prototype = {
             onStatus: function () { },
           };
 
+          // If the callback was set, handle it now before opening the channel.
+          if (download.source.adjustChannel) {
+            yield download.source.adjustChannel(channel);
+          }
+
           // Open the channel, directing output to the background file saver.
           backgroundFileSaver.QueryInterface(Ci.nsIStreamListener);
-          channel.asyncOpen({
+          channel.asyncOpen2({
             onStartRequest: function (aRequest, aContext) {
               backgroundFileSaver.onStartRequest(aRequest, aContext);
 
@@ -2065,7 +2144,7 @@ this.DownloadCopySaver.prototype = {
                                                   aInputStream, aOffset,
                                                   aCount);
             }.bind(copySaver),
-          }, null);
+          });
 
           // We should check if we have been canceled in the meantime, after
           // all the previous asynchronous operations have been executed and
@@ -2080,6 +2159,9 @@ this.DownloadCopySaver.prototype = {
           // In case an error occurs while setting up the chain of objects for
           // the download, ensure that we release the resources of the saver.
           backgroundFileSaver.finish(Cr.NS_ERROR_FAILURE);
+          // Since we're not going to handle deferSaveComplete.promise below,
+          // we need to make sure that the rejection is handled.
+          deferSaveComplete.promise.catch(() => {});
           throw ex;
         }
 
@@ -2087,7 +2169,7 @@ this.DownloadCopySaver.prototype = {
         // up the chain of objects for the download.
         yield deferSaveComplete.promise;
 
-        yield this._checkReputationAndMove();
+        yield this._checkReputationAndMove(aSetPropertiesFn);
       } catch (ex) {
         // Ensure we always remove the placeholder for the final target file on
         // failure, independently of which code path failed.  In some cases, the
@@ -2115,18 +2197,22 @@ this.DownloadCopySaver.prototype = {
    * will move it to the target path since reputation checking is the final
    * step in the saver.
    *
+   * @param aSetPropertiesFn
+   *        Function provided to the "execute" method.
+   *
    * @return {Promise}
    * @resolves When the reputation check and cleanup is complete.
    * @rejects DownloadError if the download should be blocked.
    */
-  _checkReputationAndMove: Task.async(function* () {
+  _checkReputationAndMove: Task.async(function* (aSetPropertiesFn) {
     let download = this.download;
     let targetPath = this.download.target.path;
     let partFilePath = this.download.target.partFilePath;
 
-    if (yield DownloadIntegration.shouldBlockForReputationCheck(download)) {
-      download.progress = 100;
-      download.hasPartialData = false;
+    let { shouldBlock, verdict } =
+        yield DownloadIntegration.shouldBlockForReputationCheck(download);
+    if (shouldBlock) {
+      let newProperties = { progress: 100, hasPartialData: false };
 
       // We will remove the potentially dangerous file if instructed by
       // DownloadIntegration. We will always remove the file when the
@@ -2139,10 +2225,15 @@ this.DownloadCopySaver.prototype = {
           Cu.reportError(ex);
         }
       } else {
-        download.hasBlockedData = true;
+        newProperties.hasBlockedData = true;
       }
 
-      throw new DownloadError({ becauseBlockedByReputationCheck: true });
+      aSetPropertiesFn(newProperties);
+
+      throw new DownloadError({
+        becauseBlockedByReputationCheck: true,
+        reputationCheckVerdict: verdict,
+      });
     }
 
     if (partFilePath) {
@@ -2242,8 +2333,7 @@ this.DownloadCopySaver.fromSerializable = function (aSerializable) {
   return saver;
 };
 
-////////////////////////////////////////////////////////////////////////////////
-//// DownloadLegacySaver
+// DownloadLegacySaver
 
 /**
  * Saver object that integrates with the legacy nsITransfer interface.
@@ -2316,14 +2406,18 @@ this.DownloadLegacySaver.prototype = {
    */
   onProgressBytes: function DLS_onProgressBytes(aCurrentBytes, aTotalBytes)
   {
+    this.progressWasNotified = true;
+
     // Ignore progress notifications until we are ready to process them.
     if (!this.setProgressBytesFn) {
+      // Keep the data from the last progress notification that was received.
+      this.currentBytes = aCurrentBytes;
+      this.totalBytes = aTotalBytes;
       return;
     }
 
     let hasPartFile = !!this.download.target.partFilePath;
 
-    this.progressWasNotified = true;
     this.setProgressBytesFn(aCurrentBytes, aTotalBytes,
                             aCurrentBytes > 0 && hasPartFile);
   },
@@ -2418,7 +2512,7 @@ this.DownloadLegacySaver.prototype = {
   /**
    * Implements "DownloadSaver.execute".
    */
-  execute: function DLS_execute(aSetProgressBytesFn)
+  execute: function DLS_execute(aSetProgressBytesFn, aSetPropertiesFn)
   {
     // Check if this is not the first execution of the download.  The Download
     // object guarantees that this function is not re-entered during execution.
@@ -2433,6 +2527,9 @@ this.DownloadLegacySaver.prototype = {
     }
 
     this.setProgressBytesFn = aSetProgressBytesFn;
+    if (this.progressWasNotified) {
+      this.onProgressBytes(this.currentBytes, this.totalBytes);
+    }
 
     return Task.spawn(function* task_DLS_execute() {
       try {
@@ -2471,7 +2568,7 @@ this.DownloadLegacySaver.prototype = {
           }
         }
 
-        yield this._checkReputationAndMove();
+        yield this._checkReputationAndMove(aSetPropertiesFn);
 
       } catch (ex) {
         // Ensure we always remove the final target file on failure,
@@ -2506,7 +2603,8 @@ this.DownloadLegacySaver.prototype = {
   },
 
   _checkReputationAndMove: function () {
-    return DownloadCopySaver.prototype._checkReputationAndMove.call(this);
+    return DownloadCopySaver.prototype._checkReputationAndMove
+                                      .apply(this, arguments);
   },
 
   /**
@@ -2618,8 +2716,7 @@ this.DownloadLegacySaver.fromSerializable = function () {
   return new DownloadLegacySaver();
 };
 
-////////////////////////////////////////////////////////////////////////////////
-//// DownloadPDFSaver
+// DownloadPDFSaver
 
 /**
  * This DownloadSaver type creates a PDF file from the current document in a
@@ -2772,4 +2869,3 @@ this.DownloadPDFSaver.prototype = {
 this.DownloadPDFSaver.fromSerializable = function (aSerializable) {
   return new DownloadPDFSaver();
 };
-

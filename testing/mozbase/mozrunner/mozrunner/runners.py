@@ -8,8 +8,8 @@ used Mozilla applications, such as Firefox or B2G emulator.
 """
 
 from .application import get_app_context
-from .base import DeviceRunner, GeckoRuntimeRunner
-from .devices import Emulator, Device
+from .base import DeviceRunner, GeckoRuntimeRunner, FennecRunner
+from .devices import Emulator, EmulatorAVD, Device
 
 
 def Runner(*args, **kwargs):
@@ -92,6 +92,44 @@ def B2GDesktopRunner(*args, **kwargs):
     return Runner(*args, **kwargs)
 
 
+def FennecEmulatorRunner(avd='mozemulator-4.3',
+                         adb_path=None,
+                         avd_home=None,
+                         logdir=None,
+                         serial=None,
+                         binary=None,
+                         app='org.mozilla.fennec',
+                         **kwargs):
+    """
+    Create a Fennec emulator runner. This can either start a new emulator
+    (which will use an avd), or connect to  an already-running emulator.
+
+    :param avd: name of an AVD available in your environment.
+        Typically obtained via tooltool: either 'mozemulator-4.3' or 'mozemulator-x86'.
+        Defaults to 'mozemulator-4.3'
+    :param avd_home: Path to avd parent directory
+    :param logdir: Path to save logfiles such as logcat and qemu output.
+    :param serial: Serial of emulator to connect to as seen in `adb devices`.
+        Defaults to the first entry in `adb devices`.
+    :param binary: Path to emulator binary.
+        Defaults to None, which causes the device_class to guess based on PATH.
+    :param app: Name of Fennec app (often org.mozilla.fennec_$USER)
+        Defaults to 'org.mozilla.fennec'
+    :param cmdargs: Arguments to pass into binary.
+    :returns: A DeviceRunner for Android emulators.
+    """
+    kwargs['app_ctx'] = get_app_context('fennec')(app, adb_path=adb_path,
+                                                  avd_home=avd_home)
+    device_args = {'app_ctx': kwargs['app_ctx'],
+                   'avd': avd,
+                   'binary': binary,
+                   'serial': serial,
+                   'logdir': logdir}
+    return FennecRunner(device_class=EmulatorAVD,
+                        device_args=device_args,
+                        **kwargs)
+
+
 def B2GEmulatorRunner(arch='arm',
                       b2g_home=None,
                       adb_path=None,
@@ -121,17 +159,18 @@ def B2GEmulatorRunner(arch='arm',
     :returns: A DeviceRunner for B2G emulators.
     """
     kwargs['app_ctx'] = get_app_context('b2g')(b2g_home, adb_path=adb_path)
-    device_args = { 'app_ctx': kwargs['app_ctx'],
-                    'arch': arch,
-                    'binary': binary,
-                    'resolution': resolution,
-                    'sdcard': sdcard,
-                    'userdata': userdata,
-                    'no_window': no_window,
-                    'logdir': logdir }
+    device_args = {'app_ctx': kwargs['app_ctx'],
+                   'arch': arch,
+                   'binary': binary,
+                   'resolution': resolution,
+                   'sdcard': sdcard,
+                   'userdata': userdata,
+                   'no_window': no_window,
+                   'logdir': logdir}
     return DeviceRunner(device_class=Emulator,
                         device_args=device_args,
                         **kwargs)
+
 
 def B2GDeviceRunner(b2g_home=None,
                     adb_path=None,
@@ -153,20 +192,20 @@ def B2GDeviceRunner(b2g_home=None,
     :returns: A DeviceRunner for B2G devices.
     """
     kwargs['app_ctx'] = get_app_context('b2g')(b2g_home, adb_path=adb_path)
-    device_args = { 'app_ctx': kwargs['app_ctx'],
-                    'logdir': logdir,
-                    'serial': serial }
+    device_args = {'app_ctx': kwargs['app_ctx'],
+                   'logdir': logdir,
+                   'serial': serial}
     return DeviceRunner(device_class=Device,
                         device_args=device_args,
                         **kwargs)
 
 
 runners = {
- 'default': Runner,
- 'b2g_desktop': B2GDesktopRunner,
- 'b2g_emulator': B2GEmulatorRunner,
- 'b2g_device': B2GDeviceRunner,
- 'firefox': FirefoxRunner,
- 'thunderbird': ThunderbirdRunner,
+    'default': Runner,
+    'b2g_desktop': B2GDesktopRunner,
+    'b2g_emulator': B2GEmulatorRunner,
+    'b2g_device': B2GDeviceRunner,
+    'firefox': FirefoxRunner,
+    'thunderbird': ThunderbirdRunner,
+    'fennec': FennecEmulatorRunner
 }
-

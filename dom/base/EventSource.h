@@ -26,7 +26,7 @@
 #include "nsDeque.h"
 #include "nsIUnicodeDecoder.h"
 
-class nsPIDOMWindow;
+class nsPIDOMWindowInner;
 
 namespace mozilla {
 
@@ -44,7 +44,7 @@ class EventSource final : public DOMEventTargetHelper
                         , public nsSupportsWeakReference
 {
 public:
-  explicit EventSource(nsPIDOMWindow* aOwnerWindow);
+  explicit EventSource(nsPIDOMWindowInner* aOwnerWindow);
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_SKIPPABLE_SCRIPT_HOLDER_CLASS_INHERITED(
     EventSource, DOMEventTargetHelper)
@@ -59,7 +59,7 @@ public:
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   // WebIDL
-  nsPIDOMWindow*
+  nsPIDOMWindowInner*
   GetParentObject() const
   {
     return GetOwner();
@@ -93,23 +93,20 @@ public:
   IMPL_EVENT_HANDLER(error)
   void Close();
 
-  // Determine if preferences allow EventSource
-  static bool PrefEnabled(JSContext* aCx = nullptr, JSObject* aGlobal = nullptr);
-
   virtual void DisconnectFromOwner() override;
 
 protected:
   virtual ~EventSource();
 
+  MOZ_IS_CLASS_INIT
   nsresult Init(nsISupports* aOwner,
                 const nsAString& aURL,
                 bool aWithCredentials);
 
   nsresult GetBaseURI(nsIURI **aBaseURI);
 
-  net::ReferrerPolicy GetReferrerPolicy();
-
-  nsresult SetupHttpChannel();
+  void SetupHttpChannel();
+  nsresult SetupReferrerPolicy();
   nsresult InitChannelAndRequestEventSource();
   nsresult ResetConnection();
   nsresult DispatchFailConnection();
@@ -131,12 +128,12 @@ protected:
                                uint32_t          aFormatStringsLen);
   nsresult ConsoleError();
 
-  static NS_METHOD StreamReaderFunc(nsIInputStream *aInputStream,
-                                    void           *aClosure,
-                                    const char     *aFromRawSegment,
-                                    uint32_t        aToOffset,
-                                    uint32_t        aCount,
-                                    uint32_t       *aWriteCount);
+  static nsresult StreamReaderFunc(nsIInputStream *aInputStream,
+                                   void           *aClosure,
+                                   const char     *aFromRawSegment,
+                                   uint32_t        aToOffset,
+                                   uint32_t        aCount,
+                                   uint32_t       *aWriteCount);
   nsresult SetFieldAndClear();
   nsresult ClearFields();
   nsresult ResetEvent();

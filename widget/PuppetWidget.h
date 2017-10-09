@@ -19,6 +19,8 @@
 #include "mozilla/RefPtr.h"
 #include "nsBaseScreen.h"
 #include "nsBaseWidget.h"
+#include "nsCOMArray.h"
+#include "nsIKeyEventInPluginCallback.h"
 #include "nsIScreenManager.h"
 #include "nsThreadUtils.h"
 #include "mozilla/Attributes.h"
@@ -40,6 +42,7 @@ class PuppetWidget : public nsBaseWidget
   typedef mozilla::dom::TabChild TabChild;
   typedef mozilla::gfx::DrawTarget DrawTarget;
   typedef nsBaseWidget Base;
+  typedef mozilla::CSSRect CSSRect;
 
   // The width and height of the "widget" are clamped to this.
   static const size_t kMaxDimension;
@@ -53,10 +56,18 @@ protected:
 public:
   NS_DECL_ISUPPORTS_INHERITED
 
-  NS_IMETHOD Create(nsIWidget* aParent,
-                    nsNativeWidget aNativeParent,
-                    const LayoutDeviceIntRect& aRect,
-                    nsWidgetInitData* aInitData = nullptr) override;
+  // PuppetWidget creation is infallible, hence InfallibleCreate(), which
+  // Create() calls.
+  using nsBaseWidget::Create; // for Create signature not overridden here
+  virtual nsresult Create(nsIWidget* aParent,
+                          nsNativeWidget aNativeParent,
+                          const LayoutDeviceIntRect& aRect,
+                          nsWidgetInitData* aInitData = nullptr)
+                          override;
+  void InfallibleCreate(nsIWidget* aParent,
+                        nsNativeWidget aNativeParent,
+                        const LayoutDeviceIntRect& aRect,
+                        nsWidgetInitData* aInitData = nullptr);
 
   void InitIMEState();
 
@@ -65,17 +76,17 @@ public:
               nsWidgetInitData* aInitData = nullptr,
               bool aForceUseIWidgetParent = false) override;
 
-  NS_IMETHOD Destroy() override;
+  virtual void Destroy() override;
 
   NS_IMETHOD Show(bool aState) override;
 
   virtual bool IsVisible() const override
   { return mVisible; }
 
-  NS_IMETHOD ConstrainPosition(bool     /*ignored aAllowSlop*/,
-                               int32_t* aX,
-                               int32_t* aY) override
-  { *aX = kMaxDimension;  *aY = kMaxDimension;  return NS_OK; }
+  virtual void ConstrainPosition(bool     /*ignored aAllowSlop*/,
+                                 int32_t* aX,
+                                 int32_t* aY) override
+  { *aX = kMaxDimension; *aY = kMaxDimension; }
 
   // Widget position is controlled by the parent process via TabChild.
   NS_IMETHOD Move(double aX, double aY) override
@@ -111,19 +122,11 @@ public:
 
   NS_IMETHOD Invalidate(const LayoutDeviceIntRect& aRect) override;
 
-  // This API is going away, steer clear.
-  virtual void Scroll(const nsIntPoint& aDelta,
-                      const nsTArray<nsIntRect>& aDestRects,
-                      const nsTArray<Configuration>& aReconfigureChildren)
-  { /* dead man walking */ }
-
   // PuppetWidgets don't have native data, as they're purely nonnative.
   virtual void* GetNativeData(uint32_t aDataType) override;
 #if defined(XP_WIN)
   void SetNativeData(uint32_t aDataType, uintptr_t aVal) override;
 #endif
-  NS_IMETHOD ReparentNativeWidget(nsIWidget* aNewParent) override
-  { return NS_ERROR_UNEXPECTED; }
 
   // PuppetWidgets don't have any concept of titles.
   NS_IMETHOD SetTitle(const nsAString& aTitle) override
@@ -132,11 +135,12 @@ public:
   virtual LayoutDeviceIntPoint WidgetToScreenOffset() override
   { return LayoutDeviceIntPoint::FromUnknownPoint(GetWindowPosition() + GetChromeDimensions()); }
 
+  int32_t RoundsWidgetCoordinatesTo() override;
+
   void InitEvent(WidgetGUIEvent& aEvent,
                  LayoutDeviceIntPoint* aPoint = nullptr);
 
   NS_IMETHOD DispatchEvent(WidgetGUIEvent* aEvent, nsEventStatus& aStatus) override;
-  nsEventStatus DispatchAPZAwareEvent(WidgetInputEvent* aEvent) override;
   nsEventStatus DispatchInputEvent(WidgetInputEvent* aEvent) override;
   void SetConfirmedTargetAPZC(uint64_t aInputBlockId,
                               const nsTArray<ScrollableLayerGuid>& aTargets) const override;
@@ -144,10 +148,6 @@ public:
                              const FrameMetrics::ViewID& aViewId,
                              const mozilla::Maybe<ZoomConstraints>& aConstraints) override;
   bool AsyncPanZoomEnabled() const override;
-
-  NS_IMETHOD CaptureRollupEvents(nsIRollupListener* aListener,
-                                 bool aDoCapture) override
-  { return NS_ERROR_UNEXPECTED; }
 
   NS_IMETHOD_(bool)
   ExecuteNativeKeyBinding(NativeKeyBindingsType aType,
@@ -173,8 +173,10 @@ public:
   virtual LayerManager*
   GetLayerManager(PLayerTransactionChild* aShadowManager = nullptr,
                   LayersBackend aBackendHint = mozilla::layers::LayersBackend::LAYERS_NONE,
-                  LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT,
-                  bool* aAllowRetaining = nullptr) override;
+                  LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT) override;
+
+  // This is used after a compositor reset.
+  LayerManager* RecreateLayerManager(PLayerTransactionChild* aShadowManager);
 
   NS_IMETHOD_(void) SetInputContext(const InputContext& aContext,
                                     const InputContextAction& aAction) override;
@@ -197,11 +199,15 @@ public:
 
   virtual bool NeedsPaint() override;
 
+  // Paint the widget immediately if any paints are queued up.
+  void PaintNowIfNeeded();
+
   virtual TabChild* GetOwningTabChild() override { return mTabChild; }
 
-  void UpdateBackingScaleCache(float aDpi, double aScale)
+  void UpdateBackingScaleCache(float aDpi, int32_t aRounding, double aScale)
   {
     mDPI = aDpi;
+    mRounding = aRounding;
     mDefaultScale = aScale;
   }
 
@@ -213,13 +219,15 @@ public:
   // Get the screen position of the application window.
   nsIntPoint GetWindowPosition();
 
-  NS_IMETHOD GetScreenBounds(LayoutDeviceIntRect& aRect) override;
+  virtual LayoutDeviceIntRect GetScreenBounds() override;
 
   NS_IMETHOD StartPluginIME(const mozilla::WidgetKeyboardEvent& aKeyboardEvent,
                             int32_t aPanelX, int32_t aPanelY,
                             nsString& aCommitted) override;
 
-  NS_IMETHOD SetPluginFocused(bool& aFocused) override;
+  virtual void SetPluginFocused(bool& aFocused) override;
+  virtual void DefaultProcOfPluginEvent(
+                 const mozilla::WidgetPluginEvent& aEvent) override;
 
   virtual nsresult SynthesizeNativeKeyEvent(int32_t aNativeKeyboardLayout,
                                             int32_t aNativeKeyCode,
@@ -243,17 +251,40 @@ public:
                                                     nsIObserver* aObserver) override;
   virtual nsresult SynthesizeNativeTouchPoint(uint32_t aPointerId,
                                               TouchPointerState aPointerState,
-                                              ScreenIntPoint aPointerScreenPoint,
+                                              LayoutDeviceIntPoint aPoint,
                                               double aPointerPressure,
                                               uint32_t aPointerOrientation,
                                               nsIObserver* aObserver) override;
-  virtual nsresult SynthesizeNativeTouchTap(ScreenIntPoint aPointerScreenPoint,
+  virtual nsresult SynthesizeNativeTouchTap(LayoutDeviceIntPoint aPoint,
                                             bool aLongTap,
                                             nsIObserver* aObserver) override;
   virtual nsresult ClearNativeTouchSequence(nsIObserver* aObserver) override;
   virtual uint32_t GetMaxTouchPoints() const override;
 
   virtual void StartAsyncScrollbarDrag(const AsyncDragMetrics& aDragMetrics) override;
+
+  virtual void SetCandidateWindowForPlugin(
+                 const CandidateWindowPosition& aPosition) override;
+
+  virtual void ZoomToRect(const uint32_t& aPresShellId,
+                          const FrameMetrics::ViewID& aViewId,
+                          const CSSRect& aRect,
+                          const uint32_t& aFlags) override;
+
+  virtual bool HasPendingInputEvent() override;
+
+  void HandledWindowedPluginKeyEvent(const NativeEventData& aKeyEventData,
+                                     bool aIsConsumed);
+  virtual nsresult OnWindowedPluginKeyEvent(
+                     const NativeEventData& aKeyEventData,
+                     nsIKeyEventInPluginCallback* aCallback) override;
+
+  virtual void LookUpDictionary(
+                 const nsAString& aText,
+                 const nsTArray<mozilla::FontRange>& aFontRangeArray,
+                 const bool aIsVertical,
+                 const LayoutDeviceIntPoint& aPoint) override;
+
 protected:
   virtual nsresult NotifyIMEInternal(
                      const IMENotification& aIMENotification) override;
@@ -280,7 +311,7 @@ private:
 
   nsIWidgetListener* GetCurrentWidgetListener();
 
-  class PaintTask : public nsRunnable {
+  class PaintTask : public Runnable {
   public:
     NS_DECL_NSIRUNNABLE
     explicit PaintTask(PuppetWidget* widget) : mWidget(widget) {}
@@ -330,6 +361,7 @@ private:
 
   // The DPI of the screen corresponding to this widget
   float mDPI;
+  int32_t mRounding;
   double mDefaultScale;
 
   // Precomputed answers for ExecuteNativeKeyBinding
@@ -339,6 +371,8 @@ private:
 
   nsCOMPtr<imgIContainer> mCustomCursor;
   uint32_t mCursorHotspotX, mCursorHotspotY;
+
+  nsCOMArray<nsIKeyEventInPluginCallback> mKeyEventInPluginCallbacks;
 
 protected:
   bool mEnabled;

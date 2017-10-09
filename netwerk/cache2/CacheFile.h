@@ -74,16 +74,24 @@ public:
   NS_IMETHOD OnFileDoomed(CacheFileHandle *aHandle, nsresult aResult) override;
   NS_IMETHOD OnEOFSet(CacheFileHandle *aHandle, nsresult aResult) override;
   NS_IMETHOD OnFileRenamed(CacheFileHandle *aHandle, nsresult aResult) override;
+  virtual bool IsKilled() override;
 
   NS_IMETHOD OnMetadataRead(nsresult aResult) override;
   NS_IMETHOD OnMetadataWritten(nsresult aResult) override;
 
-  NS_IMETHOD OpenInputStream(nsIInputStream **_retval);
+  NS_IMETHOD OpenInputStream(nsICacheEntry *aCacheEntryHandle, nsIInputStream **_retval);
+  NS_IMETHOD OpenAlternativeInputStream(nsICacheEntry *aCacheEntryHandle,
+                                        const char *aAltDataType, nsIInputStream **_retval);
   NS_IMETHOD OpenOutputStream(CacheOutputCloseListener *aCloseListener, nsIOutputStream **_retval);
+  NS_IMETHOD OpenAlternativeOutputStream(CacheOutputCloseListener *aCloseListener,
+                                         const char *aAltDataType, nsIOutputStream **_retval);
   NS_IMETHOD SetMemoryOnly();
   NS_IMETHOD Doom(CacheFileListener *aCallback);
 
+  void Kill() { mKill = true; }
   nsresult   ThrowMemoryCachedData();
+
+  nsresult GetAltDataSize(int64_t *aSize);
 
   // metadata forwarders
   nsresult GetElement(const char *aKey, char **_retval);
@@ -97,6 +105,7 @@ public:
   nsresult GetLastModified(uint32_t *_retval);
   nsresult GetLastFetched(uint32_t *_retval);
   nsresult GetFetchCount(uint32_t *_retval);
+  nsresult GetDiskStorageSizeInKB(uint32_t *aDiskStorageSize);
   // Called by upper layers to indicated the entry has been fetched,
   // i.e. delivered to the consumer.
   nsresult OnFetched();
@@ -134,9 +143,6 @@ private:
 
   nsresult DoomLocked(CacheFileListener *aCallback);
 
-  nsresult GetChunk(uint32_t aIndex, ECallerType aCaller,
-                    CacheFileChunkListener *aCallback,
-                    CacheFileChunk **_retval);
   nsresult GetChunkLocked(uint32_t aIndex, ECallerType aCaller,
                           CacheFileChunkListener *aCallback,
                           CacheFileChunk **_retval);
@@ -148,7 +154,13 @@ private:
   nsresult DeactivateChunk(CacheFileChunk *aChunk);
   void     RemoveChunkInternal(CacheFileChunk *aChunk, bool aCacheChunk);
 
-  int64_t  BytesFromChunk(uint32_t aIndex);
+  bool     OutputStreamExists(bool aAlternativeData);
+  // Returns number of bytes that are available and can be read by input stream
+  // without waiting for the data. The amount is counted from the start of
+  // aIndex chunk and it is guaranteed that this data won't be released by
+  // CleanUpCachedChunks().
+  int64_t  BytesFromChunk(uint32_t aIndex, bool aAlternativeData);
+  nsresult Truncate(int64_t aOffset);
 
   nsresult RemoveInput(CacheFileInputStream *aInput, nsresult aStatus);
   nsresult RemoveOutput(CacheFileOutputStream *aOutput, nsresult aStatus);
@@ -191,17 +203,31 @@ private:
   bool           mPreloadWithoutInputStreams;
   uint32_t       mPreloadChunkCount;
   nsresult       mStatus;
-  int64_t        mDataSize;
+  int64_t        mDataSize; // Size of the whole data including eventual
+                            // alternative data represenation.
+  int64_t        mAltDataOffset; // If there is alternative data present, it
+                                 // contains size of the original data, i.e.
+                                 // offset where alternative data starts.
+                                 // Otherwise it is -1.
   nsCString      mKey;
 
   RefPtr<CacheFileHandle>      mHandle;
   RefPtr<CacheFileMetadata>    mMetadata;
   nsCOMPtr<CacheFileListener>  mListener;
   nsCOMPtr<CacheFileIOListener>   mDoomAfterOpenListener;
+  Atomic<bool, Relaxed>        mKill;
 
   nsRefPtrHashtable<nsUint32HashKey, CacheFileChunk> mChunks;
   nsClassHashtable<nsUint32HashKey, ChunkListeners> mChunkListeners;
   nsRefPtrHashtable<nsUint32HashKey, CacheFileChunk> mCachedChunks;
+  // We can truncate data only if there is no input/output stream beyond the
+  // truncate position, so only unused chunks can be thrown away. But it can
+  // happen that we need to throw away a chunk that is still in mChunks (i.e.
+  // an active chunk) because deactivation happens with a small delay. We cannot
+  // delete such chunk immediately but we need to ensure that such chunk won't
+  // be returned by GetChunkLocked, so we move this chunk into mDiscardedChunks
+  // and mark it as discarded.
+  nsTArray<RefPtr<CacheFileChunk> > mDiscardedChunks;
 
   nsTArray<CacheFileInputStream*> mInputs;
   CacheFileOutputStream          *mOutput;

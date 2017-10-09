@@ -59,7 +59,7 @@
         iframe.src = "about:blank";
         document.body.removeChild(iframe);
         iframe = null;
-        SpecialPowers.exactGC(window, function() {
+        SpecialPowers.exactGC(function() {
           resolve(message.data);
         });
       };
@@ -75,7 +75,6 @@
 
   SpecialPowers.pushPrefEnv({"set": [
     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
-    ["dom.serviceWorkers.interception.enabled", true],
     ["dom.serviceWorkers.enabled", true],
     ["dom.serviceWorkers.testing.enabled", true],
   ]}, function() {

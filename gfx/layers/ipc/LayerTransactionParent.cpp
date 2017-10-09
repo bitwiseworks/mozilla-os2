@@ -13,6 +13,7 @@
 #include "Layers.h"                     // for Layer, ContainerLayer, etc
 #include "ShadowLayerParent.h"          // for ShadowLayerParent
 #include "CompositableTransactionParent.h"  // for EditReplyVector
+#include "CompositorBridgeParent.h"
 #include "gfxPrefs.h"
 #include "mozilla/gfx/BasePoint3D.h"    // for BasePoint3D
 #include "mozilla/layers/CanvasLayerComposite.h"
@@ -29,9 +30,8 @@
 #include "mozilla/layers/PLayerParent.h"  // for PLayerParent
 #include "mozilla/layers/TextureHostOGL.h"  // for TextureHostOGL
 #include "mozilla/layers/PaintedLayerComposite.h"
-#include "mozilla/layers/ShadowLayersManager.h" // for ShadowLayersManager
 #include "mozilla/mozalloc.h"           // for operator delete, etc
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsCoord.h"                    // for NSAppUnitsToFloatPixels
 #include "nsDebug.h"                    // for NS_RUNTIMEABORT
 #include "nsDeviceContext.h"            // for AppUnitsPerCSSPixel
@@ -40,6 +40,7 @@
 #include "nsMathUtils.h"                // for NS_round
 #include "nsPoint.h"                    // for nsPoint
 #include "nsTArray.h"                   // for nsTArray, nsTArray_Impl, etc
+#include "TreeTraversal.h"              // for ForEachNode
 #include "GeckoProfiler.h"
 #include "mozilla/layers/TextureHost.h"
 #include "mozilla/layers/AsyncCompositionManager.h"
@@ -49,13 +50,7 @@ typedef std::vector<mozilla::layers::EditReply> EditReplyVector;
 using mozilla::layout::RenderFrameParent;
 
 namespace mozilla {
-namespace gfx {
-class VRHMDInfo;
-} // namespace gfx
-
 namespace layers {
-
-class PGrallocBufferParent;
 
 //--------------------------------------------------
 // Convenience accessors
@@ -147,21 +142,36 @@ ShadowChild(const OpRaiseToTopChild& op)
 //--------------------------------------------------
 // LayerTransactionParent
 LayerTransactionParent::LayerTransactionParent(LayerManagerComposite* aManager,
-                                               ShadowLayersManager* aLayersManager,
+                                               CompositorBridgeParentBase* aBridge,
                                                uint64_t aId)
   : mLayerManager(aManager)
-  , mShadowLayersManager(aLayersManager)
+  , mCompositorBridge(aBridge)
   , mId(aId)
+  , mChildEpoch(0)
+  , mParentEpoch(0)
   , mPendingTransaction(0)
+  , mPendingCompositorUpdates(0)
   , mDestroyed(false)
   , mIPCOpen(false)
 {
-  MOZ_COUNT_CTOR(LayerTransactionParent);
 }
 
 LayerTransactionParent::~LayerTransactionParent()
 {
-  MOZ_COUNT_DTOR(LayerTransactionParent);
+}
+
+void
+LayerTransactionParent::SetLayerManager(LayerManagerComposite* aLayerManager)
+{
+  mLayerManager = aLayerManager;
+  const ManagedContainer<PLayerParent>& layers = ManagedPLayerParent();
+  for (auto iter = layers.ConstIter(); !iter.Done(); iter.Next()) {
+    ShadowLayerParent* slp =
+      static_cast<ShadowLayerParent*>(iter.Get()->GetKey());
+    if (slp->AsLayer() && slp->AsLayer()->AsLayerComposite()) {
+      slp->AsLayer()->AsLayerComposite()->SetLayerManager(aLayerManager);
+    }
+  }
 }
 
 bool
@@ -180,17 +190,13 @@ LayerTransactionParent::Destroy()
       static_cast<ShadowLayerParent*>(iter.Get()->GetKey());
     slp->Destroy();
   }
-  InfallibleTArray<PTextureParent*> textures;
-  ManagedPTextureParent(textures);
-  for (unsigned int i = 0; i < textures.Length(); ++i) {
-    RefPtr<TextureHost> tex = TextureHost::AsTextureHost(textures[i]);
-    tex->DeallocateDeviceData();
-  }
   mDestroyed = true;
 }
 
 bool
 LayerTransactionParent::RecvUpdateNoSwap(InfallibleTArray<Edit>&& cset,
+                                         InfallibleTArray<OpDestroy>&& aToDestroy,
+                                         const uint64_t& aFwdTransactionId,
                                          const uint64_t& aTransactionId,
                                          const TargetConfig& targetConfig,
                                          PluginsArray&& aPlugins,
@@ -201,7 +207,8 @@ LayerTransactionParent::RecvUpdateNoSwap(InfallibleTArray<Edit>&& cset,
                                          const mozilla::TimeStamp& aTransactionStart,
                                          const int32_t& aPaintSyncId)
 {
-  return RecvUpdate(Move(cset), aTransactionId, targetConfig, Move(aPlugins), isFirstPaint,
+  return RecvUpdate(Move(cset), Move(aToDestroy), aFwdTransactionId,
+      aTransactionId, targetConfig, Move(aPlugins), isFirstPaint,
       scheduleComposite, paintSequenceNumber, isRepeatTransaction,
       aTransactionStart, aPaintSyncId, nullptr);
 }
@@ -209,20 +216,42 @@ LayerTransactionParent::RecvUpdateNoSwap(InfallibleTArray<Edit>&& cset,
 class MOZ_STACK_CLASS AutoLayerTransactionParentAsyncMessageSender
 {
 public:
-  explicit AutoLayerTransactionParentAsyncMessageSender(LayerTransactionParent* aLayerTransaction)
-    : mLayerTransaction(aLayerTransaction) {}
+  explicit AutoLayerTransactionParentAsyncMessageSender(LayerTransactionParent* aLayerTransaction,
+                                                        InfallibleTArray<OpDestroy>* aDestroyActors = nullptr)
+    : mLayerTransaction(aLayerTransaction)
+    , mActorsToDestroy(aDestroyActors)
+  {
+    mLayerTransaction->SetAboutToSendAsyncMessages();
+  }
 
   ~AutoLayerTransactionParentAsyncMessageSender()
   {
     mLayerTransaction->SendPendingAsyncMessages();
-    ImageBridgeParent::SendPendingAsyncMessages(mLayerTransaction->GetChildProcessId());
+    if (mActorsToDestroy) {
+      // Destroy the actors after sending the async messages because the latter may contain
+      // references to some actors.
+      for (const auto& op : *mActorsToDestroy) {
+        mLayerTransaction->DestroyActor(op);
+      }
+    }
   }
 private:
   LayerTransactionParent* mLayerTransaction;
+  InfallibleTArray<OpDestroy>* mActorsToDestroy;
 };
 
 bool
+LayerTransactionParent::RecvPaintTime(const uint64_t& aTransactionId,
+                                      const TimeDuration& aPaintTime)
+{
+  mCompositorBridge->UpdatePaintTime(this, aPaintTime);
+  return true;
+}
+
+bool
 LayerTransactionParent::RecvUpdate(InfallibleTArray<Edit>&& cset,
+                                   InfallibleTArray<OpDestroy>&& aToDestroy,
+                                   const uint64_t& aFwdTransactionId,
                                    const uint64_t& aTransactionId,
                                    const TargetConfig& targetConfig,
                                    PluginsArray&& aPlugins,
@@ -244,17 +273,27 @@ LayerTransactionParent::RecvUpdate(InfallibleTArray<Edit>&& cset,
 
   MOZ_LAYERS_LOG(("[ParentSide] received txn with %d edits", cset.Length()));
 
+  UpdateFwdTransactionId(aFwdTransactionId);
+
   if (mDestroyed || !layer_manager() || layer_manager()->IsDestroyed()) {
+    for (const auto& op : aToDestroy) {
+      DestroyActor(op);
+    }
     return true;
   }
 
+  // This ensures that destroy operations are always processed. It is not safe
+  // to early-return from RecvUpdate without doing so.
+  AutoLayerTransactionParentAsyncMessageSender autoAsyncMessageSender(this, &aToDestroy);
   EditReplyVector replyv;
-  AutoLayerTransactionParentAsyncMessageSender autoAsyncMessageSender(this);
 
   {
-    AutoResolveRefLayers resolve(mShadowLayersManager->GetCompositionManager(this));
+    AutoResolveRefLayers resolve(mCompositorBridge->GetCompositionManager(this));
     layer_manager()->BeginTransaction();
   }
+
+  // not all edits require an update to the hit testing tree
+  bool updateHitTestingTree = false;
 
   for (EditArray::index_type i = 0; i < cset.Length(); ++i) {
     const Edit& edit = cset[i];
@@ -267,6 +306,8 @@ LayerTransactionParent::RecvUpdate(InfallibleTArray<Edit>&& cset,
       RefPtr<PaintedLayerComposite> layer =
         layer_manager()->CreatePaintedLayerComposite();
       AsLayerComposite(edit.get_OpCreatePaintedLayer())->Bind(layer);
+
+      updateHitTestingTree = true;
       break;
     }
     case Edit::TOpCreateContainerLayer: {
@@ -274,6 +315,8 @@ LayerTransactionParent::RecvUpdate(InfallibleTArray<Edit>&& cset,
 
       RefPtr<ContainerLayer> layer = layer_manager()->CreateContainerLayerComposite();
       AsLayerComposite(edit.get_OpCreateContainerLayer())->Bind(layer);
+
+      updateHitTestingTree = true;
       break;
     }
     case Edit::TOpCreateImageLayer: {
@@ -282,6 +325,8 @@ LayerTransactionParent::RecvUpdate(InfallibleTArray<Edit>&& cset,
       RefPtr<ImageLayerComposite> layer =
         layer_manager()->CreateImageLayerComposite();
       AsLayerComposite(edit.get_OpCreateImageLayer())->Bind(layer);
+
+      updateHitTestingTree = true;
       break;
     }
     case Edit::TOpCreateColorLayer: {
@@ -289,6 +334,8 @@ LayerTransactionParent::RecvUpdate(InfallibleTArray<Edit>&& cset,
 
       RefPtr<ColorLayerComposite> layer = layer_manager()->CreateColorLayerComposite();
       AsLayerComposite(edit.get_OpCreateColorLayer())->Bind(layer);
+
+      updateHitTestingTree = true;
       break;
     }
     case Edit::TOpCreateCanvasLayer: {
@@ -297,6 +344,8 @@ LayerTransactionParent::RecvUpdate(InfallibleTArray<Edit>&& cset,
       RefPtr<CanvasLayerComposite> layer =
         layer_manager()->CreateCanvasLayerComposite();
       AsLayerComposite(edit.get_OpCreateCanvasLayer())->Bind(layer);
+
+      updateHitTestingTree = true;
       break;
     }
     case Edit::TOpCreateRefLayer: {
@@ -305,6 +354,8 @@ LayerTransactionParent::RecvUpdate(InfallibleTArray<Edit>&& cset,
       RefPtr<RefLayerComposite> layer =
         layer_manager()->CreateRefLayerComposite();
       AsLayerComposite(edit.get_OpCreateRefLayer())->Bind(layer);
+
+      updateHitTestingTree = true;
       break;
     }
 
@@ -327,14 +378,15 @@ LayerTransactionParent::RecvUpdate(InfallibleTArray<Edit>&& cset,
       layer->SetContentFlags(common.contentFlags());
       layer->SetOpacity(common.opacity());
       layer->SetClipRect(common.useClipRect() ? Some(common.clipRect()) : Nothing());
+      layer->SetScrolledClip(common.scrolledClip());
       layer->SetBaseTransform(common.transform().value());
+      layer->SetTransformIsPerspective(common.transformIsPerspective());
       layer->SetPostScale(common.postXScale(), common.postYScale());
       layer->SetIsFixedPosition(common.isFixedPosition());
       if (common.isFixedPosition()) {
         layer->SetFixedPositionData(common.fixedPositionScrollContainerId(),
                                     common.fixedPositionAnchor(),
-                                    common.fixedPositionSides(),
-                                    common.isClipFixed());
+                                    common.fixedPositionSides());
       }
       if (common.isStickyPosition()) {
         layer->SetStickyPositionData(common.stickyScrollContainerId(),
@@ -344,6 +396,9 @@ LayerTransactionParent::RecvUpdate(InfallibleTArray<Edit>&& cset,
       layer->SetScrollbarData(common.scrollbarTargetContainerId(),
         static_cast<Layer::ScrollDirection>(common.scrollbarDirection()),
         common.scrollbarThumbRatio());
+      if (common.isScrollbarContainer()) {
+        layer->SetIsScrollbarContainer();
+      }
       layer->SetMixBlendMode((gfx::CompositionOp)common.mixBlendMode());
       layer->SetForceIsolatedGroup(common.forceIsolatedGroup());
       if (PLayerParent* maskLayer = common.maskLayerParent()) {
@@ -352,7 +407,7 @@ LayerTransactionParent::RecvUpdate(InfallibleTArray<Edit>&& cset,
         layer->SetMaskLayer(nullptr);
       }
       layer->SetAnimations(common.animations());
-      layer->SetFrameMetrics(common.metrics());
+      layer->SetScrollMetadata(common.scrollMetadata());
       layer->SetDisplayListLog(common.displayListLog().get());
 
       // The updated invalid region is added to the existing one, since we can
@@ -401,14 +456,6 @@ LayerTransactionParent::RecvUpdate(InfallibleTArray<Edit>&& cset,
                                              attrs.presShellResolution());
         containerLayer->SetEventRegionsOverride(attrs.eventRegionsOverride());
 
-        if (attrs.hmdInfo()) {
-          if (!IsSameProcess()) {
-            NS_WARNING("VR layers currently not supported with cross-process compositing");
-            return false;
-          }
-          containerLayer->SetVRHMDInfo(reinterpret_cast<mozilla::gfx::VRHMDInfo*>(attrs.hmdInfo()));
-        }
-
         break;
       }
       case Specific::TColorLayerAttributes: {
@@ -429,7 +476,7 @@ LayerTransactionParent::RecvUpdate(InfallibleTArray<Edit>&& cset,
         if (!canvasLayer) {
           return false;
         }
-        canvasLayer->SetFilter(specific.get_CanvasLayerAttributes().filter());
+        canvasLayer->SetSamplingFilter(specific.get_CanvasLayerAttributes().samplingFilter());
         canvasLayer->SetBounds(specific.get_CanvasLayerAttributes().bounds());
         break;
       }
@@ -452,13 +499,15 @@ LayerTransactionParent::RecvUpdate(InfallibleTArray<Edit>&& cset,
           return false;
         }
         const ImageLayerAttributes& attrs = specific.get_ImageLayerAttributes();
-        imageLayer->SetFilter(attrs.filter());
+        imageLayer->SetSamplingFilter(attrs.samplingFilter());
         imageLayer->SetScaleToSize(attrs.scaleToSize(), attrs.scaleMode());
         break;
       }
       default:
         NS_RUNTIMEABORT("not reached");
       }
+
+      updateHitTestingTree = true;
       break;
     }
     case Edit::TOpSetDiagnosticTypes: {
@@ -483,6 +532,8 @@ LayerTransactionParent::RecvUpdate(InfallibleTArray<Edit>&& cset,
         return false;
       }
       mRoot = newRoot;
+
+      updateHitTestingTree = true;
       break;
     }
     case Edit::TOpInsertAfter: {
@@ -499,6 +550,8 @@ LayerTransactionParent::RecvUpdate(InfallibleTArray<Edit>&& cset,
       {
         return false;
       }
+
+      updateHitTestingTree = true;
       break;
     }
     case Edit::TOpPrependChild: {
@@ -515,6 +568,8 @@ LayerTransactionParent::RecvUpdate(InfallibleTArray<Edit>&& cset,
       {
         return false;
       }
+
+      updateHitTestingTree = true;
       break;
     }
     case Edit::TOpRemoveChild: {
@@ -531,6 +586,8 @@ LayerTransactionParent::RecvUpdate(InfallibleTArray<Edit>&& cset,
       {
         return false;
       }
+
+      updateHitTestingTree = true;
       break;
     }
     case Edit::TOpRepositionChild: {
@@ -547,6 +604,8 @@ LayerTransactionParent::RecvUpdate(InfallibleTArray<Edit>&& cset,
       {
         return false;
       }
+
+      updateHitTestingTree = true;
       break;
     }
     case Edit::TOpRaiseToTopChild: {
@@ -563,6 +622,8 @@ LayerTransactionParent::RecvUpdate(InfallibleTArray<Edit>&& cset,
       {
         return false;
       }
+
+      updateHitTestingTree = true;
       break;
     }
     case Edit::TCompositableOperation: {
@@ -575,6 +636,11 @@ LayerTransactionParent::RecvUpdate(InfallibleTArray<Edit>&& cset,
     case Edit::TOpAttachCompositable: {
       const OpAttachCompositable& op = edit.get_OpAttachCompositable();
       CompositableHost* host = CompositableHost::FromIPDLActor(op.compositableParent());
+      if (mPendingCompositorUpdates) {
+        // Do not attach compositables from old layer trees. Return true since
+        // content cannot handle errors.
+        return true;
+      }
       if (!Attach(cast(op.layerParent()), host, false)) {
         return false;
       }
@@ -588,6 +654,11 @@ LayerTransactionParent::RecvUpdate(InfallibleTArray<Edit>&& cset,
         NS_ERROR("CompositableParent not found in the map");
         return false;
       }
+      if (mPendingCompositorUpdates) {
+        // Do not attach compositables from old layer trees. Return true since
+        // content cannot handle errors.
+        return true;
+      }
       CompositableHost* host = CompositableHost::FromIPDLActor(compositableParent);
       if (!Attach(cast(op.layerParent()), host, true)) {
         return false;
@@ -600,13 +671,13 @@ LayerTransactionParent::RecvUpdate(InfallibleTArray<Edit>&& cset,
     }
   }
 
-  mShadowLayersManager->ShadowLayersUpdated(this, aTransactionId, targetConfig,
-                                            aPlugins, isFirstPaint, scheduleComposite,
-                                            paintSequenceNumber, isRepeatTransaction,
-                                            aPaintSyncId);
+  mCompositorBridge->ShadowLayersUpdated(this, aTransactionId, targetConfig,
+                                         aPlugins, isFirstPaint, scheduleComposite,
+                                         paintSequenceNumber, isRepeatTransaction,
+                                         aPaintSyncId, updateHitTestingTree);
 
   {
-    AutoResolveRefLayers resolve(mShadowLayersManager->GetCompositionManager(this));
+    AutoResolveRefLayers resolve(mCompositorBridge->GetCompositionManager(this));
     layer_manager()->EndTransaction(TimeStamp(), LayerManager::END_NO_IMMEDIATE_REDRAW);
   }
 
@@ -655,22 +726,42 @@ LayerTransactionParent::RecvUpdate(InfallibleTArray<Edit>&& cset,
 }
 
 bool
+LayerTransactionParent::RecvSetLayerObserverEpoch(const uint64_t& aLayerObserverEpoch)
+{
+  mChildEpoch = aLayerObserverEpoch;
+  return true;
+}
+
+bool
+LayerTransactionParent::ShouldParentObserveEpoch()
+{
+  if (mParentEpoch == mChildEpoch) {
+    return false;
+  }
+
+  mParentEpoch = mChildEpoch;
+  return true;
+}
+
+bool
 LayerTransactionParent::RecvSetTestSampleTime(const TimeStamp& aTime)
 {
-  return mShadowLayersManager->SetTestSampleTime(this, aTime);
+  return mCompositorBridge->SetTestSampleTime(this, aTime);
 }
 
 bool
 LayerTransactionParent::RecvLeaveTestMode()
 {
-  mShadowLayersManager->LeaveTestMode(this);
+  mCompositorBridge->LeaveTestMode(this);
   return true;
 }
 
 bool
-LayerTransactionParent::RecvGetOpacity(PLayerParent* aParent,
-                                       float* aOpacity)
+LayerTransactionParent::RecvGetAnimationOpacity(PLayerParent* aParent,
+                                                float* aOpacity,
+                                                bool* aHasAnimationOpacity)
 {
+  *aHasAnimationOpacity = false;
   if (mDestroyed || !layer_manager() || layer_manager()->IsDestroyed()) {
     return false;
   }
@@ -680,9 +771,14 @@ LayerTransactionParent::RecvGetOpacity(PLayerParent* aParent,
     return false;
   }
 
-  mShadowLayersManager->ApplyAsyncProperties(this);
+  mCompositorBridge->ApplyAsyncProperties(this);
+
+  if (!layer->AsLayerComposite()->GetShadowOpacitySetByAnimation()) {
+    return true;
+  }
 
   *aOpacity = layer->GetLocalOpacity();
+  *aHasAnimationOpacity = true;
   return true;
 }
 
@@ -701,9 +797,9 @@ LayerTransactionParent::RecvGetAnimationTransform(PLayerParent* aParent,
 
   // Make sure we apply the latest animation style or else we can end up with
   // a race between when we temporarily clear the animation transform (in
-  // CompositorParent::SetShadowProperties) and when animation recalculates
+  // CompositorBridgeParent::SetShadowProperties) and when animation recalculates
   // the value.
-  mShadowLayersManager->ApplyAsyncProperties(this);
+  mCompositorBridge->ApplyAsyncProperties(this);
 
   // This method is specific to transforms applied by animation.
   // This is because this method uses the information stored with an animation
@@ -720,7 +816,7 @@ LayerTransactionParent::RecvGetAnimationTransform(PLayerParent* aParent,
   // from the shadow transform by undoing the translations in
   // AsyncCompositionManager::SampleValue.
 
-  Matrix4x4 transform = layer->AsLayerComposite()->GetShadowTransform();
+  Matrix4x4 transform = layer->AsLayerComposite()->GetShadowBaseTransform();
   if (ContainerLayer* c = layer->AsContainerLayer()) {
     // Undo the scale transform applied by AsyncCompositionManager::SampleValue
     transform.PostScale(1.0f/c->GetInheritedXScale(),
@@ -743,14 +839,16 @@ LayerTransactionParent::RecvGetAnimationTransform(PLayerParent* aParent,
     }
   }
 
-  // Undo the translation to the origin of the reference frame applied by
-  // AsyncCompositionManager::SampleValue
-  transform.PreTranslate(-scaledOrigin.x, -scaledOrigin.y, -scaledOrigin.z);
+  // If our parent isn't a perspective layer, then the offset into reference
+  // frame coordinates will have been applied to us. Add an inverse translation
+  // to cancel it out.
+  if (!layer->GetParent() || !layer->GetParent()->GetTransformIsPerspective()) {
+    transform.PostTranslate(-scaledOrigin.x, -scaledOrigin.y, -scaledOrigin.z);
+  }
 
   // Undo the rebasing applied by
   // nsDisplayTransform::GetResultingTransformMatrixInternal
-  Point3D basis = -scaledOrigin - transformOrigin;
-  transform.ChangeBasis(basis.x, basis.y, basis.z);
+  transform.ChangeBasis(-transformOrigin);
 
   // Convert to CSS pixels (this undoes the operations performed by
   // nsStyleTransformMatrix::ProcessTranslatePart which is called from
@@ -768,21 +866,20 @@ LayerTransactionParent::RecvGetAnimationTransform(PLayerParent* aParent,
 static AsyncPanZoomController*
 GetAPZCForViewID(Layer* aLayer, FrameMetrics::ViewID aScrollID)
 {
-  for (uint32_t i = 0; i < aLayer->GetFrameMetricsCount(); i++) {
-    if (aLayer->GetFrameMetrics(i).GetScrollId() == aScrollID) {
-      return aLayer->GetAsyncPanZoomController(i);
-    }
-  }
-  ContainerLayer* container = aLayer->AsContainerLayer();
-  if (container) {
-    for (Layer* l = container->GetFirstChild(); l; l = l->GetNextSibling()) {
-      AsyncPanZoomController* c = GetAPZCForViewID(l, aScrollID);
-      if (c) {
-        return c;
-      }
-    }
-  }
-  return nullptr;
+  AsyncPanZoomController* resultApzc = nullptr;
+  ForEachNode<ForwardIterator>(
+      aLayer,
+      [aScrollID, &resultApzc] (Layer* layer)
+      {
+        for (uint32_t i = 0; i < layer->GetScrollMetadataCount(); i++) {
+          if (layer->GetFrameMetrics(i).GetScrollId() == aScrollID) {
+            resultApzc = layer->GetAsyncPanZoomController(i);
+            return TraversalFlag::Abort;
+          }
+        }
+        return TraversalFlag::Continue;
+      });
+  return resultApzc;
 }
 
 bool
@@ -820,14 +917,14 @@ LayerTransactionParent::RecvSetAsyncZoom(const FrameMetrics::ViewID& aScrollID,
 bool
 LayerTransactionParent::RecvFlushApzRepaints()
 {
-  mShadowLayersManager->FlushApzRepaints(this);
+  mCompositorBridge->FlushApzRepaints(this);
   return true;
 }
 
 bool
 LayerTransactionParent::RecvGetAPZTestData(APZTestData* aOutData)
 {
-  mShadowLayersManager->GetAPZTestData(this, aOutData);
+  mCompositorBridge->GetAPZTestData(this, aOutData);
   return true;
 }
 
@@ -848,7 +945,7 @@ bool
 LayerTransactionParent::RecvSetConfirmedTargetAPZC(const uint64_t& aBlockId,
                                                    nsTArray<ScrollableLayerGuid>&& aTargets)
 {
-  mShadowLayersManager->SetConfirmedTargetAPZC(this, aBlockId, aTargets);
+  mCompositorBridge->SetConfirmedTargetAPZC(this, aBlockId, aTargets);
   return true;
 }
 
@@ -895,14 +992,14 @@ LayerTransactionParent::RecvClearCachedResources()
     // of resources to exactly that subtree, so we specify it here.
     mLayerManager->ClearCachedResources(mRoot);
   }
-  mShadowLayersManager->NotifyClearCachedResources(this);
+  mCompositorBridge->NotifyClearCachedResources(this);
   return true;
 }
 
 bool
 LayerTransactionParent::RecvForceComposite()
 {
-  mShadowLayersManager->ForceComposite(this);
+  mCompositorBridge->ForceComposite(this);
   return true;
 }
 
@@ -929,65 +1026,6 @@ bool
 LayerTransactionParent::DeallocPCompositableParent(PCompositableParent* aActor)
 {
   return CompositableHost::DestroyIPDLActor(aActor);
-}
-
-PTextureParent*
-LayerTransactionParent::AllocPTextureParent(const SurfaceDescriptor& aSharedData,
-                                            const LayersBackend& aLayersBackend,
-                                            const TextureFlags& aFlags)
-{
-  MOZ_ASSERT(aLayersBackend == mLayerManager->GetCompositor()->GetBackendType());
-  return TextureHost::CreateIPDLActor(this, aSharedData, aLayersBackend, aFlags);
-}
-
-bool
-LayerTransactionParent::DeallocPTextureParent(PTextureParent* actor)
-{
-  return TextureHost::DestroyIPDLActor(actor);
-}
-
-bool
-LayerTransactionParent::RecvChildAsyncMessages(InfallibleTArray<AsyncChildMessageData>&& aMessages)
-{
-  AutoLayerTransactionParentAsyncMessageSender autoAsyncMessageSender(this);
-
-  for (AsyncChildMessageArray::index_type i = 0; i < aMessages.Length(); ++i) {
-    const AsyncChildMessageData& message = aMessages[i];
-
-    switch (message.type()) {
-      case AsyncChildMessageData::TOpRemoveTextureAsync: {
-        const OpRemoveTextureAsync& op = message.get_OpRemoveTextureAsync();
-        CompositableHost* compositable = CompositableHost::FromIPDLActor(op.compositableParent());
-        RefPtr<TextureHost> tex = TextureHost::AsTextureHost(op.textureParent());
-
-        MOZ_ASSERT(tex.get());
-        compositable->RemoveTextureHost(tex);
-
-        MOZ_ASSERT(ImageBridgeParent::GetInstance(GetChildProcessId()));
-        if (ImageBridgeParent::GetInstance(GetChildProcessId())) {
-          // send FenceHandle if present via ImageBridge.
-          ImageBridgeParent::AppendDeliverFenceMessage(
-            GetChildProcessId(),
-            op.holderId(),
-            op.transactionId(),
-            op.textureParent(),
-            compositable);
-          // Send message back via PImageBridge.
-          ImageBridgeParent::ReplyRemoveTexture(
-            GetChildProcessId(),
-            OpReplyRemoveTexture(op.holderId(),
-                                 op.transactionId()));
-        } else {
-          NS_ERROR("ImageBridgeParent should exist");
-        }
-        break;
-      }
-      default:
-        NS_ERROR("unknown AsyncChildMessageData type");
-        return false;
-    }
-  }
-  return true;
 }
 
 void
@@ -1033,43 +1071,27 @@ bool LayerTransactionParent::IsSameProcess() const
 }
 
 void
-LayerTransactionParent::SendFenceHandleIfPresent(PTextureParent* aTexture,
-                                                 CompositableHost* aCompositableHost)
-{
-  RefPtr<TextureHost> texture = TextureHost::AsTextureHost(aTexture);
-  if (!texture) {
-    return;
-  }
-
-  // Send a ReleaseFence of CompositorOGL.
-  if (aCompositableHost && aCompositableHost->GetCompositor()) {
-    FenceHandle fence = aCompositableHost->GetCompositor()->GetReleaseFence();
-    if (fence.IsValid()) {
-      mPendingAsyncMessage.push_back(OpDeliverFence(aTexture, nullptr,
-                                                    fence));
-    }
-  }
-
-  // Send a ReleaseFence that is set by HwcComposer2D.
-  FenceHandle fence = texture->GetAndResetReleaseFenceHandle();
-  if (fence.IsValid()) {
-    mPendingAsyncMessage.push_back(OpDeliverFence(aTexture, nullptr,
-                                                  fence));
-  }
-}
-
-void
 LayerTransactionParent::SendAsyncMessage(const InfallibleTArray<AsyncParentMessageData>& aMessage)
 {
-  mozilla::Unused << SendParentAsyncMessages(aMessage);
+  MOZ_ASSERT_UNREACHABLE("unexpected to be called");
 }
 
 void
-LayerTransactionParent::ReplyRemoveTexture(const OpReplyRemoveTexture& aReply)
+LayerTransactionParent::SendPendingAsyncMessages()
 {
-  InfallibleTArray<AsyncParentMessageData> messages;
-  messages.AppendElement(aReply);
-  mozilla::Unused << SendParentAsyncMessages(messages);
+  mCompositorBridge->SendPendingAsyncMessages();
+}
+
+void
+LayerTransactionParent::SetAboutToSendAsyncMessages()
+{
+  mCompositorBridge->SetAboutToSendAsyncMessages();
+}
+
+void
+LayerTransactionParent::NotifyNotUsed(PTextureParent* aTexture, uint64_t aTransactionId)
+{
+  MOZ_ASSERT_UNREACHABLE("unexpected to be called");
 }
 
 } // namespace layers

@@ -38,11 +38,6 @@
 #include <signal.h>
 #endif
 
-#ifdef VMS
-#include <lib$routines.h>
-#include <ssdef.h>
-#endif
-
 #ifdef DEBUG
 #define IMPLEMENT_BREAK_AFTER_LOAD
 #endif
@@ -60,7 +55,7 @@ nsNativeModuleLoader::Init()
   return NS_OK;
 }
 
-class LoadModuleMainThreadRunnable : public nsRunnable
+class LoadModuleMainThreadRunnable : public Runnable
 {
 public:
   LoadModuleMainThreadRunnable(nsNativeModuleLoader* aLoader,
@@ -72,7 +67,7 @@ public:
   {
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     mResult = mLoader->LoadModule(mFile);
     return NS_OK;

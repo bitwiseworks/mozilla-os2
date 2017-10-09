@@ -13,12 +13,10 @@ var serverURL;
 var serverPort = -1;
 var pushEnabled;
 var pushConnectionEnabled;
+var db;
 
 function run_test() {
-  var env = Cc["@mozilla.org/process/environment;1"].getService(Ci.nsIEnvironment);
-  serverPort = env.get("MOZHTTP2_PORT");
-  do_check_neq(serverPort, null);
-  serverURL = "https://localhost:" + serverPort;
+  serverPort = getTestServerPort();
 
   do_get_profile();
   prefs = Cc["@mozilla.org/preferences-service;1"].getService(Ci.nsIPrefBranch);
@@ -41,35 +39,37 @@ function run_test() {
 
   prefs.setIntPref("network.http.speculative-parallel-limit", oldPref);
 
-  disableServiceWorkerEvents(
-    'https://example.org/1',
-    'https://example.org/no_receiptEndpoint'
-  );
+  serverURL = "https://localhost:" + serverPort;
 
   run_next_test();
 }
 
-add_task(function* test_pushSubscriptionSuccess() {
+add_task(function* test_setup() {
 
-  let db = PushServiceHttp2.newPushDB();
+  db = PushServiceHttp2.newPushDB();
   do_register_cleanup(() => {
     return db.drop().then(_ => db.close());
   });
+
+});
+
+add_task(function* test_pushSubscriptionSuccess() {
 
   PushService.init({
     serverURI: serverURL + "/pushSubscriptionSuccess/subscribe",
     db
   });
 
-  let newRecord = yield PushNotificationService.register(
-    'https://example.org/1',
-    ChromeUtils.originAttributesToSuffix({ appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inBrowser: false })
-  );
+  let newRecord = yield PushService.register({
+    scope: 'https://example.org/1',
+    originAttributes: ChromeUtils.originAttributesToSuffix(
+      { appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inIsolatedMozBrowser: false }),
+  });
 
   var subscriptionUri = serverURL + '/pushSubscriptionSuccesss';
   var pushEndpoint = serverURL + '/pushEndpointSuccess';
   var pushReceiptEndpoint = serverURL + '/receiptPushEndpointSuccess';
-  equal(newRecord.pushEndpoint, pushEndpoint,
+  equal(newRecord.endpoint, pushEndpoint,
     'Wrong push endpoint in registration record');
 
   equal(newRecord.pushReceiptEndpoint, pushReceiptEndpoint,
@@ -85,30 +85,26 @@ add_task(function* test_pushSubscriptionSuccess() {
   equal(record.scope, 'https://example.org/1',
     'Wrong scope in database record');
 
-  return db.drop().then(PushService.uninit());
+  PushService.uninit()
 });
 
 add_task(function* test_pushSubscriptionMissingLink2() {
-
-  let db = PushServiceHttp2.newPushDB();
-  do_register_cleanup(() => {
-    return db.drop().then(_ => db.close());
-  });
 
   PushService.init({
     serverURI: serverURL + "/pushSubscriptionMissingLink2/subscribe",
     db
   });
 
-  let newRecord = yield PushNotificationService.register(
-    'https://example.org/no_receiptEndpoint',
-    ChromeUtils.originAttributesToSuffix({ appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inBrowser: false })
-  );
+  let newRecord = yield PushService.register({
+    scope: 'https://example.org/no_receiptEndpoint',
+    originAttributes: ChromeUtils.originAttributesToSuffix(
+      { appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inIsolatedMozBrowser: false }),
+  });
 
   var subscriptionUri = serverURL + '/subscriptionMissingLink2';
   var pushEndpoint = serverURL + '/pushEndpointMissingLink2';
   var pushReceiptEndpoint = '';
-  equal(newRecord.pushEndpoint, pushEndpoint,
+  equal(newRecord.endpoint, pushEndpoint,
     'Wrong push endpoint in registration record');
 
   equal(newRecord.pushReceiptEndpoint, pushReceiptEndpoint,

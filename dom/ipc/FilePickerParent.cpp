@@ -11,8 +11,9 @@
 #include "nsIDOMWindow.h"
 #include "nsIFile.h"
 #include "nsISimpleEnumerator.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/dom/File.h"
+#include "mozilla/dom/FileSystemSecurity.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/TabParent.h"
@@ -53,15 +54,18 @@ FilePickerParent::~FilePickerParent()
 // 2. The stream transport thread stat()s the file in Run() and then dispatches
 // the same runnable on the main thread.
 // 3. The main thread sends the results over IPC.
-FilePickerParent::FileSizeAndDateRunnable::FileSizeAndDateRunnable(FilePickerParent *aFPParent,
-                                                                   nsTArray<RefPtr<BlobImpl>>& aBlobs)
+FilePickerParent::IORunnable::IORunnable(FilePickerParent *aFPParent,
+                                         nsTArray<nsCOMPtr<nsIFile>>& aFiles,
+                                         bool aIsDirectory)
  : mFilePickerParent(aFPParent)
+ , mIsDirectory(aIsDirectory)
 {
-  mBlobs.SwapElements(aBlobs);
+  mFiles.SwapElements(aFiles);
+  MOZ_ASSERT_IF(aIsDirectory, mFiles.Length() == 1);
 }
 
 bool
-FilePickerParent::FileSizeAndDateRunnable::Dispatch()
+FilePickerParent::IORunnable::Dispatch()
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -75,23 +79,51 @@ FilePickerParent::FileSizeAndDateRunnable::Dispatch()
 }
 
 NS_IMETHODIMP
-FilePickerParent::FileSizeAndDateRunnable::Run()
+FilePickerParent::IORunnable::Run()
 {
   // If we're on the main thread, then that means we're done. Just send the
   // results.
   if (NS_IsMainThread()) {
     if (mFilePickerParent) {
-      mFilePickerParent->SendFiles(mBlobs);
+      mFilePickerParent->SendFilesOrDirectories(mResults);
     }
     return NS_OK;
   }
 
-  // We're not on the main thread, so do the stat().
-  for (unsigned i = 0; i < mBlobs.Length(); i++) {
-    ErrorResult rv;
-    mBlobs[i]->GetSize(rv);
-    mBlobs[i]->GetLastModified(rv);
-    mBlobs[i]->LookupAndCacheIsDirectory();
+  // We're not on the main thread, so do the IO.
+
+  for (uint32_t i = 0; i < mFiles.Length(); ++i) {
+    if (mIsDirectory) {
+      nsAutoString path;
+      nsresult rv = mFiles[i]->GetPath(path);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        continue;
+      }
+
+      BlobImplOrString* data = mResults.AppendElement();
+      data->mType = BlobImplOrString::eDirectoryPath;
+      data->mDirectoryPath = path;
+      continue;
+    }
+
+    RefPtr<BlobImpl> blobImpl = new BlobImplFile(mFiles[i]);
+
+    ErrorResult error;
+    blobImpl->GetSize(error);
+    if (NS_WARN_IF(error.Failed())) {
+      error.SuppressException();
+      continue;
+    }
+
+    blobImpl->GetLastModified(error);
+    if (NS_WARN_IF(error.Failed())) {
+      error.SuppressException();
+      continue;
+    }
+
+    BlobImplOrString* data = mResults.AppendElement();
+    data->mType = BlobImplOrString::eBlobImpl;
+    data->mBlobImpl = blobImpl;
   }
 
   // Dispatch ourselves back on the main thread.
@@ -101,29 +133,53 @@ FilePickerParent::FileSizeAndDateRunnable::Run()
     // thread.
     MOZ_CRASH();
   }
+
   return NS_OK;
 }
 
 void
-FilePickerParent::FileSizeAndDateRunnable::Destroy()
+FilePickerParent::IORunnable::Destroy()
 {
   mFilePickerParent = nullptr;
 }
 
 void
-FilePickerParent::SendFiles(const nsTArray<RefPtr<BlobImpl>>& aBlobs)
+FilePickerParent::SendFilesOrDirectories(const nsTArray<BlobImplOrString>& aData)
 {
   nsIContentParent* parent = TabParent::GetFrom(Manager())->Manager();
+
+  if (mMode == nsIFilePicker::modeGetFolder) {
+    MOZ_ASSERT(aData.Length() <= 1);
+    if (aData.IsEmpty()) {
+      Unused << Send__delete__(this, void_t(), mResult);
+      return;
+    }
+
+    MOZ_ASSERT(aData[0].mType == BlobImplOrString::eDirectoryPath);
+
+    // Let's inform the security singleton about the given access of this tab on
+    // this directory path.
+    RefPtr<FileSystemSecurity> fss = FileSystemSecurity::GetOrCreate();
+    fss->GrantAccessToContentProcess(parent->ChildID(),
+                                     aData[0].mDirectoryPath);
+
+    InputDirectory input;
+    input.directoryPath() = aData[0].mDirectoryPath;
+    Unused << Send__delete__(this, input, mResult);
+    return;
+  }
+
   InfallibleTArray<PBlobParent*> blobs;
 
-  for (unsigned i = 0; i < aBlobs.Length(); i++) {
-    BlobParent* blobParent = parent->GetOrCreateActorForBlobImpl(aBlobs[i]);
+  for (unsigned i = 0; i < aData.Length(); i++) {
+    MOZ_ASSERT(aData[i].mType == BlobImplOrString::eBlobImpl);
+    BlobParent* blobParent = parent->GetOrCreateActorForBlobImpl(aData[i].mBlobImpl);
     if (blobParent) {
       blobs.AppendElement(blobParent);
     }
   }
 
-  InputFiles inblobs;
+  InputBlobs inblobs;
   inblobs.blobsParent().SwapElements(blobs);
   Unused << Send__delete__(this, inblobs, mResult);
 }
@@ -138,7 +194,7 @@ FilePickerParent::Done(int16_t aResult)
     return;
   }
 
-  nsTArray<RefPtr<BlobImpl>> blobs;
+  nsTArray<nsCOMPtr<nsIFile>> files;
   if (mMode == nsIFilePicker::modeOpenMultiple) {
     nsCOMPtr<nsISimpleEnumerator> iter;
     NS_ENSURE_SUCCESS_VOID(mFilePicker->GetFiles(getter_AddRefs(iter)));
@@ -149,22 +205,26 @@ FilePickerParent::Done(int16_t aResult)
       iter->GetNext(getter_AddRefs(supports));
       if (supports) {
         nsCOMPtr<nsIFile> file = do_QueryInterface(supports);
-
-        RefPtr<BlobImpl> blobimpl = new BlobImplFile(file);
-        blobs.AppendElement(blobimpl);
+        MOZ_ASSERT(file);
+        files.AppendElement(file);
       }
     }
   } else {
     nsCOMPtr<nsIFile> file;
     mFilePicker->GetFile(getter_AddRefs(file));
     if (file) {
-      RefPtr<BlobImpl> blobimpl = new BlobImplFile(file);
-      blobs.AppendElement(blobimpl);
+      files.AppendElement(file);
     }
   }
 
+  if (files.IsEmpty()) {
+    Unused << Send__delete__(this, void_t(), mResult);
+    return;
+  }
+
   MOZ_ASSERT(!mRunnable);
-  mRunnable = new FileSizeAndDateRunnable(this, blobs);
+  mRunnable = new IORunnable(this, files, mMode == nsIFilePicker::modeGetFolder);
+
   // Dispatch to background thread to do I/O:
   if (!mRunnable->Dispatch()) {
     Unused << Send__delete__(this, void_t(), nsIFilePicker::returnCancel);
@@ -184,7 +244,7 @@ FilePickerParent::CreateFilePicker()
     return false;
   }
 
-  nsCOMPtr<nsIDOMWindow> window = do_QueryInterface(element->OwnerDoc()->GetWindow());
+  nsCOMPtr<mozIDOMWindowProxy> window = element->OwnerDoc()->GetWindow();
   if (!window) {
     return false;
   }
@@ -199,7 +259,8 @@ FilePickerParent::RecvOpen(const int16_t& aSelectedType,
                            const nsString& aDefaultExtension,
                            InfallibleTArray<nsString>&& aFilters,
                            InfallibleTArray<nsString>&& aFilterNames,
-                           const nsString& aDisplayDirectory)
+                           const nsString& aDisplayDirectory,
+                           const nsString& aOkButtonLabel)
 {
   if (!CreateFilePicker()) {
     Unused << Send__delete__(this, void_t(), nsIFilePicker::returnCancel);
@@ -215,6 +276,7 @@ FilePickerParent::RecvOpen(const int16_t& aSelectedType,
   mFilePicker->SetDefaultString(aDefaultFile);
   mFilePicker->SetDefaultExtension(aDefaultExtension);
   mFilePicker->SetFilterIndex(aSelectedType);
+  mFilePicker->SetOkButtonLabel(aOkButtonLabel);
 
   if (!aDisplayDirectory.IsEmpty()) {
     nsCOMPtr<nsIFile> localFile = do_CreateInstance(NS_LOCAL_FILE_CONTRACTID);

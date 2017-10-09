@@ -10,6 +10,7 @@
 #define nsRubyBaseContainerFrame_h___
 
 #include "nsContainerFrame.h"
+#include "RubyUtils.h"
 
 /**
  * Factory function.
@@ -17,10 +18,6 @@
  */
 nsContainerFrame* NS_NewRubyBaseContainerFrame(nsIPresShell* aPresShell,
                                                nsStyleContext* aContext);
-
-namespace mozilla {
-struct RubyColumn;
-} // namespace mozilla
 
 class nsRubyBaseContainerFrame final : public nsContainerFrame
 {
@@ -47,8 +44,8 @@ public:
                 const mozilla::LogicalSize& aPadding,
                 ComputeSizeFlags aFlags) override;
   virtual void Reflow(nsPresContext* aPresContext,
-                      nsHTMLReflowMetrics& aDesiredSize,
-                      const nsHTMLReflowState& aReflowState,
+                      ReflowOutput& aDesiredSize,
+                      const ReflowInput& aReflowInput,
                       nsReflowStatus& aStatus) override;
 
   virtual nscoord
@@ -58,20 +55,27 @@ public:
   virtual nsresult GetFrameName(nsAString& aResult) const override;
 #endif
 
+  void UpdateDescendantLeadings(const mozilla::RubyBlockLeadings& aLeadings) {
+    mDescendantLeadings.Update(aLeadings);
+  }
+  mozilla::RubyBlockLeadings GetDescendantLeadings() const {
+    return mDescendantLeadings;
+  }
+
 protected:
   friend nsContainerFrame*
     NS_NewRubyBaseContainerFrame(nsIPresShell* aPresShell,
                                  nsStyleContext* aContext);
   explicit nsRubyBaseContainerFrame(nsStyleContext* aContext) : nsContainerFrame(aContext) {}
 
-  struct ReflowState;
-  nscoord ReflowColumns(const ReflowState& aReflowState,
+  struct RubyReflowInput;
+  nscoord ReflowColumns(const RubyReflowInput& aReflowInput,
                         nsReflowStatus& aStatus);
-  nscoord ReflowOneColumn(const ReflowState& aReflowState,
+  nscoord ReflowOneColumn(const RubyReflowInput& aReflowInput,
                           uint32_t aColumnIndex,
                           const mozilla::RubyColumn& aColumn,
                           nsReflowStatus& aStatus);
-  nscoord ReflowSpans(const ReflowState& aReflowState);
+  nscoord ReflowSpans(const RubyReflowInput& aReflowInput);
 
   struct PullFrameState;
 
@@ -83,6 +87,9 @@ protected:
                      bool& aIsComplete);
 
   nscoord mBaseline;
+
+  // Leading produced by descendant ruby annotations.
+  mozilla::RubyBlockLeadings mDescendantLeadings;
 };
 
 #endif /* nsRubyBaseContainerFrame_h___ */

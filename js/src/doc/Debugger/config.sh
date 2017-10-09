@@ -24,7 +24,6 @@ markdown Debugger.Environment.md Debugger-API/Debugger.Environment
 markdown Debugger.Frame.md Debugger-API/Debugger.Frame
   label 'frame'                                 "Debugger.Frame"
   label 'vf'            '#visible-frames'       "Debugger.Frame: Visible Frames"
-  label 'generator'     '#generator-frames'     "Debugger.Frame: Generator Frames"
   label 'inv fr'        '#invf'                 "Debugger.Frame: Invocation Frames"
   label 'fr eval'       '#eval'                 "Debugger.Frame: Eval"
 
@@ -64,5 +63,4 @@ resource 'img-alloc-plot'         alloc-plot-console.png             $RBASE/8461
 absolute-label 'protocol' https://wiki.mozilla.org/Remote_Debugging_Protocol "Remote Debugging Protocol"
 absolute-label 'saved-frame' https://developer.mozilla.org/en-US/docs/Mozilla/Projects/SpiderMonkey/SavedFrame "SavedFrame"
 absolute-label 'bernoulli-trial' https://en.wikipedia.org/wiki/Bernoulli_trial "Bernoulli Trial"
-absolute-label 'ssa-form' https://en.wikipedia.org/wiki/Static_single_assignment_form "SSA form"
-absolute-label 'promise-debugging' https://mxr.mozilla.org/mozilla-central/source/dom/webidl/PromiseDebugging.webidl?rev=331d71cabe1e "PromiseDebugging.webidl"
+absolute-label 'promise' https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise "Promise"

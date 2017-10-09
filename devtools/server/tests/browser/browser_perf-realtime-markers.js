@@ -5,10 +5,11 @@
  * Test functionality of real time markers.
  */
 
-const { PerformanceFront } = require("devtools/server/actors/performance");
+const { PerformanceFront } = require("devtools/shared/fronts/performance");
 
-add_task(function*() {
-  let doc = yield addTab(MAIN_DOMAIN + "doc_perf.html");
+add_task(function* () {
+  let browser = yield addTab(MAIN_DOMAIN + "doc_perf.html");
+  let doc = browser.contentDocument;
 
   initDebuggerServer();
   let client = new DebuggerClient(DebuggerServer.connectPipe());
@@ -43,10 +44,10 @@ add_task(function*() {
   is(counters.ticks.length, 3, "three ticks events fired.");
 
   yield front.destroy();
-  yield closeDebuggerClient(client);
+  yield client.close();
   gBrowser.removeCurrentTab();
 
-  function handler (name, data) {
+  function handler(name, data) {
     if (name === "markers") {
       if (counters.markers.length >= 1) { return; }
       ok(data.markers[0].start, "received atleast one marker with `start`");
@@ -88,5 +89,5 @@ add_task(function*() {
         name === "ticks" && counters[name].length === 3) {
       deferreds[name].resolve();
     }
-  };
+  }
 });

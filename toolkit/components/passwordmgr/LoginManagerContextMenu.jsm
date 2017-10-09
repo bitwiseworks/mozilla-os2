@@ -10,6 +10,8 @@ const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "LoginHelper",
+                                  "resource://gre/modules/LoginHelper.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "LoginManagerParent",
                                   "resource://gre/modules/LoginManagerParent.jsm");
 
@@ -17,8 +19,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "LoginManagerParent",
  * Password manager object for the browser contextual menu.
  */
 var LoginManagerContextMenu = {
-  dateAndTimeFormatter: new Intl.DateTimeFormat(undefined,
-                        { day: "numeric", month: "short", year: "numeric" }),
   /**
    * Look for login items and add them to the contextual menu.
    *
@@ -33,7 +33,6 @@ var LoginManagerContextMenu = {
    * @returns {DocumentFragment} a document fragment with all the login items.
    */
   addLoginsToMenu(inputElement, browser, documentURI) {
-
     let foundLogins = this._findLogins(documentURI);
 
     if (!foundLogins.length) {
@@ -47,7 +46,7 @@ var LoginManagerContextMenu = {
 
         let username = login.username;
         // If login is empty or duplicated we want to append a modification date to it.
-        if (!username || duplicateUsernames.has(username)){
+        if (!username || duplicateUsernames.has(username)) {
           if (!username) {
             username = this._getLocalizedString("noUsername");
           }
@@ -93,7 +92,16 @@ var LoginManagerContextMenu = {
    * @returns {nsILoginInfo[]} a login list
    */
   _findLogins(documentURI) {
-    let logins = Services.logins.findLogins({}, documentURI.prePath, "", "");
+    let searchParams = {
+      hostname: documentURI.prePath,
+      schemeUpgrades: LoginHelper.schemeUpgrades,
+    };
+    let logins = LoginHelper.searchLoginsWithObject(searchParams);
+    let resolveBy = [
+      "scheme",
+      "timePasswordChanged",
+    ];
+    logins = LoginHelper.dedupeLogins(logins, ["username", "password"], resolveBy, documentURI.prePath);
 
     // Sort logins in alphabetical order and by date.
     logins.sort((loginA, loginB) => {
@@ -180,4 +188,12 @@ var LoginManagerContextMenu = {
 XPCOMUtils.defineLazyGetter(LoginManagerContextMenu, "_stringBundle", function() {
   return Services.strings.
          createBundle("chrome://passwordmgr/locale/passwordmgr.properties");
+});
+
+XPCOMUtils.defineLazyGetter(LoginManagerContextMenu, "dateAndTimeFormatter", function() {
+  return new Intl.DateTimeFormat(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
 });

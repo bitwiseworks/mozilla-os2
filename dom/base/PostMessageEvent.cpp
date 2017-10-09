@@ -11,15 +11,20 @@
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/FileList.h"
 #include "mozilla/dom/FileListBinding.h"
+#include "mozilla/dom/MessageEventBinding.h"
 #include "mozilla/dom/MessagePort.h"
 #include "mozilla/dom/MessagePortBinding.h"
 #include "mozilla/dom/PMessagePort.h"
 #include "mozilla/dom/StructuredCloneTags.h"
+#include "mozilla/dom/UnionConversions.h"
 #include "mozilla/EventDispatcher.h"
+#include "nsContentUtils.h"
 #include "nsGlobalWindow.h"
 #include "nsIPresShell.h"
 #include "nsIPrincipal.h"
+#include "nsIScriptError.h"
 #include "nsPresContext.h"
+#include "nsQueryObject.h"
 
 namespace mozilla {
 namespace dom {
@@ -28,13 +33,15 @@ PostMessageEvent::PostMessageEvent(nsGlobalWindow* aSource,
                                    const nsAString& aCallerOrigin,
                                    nsGlobalWindow* aTargetWindow,
                                    nsIPrincipal* aProvidedPrincipal,
+                                   nsIDocument* aSourceDocument,
                                    bool aTrustedCaller)
 : StructuredCloneHolder(CloningSupported, TransferringSupported,
-                        SameProcessSameThread),
+                        StructuredCloneScope::SameProcessSameThread),
   mSource(aSource),
   mCallerOrigin(aCallerOrigin),
   mTargetWindow(aTargetWindow),
   mProvidedPrincipal(aProvidedPrincipal),
+  mSourceDocument(aSourceDocument),
   mTrustedCaller(aTrustedCaller)
 {
   MOZ_COUNT_CTOR(PostMessageEvent);
@@ -53,9 +60,18 @@ PostMessageEvent::Run()
   MOZ_ASSERT(!mSource || mSource->IsOuterWindow(),
              "should have been passed an outer window!");
 
+  // Note: We don't init this AutoJSAPI with targetWindow, because we do not
+  // want exceptions during message deserialization to trigger error events on
+  // targetWindow.
   AutoJSAPI jsapi;
   jsapi.Init();
   JSContext* cx = jsapi.cx();
+
+  // The document is just used for the principal mismatch error message below.
+  // Use a stack variable so mSourceDocument is not held onto after this method
+  // finishes, regardless of the method outcome.
+  nsCOMPtr<nsIDocument> sourceDocument;
+  sourceDocument.swap(mSourceDocument);
 
   // If we bailed before this point we're going to leak mMessage, but
   // that's probably better than crashing.
@@ -68,7 +84,7 @@ PostMessageEvent::Run()
 
   MOZ_ASSERT(targetWindow->IsInnerWindow(),
              "we ordered an inner window!");
-  JSAutoCompartment ac(cx, targetWindow->GetWrapperPreserveColor());
+  JSAutoCompartment ac(cx, targetWindow->GetWrapper());
 
   // Ensure that any origin which might have been provided is the origin of this
   // window's document.  Note that we do this *now* instead of when postMessage
@@ -91,14 +107,34 @@ PostMessageEvent::Run()
     //       don't do that in other places it seems better to hold the line for
     //       now.  Long-term, we want HTML5 to address this so that we can
     //       be compliant while being safer.
-    if (!targetPrin->Equals(mProvidedPrincipal)) {
+    if (!BasePrincipal::Cast(targetPrin)->EqualsIgnoringAddonId(mProvidedPrincipal)) {
+      nsAutoString providedOrigin, targetOrigin;
+      nsresult rv = nsContentUtils::GetUTFOrigin(targetPrin, targetOrigin);
+      NS_ENSURE_SUCCESS(rv, rv);
+      rv = nsContentUtils::GetUTFOrigin(mProvidedPrincipal, providedOrigin);
+      NS_ENSURE_SUCCESS(rv, rv);
+
+      MOZ_DIAGNOSTIC_ASSERT(providedOrigin != targetOrigin ||
+                            (BasePrincipal::Cast(mProvidedPrincipal)->OriginAttributesRef() ==
+                              BasePrincipal::Cast(targetPrin)->OriginAttributesRef()),
+                            "Unexpected postMessage call to a window with mismatched "
+                            "origin attributes");
+
+      const char16_t* params[] = { providedOrigin.get(), targetOrigin.get() };
+
+      nsContentUtils::ReportToConsole(nsIScriptError::errorFlag,
+        NS_LITERAL_CSTRING("DOM Window"), sourceDocument,
+        nsContentUtils::eDOM_PROPERTIES,
+        "TargetPrincipalDoesNotMatch",
+        params, ArrayLength(params));
+
       return NS_OK;
     }
   }
 
   ErrorResult rv;
   JS::Rooted<JS::Value> messageData(cx);
-  nsCOMPtr<nsPIDOMWindow> window = targetWindow.get();
+  nsCOMPtr<nsPIDOMWindowInner> window = targetWindow->AsInner();
 
   Read(window, cx, &messageData, rv);
   if (NS_WARN_IF(rv.Failed())) {
@@ -106,19 +142,23 @@ PostMessageEvent::Run()
   }
 
   // Create the event
-  nsCOMPtr<mozilla::dom::EventTarget> eventTarget =
-    do_QueryInterface(static_cast<nsPIDOMWindow*>(targetWindow.get()));
+  nsCOMPtr<mozilla::dom::EventTarget> eventTarget = do_QueryObject(targetWindow);
   RefPtr<MessageEvent> event =
     new MessageEvent(eventTarget, nullptr, nullptr);
 
-  event->InitMessageEvent(NS_LITERAL_STRING("message"), false /*non-bubbling */,
-                          false /*cancelable */, messageData, mCallerOrigin,
-                          EmptyString(), mSource);
 
-  nsTArray<RefPtr<MessagePort>> ports = TakeTransferredPorts();
+  Nullable<WindowProxyOrMessagePort> source;
+  source.SetValue().SetAsWindowProxy() = mSource ? mSource->AsOuter() : nullptr;
 
-  event->SetPorts(new MessagePortList(static_cast<dom::Event*>(event.get()),
-                                      ports));
+  Sequence<OwningNonNull<MessagePort>> ports;
+  if (!TakeTransferredPortsAsSequence(ports)) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+
+  event->InitMessageEvent(nullptr, NS_LITERAL_STRING("message"),
+                          false /*non-bubbling */, false /*cancelable */,
+                          messageData, mCallerOrigin,
+                          EmptyString(), source, ports);
 
   // We can't simply call dispatchEvent on the window because doing so ends
   // up flipping the trusted bit on the event, and we don't want that to
@@ -131,10 +171,10 @@ PostMessageEvent::Run()
     presContext = shell->GetPresContext();
 
   event->SetTrusted(mTrustedCaller);
-  WidgetEvent* internalEvent = event->GetInternalNSEvent();
+  WidgetEvent* internalEvent = event->WidgetEventPtr();
 
   nsEventStatus status = nsEventStatus_eIgnore;
-  EventDispatcher::Dispatch(static_cast<nsPIDOMWindow*>(mTargetWindow),
+  EventDispatcher::Dispatch(window,
                             presContext,
                             internalEvent,
                             static_cast<dom::Event*>(event.get()),

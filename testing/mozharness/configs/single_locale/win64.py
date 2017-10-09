@@ -14,12 +14,15 @@ config = {
         "LOCALE_MERGEDIR": "%(abs_merge_dir)s",
         "L10NBASEDIR": "../../l10n",
         "MOZ_MAKE_COMPLETE_MAR": "1",
+        "PATH": 'C:\\mozilla-build\\nsis-3.01;'
+                '%s' % (os.environ.get('path')),
+        'TOOLTOOL_CACHE': '/c/builds/tooltool_cache',
+        'TOOLTOOL_HOME': '/c/builds',
     },
     "ssh_key_dir": "~/.ssh",
     "log_name": "single_locale",
     "objdir": "obj-l10n",
     "js_src_dir": "js/src",
-    "make_dirs": ['config'],
     "vcs_share_base": "c:/builds/hg-shared",
 
     # tooltool
@@ -32,7 +35,7 @@ config = {
     'balrog_credentials_file': 'oauth.txt',
 
     # l10n
-    "ignore_locales": ["en-US"],
+    "ignore_locales": ["en-US", "ja-JP-mac"],
     "l10n_dir": "l10n",
     "locales_file": "%(branch)s/browser/locales/all-locales",
     "locales_dir": "browser/locales",
@@ -66,12 +69,6 @@ config = {
     "enable_mozmake": True,
     'exes': {
         'python2.7': sys.executable,
-        'hgtool.py': [
-            sys.executable,
-            os.path.join(
-                os.getcwd(), 'build', 'tools', 'buildfarm', 'utils', 'hgtool.py'
-            )
-        ],
         'virtualenv': [
             sys.executable,
             'c:/mozilla-build/buildbotve/virtualenv.py'

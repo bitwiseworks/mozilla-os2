@@ -192,7 +192,7 @@ class Continuation {
       needsPercentDecoding = false;
       wasQuotedString = false;
     }
-    ~Continuation() {}
+    ~Continuation() = default;
 
     const char *value;
     uint32_t length;
@@ -824,8 +824,8 @@ nsMIMEHeaderParamImpl::DecodeRFC5987Param(const nsACString& aParamVal,
   nsAutoCString value;
 
   uint32_t delimiters = 0;
-  const char *encoded = PromiseFlatCString(aParamVal).get();
-  const char *c = encoded;
+  const nsCString& encoded = PromiseFlatCString(aParamVal);
+  const char *c = encoded.get();
 
   while (*c) {
     char tc = *c++;
@@ -1157,7 +1157,7 @@ nsresult DecodeQOrBase64Str(const char *aEncoded, size_t aLen, char aQOrBase64,
   return NS_OK;
 }
 
-static const char especials[] = "()<>@,;:\\\"/[]?.=";
+static const char especials[] = R"(()<>@,;:\"/[]?.=)";
 
 // |decode_mime_part2_str| taken from comi18n.c
 // Decode RFC2047-encoded words in the input and convert the result to UTF-8.
@@ -1238,13 +1238,14 @@ nsresult DecodeRFC2047Str(const char *aHeader, const char *aDefaultCharset,
     if (q[1] != '?')
       goto badsyntax;
 
-    r = q;
-    for (r = q + 2; *r != '?'; r++) {
+    // loop-wise, keep going until we hit "?=".  the inner check handles the
+    //  nul terminator should the string terminate before we hit the right
+    //  marker.  (And the r[1] will never reach beyond the end of the string
+    //  because *r != '?' is true if r is the nul character.)
+    for (r = q + 2; *r != '?' || r[1] != '='; r++) {
       if (*r < ' ') goto badsyntax;
     }
-    if (r[1] != '=')
-        goto badsyntax;
-    else if (r == q + 2) {
+    if (r == q + 2) {
         // it's empty, skip
         begin = r + 2;
         isLastEncodedWord = 1;

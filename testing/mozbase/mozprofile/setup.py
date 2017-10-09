@@ -6,7 +6,7 @@ import sys
 from setuptools import setup
 
 PACKAGE_NAME = 'mozprofile'
-PACKAGE_VERSION = '0.27'
+PACKAGE_VERSION = '0.28'
 
 # we only support python 2 right now
 assert sys.version_info[0] == 2
@@ -42,5 +42,4 @@ setup(name=PACKAGE_NAME,
       mozprofile = mozprofile:cli
       view-profile = mozprofile:view_profile
       diff-profiles = mozprofile:diff_profiles
-      """,
-    )
+      """, )

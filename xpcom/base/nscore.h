@@ -121,12 +121,6 @@
 
 #endif
 
-#ifdef MOZ_WIDGET_GONK
-#define B2G_ACL_EXPORT NS_EXPORT
-#else
-#define B2G_ACL_EXPORT
-#endif
-
 /**
  * Macro for creating typedefs for pointer-to-member types which are
  * declared with stdcall.  It is important to use this for any type which is
@@ -166,17 +160,12 @@
 #endif
 
 /**
- * Printf style formats
- */
-#ifdef __GNUC__
-#define MOZ_FORMAT_PRINTF(stringIndex, firstToCheck)  \
-    __attribute__ ((format (printf, stringIndex, firstToCheck)))
-#else
-#define MOZ_FORMAT_PRINTF(stringIndex, firstToCheck)
-#endif
-
-/**
  * Generic API modifiers which return the standard XPCOM nsresult type
+ *
+ * - NS_IMETHOD: use for in-class declarations and definitions.
+ * - NS_IMETHODIMP: use for out-of-class definitions.
+ * - NS_METHOD: usually used in conjunction with NS_CALLBACK.
+ * - NS_CALLBACK: used in some legacy situations. Best avoided.
  */
 #define NS_IMETHOD          NS_IMETHOD_(nsresult)
 #define NS_IMETHODIMP       NS_IMETHODIMP_(nsresult)
@@ -248,7 +237,7 @@
 #ifdef NS_NO_VTABLE
 #undef NS_NO_VTABLE
 #endif
-#if defined(_MSC_VER) && !defined(__clang__)
+#if defined(_MSC_VER)
 #define NS_NO_VTABLE __declspec(novtable)
 #else
 #define NS_NO_VTABLE

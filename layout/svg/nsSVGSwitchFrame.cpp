@@ -12,15 +12,13 @@
 
 using namespace mozilla::gfx;
 
-typedef nsSVGGFrame nsSVGSwitchFrameBase;
-
-class nsSVGSwitchFrame : public nsSVGSwitchFrameBase
+class nsSVGSwitchFrame : public nsSVGGFrame
 {
   friend nsIFrame*
   NS_NewSVGSwitchFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 protected:
-  explicit nsSVGSwitchFrame(nsStyleContext* aContext) :
-    nsSVGSwitchFrameBase(aContext) {}
+  explicit nsSVGSwitchFrame(nsStyleContext* aContext)
+    : nsSVGGFrame(aContext) {}
 
 public:
   NS_DECL_FRAMEARENA_HELPERS
@@ -50,9 +48,9 @@ public:
                                 const nsDisplayListSet& aLists) override;
 
   // nsISVGChildFrame interface:
-  virtual nsresult PaintSVG(gfxContext& aContext,
-                            const gfxMatrix& aTransform,
-                            const nsIntRect* aDirtyRect = nullptr) override;
+  virtual DrawResult PaintSVG(gfxContext& aContext,
+                              const gfxMatrix& aTransform,
+                              const nsIntRect* aDirtyRect = nullptr) override;
   nsIFrame* GetFrameForPoint(const gfxPoint& aPoint) override;
   nsRect GetCoveredRegion() override;
   virtual void ReflowSVG() override;
@@ -83,7 +81,7 @@ nsSVGSwitchFrame::Init(nsIContent*       aContent,
   NS_ASSERTION(aContent->IsSVGElement(nsGkAtoms::svgSwitch),
                "Content is not an SVG switch");
 
-  nsSVGSwitchFrameBase::Init(aContent, aParent, aPrevInFlow);
+  nsSVGGFrame::Init(aContent, aParent, aPrevInFlow);
 }
 #endif /* DEBUG */
 
@@ -104,7 +102,7 @@ nsSVGSwitchFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   }
 }
 
-nsresult
+DrawResult
 nsSVGSwitchFrame::PaintSVG(gfxContext& aContext,
                            const gfxMatrix& aTransform,
                            const nsIntRect* aDirtyRect)
@@ -114,9 +112,10 @@ nsSVGSwitchFrame::PaintSVG(gfxContext& aContext,
                "If display lists are enabled, only painting of non-display "
                "SVG should take this code path");
 
-  if (StyleDisplay()->mOpacity == 0.0)
-    return NS_OK;
+  if (StyleEffects()->mOpacity == 0.0)
+    return DrawResult::SUCCESS;
 
+  DrawResult result = DrawResult::SUCCESS;
   nsIFrame *kid = GetActiveChildFrame();
   if (kid) {
     gfxMatrix tm = aTransform;
@@ -124,9 +123,9 @@ nsSVGSwitchFrame::PaintSVG(gfxContext& aContext,
       tm = static_cast<nsSVGElement*>(kid->GetContent())->
              PrependLocalTransformsTo(tm, eUserSpaceToParent);
     }
-    nsSVGUtils::PaintFrameWithEffects(kid, aContext, tm, aDirtyRect);
+    result = nsSVGUtils::PaintFrameWithEffects(kid, aContext, tm, aDirtyRect);
   }
-  return NS_OK;
+  return result;
 }
 
 

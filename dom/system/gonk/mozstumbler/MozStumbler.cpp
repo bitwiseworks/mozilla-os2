@@ -28,13 +28,13 @@ using namespace mozilla::dom;
 
 NS_IMPL_ISUPPORTS(StumblerInfo, nsICellInfoListCallback, nsIWifiScanResultsReady)
 
-class RequestCellInfoEvent : public nsRunnable {
+class RequestCellInfoEvent : public Runnable {
 public:
   RequestCellInfoEvent(StumblerInfo *callback)
   : mRequestCallback(callback)
   {}
 
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() override {
     MOZ_ASSERT(NS_IsMainThread());
     // Get Cell Info
     nsCOMPtr<nsIMobileConnectionService> service =

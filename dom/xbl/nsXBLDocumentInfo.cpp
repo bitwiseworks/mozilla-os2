@@ -12,7 +12,6 @@
 #include "nsIScriptObjectPrincipal.h"
 #include "nsIScriptContext.h"
 #include "nsIDOMDocument.h"
-#include "nsIDOMScriptObjectFactory.h"
 #include "jsapi.h"
 #include "jsfriendapi.h"
 #include "nsIURI.h"
@@ -196,19 +195,20 @@ nsXBLDocumentInfo::ReadPrototypeBindings(nsIURI* aURI, nsXBLDocumentInfo** aDocI
   NS_ENSURE_SUCCESS(rv, rv);
 
   StartupCache* startupCache = StartupCache::GetSingleton();
-  NS_ENSURE_TRUE(startupCache, NS_ERROR_FAILURE);
+  if (!startupCache) {
+    return NS_ERROR_FAILURE;
+  }
 
-  nsAutoArrayPtr<char> buf;
+  UniquePtr<char[]> buf;
   uint32_t len;
-  rv = startupCache->GetBuffer(spec.get(), getter_Transfers(buf), &len);
+  rv = startupCache->GetBuffer(spec.get(), &buf, &len);
   // GetBuffer will fail if the binding is not in the cache.
   if (NS_FAILED(rv))
     return rv;
 
   nsCOMPtr<nsIObjectInputStream> stream;
-  rv = NewObjectInputStreamFromBuffer(buf, len, getter_AddRefs(stream));
+  rv = NewObjectInputStreamFromBuffer(Move(buf), len, getter_AddRefs(stream));
   NS_ENSURE_SUCCESS(rv, rv);
-  buf.forget();
 
   // The file compatibility.ini stores the build id. This is checked in
   // nsAppRunner.cpp and will delete the cache if a different build is
@@ -248,7 +248,7 @@ nsXBLDocumentInfo::ReadPrototypeBindings(nsIURI* aURI, nsXBLDocumentInfo** aDocI
     }
   }
 
-  docInfo.swap(*aDocInfo);
+  docInfo.forget(aDocInfo);
   return NS_OK;
 }
 
@@ -264,7 +264,9 @@ nsXBLDocumentInfo::WritePrototypeBindings()
   NS_ENSURE_SUCCESS(rv, rv);
 
   StartupCache* startupCache = StartupCache::GetSingleton();
-  NS_ENSURE_TRUE(startupCache, rv);
+  if (!startupCache) {
+    return rv;
+  }
 
   nsCOMPtr<nsIObjectOutputStream> stream;
   nsCOMPtr<nsIStorageStream> storageStream;
@@ -290,11 +292,11 @@ nsXBLDocumentInfo::WritePrototypeBindings()
   NS_ENSURE_SUCCESS(rv, rv);
 
   uint32_t len;
-  nsAutoArrayPtr<char> buf;
-  rv = NewBufferFromStorageStream(storageStream, getter_Transfers(buf), &len);
+  UniquePtr<char[]> buf;
+  rv = NewBufferFromStorageStream(storageStream, &buf, &len);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  return startupCache->PutBuffer(spec.get(), buf, len);
+  return startupCache->PutBuffer(spec.get(), buf.get(), len);
 }
 
 void

@@ -9,16 +9,16 @@
 
 const BUG_1112378_URL = EXAMPLE_URL + "doc_bug_1112378.html";
 
-add_task(function*() {
+add_task(function* () {
   let { target, panel } = yield initWebAudioEditor(BUG_1112378_URL);
   let { panelWin } = panel;
   let { gFront, $, $$, EVENTS, gAudioNodes } = panelWin;
 
   loadFrameScripts();
 
+  let rendered = waitForGraphRendered(panelWin, 2, 0);
   reload(target);
-
-  yield waitForGraphRendered(panelWin, 2, 0);
+  yield rendered;
 
   let error = yield evalInDebuggee("throwError()");
   is(error.lineNumber, 21, "error has correct lineNumber");

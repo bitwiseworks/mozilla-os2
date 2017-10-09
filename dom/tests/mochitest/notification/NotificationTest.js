@@ -9,7 +9,6 @@ var NotificationTest = (function () {
     SimpleTest.waitForExplicitFinish();
     // turn on testing pref (used by notification.cpp, and mock the alerts
     SpecialPowers.setBoolPref("notification.prompt.testing", true);
-    SpecialPowers.setAllAppsLaunchable(true);
   }
 
   function teardown_testing_env() {
@@ -42,19 +41,6 @@ var NotificationTest = (function () {
         finishTest();
       }
     })(tests);
-  }
-
-  function fakeApp(aManifest) {
-    var aApp = {
-      "origin": "{mochitest}",
-      "manifestURL": aManifest
-    };
-
-    SpecialPowers.injectApp("{mochitest}", aApp);
-  }
-
-  function unfakeApp() {
-    SpecialPowers.rejectApp("{mochitest}");
   }
 
   var fakeCustomData = (function () {
@@ -119,10 +105,6 @@ var NotificationTest = (function () {
     },
 
     info: info,
-
-    fakeApp: fakeApp,
-
-    unfakeApp: unfakeApp,
 
     customDataMatches: function(dataObj) {
       var url = "http://www.domain.com";

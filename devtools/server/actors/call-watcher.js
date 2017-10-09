@@ -5,37 +5,20 @@
 
 const {Cc, Ci, Cu, Cr} = require("chrome");
 const events = require("sdk/event/core");
-const protocol = require("devtools/server/protocol");
+const protocol = require("devtools/shared/protocol");
 const {serializeStack, parseStack} = require("toolkit/loader");
 
 const {on, once, off, emit} = events;
 const {method, Arg, Option, RetVal} = protocol;
 
-/**
- * Type describing a single function call in a stack trace.
- */
-protocol.types.addDictType("call-stack-item", {
-  name: "string",
-  file: "string",
-  line: "number"
-});
-
-/**
- * Type describing an overview of a function call.
- */
-protocol.types.addDictType("call-details", {
-  type: "number",
-  name: "string",
-  stack: "array:call-stack-item"
-});
+const { functionCallSpec, callWatcherSpec } = require("devtools/shared/specs/call-watcher");
+const { CallWatcherFront } = require("devtools/shared/fronts/call-watcher");
 
 /**
  * This actor contains information about a function call, like the function
  * type, name, stack, arguments, returned value etc.
  */
-var FunctionCallActor = protocol.ActorClass({
-  typeName: "function-call",
-
+var FunctionCallActor = protocol.ActorClassWithSpec(functionCallSpec, {
   /**
    * Creates the function call actor.
    *
@@ -56,7 +39,7 @@ var FunctionCallActor = protocol.ActorClass({
    * @param array stack
    *        The called function's stack, as a list of { name, file, line } objects.
    * @param number timestamp
-   *        The timestamp of draw-related functions
+   *        The performance.now() timestamp when the function was called.
    * @param array args
    *        The called function's arguments.
    * @param any result
@@ -65,10 +48,11 @@ var FunctionCallActor = protocol.ActorClass({
    *        Determines whether or not FunctionCallActor stores a weak reference
    *        to the underlying objects.
    */
-  initialize: function(conn, [window, global, caller, type, name, stack, timestamp, args, result], holdWeak) {
+  initialize: function (conn, [window, global, caller, type, name, stack, timestamp, args, result], holdWeak) {
     protocol.Actor.prototype.initialize.call(this, conn);
 
     this.details = {
+      global: global,
       type: type,
       name: name,
       stack: stack,
@@ -77,56 +61,46 @@ var FunctionCallActor = protocol.ActorClass({
 
     // Store a weak reference to all objects so we don't
     // prevent natural GC if `holdWeak` was passed into
-    // setup as truthy. Used in the Web Audio Editor.
+    // setup as truthy.
     if (holdWeak) {
       let weakRefs = {
         window: Cu.getWeakReference(window),
         caller: Cu.getWeakReference(caller),
+        args: Cu.getWeakReference(args),
         result: Cu.getWeakReference(result),
-        args: Cu.getWeakReference(args)
       };
 
       Object.defineProperties(this.details, {
         window: { get: () => weakRefs.window.get() },
         caller: { get: () => weakRefs.caller.get() },
-        result: { get: () => weakRefs.result.get() },
         args: { get: () => weakRefs.args.get() },
-        timestamp: { get: () => weakRefs.timestamp.get() },
+        result: { get: () => weakRefs.result.get() },
       });
     }
     // Otherwise, hold strong references to the objects.
     else {
       this.details.window = window;
       this.details.caller = caller;
-      this.details.result = result;
       this.details.args = args;
-      this.details.timestamp = timestamp;
+      this.details.result = result;
     }
 
-    this.meta = {
-      global: -1,
-      previews: { caller: "", args: "" }
+    // The caller, args and results are string names for now. It would
+    // certainly be nicer if they were Object actors. Make this smarter, so
+    // that the frontend can inspect each argument, be it object or primitive.
+    // Bug 978960.
+    this.details.previews = {
+      caller: this._generateStringPreview(caller),
+      args: this._generateArgsPreview(args),
+      result: this._generateStringPreview(result)
     };
-
-    if (global == "WebGLRenderingContext") {
-      this.meta.global = CallWatcherFront.CANVAS_WEBGL_CONTEXT;
-    } else if (global == "CanvasRenderingContext2D") {
-      this.meta.global = CallWatcherFront.CANVAS_2D_CONTEXT;
-    } else if (global == "window") {
-      this.meta.global = CallWatcherFront.UNKNOWN_SCOPE;
-    } else {
-      this.meta.global = CallWatcherFront.GLOBAL_SCOPE;
-    }
-
-    this.meta.previews.caller = this._generateCallerPreview();
-    this.meta.previews.args = this._generateArgsPreview();
   },
 
   /**
    * Customize the marshalling of this actor to provide some generic information
    * directly on the Front instance.
    */
-  form: function() {
+  form: function () {
     return {
       actor: this.actorID,
       type: this.details.type,
@@ -134,8 +108,9 @@ var FunctionCallActor = protocol.ActorClass({
       file: this.details.stack[0].file,
       line: this.details.stack[0].line,
       timestamp: this.details.timestamp,
-      callerPreview: this.meta.previews.caller,
-      argsPreview: this.meta.previews.args
+      callerPreview: this.details.previews.caller,
+      argsPreview: this.details.previews.args,
+      resultPreview: this.details.previews.result
     };
   },
 
@@ -143,13 +118,13 @@ var FunctionCallActor = protocol.ActorClass({
    * Gets more information about this function call, which is not necessarily
    * available on the Front instance.
    */
-  getDetails: method(function() {
+  getDetails: function () {
     let { type, name, stack, timestamp } = this.details;
 
     // Since not all calls on the stack have corresponding owner files (e.g.
     // callbacks of a requestAnimationFrame etc.), there's no benefit in
     // returning them, as the user can't jump to the Debugger from them.
-    for (let i = stack.length - 1;;) {
+    for (let i = stack.length - 1; ;) {
       if (stack[i].file) {
         break;
       }
@@ -165,49 +140,39 @@ var FunctionCallActor = protocol.ActorClass({
       stack: stack,
       timestamp: timestamp
     };
-  }, {
-    response: { info: RetVal("call-details") }
-  }),
-
-  /**
-   * Serializes the caller's name so that it can be easily be transferred
-   * as a string, but still be useful when displayed in a potential UI.
-   *
-   * @return string
-   *         The caller's name as a string.
-   */
-  _generateCallerPreview: function() {
-    let global = this.meta.global;
-    if (global == CallWatcherFront.CANVAS_WEBGL_CONTEXT) {
-      return "gl";
-    }
-    if (global == CallWatcherFront.CANVAS_2D_CONTEXT) {
-      return "ctx";
-    }
-    return "";
   },
 
   /**
    * Serializes the arguments so that they can be easily be transferred
    * as a string, but still be useful when displayed in a potential UI.
    *
+   * @param array args
+   *        The source arguments.
    * @return string
    *         The arguments as a string.
    */
-  _generateArgsPreview: function() {
-    let { caller, args, name } = this.details;
-    let { global } = this.meta;
+  _generateArgsPreview: function (args) {
+    let { global, name, caller } = this.details;
 
     // Get method signature to determine if there are any enums
     // used in this method.
-    let enumArgs = (CallWatcherFront.ENUM_METHODS[global] || {})[name];
-    if (typeof enumArgs === "function") {
-      enumArgs = enumArgs(args);
+    let methodSignatureEnums;
+
+    let knownGlobal = CallWatcherFront.KNOWN_METHODS[global];
+    if (knownGlobal) {
+      let knownMethod = knownGlobal[name];
+      if (knownMethod) {
+        let isOverloaded = typeof knownMethod.enums === "function";
+        if (isOverloaded) {
+          methodSignatureEnums = methodSignatureEnums(args);
+        } else {
+          methodSignatureEnums = knownMethod.enums;
+        }
+      }
     }
 
-    // XXX: All of this sucks. Make this smarter, so that the frontend
-    // can inspect each argument, be it object or primitive. Bug 978960.
     let serializeArgs = () => args.map((arg, i) => {
+      // XXX: Bug 978960.
       if (arg === undefined) {
         return "undefined";
       }
@@ -222,67 +187,80 @@ var FunctionCallActor = protocol.ActorClass({
       }
       // If this argument matches the method's signature
       // and is an enum, change it to its constant name.
-      if (enumArgs && enumArgs.indexOf(i) !== -1) {
+      if (methodSignatureEnums && methodSignatureEnums.has(i)) {
         return getBitToEnumValue(global, caller, arg);
       }
-      return arg;
+      return arg + "";
     });
 
     return serializeArgs().join(", ");
-  }
-});
-
-/**
- * The corresponding Front object for the FunctionCallActor.
- */
-var FunctionCallFront = protocol.FrontClass(FunctionCallActor, {
-  initialize: function(client, form) {
-    protocol.Front.prototype.initialize.call(this, client, form);
   },
 
   /**
-   * Adds some generic information directly to this instance,
-   * to avoid extra roundtrips.
+   * Serializes the data so that it can be easily be transferred
+   * as a string, but still be useful when displayed in a potential UI.
+   *
+   * @param object data
+   *        The source data.
+   * @return string
+   *         The arguments as a string.
    */
-  form: function(form) {
-    this.actorID = form.actor;
-    this.type = form.type;
-    this.name = form.name;
-    this.file = form.file;
-    this.line = form.line;
-    this.timestamp = form.timestamp;
-    this.callerPreview = form.callerPreview;
-    this.argsPreview = form.argsPreview;
+  _generateStringPreview: function (data) {
+    // XXX: Bug 978960.
+    if (data === undefined) {
+      return "undefined";
+    }
+    if (data === null) {
+      return "null";
+    }
+    if (typeof data == "function") {
+      return "Function";
+    }
+    if (typeof data == "object") {
+      return "Object";
+    }
+    return data + "";
   }
 });
 
 /**
  * This actor observes function calls on certain objects or globals.
  */
-var CallWatcherActor = exports.CallWatcherActor = protocol.ActorClass({
-  typeName: "call-watcher",
-  initialize: function(conn, tabActor) {
+var CallWatcherActor = exports.CallWatcherActor = protocol.ActorClassWithSpec(callWatcherSpec, {
+  initialize: function (conn, tabActor) {
     protocol.Actor.prototype.initialize.call(this, conn);
     this.tabActor = tabActor;
     this._onGlobalCreated = this._onGlobalCreated.bind(this);
     this._onGlobalDestroyed = this._onGlobalDestroyed.bind(this);
     this._onContentFunctionCall = this._onContentFunctionCall.bind(this);
+    on(this.tabActor, "window-ready", this._onGlobalCreated);
+    on(this.tabActor, "window-destroyed", this._onGlobalDestroyed);
   },
-  destroy: function(conn) {
+  destroy: function (conn) {
     protocol.Actor.prototype.destroy.call(this, conn);
+    off(this.tabActor, "window-ready", this._onGlobalCreated);
+    off(this.tabActor, "window-destroyed", this._onGlobalDestroyed);
     this.finalize();
   },
+
+  /**
+   * Lightweight listener invoked whenever an instrumented function is called
+   * while recording. We're doing this to avoid the event emitter overhead,
+   * since this is expected to be a very hot function.
+   */
+  onCall: null,
 
   /**
    * Starts waiting for the current tab actor's document global to be
    * created, in order to instrument the specified objects and become
    * aware of everything the content does with them.
    */
-  setup: method(function({ tracedGlobals, tracedFunctions, startRecording, performReload, holdWeak, storeCalls }) {
+  setup: function ({ tracedGlobals, tracedFunctions, startRecording, performReload, holdWeak, storeCalls }) {
     if (this._initialized) {
       return;
     }
     this._initialized = true;
+    this._timestampEpoch = 0;
 
     this._functionCalls = [];
     this._tracedGlobals = tracedGlobals || [];
@@ -290,106 +268,81 @@ var CallWatcherActor = exports.CallWatcherActor = protocol.ActorClass({
     this._holdWeak = !!holdWeak;
     this._storeCalls = !!storeCalls;
 
-    on(this.tabActor, "window-ready", this._onGlobalCreated);
-    on(this.tabActor, "window-destroyed", this._onGlobalDestroyed);
-
     if (startRecording) {
       this.resumeRecording();
     }
     if (performReload) {
       this.tabActor.window.location.reload();
     }
-  }, {
-    request: {
-      tracedGlobals: Option(0, "nullable:array:string"),
-      tracedFunctions: Option(0, "nullable:array:string"),
-      startRecording: Option(0, "boolean"),
-      performReload: Option(0, "boolean"),
-      holdWeak: Option(0, "boolean"),
-      storeCalls: Option(0, "boolean")
-    },
-    oneway: true
-  }),
+  },
 
   /**
    * Stops listening for document global changes and puts this actor
    * to hibernation. This method is called automatically just before the
    * actor is destroyed.
    */
-  finalize: method(function() {
+  finalize: function () {
     if (!this._initialized) {
       return;
     }
     this._initialized = false;
     this._finalized = true;
 
-    off(this.tabActor, "window-ready", this._onGlobalCreated);
-    off(this.tabActor, "window-destroyed", this._onGlobalDestroyed);
-
     this._tracedGlobals = null;
     this._tracedFunctions = null;
-  }, {
-    oneway: true
-  }),
+  },
 
   /**
    * Returns whether the instrumented function calls are currently recorded.
    */
-  isRecording: method(function() {
+  isRecording: function () {
     return this._recording;
-  }, {
-    response: RetVal("boolean")
-  }),
+  },
 
   /**
-   * Initialize frame start timestamp for measuring
+   * Initialize the timestamp epoch used to offset function call timestamps.
    */
-  initFrameStartTimestamp: method(function() {
-    this._frameStartTimestamp = this.tabActor.window.performance.now();
-  }),
+  initTimestampEpoch: function () {
+    this._timestampEpoch = this.tabActor.window.performance.now();
+  },
 
   /**
    * Starts recording function calls.
    */
-  resumeRecording: method(function() {
+  resumeRecording: function () {
     this._recording = true;
-  }),
+  },
 
   /**
    * Stops recording function calls.
    */
-  pauseRecording: method(function() {
+  pauseRecording: function () {
     this._recording = false;
     return this._functionCalls;
-  }, {
-    response: { calls: RetVal("array:function-call") }
-  }),
+  },
 
   /**
    * Erases all the recorded function calls.
    * Calling `resumeRecording` or `pauseRecording` does not erase history.
    */
-  eraseRecording: method(function() {
+  eraseRecording: function () {
     this._functionCalls = [];
-  }),
-
-  /**
-   * Lightweight listener invoked whenever an instrumented function is called
-   * while recording. We're doing this to avoid the event emitter overhead,
-   * since this is expected to be a very hot function.
-   */
-  onCall: function() {},
+  },
 
   /**
    * Invoked whenever the current tab actor's document global is created.
    */
-  _onGlobalCreated: function({window, id, isTopLevel}) {
-    let self = this;
+  _onGlobalCreated: function ({window, id, isTopLevel}) {
+    if (!this._initialized) {
+      return;
+    }
 
     // TODO: bug 981748, support more than just the top-level documents.
     if (!isTopLevel) {
       return;
     }
+
+    let self = this;
     this._tracedWindowId = id;
 
     let unwrappedWindow = XPCNativeWrapper.unwrap(window);
@@ -430,7 +383,7 @@ var CallWatcherActor = exports.CallWatcherActor = protocol.ActorClass({
       // the arguments array is inaccessible to it. Get Xrays back.
       let originalFunc = Cu.unwaiveXrays(target[name]);
 
-      Cu.exportFunction(function(...args) {
+      Cu.exportFunction(function (...args) {
         let result;
         try {
           result = Cu.waiveXrays(originalFunc.apply(this, args));
@@ -439,9 +392,9 @@ var CallWatcherActor = exports.CallWatcherActor = protocol.ActorClass({
         }
 
         if (self._recording) {
-          let timestamp = self.tabActor.window.performance.now() - self._frameStartTimestamp;
-          let stack = getStack(name);
           let type = CallWatcherFront.METHOD_FUNCTION;
+          let stack = getStack(name);
+          let timestamp = self.tabActor.window.performance.now() - self._timestampEpoch;
           callback(unwrappedWindow, global, this, type, name, stack, timestamp, args, result);
         }
         return result;
@@ -464,26 +417,26 @@ var CallWatcherActor = exports.CallWatcherActor = protocol.ActorClass({
       let originalSetter = Cu.unwaiveXrays(target.__lookupSetter__(name));
 
       Object.defineProperty(target, name, {
-        get: function(...args) {
+        get: function (...args) {
           if (!originalGetter) return undefined;
           let result = Cu.waiveXrays(originalGetter.apply(this, args));
 
           if (self._recording) {
-            let timestamp = self.tabActor.window.performance.now() - self._frameStartTimestamp;
-            let stack = getStack(name);
             let type = CallWatcherFront.GETTER_FUNCTION;
+            let stack = getStack(name);
+            let timestamp = self.tabActor.window.performance.now() - self._timestampEpoch;
             callback(unwrappedWindow, global, this, type, name, stack, timestamp, args, result);
           }
           return result;
         },
-        set: function(...args) {
+        set: function (...args) {
           if (!originalSetter) return;
           originalSetter.apply(this, args);
 
           if (self._recording) {
-            let timestamp = self.tabActor.window.performance.now() - self._frameStartTimestamp;
-            let stack = getStack(name);
             let type = CallWatcherFront.SETTER_FUNCTION;
+            let stack = getStack(name);
+            let timestamp = self.tabActor.window.performance.now() - self._timestampEpoch;
             callback(unwrappedWindow, global, this, type, name, stack, timestamp, args, undefined);
           }
         },
@@ -550,115 +503,37 @@ var CallWatcherActor = exports.CallWatcherActor = protocol.ActorClass({
   /**
    * Invoked whenever the current tab actor's inner window is destroyed.
    */
-  _onGlobalDestroyed: function({window, id, isTopLevel}) {
+  _onGlobalDestroyed: function ({window, id, isTopLevel}) {
     if (this._tracedWindowId == id) {
       this.pauseRecording();
       this.eraseRecording();
+      this._timestampEpoch = 0;
     }
   },
 
   /**
    * Invoked whenever an instrumented function is called.
    */
-  _onContentFunctionCall: function(...details) {
+  _onContentFunctionCall: function (...details) {
     // If the consuming tool has finalized call-watcher, ignore the
     // still-instrumented calls.
     if (this._finalized) {
       return;
     }
+
     let functionCall = new FunctionCallActor(this.conn, details, this._holdWeak);
 
     if (this._storeCalls) {
       this._functionCalls.push(functionCall);
     }
 
-    this.onCall(functionCall);
+    if (this.onCall) {
+      this.onCall(functionCall);
+    } else {
+      emit(this, "call", functionCall);
+    }
   }
 });
-
-/**
- * The corresponding Front object for the CallWatcherActor.
- */
-var CallWatcherFront = exports.CallWatcherFront = protocol.FrontClass(CallWatcherActor, {
-  initialize: function(client, { callWatcherActor }) {
-    protocol.Front.prototype.initialize.call(this, client, { actor: callWatcherActor });
-    this.manage(this);
-  }
-});
-
-/**
- * Constants.
- */
-CallWatcherFront.METHOD_FUNCTION = 0;
-CallWatcherFront.GETTER_FUNCTION = 1;
-CallWatcherFront.SETTER_FUNCTION = 2;
-
-CallWatcherFront.GLOBAL_SCOPE = 0;
-CallWatcherFront.UNKNOWN_SCOPE = 1;
-CallWatcherFront.CANVAS_WEBGL_CONTEXT = 2;
-CallWatcherFront.CANVAS_2D_CONTEXT = 3;
-
-CallWatcherFront.ENUM_METHODS = {};
-CallWatcherFront.ENUM_METHODS[CallWatcherFront.CANVAS_2D_CONTEXT] = {
-  asyncDrawXULElement: [6],
-  drawWindow: [6]
-};
-
-CallWatcherFront.ENUM_METHODS[CallWatcherFront.CANVAS_WEBGL_CONTEXT] = {
-  activeTexture: [0],
-  bindBuffer: [0],
-  bindFramebuffer: [0],
-  bindRenderbuffer: [0],
-  bindTexture: [0],
-  blendEquation: [0],
-  blendEquationSeparate: [0, 1],
-  blendFunc: [0, 1],
-  blendFuncSeparate: [0, 1, 2, 3],
-  bufferData: [0, 1, 2],
-  bufferSubData: [0, 1],
-  checkFramebufferStatus: [0],
-  clear: [0],
-  compressedTexImage2D: [0, 2],
-  compressedTexSubImage2D: [0, 6],
-  copyTexImage2D: [0, 2],
-  copyTexSubImage2D: [0],
-  createShader: [0],
-  cullFace: [0],
-  depthFunc: [0],
-  disable: [0],
-  drawArrays: [0],
-  drawElements: [0, 2],
-  enable: [0],
-  framebufferRenderbuffer: [0, 1, 2],
-  framebufferTexture2D: [0, 1, 2],
-  frontFace: [0],
-  generateMipmap: [0],
-  getBufferParameter: [0, 1],
-  getParameter: [0],
-  getFramebufferAttachmentParameter: [0, 1, 2],
-  getProgramParameter: [1],
-  getRenderbufferParameter: [0, 1],
-  getShaderParameter: [1],
-  getShaderPrecisionFormat: [0, 1],
-  getTexParameter: [0, 1],
-  getVertexAttrib: [1],
-  getVertexAttribOffset: [1],
-  hint: [0, 1],
-  isEnabled: [0],
-  pixelStorei: [0],
-  readPixels: [4, 5],
-  renderbufferStorage: [0, 1],
-  stencilFunc: [0],
-  stencilFuncSeparate: [0, 1],
-  stencilMaskSeparate: [0],
-  stencilOp: [0, 1, 2],
-  stencilOpSeparate: [0, 1, 2, 3],
-  texImage2D: (args) => args.length > 6 ? [0, 2, 6, 7] : [0, 2, 3, 4],
-  texParameterf: [0, 1],
-  texParameteri: [0, 1, 2],
-  texSubImage2D: (args) => args.length === 9 ? [0, 6, 7] : [0, 4, 5],
-  vertexAttribPointer: [2]
-};
 
 /**
  * A lookup table for cross-referencing flags or properties with their name
@@ -726,7 +601,7 @@ function getBitToEnumValue(type, object, arg) {
  * column number, would have to change the protocol models `call-stack-items` and `call-details`
  * which hurts backwards compatibility, and the local `getStack` is an optimized, hot function.
  */
-function createContentError (e, win) {
+function createContentError(e, win) {
   let { message, name, stack } = e;
   let parsedStack = parseStack(stack);
   let { fileName, lineNumber, columnNumber } = parsedStack[parsedStack.length - 1];

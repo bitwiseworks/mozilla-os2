@@ -39,7 +39,7 @@
 class nsExternalAppHandler;
 class nsIMIMEInfo;
 class nsITransfer;
-class nsIDOMWindow;
+class nsPIDOMWindowOuter;
 
 /**
  * The helper app service. Responsible for handling content that Mozilla
@@ -67,7 +67,7 @@ public:
    * Initializes internal state. Will be called automatically when
    * this service is first instantiated.
    */
-  nsresult Init();
+  MOZ_MUST_USE nsresult Init();
  
   /**
    * Given a mimetype and an extension, looks up a mime info from the OS.
@@ -108,6 +108,15 @@ public:
   virtual nsresult OSProtocolHandlerExists(const char *aScheme,
                                                        bool *aExists) = 0;
 
+  /**
+   * Given an extension, get a MIME type string. If not overridden by
+   * the OS-specific nsOSHelperAppService, will call into GetMIMEInfoFromOS
+   * with an empty mimetype.
+   * @return true if we successfully found a mimetype.
+   */
+  virtual bool GetMIMETypeFromOSForExtension(const nsACString& aExtension,
+                                             nsACString& aMIMEType);
+
 protected:
   virtual ~nsExternalHelperAppService();
 
@@ -142,11 +151,11 @@ protected:
                                        nsACString& aMIMEType);
 
   /**
-   * NSPR Logging Module. Usage: set NSPR_LOG_MODULES=HelperAppService:level,
-   * where level should be 2 for errors, 3 for debug messages from the cross-
-   * platform nsExternalHelperAppService, and 4 for os-specific debug messages.
+   * Logging Module. Usage: set MOZ_LOG=HelperAppService:level, where level
+   * should be 2 for errors, 3 for debug messages from the cross- platform
+   * nsExternalHelperAppService, and 4 for os-specific debug messages.
    */
-  static PRLogModuleInfo* mLog;
+  static mozilla::LazyLogModule mLog;
 
   // friend, so that it can access the nspr log module.
   friend class nsExternalAppHandler;
@@ -277,7 +286,7 @@ protected:
    * Used to close the window on a timer, to avoid any exceptions that are
    * thrown if we try to close the window before it's fully loaded.
    */
-  nsCOMPtr<nsIDOMWindow> mWindowToClose;
+  nsCOMPtr<nsPIDOMWindowOuter> mWindowToClose;
   nsCOMPtr<nsITimer> mTimer;
 
   /**

@@ -11,6 +11,7 @@
 // shellapi.h is needed to build with WIN32_LEAN_AND_MEAN
 #include <shellapi.h>
 
+#include "nsArrayUtils.h"
 #include "nsCOMPtr.h"
 #include "nsDataObj.h"
 #include "nsIClipboardOwner.h"
@@ -42,6 +43,7 @@ PRLogModuleInfo* gWin32ClipboardLog = nullptr;
 
 // oddly, this isn't in the MSVC headers anywhere.
 UINT nsClipboard::CF_HTML = ::RegisterClipboardFormatW(L"HTML Format");
+UINT nsClipboard::CF_CUSTOMTYPES = ::RegisterClipboardFormatW(L"application/x-moz-custom-clipdata");
 
 
 //-------------------------------------------------------------------------
@@ -108,6 +110,8 @@ UINT nsClipboard::GetFormat(const char* aMimeStr, bool aMapHTMLMime)
   else if (strcmp(aMimeStr, kNativeHTMLMime) == 0 ||
            aMapHTMLMime && strcmp(aMimeStr, kHTMLMime) == 0)
     format = CF_HTML;
+  else if (strcmp(aMimeStr, kCustomTypesMime) == 0)
+    format = CF_CUSTOMTYPES;
   else
     format = ::RegisterClipboardFormatW(NS_ConvertASCIItoUTF16(aMimeStr).get());
 
@@ -154,18 +158,16 @@ nsresult nsClipboard::SetupNativeDataObject(nsITransferable * aTransferable, IDa
   dObj->SetTransferable(aTransferable);
 
   // Get the transferable list of data flavors
-  nsCOMPtr<nsISupportsArray> dfList;
+  nsCOMPtr<nsIArray> dfList;
   aTransferable->FlavorsTransferableCanExport(getter_AddRefs(dfList));
 
   // Walk through flavors that contain data and register them
   // into the DataObj as supported flavors
   uint32_t i;
   uint32_t cnt;
-  dfList->Count(&cnt);
+  dfList->GetLength(&cnt);
   for (i=0;i<cnt;i++) {
-    nsCOMPtr<nsISupports> genericFlavor;
-    dfList->GetElementAt ( i, getter_AddRefs(genericFlavor) );
-    nsCOMPtr<nsISupportsCString> currentFlavor ( do_QueryInterface(genericFlavor) );
+    nsCOMPtr<nsISupportsCString> currentFlavor = do_QueryElementAt(dfList, i);
     if ( currentFlavor ) {
       nsXPIDLCString flavorStr;
       currentFlavor->ToString(getter_Copies(flavorStr));
@@ -534,6 +536,9 @@ nsresult nsClipboard::GetNativeDataOffClipboard(IDataObject * aDataObject, UINT 
                     // do that in FindPlatformHTML(). For now, return the allocLen. This
                     // case is mostly to ensure we don't try to call strlen on the buffer.
                     *aLen = allocLen;
+                  } else if (fe.cfFormat == CF_CUSTOMTYPES) {
+                    // Binary data
+                    *aLen = allocLen;
                   } else if (fe.cfFormat == preferredDropEffect) {
                     // As per the MSDN doc entitled: "Shell Clipboard Formats"
                     // CFSTR_PREFERREDDROPEFFECT should return a DWORD
@@ -585,7 +590,7 @@ nsresult nsClipboard::GetDataFromDataObject(IDataObject     * aDataObject,
 
   // get flavor list that includes all flavors that can be written (including ones 
   // obtained through conversion)
-  nsCOMPtr<nsISupportsArray> flavorList;
+  nsCOMPtr<nsIArray> flavorList;
   res = aTransferable->FlavorsTransferableCanImport ( getter_AddRefs(flavorList) );
   if ( NS_FAILED(res) )
     return NS_ERROR_FAILURE;
@@ -593,11 +598,9 @@ nsresult nsClipboard::GetDataFromDataObject(IDataObject     * aDataObject,
   // Walk through flavors and see which flavor is on the clipboard them on the native clipboard,
   uint32_t i;
   uint32_t cnt;
-  flavorList->Count(&cnt);
+  flavorList->GetLength(&cnt);
   for (i=0;i<cnt;i++) {
-    nsCOMPtr<nsISupports> genericFlavor;
-    flavorList->GetElementAt ( i, getter_AddRefs(genericFlavor) );
-    nsCOMPtr<nsISupportsCString> currentFlavor ( do_QueryInterface(genericFlavor) );
+    nsCOMPtr<nsISupportsCString> currentFlavor = do_QueryElementAt(flavorList, i);
     if ( currentFlavor ) {
       nsXPIDLCString flavorStr;
       currentFlavor->ToString(getter_Copies(flavorStr));
@@ -682,16 +685,19 @@ nsresult nsClipboard::GetDataFromDataObject(IDataObject     * aDataObject,
           NS_IF_RELEASE(imageStream);
         }
         else {
-          // we probably have some form of text. The DOM only wants LF, so convert from Win32 line 
-          // endings to DOM line endings.
-          int32_t signedLen = static_cast<int32_t>(dataLen);
-          nsLinebreakHelpers::ConvertPlatformToDOMLinebreaks ( flavorStr, &data, &signedLen );
-          dataLen = signedLen;
+          // Treat custom types as a string of bytes.
+          if (strcmp(flavorStr, kCustomTypesMime) != 0) {
+            // we probably have some form of text. The DOM only wants LF, so convert from Win32 line 
+            // endings to DOM line endings.
+            int32_t signedLen = static_cast<int32_t>(dataLen);
+            nsLinebreakHelpers::ConvertPlatformToDOMLinebreaks ( flavorStr, &data, &signedLen );
+            dataLen = signedLen;
 
-          if (strcmp(flavorStr, kRTFMime) == 0) {
-            // RTF on Windows is known to sometimes deliver an extra null byte.
-            if (dataLen > 0 && static_cast<char*>(data)[dataLen - 1] == '\0')
-              dataLen--;
+            if (strcmp(flavorStr, kRTFMime) == 0) {
+              // RTF on Windows is known to sometimes deliver an extra null byte.
+              if (dataLen > 0 && static_cast<char*>(data)[dataLen - 1] == '\0')
+                dataLen--;
+            }
           }
 
           nsPrimitiveHelpers::CreatePrimitiveForData ( flavorStr, data, dataLen, getter_AddRefs(genericDataWrapper) );
@@ -764,7 +770,7 @@ nsClipboard :: FindPlatformHTML ( IDataObject* inDataObject, UINT inIndex,
   }
   
   // We want to return the buffer not offset by startOfData because it will be 
-  // parsed out later (probably by nsHTMLEditor::ParseCFHTML) when it is still
+  // parsed out later (probably by HTMLEditor::ParseCFHTML) when it is still
   // in CF_HTML format.
 
   // We return the byte offset from the start of the data buffer to where the
@@ -838,7 +844,7 @@ nsClipboard :: FindURLFromLocalFile ( IDataObject* inDataObject, UINT inIndex, v
       ResolveShortcut( file, url );
       if ( !url.IsEmpty() ) {
         // convert it to unicode and pass it out
-        nsDependentString urlString(UTF8ToNewUnicode(url));
+        NS_ConvertUTF8toUTF16 urlString(url);
         // the internal mozilla URL format, text/x-moz-url, contains
         // URL\ntitle.  We can guess the title from the file's name.
         nsAutoString title;

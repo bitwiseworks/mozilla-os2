@@ -10,14 +10,15 @@
 
 #include "GrTypes.h"
 #include "GrTypesPriv.h"
+#include "SkRefCnt.h"
 
-class GrEffect;
+class GrFragmentProcessor;
 
 namespace GrDitherEffect {
     /**
      * Creates an effect that dithers the resulting color to an RGBA8 framebuffer
      */
-    GrEffect* Create();
+    sk_sp<GrFragmentProcessor> Make();
 };
 
 #endif

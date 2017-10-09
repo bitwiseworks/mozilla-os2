@@ -40,14 +40,14 @@ function* ifTestingSupported() {
   is(functionCalls[0].line, 25,
     "The called function's line is correct.");
 
-  is(functionCalls[0].callerPreview, "ctx",
+  is(functionCalls[0].callerPreview, "Object",
     "The called function's caller preview is correct.");
   is(functionCalls[0].argsPreview, "0, 0, 128, 128",
     "The called function's args preview is correct.");
 
   let details = yield functionCalls[1].getDetails();
   ok(details,
-    "The first called function has some details available.")
+    "The first called function has some details available.");
 
   is(details.stack.length, 3,
     "The called function's stack depth is correct.");

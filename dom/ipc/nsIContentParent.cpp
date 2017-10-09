@@ -17,7 +17,10 @@
 #include "mozilla/dom/ipc/BlobParent.h"
 #include "mozilla/dom/ipc/StructuredCloneData.h"
 #include "mozilla/jsipc/CrossProcessObjectWrappers.h"
-#include "mozilla/unused.h"
+#include "mozilla/ipc/FileDescriptorSetParent.h"
+#include "mozilla/ipc/PFileDescriptorSetParent.h"
+#include "mozilla/ipc/SendStreamAlloc.h"
+#include "mozilla/Unused.h"
 
 #include "nsFrameMessageManager.h"
 #include "nsIWebBrowserChrome.h"
@@ -58,7 +61,7 @@ nsIContentParent::AsContentBridgeParent()
 PJavaScriptParent*
 nsIContentParent::AllocPJavaScriptParent()
 {
-  return NewJavaScriptParent(xpc::GetJSRuntime());
+  return NewJavaScriptParent();
 }
 
 bool
@@ -94,10 +97,10 @@ nsIContentParent::CanOpenBrowser(const IPCTabContext& aContext)
       return false;
     }
 
-    // Popup windows of isBrowser frames must be isBrowser if the parent
-    // isBrowser.  Allocating a !isBrowser frame with same app ID would allow
-    // the content to access data it's not supposed to.
-    if (!popupContext.isBrowserElement() && opener->IsBrowserElement()) {
+    // Popup windows of isMozBrowserElement frames must be isMozBrowserElement if
+    // the parent isMozBrowserElement.  Allocating a !isMozBrowserElement frame with
+    // same app ID would allow the content to access data it's not supposed to.
+    if (!popupContext.isMozBrowserElement() && opener->IsMozBrowserElement()) {
       ASSERT_UNLESS_FUZZING("Child trying to escalate privileges!  Aborting AllocPBrowserParent.");
       return false;
     }
@@ -267,11 +270,37 @@ nsIContentParent::RecvRpcMessage(const nsString& aMsg,
   return true;
 }
 
+PFileDescriptorSetParent*
+nsIContentParent::AllocPFileDescriptorSetParent(const FileDescriptor& aFD)
+{
+  return new FileDescriptorSetParent(aFD);
+}
+
+bool
+nsIContentParent::DeallocPFileDescriptorSetParent(PFileDescriptorSetParent* aActor)
+{
+  delete static_cast<FileDescriptorSetParent*>(aActor);
+  return true;
+}
+
+PSendStreamParent*
+nsIContentParent::AllocPSendStreamParent()
+{
+  return mozilla::ipc::AllocPSendStreamParent();
+}
+
+bool
+nsIContentParent::DeallocPSendStreamParent(PSendStreamParent* aActor)
+{
+  delete aActor;
+  return true;
+}
+
 bool
 nsIContentParent::RecvAsyncMessage(const nsString& aMsg,
-                                   const ClonedMessageData& aData,
                                    InfallibleTArray<CpowEntry>&& aCpows,
-                                   const IPC::Principal& aPrincipal)
+                                   const IPC::Principal& aPrincipal,
+                                   const ClonedMessageData& aData)
 {
   // FIXME Permission check in Content process
   nsIPrincipal* principal = aPrincipal;

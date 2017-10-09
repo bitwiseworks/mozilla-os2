@@ -1,13 +1,15 @@
 import json
 import os
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
+from six import iteritems
 
-from item import item_types, ManualTest, WebdriverSpecTest, Stub, RefTest, TestharnessTest
-from log import get_logger
-from sourcefile import SourceFile
+from .item import item_types, ManualTest, WebdriverSpecTest, Stub, RefTest, TestharnessTest
+from .log import get_logger
+from .sourcefile import SourceFile
+from .utils import from_os_path, to_os_path
 
 
-CURRENT_VERSION = 2
+CURRENT_VERSION = 3
 
 
 class ManifestError(Exception):
@@ -36,11 +38,16 @@ class Manifest(object):
         for item_type in include_types:
             paths = self._data[item_type].copy()
             for local_types, local_paths in self.local_changes.itertypes(item_type):
-                for path, items in local_paths.iteritems():
+                for path, items in iteritems(local_paths):
                     paths[path] = items
                 for path in self.local_changes.iterdeleted():
                     if path in paths:
                         del paths[path]
+                if item_type == "reftest":
+                    for path, items in self.local_changes.iterdeletedreftests():
+                        paths[path] -= items
+                        if len(paths[path]) == 0:
+                            del paths[path]
 
             yield item_type, paths
 
@@ -51,13 +58,10 @@ class Manifest(object):
         if item is None:
             return
 
-        is_reference = False
         if isinstance(item, RefTest):
             self.reftest_nodes[item.path].add(item)
             self.reftest_nodes_by_url[item.url] = item
-            is_reference = item.is_reference
-
-        if not is_reference:
+        else:
             self._add(item)
 
         item.manifest = self
@@ -78,7 +82,7 @@ class Manifest(object):
         if not types:
             types = None
         for item_type, items in self._included_items(types):
-            for item in sorted(items.items()):
+            for item in sorted(iteritems(items)):
                 yield item
 
     def __iter__(self):
@@ -142,7 +146,7 @@ class Manifest(object):
         self.local_changes = LocalChanges(self)
 
         local_paths = set()
-        for rel_path, status in local_changes.iteritems():
+        for rel_path, status in iteritems(local_changes):
             local_paths.add(rel_path)
 
             if status == "modified":
@@ -169,46 +173,65 @@ class Manifest(object):
         self.url_base = url_base
 
     def update_reftests(self):
-        reftest_nodes = self.reftest_nodes.copy()
-        for path, items in self.local_changes.reftest_nodes.iteritems():
-            reftest_nodes[path] |= items
+        default_reftests = self.compute_reftests(self.reftest_nodes)
+        all_reftest_nodes = self.reftest_nodes.copy()
+        all_reftest_nodes.update(self.local_changes.reftest_nodes)
 
-        #TODO: remove locally deleted files
-        tests = set()
-        for items in reftest_nodes.values():
-            tests |= set(item for item in items if not item.is_reference)
+        for item in self.local_changes.iterdeleted():
+            if item in all_reftest_nodes:
+                del all_reftest_nodes[item]
+
+        modified_reftests = self.compute_reftests(all_reftest_nodes)
+
+        added_reftests = modified_reftests - default_reftests
+        # The interesting case here is not when the file is deleted,
+        # but when a reftest like A == B is changed to the form
+        # C == A == B, so that A still exists but is now a ref rather than
+        # a test.
+        removed_reftests = default_reftests - modified_reftests
+
+        dests = [(default_reftests, self._data["reftest"]),
+                 (added_reftests, self.local_changes._data["reftest"]),
+                 (removed_reftests, self.local_changes._deleted_reftests)]
+
+        #TODO: Warn if there exist unreachable reftest nodes
+        for source, target in dests:
+            for item in source:
+                target[item.path].add(item)
+
+    def compute_reftests(self, reftest_nodes):
+        """Given a set of reftest_nodes, return a set of all the nodes that are top-level
+        tests i.e. don't have any incoming reference links."""
+
+        reftests = set()
 
         has_inbound = set()
-        for path, items in reftest_nodes.iteritems():
+        for path, items in iteritems(reftest_nodes):
             for item in items:
                 for ref_url, ref_type in item.references:
                     has_inbound.add(ref_url)
 
-        if self.local_changes.reftest_nodes:
-            target = self.local_changes
-        else:
-            target = self
-
-        #TODO: Warn if there exist unreachable reftest nodes
-
-        for path, items in reftest_nodes.iteritems():
+        for path, items in iteritems(reftest_nodes):
             for item in items:
                 if item.url in has_inbound:
                     continue
-                target._data["reftest"][path].add(item)
+                reftests.add(item)
+
+        return reftests
 
     def to_json(self):
         out_items = {
             item_type: sorted(
                 test.to_json()
-                for _, tests in items.iteritems()
+                for _, tests in iteritems(items)
                 for test in tests
             )
-            for item_type, items in self._data.iteritems()
+            for item_type, items in iteritems(self._data)
         }
 
-        reftest_nodes = {key:[v.to_json() for v in value]
-                         for key, value in self.reftest_nodes.iteritems()}
+        reftest_nodes = OrderedDict()
+        for key, value in sorted(iteritems(self.reftest_nodes)):
+            reftest_nodes[from_os_path(key)] = [v.to_json() for v in value]
 
         rv = {"url_base": self.url_base,
               "rev": self.rev,
@@ -226,7 +249,7 @@ class Manifest(object):
 
         self = cls(git_rev=obj["rev"],
                    url_base=obj.get("url_base", "/"))
-        if not hasattr(obj, "iteritems"):
+        if not hasattr(obj, "items"):
             raise ManifestError
 
         item_classes = {"testharness": TestharnessTest,
@@ -237,7 +260,7 @@ class Manifest(object):
 
         source_files = {}
 
-        for k, values in obj["items"].iteritems():
+        for k, values in iteritems(obj["items"]):
             if k not in item_types:
                 raise ManifestError
             for v in values:
@@ -245,7 +268,8 @@ class Manifest(object):
                                                           source_files=source_files)
                 self._add(manifest_item)
 
-        for path, values in obj["reftest_nodes"].iteritems():
+        for path, values in iteritems(obj["reftest_nodes"]):
+            path = to_os_path(path)
             for v in values:
                 item = RefTest.from_json(self, tests_root, v,
                                          source_files=source_files)
@@ -256,7 +280,9 @@ class Manifest(object):
                                                     tests_root,
                                                     obj["local_changes"],
                                                     source_files=source_files)
+        self.update_reftests()
         return self
+
 
 class LocalChanges(object):
     def __init__(self, manifest):
@@ -265,18 +291,16 @@ class LocalChanges(object):
         self._deleted = set()
         self.reftest_nodes = defaultdict(set)
         self.reftest_nodes_by_url = {}
+        self._deleted_reftests = defaultdict(set)
 
     def add(self, item):
         if item is None:
             return
 
-        is_reference = False
         if isinstance(item, RefTest):
             self.reftest_nodes[item.path].add(item)
             self.reftest_nodes_by_url[item.url] = item
-            is_reference = item.is_reference
-
-        if not is_reference:
+        else:
             self._add(item)
 
         item.manifest = self.manifest
@@ -302,21 +326,28 @@ class LocalChanges(object):
         for item in self._deleted:
             yield item
 
+    def iterdeletedreftests(self):
+        for item in iteritems(self._deleted_reftests):
+            yield item
+
     def __getitem__(self, item_type):
         return self._data[item_type]
 
     def to_json(self):
-        reftest_nodes = {key:[v.to_json() for v in value]
-                         for key, value in self.reftest_nodes.iteritems()}
+        reftest_nodes = {from_os_path(key): [v.to_json() for v in value]
+                         for key, value in iteritems(self.reftest_nodes)}
+
+        deleted_reftests = {from_os_path(key): [v.to_json() for v in value]
+                            for key, value in iteritems(self._deleted_reftests)}
 
         rv = {"items": defaultdict(dict),
               "reftest_nodes": reftest_nodes,
-              "deleted": []}
+              "deleted": [from_os_path(path) for path in self._deleted],
+              "deleted_reftests": deleted_reftests}
 
-        rv["deleted"].extend(self._deleted)
-
-        for test_type, paths in self._data.iteritems():
-            for path, tests in paths.iteritems():
+        for test_type, paths in iteritems(self._data):
+            for path, tests in iteritems(paths):
+                path = from_os_path(path)
                 rv["items"][test_type][path] = [test.to_json() for test in tests]
 
         return rv
@@ -324,7 +355,7 @@ class LocalChanges(object):
     @classmethod
     def from_json(cls, manifest, tests_root, obj, source_files=None):
         self = cls(manifest)
-        if not hasattr(obj, "iteritems"):
+        if not hasattr(obj, "items"):
             raise ManifestError
 
         item_classes = {"testharness": TestharnessTest,
@@ -333,8 +364,8 @@ class LocalChanges(object):
                         "stub": Stub,
                         "wdspec": WebdriverSpecTest}
 
-        for test_type, paths in obj["items"].iteritems():
-            for path, tests in paths.iteritems():
+        for test_type, paths in iteritems(obj["items"]):
+            for path, tests in iteritems(paths):
                 for test in tests:
                     manifest_item = item_classes[test_type].from_json(manifest,
                                                                       tests_root,
@@ -342,7 +373,8 @@ class LocalChanges(object):
                                                                       source_files=source_files)
                     self.add(manifest_item)
 
-        for path, values in obj["reftest_nodes"].iteritems():
+        for path, values in iteritems(obj["reftest_nodes"]):
+            path = to_os_path(path)
             for v in values:
                 item = RefTest.from_json(self.manifest, tests_root, v,
                                          source_files=source_files)
@@ -350,7 +382,14 @@ class LocalChanges(object):
                 self.reftest_nodes_by_url[item.url] = item
 
         for item in obj["deleted"]:
-            self.add_deleted(item)
+            self.add_deleted(to_os_path(item))
+
+        for path, values in iteritems(obj.get("deleted_reftests", {})):
+            path = to_os_path(path)
+            for v in values:
+                item = RefTest.from_json(self.manifest, tests_root, v,
+                                         source_files=source_files)
+                self._deleted_reftests[path].add(item)
 
         return self
 

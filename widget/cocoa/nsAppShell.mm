@@ -33,7 +33,7 @@
 #include "mozilla/HangMonitor.h"
 #include "GeckoProfiler.h"
 #include "pratom.h"
-#if !defined(RELEASE_BUILD) || defined(DEBUG)
+#if !defined(RELEASE_OR_BETA) || defined(DEBUG)
 #include "nsSandboxViolationSink.h"
 #endif
 
@@ -110,7 +110,14 @@ static bool gAppShellMethodsSwizzled = false;
   [super sendEvent:anEvent];
 }
 
+#if defined(MAC_OS_X_VERSION_10_12) && \
+    MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_12 && \
+    __LP64__
+// 10.12 changed `mask` to NSEventMask (unsigned long long) for x86_64 builds.
+- (NSEvent*)nextEventMatchingMask:(NSEventMask)mask
+#else
 - (NSEvent*)nextEventMatchingMask:(NSUInteger)mask
+#endif
                         untilDate:(NSDate*)expiration
                            inMode:(NSString*)mode
                           dequeue:(BOOL)flag
@@ -127,7 +134,6 @@ static bool gAppShellMethodsSwizzled = false;
 }
 
 @end
-
 
 // AppShellDelegate
 //
@@ -322,9 +328,8 @@ nsAppShell::Init()
     CGSSetDebugOptions(0x80000007);
   }
 
-#if !defined(RELEASE_BUILD) || defined(DEBUG)
-  if (nsCocoaFeatures::OnMavericksOrLater() &&
-      Preferences::GetBool("security.sandbox.mac.track.violations", false)) {
+#if !defined(RELEASE_OR_BETA) || defined(DEBUG)
+  if (Preferences::GetBool("security.sandbox.mac.track.violations", false)) {
     nsSandboxViolationSink::Start();
   }
 #endif
@@ -364,7 +369,7 @@ nsAppShell::ProcessGeckoEvents(void* aInfo)
     // presentable.
     //
     // But _don't_ set windowNumber to '-1' -- that can lead to nasty
-    // wierdness like bmo bug 397039 (a crash in [NSApp sendEvent:] on one of
+    // weirdness like bmo bug 397039 (a crash in [NSApp sendEvent:] on one of
     // these fake events, because the -1 has gotten changed into the number
     // of an actual NSWindow object, and that NSWindow object has just been
     // destroyed).  Setting windowNumber to '0' seems to work fine -- this
@@ -682,10 +687,8 @@ nsAppShell::Exit(void)
 
   mTerminated = true;
 
-#if !defined(RELEASE_BUILD) || defined(DEBUG)
-  if (nsCocoaFeatures::OnMavericksOrLater()) {
-    nsSandboxViolationSink::Stop();
-  }
+#if !defined(RELEASE_OR_BETA) || defined(DEBUG)
+  nsSandboxViolationSink::Stop();
 #endif
 
   // Quoting from Apple's doc on the [NSApplication stop:] method (from their

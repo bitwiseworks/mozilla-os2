@@ -1,18 +1,19 @@
+import os
+
+ABS_WORK_DIR = os.path.join(os.getcwd(), "build")
 config = {
     "log_name": "central_to_aurora",
     "version_files": [
-        "browser/config/version.txt",
-        "browser/config/version_display.txt",
-        "config/milestone.txt",
-        "b2g/confvars.sh",
+        {"file": "browser/config/version.txt", "suffix": ""},
+        {"file": "browser/config/version_display.txt", "suffix": ""},
+        {"file": "config/milestone.txt", "suffix": ""},
     ],
     "replacements": [
         # File, from, to
         ("{}/{}".format(d, f),
         "ac_add_options --with-branding=mobile/android/branding/nightly",
         "ac_add_options --with-branding=mobile/android/branding/aurora")
-        for d in ["mobile/android/config/mozconfigs/android-api-11/",
-                  "mobile/android/config/mozconfigs/android-api-9-10-constrained/",
+        for d in ["mobile/android/config/mozconfigs/android-api-15/",
                   "mobile/android/config/mozconfigs/android-x86/"]
         for f in ["debug", "nightly", "l10n-nightly"]
     ] + [
@@ -31,14 +32,12 @@ config = {
         ("{}/l10n-nightly".format(d),
         "ac_add_options --with-l10n-base=../../l10n-central",
         "ac_add_options --with-l10n-base=..")
-        for d in ["mobile/android/config/mozconfigs/android-api-11/",
-                  "mobile/android/config/mozconfigs/android-api-9-10-constrained/",
+        for d in ["mobile/android/config/mozconfigs/android-api-15/",
                   "mobile/android/config/mozconfigs/android-x86/"]
     ] + [
         # File, from, to
         (f, "ac_add_options --enable-profiling", "") for f in
-        ["mobile/android/config/mozconfigs/android-api-11/nightly",
-         "mobile/android/config/mozconfigs/android-api-9-10-constrained/nightly",
+        ["mobile/android/config/mozconfigs/android-api-15/nightly",
          "mobile/android/config/mozconfigs/android-x86/nightly",
          "browser/config/mozconfigs/linux32/nightly",
          "browser/config/mozconfigs/linux64/nightly",
@@ -70,11 +69,10 @@ config = {
         "mobile/android/locales/all-locales"
     ],
 
-    # Disallow sharing, since we want pristine .hg directories.
-    # "vcs_share_base": None,
+    "vcs_share_base": os.path.join(ABS_WORK_DIR, 'hg-shared'),
     # "hg_share_base": None,
     "tools_repo_url": "https://hg.mozilla.org/build/tools",
-    "tools_repo_revision": "default",
+    "tools_repo_branch": "default",
     "from_repo_url": "ssh://hg.mozilla.org/mozilla-central",
     "to_repo_url": "ssh://hg.mozilla.org/releases/mozilla-aurora",
 
@@ -87,7 +85,6 @@ config = {
         8,  # Fennec aurora channel
         10,  # Firefox aurora channel
         18,  # MetroFirefox aurora channel
-        106,  # Fennec api-9 aurora channel
     ],
     "balrog_credentials_file": "oauth.txt",
 
@@ -95,10 +92,7 @@ config = {
         "requests==2.8.1",
     ],
 
-    "post_merge_builders": [
-        "mozilla-aurora hg bundle",
-        "mozilla-central hg bundle",
-    ],
+    "post_merge_builders": [],
     "post_merge_nightly_branches": [
         "mozilla-central",
         "mozilla-aurora",

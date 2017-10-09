@@ -19,6 +19,8 @@
 using namespace js;
 using namespace js::jit;
 
+using mozilla::IsPowerOfTwo;
+
 // All registers to save and restore. This includes the stack pointer, since we
 // use the ability to reference register values on the stack by index.
 static const LiveRegisterSet AllRegs =
@@ -40,7 +42,7 @@ JitRuntime::generateEnterJIT(JSContext* cx, EnterJitType type)
     MOZ_ASSERT(OsrFrameReg == IntArgReg3);
 
 #if defined(_WIN64)
-    const Operand token  = Operand(rbp, 16 + ShadowStackSpace);
+    const Address token  = Address(rbp, 16 + ShadowStackSpace);
     const Operand scopeChain = Operand(rbp, 24 + ShadowStackSpace);
     const Operand numStackValuesAddr = Operand(rbp, 32 + ShadowStackSpace);
     const Operand result = Operand(rbp, 40 + ShadowStackSpace);
@@ -158,7 +160,7 @@ JitRuntime::generateEnterJIT(JSContext* cx, EnterJitType type)
     masm.subq(rsp, r14);
 
     // Create a frame descriptor.
-    masm.makeFrameDescriptor(r14, JitFrame_Entry);
+    masm.makeFrameDescriptor(r14, JitFrame_Entry, JitFrameLayout::Size());
     masm.push(r14);
 
     CodeLabel returnLabel;
@@ -223,7 +225,7 @@ JitRuntime::generateEnterJIT(JSContext* cx, EnterJitType type)
 
         // Enter exit frame.
         masm.addPtr(Imm32(BaselineFrame::Size() + BaselineFrame::FramePointerOffset), valuesSize);
-        masm.makeFrameDescriptor(valuesSize, JitFrame_BaselineJS);
+        masm.makeFrameDescriptor(valuesSize, JitFrame_BaselineJS, ExitFrameLayout::Size());
         masm.push(valuesSize);
         masm.push(Imm32(0)); // Fake return address.
         // No GC things to mark, push a bare token.
@@ -431,8 +433,9 @@ JitRuntime::generateArgumentsRectifier(JSContext* cx, void** returnAddrOut)
       "No need to consider the JitFrameLayout for aligning the stack");
     static_assert(JitStackAlignment % sizeof(Value) == 0,
       "Ensure that we can pad the stack by pushing extra UndefinedValue");
+    static_assert(IsPowerOfTwo(JitStackValueAlignment),
+                  "must have power of two for masm.andl to do its job");
 
-    MOZ_ASSERT(IsPowerOfTwo(JitStackValueAlignment));
     masm.addl(Imm32(JitStackValueAlignment - 1 /* for padding */ + 1 /* for |this| */), rcx);
     masm.addl(rdx, rcx);
     masm.andl(Imm32(~(JitStackValueAlignment - 1)), rcx);
@@ -516,7 +519,7 @@ JitRuntime::generateArgumentsRectifier(JSContext* cx, void** returnAddrOut)
 
     // Construct descriptor.
     masm.subq(rsp, r9);
-    masm.makeFrameDescriptor(r9, JitFrame_Rectifier);
+    masm.makeFrameDescriptor(r9, JitFrame_Rectifier, JitFrameLayout::Size());
 
     // Construct JitFrameLayout.
     masm.push(rdx); // numActualArgs
@@ -563,11 +566,11 @@ PushBailoutFrame(MacroAssembler& masm, Register spArg)
         // the float registers to have the maximal possible size
         // (Simd128DataSize). To work around this, we just spill the double
         // registers by hand here, using the register dump offset directly.
-        for (GeneralRegisterBackwardIterator iter(AllRegs.gprs()); iter.more(); iter++)
+        for (GeneralRegisterBackwardIterator iter(AllRegs.gprs()); iter.more(); ++iter)
             masm.Push(*iter);
 
         masm.reserveStack(sizeof(RegisterDump::FPUArray));
-        for (FloatRegisterBackwardIterator iter(AllRegs.fpus()); iter.more(); iter++) {
+        for (FloatRegisterBackwardIterator iter(AllRegs.fpus()); iter.more(); ++iter) {
             FloatRegister reg = *iter;
             Address spillAddress(StackPointer, reg.getRegisterDumpOffsetInBytes());
             masm.storeDouble(reg, spillAddress);
@@ -714,6 +717,9 @@ JitRuntime::generateVMWrapper(JSContext* cx, const VMFunction& f)
         break;
     }
 
+    if (!generateTLEnterVM(cx, masm, f))
+        return nullptr;
+
     masm.setupUnalignedABICall(regs.getAny());
     masm.passABIArg(cxreg);
 
@@ -746,6 +752,9 @@ JitRuntime::generateVMWrapper(JSContext* cx, const VMFunction& f)
         masm.passABIArg(outReg);
 
     masm.callWithABI(f.wrapped);
+
+    if (!generateTLExitVM(cx, masm, f))
+        return nullptr;
 
     // Test for failure.
     switch (f.failType()) {
@@ -850,7 +859,8 @@ JitRuntime::generatePreBarrier(JSContext* cx, MIRType type)
 }
 
 typedef bool (*HandleDebugTrapFn)(JSContext*, BaselineFrame*, uint8_t*, bool*);
-static const VMFunction HandleDebugTrapInfo = FunctionInfo<HandleDebugTrapFn>(HandleDebugTrap);
+static const VMFunction HandleDebugTrapInfo =
+    FunctionInfo<HandleDebugTrapFn>(HandleDebugTrap, "HandleDebugTrap");
 
 JitCode*
 JitRuntime::generateDebugTrapHandler(JSContext* cx)

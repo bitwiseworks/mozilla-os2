@@ -274,7 +274,7 @@ protected:
     virtual gfxFont *CreateFontInstance(const gfxFontStyle *aFontStyle, bool aNeedsBold);
 
     virtual nsresult CopyFontTable(uint32_t aTableTag,
-                                   FallibleTArray<uint8_t>& aBuffer) override;
+                                   nsTArray<uint8_t>& aBuffer) override;
 
     LOGFONTW mLogFont;
 };
@@ -301,13 +301,12 @@ public:
     }
 
     // initialize font lists
-    virtual nsresult InitFontList();
+    virtual nsresult InitFontListForPlatform() override;
 
-    virtual gfxFontFamily* GetDefaultFont(const gfxFontStyle* aStyle);
-
-    gfxFontFamily* FindFamily(const nsAString& aFamily,
-                              gfxFontStyle* aStyle = nullptr,
-                              gfxFloat aDevToCssSize = 1.0) override;
+    bool FindAndAddFamilies(const nsAString& aFamily,
+                            nsTArray<gfxFontFamily*>* aOutput,
+                            gfxFontStyle* aStyle = nullptr,
+                            gfxFloat aDevToCssSize = 1.0) override;
 
     virtual gfxFontEntry* LookupLocalFont(const nsAString& aFontName,
                                           uint16_t aWeight,
@@ -325,6 +324,10 @@ public:
                                         FontListSizes* aSizes) const;
     virtual void AddSizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf,
                                         FontListSizes* aSizes) const;
+
+protected:
+    virtual gfxFontFamily*
+    GetDefaultFontForPlatform(const gfxFontStyle* aStyle) override;
 
 private:
     friend class gfxWindowsPlatform;

@@ -86,13 +86,13 @@ struct TracerStartClosure {
 };
 
 #ifdef MOZ_WIDGET_GONK
-class EventLoopLagDispatcher : public nsRunnable
+class EventLoopLagDispatcher : public Runnable
 {
   public:
     explicit EventLoopLagDispatcher(int aLag)
       : mLag(aLag) {}
 
-    NS_IMETHODIMP Run()
+    NS_IMETHOD Run() override
     {
       nsCOMPtr<nsIObserverService> obsService =
         mozilla::services::GetObserverService();

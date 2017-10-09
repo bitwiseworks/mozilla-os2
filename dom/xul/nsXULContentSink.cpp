@@ -529,7 +529,7 @@ XULContentSinkImpl::HandleEndElement(const char16_t *aName)
             static_cast<nsXULPrototypeScript*>(node.get());
 
         // If given a src= attribute, we must ignore script tag content.
-        if (!script->mSrcURI && !script->GetScriptObject()) {
+        if (!script->mSrcURI && !script->HasScriptObject()) {
             nsCOMPtr<nsIDocument> doc = do_QueryReferent(mDocument);
 
             script->mOutOfLine = false;
@@ -671,6 +671,12 @@ XULContentSinkImpl::ReportError(const char16_t* aErrorText,
   // The buffer itself is allocated when we're created and deleted in our
   // destructor, so don't mess with it.
   mTextLength = 0;
+
+  // return leaving the document empty if we're asked to not add a <parsererror> root node
+  nsCOMPtr<nsIDocument> idoc = do_QueryReferent(mDocument);
+  if (idoc && idoc->SuppressParserErrorElement()) {
+    return NS_OK;
+  };
 
   nsCOMPtr<nsIXULDocument> doc = do_QueryReferent(mDocument);
   if (doc && !doc->OnDocumentParserError()) {

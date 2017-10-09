@@ -25,24 +25,11 @@
 - (CGFloat)backingScaleFactor;
 @end
 
-// When building with a pre-10.7 SDK, NSEventPhase is not defined.
-#if !defined(MAC_OS_X_VERSION_10_7) || MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_7
-enum {
-  NSEventPhaseNone        = 0,
-  NSEventPhaseBegan       = 0x1 << 0,
-  NSEventPhaseStationary  = 0x1 << 1,
-  NSEventPhaseChanged     = 0x1 << 2,
-  NSEventPhaseEnded       = 0x1 << 3,
-  NSEventPhaseCancelled   = 0x1 << 4,
-};
-typedef NSUInteger NSEventPhase;
-#endif // #if !defined(MAC_OS_X_VERSION_10_7) || MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_7
-
 #if !defined(MAC_OS_X_VERSION_10_8) || MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_8
 enum {
   NSEventPhaseMayBegin    = 0x1 << 5
 };
-#endif // #if !defined(MAC_OS_X_VERSION_10_8) || MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_8
+#endif
 
 class nsIWidget;
 
@@ -98,11 +85,6 @@ private:
 // Send an event to the current Cocoa app-modal session.  Present in all
 // versions of OS X from (at least) 10.2.8 through 10.5.
 - (void)_modalSession:(NSModalSession)aSession sendEvent:(NSEvent *)theEvent;
-
-// Present (and documented) on OS X 10.6 and above.  Not present before 10.6.
-// This declaration needed to avoid compiler warnings when compiling on 10.5
-// and below (or using the 10.5 SDK and below).
-- (void)setHelpMenu:(NSMenu *)helpMenu;
 
 @end
 
@@ -161,6 +143,13 @@ public:
                                 NSToIntRound(aPt.y * aBackingScale));
   }
 
+  static LayoutDeviceIntPoint
+  CocoaPointsToDevPixelsRoundDown(const NSPoint& aPt, CGFloat aBackingScale)
+  {
+    return LayoutDeviceIntPoint(NSToIntFloor(aPt.x * aBackingScale),
+                                NSToIntFloor(aPt.y * aBackingScale));
+  }
+
   static LayoutDeviceIntRect
   CocoaPointsToDevPixels(const NSRect& aRect, CGFloat aBackingScale)
   {
@@ -184,15 +173,18 @@ public:
                        (CGFloat)aPt.y / aBackingScale);
   }
 
-  // XXX: all calls to this function should eventually be replaced with calls
-  // to DevPixelsToCocoaPoints().
-  static NSRect
-  UntypedDevPixelsToCocoaPoints(const nsIntRect& aRect, CGFloat aBackingScale)
+  // Implements an NSPoint equivalent of -[NSWindow convertRectFromScreen:].
+  static NSPoint
+  ConvertPointFromScreen(NSWindow* aWindow, const NSPoint& aPt)
   {
-    return NSMakeRect((CGFloat)aRect.x / aBackingScale,
-                      (CGFloat)aRect.y / aBackingScale,
-                      (CGFloat)aRect.width / aBackingScale,
-                      (CGFloat)aRect.height / aBackingScale);
+    return [aWindow convertRectFromScreen:NSMakeRect(aPt.x, aPt.y, 0, 0)].origin;
+  }
+
+  // Implements an NSPoint equivalent of -[NSWindow convertRectToScreen:].
+  static NSPoint
+  ConvertPointToScreen(NSWindow* aWindow, const NSPoint& aPt)
+  {
+    return [aWindow convertRectToScreen:NSMakeRect(aPt.x, aPt.y, 0, 0)].origin;
   }
 
   static NSRect
@@ -221,15 +213,17 @@ public:
   // in the bottom-left of the primary screen. Both nsRect and NSRect
   // contain width/height info, with no difference in their use.
   // This function does no scaling, so the Gecko coordinates are
-  // expected to be CSS pixels, which we treat as equal to Cocoa points.
-  static NSRect GeckoRectToCocoaRect(const nsIntRect &geckoRect);
+  // expected to be desktop pixels, which are equal to Cocoa points
+  // (by definition).
+  static NSRect GeckoRectToCocoaRect(const mozilla::DesktopIntRect &geckoRect);
 
   // Converts aGeckoRect in dev pixels to points in Cocoa coordinates
-  static NSRect GeckoRectToCocoaRectDevPix(const nsIntRect &aGeckoRect,
-                                           CGFloat aBackingScale);
+  static NSRect
+  GeckoRectToCocoaRectDevPix(const mozilla::LayoutDeviceIntRect &aGeckoRect,
+                             CGFloat aBackingScale);
 
   // See explanation for geckoRectToCocoaRect, guess what this does...
-  static nsIntRect CocoaRectToGeckoRect(const NSRect &cocoaRect);
+  static mozilla::DesktopIntRect CocoaRectToGeckoRect(const NSRect &cocoaRect);
 
   static mozilla::LayoutDeviceIntRect CocoaRectToGeckoRectDevPix(
     const NSRect& aCocoaRect, CGFloat aBackingScale);
@@ -381,6 +375,15 @@ public:
    * Unicode character.
    */
   static uint32_t ConvertGeckoKeyCodeToMacCharCode(uint32_t aKeyCode);
+
+  /**
+   * Convert string with font attribute to NSMutableAttributedString
+   */
+  static NSMutableAttributedString* GetNSMutableAttributedString(
+           const nsAString& aText,
+           const nsTArray<mozilla::FontRange>& aFontRanges,
+           const bool aIsVertical,
+           const CGFloat aBackingScaleFactor);
 };
 
 #endif // nsCocoaUtils_h_

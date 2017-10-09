@@ -7,6 +7,7 @@
 #ifndef dom_plugins_PluginInstanceChild_h
 #define dom_plugins_PluginInstanceChild_h 1
 
+#include "mozilla/EventForwards.h"
 #include "mozilla/plugins/PPluginInstanceChild.h"
 #include "mozilla/plugins/PluginScriptableObjectChild.h"
 #include "mozilla/plugins/StreamNotifyChild.h"
@@ -89,6 +90,8 @@ protected:
     AnswerNPP_SetValue_NPNVprivateModeBool(const bool& value, NPError* result) override;
     virtual bool
     AnswerNPP_SetValue_NPNVmuteAudioBool(const bool& value, NPError* result) override;
+    virtual bool
+    AnswerNPP_SetValue_NPNVCSSZoomFactor(const double& value, NPError* result) override;
 
     virtual bool
     AnswerNPP_HandleEvent(const NPRemoteEvent& event, int16_t* handled) override;
@@ -256,7 +259,7 @@ public:
 
     void AsyncCall(PluginThreadCallback aFunc, void* aUserData);
     // This function is a more general version of AsyncCall
-    void PostChildAsyncCall(ChildAsyncCall* aTask);
+    void PostChildAsyncCall(already_AddRefed<ChildAsyncCall> aTask);
 
     int GetQuirks();
 
@@ -270,6 +273,15 @@ public:
     void NPN_SetCurrentAsyncSurface(NPAsyncSurface *surface, NPRect *changed);
 
     void DoAsyncRedraw();
+
+    virtual bool RecvHandledWindowedPluginKeyEvent(
+                   const NativeEventData& aKeyEventData,
+                   const bool& aIsConsumed) override;
+
+#if defined(XP_WIN)
+    NPError DefaultAudioDeviceChanged(NPAudioDeviceChangeDetails& details);
+#endif
+
 private:
     friend class PluginModuleChild;
 
@@ -300,12 +312,12 @@ private:
     void CreateWinlessPopupSurrogate();
     void DestroyWinlessPopupSurrogate();
     void InitPopupMenuHook();
-    void InitSetCursorHook();
     void SetupFlashMsgThrottle();
     void UnhookWinlessFlashThrottle();
     void HookSetWindowLongPtr();
     void SetUnityHooks();
     void ClearUnityHooks();
+    void InitImm32Hook();
     static inline bool SetWindowLongHookCheck(HWND hWnd,
                                                 int nIndex,
                                                 LONG_PTR newLong);
@@ -334,7 +346,6 @@ private:
                                                       UINT message,
                                                       WPARAM wParam,
                                                       LPARAM lParam);
-    static HCURSOR WINAPI SetCursorHookProc(HCURSOR hCursor);
 #ifdef _WIN64
     static LONG_PTR WINAPI SetWindowLongPtrAHook(HWND hWnd,
                                                  int nIndex,
@@ -352,6 +363,15 @@ private:
                                           LONG newLong);
 #endif
 
+    static HIMC WINAPI ImmGetContextProc(HWND aWND);
+    static BOOL WINAPI ImmReleaseContextProc(HWND aWND, HIMC aIMC);
+    static LONG WINAPI ImmGetCompositionStringProc(HIMC aIMC, DWORD aIndex,
+                                                   LPVOID aBuf, DWORD aLen);
+    static BOOL WINAPI ImmSetCandidateWindowProc(HIMC hIMC,
+                                                 LPCANDIDATEFORM plCandidate);
+    static BOOL WINAPI ImmNotifyIME(HIMC aIMC, DWORD aAction, DWORD aIndex,
+                                    DWORD aValue);
+
     class FlashThrottleAsyncMsg : public ChildAsyncCall
     {
       public:
@@ -368,7 +388,7 @@ private:
           mWindowed(isWindowed)
         {}
 
-        void Run() override;
+        NS_IMETHOD Run() override;
 
         WNDPROC GetProc();
         HWND GetWnd() { return mWnd; }
@@ -384,7 +404,9 @@ private:
         bool                 mWindowed;
     };
 
-#endif
+    bool ShouldPostKeyMessage(UINT message, WPARAM wParam, LPARAM lParam);
+    bool MaybePostKeyMessage(UINT message, WPARAM wParam, LPARAM lParam);
+#endif // #if defined(OS_WIN)
     const NPPluginFuncs* mPluginIface;
     nsCString                   mMimeType;
     uint16_t                    mMode;
@@ -392,9 +414,12 @@ private:
     InfallibleTArray<nsCString> mValues;
     NPP_t mData;
     NPWindow mWindow;
-#if defined(XP_DARWIN)
+#if defined(XP_DARWIN) || defined(XP_WIN)
     double mContentsScaleFactor;
 #endif
+    double mCSSZoomFactor;
+    uint32_t mPostingKeyEvents;
+    uint32_t mPostingKeyEventsOutdated;
     int16_t               mDrawingModel;
 
     NPAsyncSurface* mCurrentDirectSurface;
@@ -425,7 +450,7 @@ private:
 #endif
 
     mozilla::Mutex mAsyncInvalidateMutex;
-    CancelableTask *mAsyncInvalidateTask;
+    CancelableRunnable *mAsyncInvalidateTask;
 
     // Cached scriptable actors to avoid IPC churn
     PluginScriptableObjectChild* mCachedWindowActor;
@@ -616,10 +641,10 @@ private:
     gfxSurfaceType mSurfaceType;
 
     // Keep InvalidateRect task pointer to be able Cancel it on Destroy
-    CancelableTask *mCurrentInvalidateTask;
+    RefPtr<CancelableRunnable> mCurrentInvalidateTask;
 
     // Keep AsyncSetWindow task pointer to be able to Cancel it on Destroy
-    CancelableTask *mCurrentAsyncSetWindowTask;
+    RefPtr<CancelableRunnable> mCurrentAsyncSetWindowTask;
 
     // True while plugin-child in plugin call
     // Use to prevent plugin paint re-enter
@@ -649,6 +674,37 @@ private:
 
     // Has this instance been destroyed, either by ActorDestroy or NPP_Destroy?
     bool mDestroyed;
+
+#ifdef XP_WIN
+    // WM_*CHAR messages are never consumed by chrome process's widget.
+    // So, if preceding keydown or keyup event is consumed by reserved
+    // shortcut key in the chrome process, we shouldn't send the following
+    // WM_*CHAR messages to the plugin.
+    bool mLastKeyEventConsumed;
+#endif // #ifdef XP_WIN
+
+    // While IME in the process has composition, this is set to true.
+    // Otherwise, false.
+    static bool sIsIMEComposing;
+
+    // A counter is incremented by AutoStackHelper to indicate that there is an
+    // active plugin call which should be preventing shutdown.
+public:
+    class AutoStackHelper {
+    public:
+        explicit AutoStackHelper(PluginInstanceChild* instance)
+            : mInstance(instance)
+        {
+            ++mInstance->mStackDepth;
+        }
+        ~AutoStackHelper() {
+            --mInstance->mStackDepth;
+        }
+    private:
+        PluginInstanceChild *const mInstance;
+    };
+private:
+    int32_t mStackDepth;
 };
 
 } // namespace plugins

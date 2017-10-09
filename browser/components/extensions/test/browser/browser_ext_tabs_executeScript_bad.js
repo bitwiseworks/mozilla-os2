@@ -5,7 +5,7 @@
 function* testHasNoPermission(params) {
   let contentSetup = params.contentSetup || (() => Promise.resolve());
 
-  function background(contentSetup) {
+  async function background(contentSetup) {
     browser.runtime.onMessage.addListener((msg, sender) => {
       browser.test.assertEq(msg, "second script ran", "second script ran");
       browser.test.notifyPass("executeScript");
@@ -14,7 +14,7 @@ function* testHasNoPermission(params) {
     browser.test.onMessage.addListener(msg => {
       browser.test.assertEq(msg, "execute-script");
 
-      browser.tabs.query({ currentWindow: true }, tabs => {
+      browser.tabs.query({currentWindow: true}, tabs => {
         browser.tabs.executeScript({
           file: "script.js",
         });
@@ -30,9 +30,9 @@ function* testHasNoPermission(params) {
       });
     });
 
-    contentSetup().then(() => {
-      browser.test.sendMessage("ready");
-    });
+    await contentSetup();
+
+    browser.test.sendMessage("ready");
   }
 
   let extension = ExtensionTestUtils.loadExtension({
@@ -70,12 +70,52 @@ add_task(function* testBadPermissions() {
 
   info("Test no special permissions");
   yield testHasNoPermission({
-    manifest: { "permissions": ["http://example.com/"] },
+    manifest: {"permissions": ["http://example.com/"]},
   });
 
   info("Test tabs permissions");
   yield testHasNoPermission({
-    manifest: { "permissions": ["http://example.com/", "tabs"] },
+    manifest: {"permissions": ["http://example.com/", "tabs"]},
+  });
+
+  info("Test no special permissions, commands, key press");
+  yield testHasNoPermission({
+    manifest: {
+      "permissions": ["http://example.com/"],
+      "commands": {
+        "test-tabs-executeScript": {
+          "suggested_key": {
+            "default": "Alt+Shift+K",
+          },
+        },
+      },
+    },
+    contentSetup() {
+      browser.commands.onCommand.addListener(function(command) {
+        if (command == "test-tabs-executeScript") {
+          browser.test.sendMessage("tabs-command-key-pressed");
+        }
+      });
+      return Promise.resolve();
+    },
+    setup: function* (extension) {
+      yield EventUtils.synthesizeKey("k", {altKey: true, shiftKey: true});
+      yield extension.awaitMessage("tabs-command-key-pressed");
+    },
+  });
+
+  info("Test active tab, commands, no key press");
+  yield testHasNoPermission({
+    manifest: {
+      "permissions": ["http://example.com/", "activeTab"],
+      "commands": {
+        "test-tabs-executeScript": {
+          "suggested_key": {
+            "default": "Alt+Shift+K",
+          },
+        },
+      },
+    },
   });
 
   info("Test active tab, browser action, no click");
@@ -92,13 +132,9 @@ add_task(function* testBadPermissions() {
       "permissions": ["http://example.com/", "activeTab"],
       "page_action": {},
     },
-    contentSetup() {
-      return new Promise(resolve => {
-        browser.tabs.query({ active: true, currentWindow: true }, tabs => {
-          browser.pageAction.show(tabs[0].id);
-          resolve();
-        });
-      });
+    async contentSetup() {
+      let [tab] = await browser.tabs.query({active: true, currentWindow: true});
+      await browser.pageAction.show(tab.id);
     },
   });
 
@@ -106,7 +142,76 @@ add_task(function* testBadPermissions() {
   yield BrowserTestUtils.removeTab(tab1);
 });
 
+add_task(function* testBadURL() {
+  async function background() {
+    let promises = [
+      new Promise(resolve => {
+        browser.tabs.executeScript({
+          file: "http://example.com/script.js",
+        }, result => {
+          browser.test.assertEq(undefined, result, "Result value");
+
+          browser.test.assertTrue(browser.extension.lastError instanceof Error,
+                                  "runtime.lastError is Error");
+
+          browser.test.assertTrue(browser.runtime.lastError instanceof Error,
+                                  "runtime.lastError is Error");
+
+          browser.test.assertEq(
+            "Files to be injected must be within the extension",
+            browser.extension.lastError && browser.extension.lastError.message,
+            "extension.lastError value");
+
+          browser.test.assertEq(
+            "Files to be injected must be within the extension",
+            browser.runtime.lastError && browser.runtime.lastError.message,
+            "runtime.lastError value");
+
+          resolve();
+        });
+      }),
+
+      browser.tabs.executeScript({
+        file: "http://example.com/script.js",
+      }).catch(error => {
+        browser.test.assertTrue(error instanceof Error, "Error is Error");
+
+        browser.test.assertEq(null, browser.extension.lastError,
+                              "extension.lastError value");
+
+        browser.test.assertEq(null, browser.runtime.lastError,
+                              "runtime.lastError value");
+
+        browser.test.assertEq(
+          "Files to be injected must be within the extension",
+          error && error.message,
+          "error value");
+      }),
+    ];
+
+    await Promise.all(promises);
+
+    browser.test.notifyPass("executeScript-lastError");
+  }
+
+  let extension = ExtensionTestUtils.loadExtension({
+    manifest: {
+      "permissions": ["<all_urls>"],
+    },
+
+    background,
+  });
+
+  yield extension.startup();
+
+  yield extension.awaitFinish("executeScript-lastError");
+
+  yield extension.unload();
+});
+
 // TODO: Test that |executeScript| fails if the tab has navigated to a
 // new page, and no longer matches our expected state. This involves
 // intentionally trying to trigger a race condition, and is probably not
 // even worth attempting until we have proper |executeScript| callbacks.
+
+add_task(forceGC);

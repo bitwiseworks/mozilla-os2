@@ -38,7 +38,7 @@ public:
   NS_FORWARD_TO_EVENT_NO_SERIALIZATION_NO_DUPLICATION
   NS_IMETHOD DuplicatePrivateData() override;
   NS_IMETHOD_(void) Serialize(IPC::Message* aMsg, bool aSerializeInterfaceType) override;
-  NS_IMETHOD_(bool) Deserialize(const IPC::Message* aMsg, void** aIter) override;
+  NS_IMETHOD_(bool) Deserialize(const IPC::Message* aMsg, PickleIterator* aIter) override;
 
 
   static already_AddRefed<UIEvent> Constructor(const GlobalObject& aGlobal,
@@ -51,7 +51,13 @@ public:
     return UIEventBinding::Wrap(aCx, this, aGivenProto);
   }
 
-  nsIDOMWindow* GetView() const
+  void InitUIEvent(const nsAString& typeArg,
+                   bool canBubbleArg,
+                   bool cancelableArg,
+                   nsGlobalWindow* viewArg,
+                   int32_t detailArg);
+
+  nsPIDOMWindowOuter* GetView() const
   {
     return mView;
   }
@@ -87,11 +93,6 @@ public:
 
   int32_t RangeOffset() const;
 
-  bool CancelBubble() const
-  {
-    return mEvent->mFlags.mPropagationStopped;
-  }
-
   bool IsChar() const;
 
 protected:
@@ -101,10 +102,10 @@ protected:
   nsIntPoint GetMovementPoint();
   nsIntPoint GetLayerPoint() const;
 
-  nsCOMPtr<nsIDOMWindow> mView;
+  nsCOMPtr<nsPIDOMWindowOuter> mView;
   int32_t mDetail;
   CSSIntPoint mClientPoint;
-  // Screenpoint is mEvent->refPoint.
+  // Screenpoint is mEvent->mRefPoint.
   nsIntPoint mLayerPoint;
   CSSIntPoint mPagePoint;
   nsIntPoint mMovementPoint;
@@ -133,7 +134,7 @@ protected:
     UIEvent::Serialize(aMsg, aSerializeInterfaceType);      \
   }                                                         \
   NS_IMETHOD_(bool) Deserialize(const IPC::Message* aMsg,   \
-                                void** aIter) override      \
+                                PickleIterator* aIter) override \
   {                                                         \
     return UIEvent::Deserialize(aMsg, aIter);               \
   }

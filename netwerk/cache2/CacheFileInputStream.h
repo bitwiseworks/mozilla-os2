@@ -11,7 +11,6 @@
 #include "nsAutoPtr.h"
 #include "CacheFileChunk.h"
 
-
 namespace mozilla {
 namespace net {
 
@@ -27,7 +26,8 @@ class CacheFileInputStream : public nsIAsyncInputStream
   NS_DECL_NSISEEKABLESTREAM
 
 public:
-  explicit CacheFileInputStream(CacheFile *aFile);
+  explicit CacheFileInputStream(CacheFile *aFile, nsISupports *aEntry,
+                                bool aAlternativeData);
 
   NS_IMETHOD OnChunkRead(nsresult aResult, CacheFileChunk *aChunk) override;
   NS_IMETHOD OnChunkWritten(nsresult aResult, CacheFileChunk *aChunk) override;
@@ -39,31 +39,37 @@ public:
   size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
 
   uint32_t GetPosition() const { return mPos; };
+  bool IsAlternativeData() const { return mAlternativeData; };
 
 private:
   virtual ~CacheFileInputStream();
 
   nsresult CloseWithStatusLocked(nsresult aStatus);
+  void CleanUp();
   void ReleaseChunk();
   void EnsureCorrectChunk(bool aReleaseOnly);
 
   // CanRead returns negative value when output stream truncates the data before
   // the input stream's mPos.
-  void CanRead(int64_t *aCanRead, const char **aBuf);
+  int64_t CanRead(CacheFileChunkReadHandle *aHandle);
   void NotifyListener();
   void MaybeNotifyListener();
 
-  RefPtr<CacheFile>        mFile;
+  RefPtr<CacheFile>      mFile;
   RefPtr<CacheFileChunk> mChunk;
-  int64_t                  mPos;
-  bool                     mClosed;
-  nsresult                 mStatus;
-  bool                     mWaitingForUpdate;
-  int64_t                  mListeningForChunk;
+  int64_t                mPos;
+  nsresult               mStatus;
+  bool                   mClosed : 1;
+  bool                   mInReadSegments : 1;
+  bool                   mWaitingForUpdate : 1;
+  bool const             mAlternativeData : 1;
+  int64_t                mListeningForChunk;
 
   nsCOMPtr<nsIInputStreamCallback> mCallback;
   uint32_t                         mCallbackFlags;
   nsCOMPtr<nsIEventTarget>         mCallbackTarget;
+  // Held purely for referencing purposes
+  RefPtr<nsISupports>              mCacheEntryHandle;
 };
 
 

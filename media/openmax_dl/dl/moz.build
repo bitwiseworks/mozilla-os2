@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -68,6 +68,7 @@ if CONFIG['CPU_ARCH'] == 'arm' and CONFIG['BUILD_ARM_NEON']:
         'sp/src/omxSP_FFTFwd_RToCCS_S16S32_Sfs_s.S',
         'sp/src/omxSP_FFTFwd_RToCCS_S32_Sfs_s.S',
         'sp/src/omxSP_FFTInv_CCSToR_F32_Sfs_s.S',
+        'sp/src/omxSP_FFTInv_CCSToR_F32_Sfs_unscaled_s.S',
         'sp/src/omxSP_FFTInv_CCSToR_S32_Sfs_s.S',
         'sp/src/omxSP_FFTInv_CCSToR_S32S16_Sfs_s.S',
         'sp/src/omxSP_FFTInv_CToC_FC32_Sfs_s.S',
@@ -83,3 +84,9 @@ if CONFIG['CPU_ARCH'] == 'arm' and CONFIG['BUILD_ARM_NEON']:
     DEFINES['BIG_FFT_TABLE'] = True
 
     FINAL_LIBRARY = 'xul'
+
+    if CONFIG['CLANG_CXX']:
+        ASFLAGS += [
+            '-no-integrated-as',
+        ]
+    

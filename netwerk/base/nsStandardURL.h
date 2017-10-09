@@ -33,6 +33,9 @@ class nsIPrefBranch;
 class nsIFile;
 class nsIURLParser;
 
+namespace mozilla {
+namespace net {
+
 //-----------------------------------------------------------------------------
 // standard URL implementation
 //-----------------------------------------------------------------------------
@@ -51,6 +54,7 @@ protected:
 public:
     NS_DECL_ISUPPORTS
     NS_DECL_NSIURI
+    NS_DECL_NSIURIWITHQUERY
     NS_DECL_NSIURL
     NS_DECL_NSIFILEURL
     NS_DECL_NSISTANDARDURL
@@ -61,8 +65,8 @@ public:
     NS_DECL_NSISENSITIVEINFOHIDDENURI
 
     // nsISizeOf
-    virtual size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const override;
-    virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const override;
+    virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override;
+    virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override;
 
     explicit nsStandardURL(bool aSupportsFileURL = false, bool aTrackURL = true);
 
@@ -146,7 +150,8 @@ protected:
     // enum used in a few places to specify how .ref attribute should be handled
     enum RefHandlingEnum {
         eIgnoreRef,
-        eHonorRef
+        eHonorRef,
+        eReplaceRef
     };
 
     // Helper to share code between Equals and EqualsExceptRef
@@ -159,10 +164,12 @@ protected:
 
     // Helper to share code between Clone methods.
     nsresult CloneInternal(RefHandlingEnum aRefHandlingMode,
+                           const nsACString& newRef,
                            nsIURI** aClone);
     // Helper method that copies member variables from the source StandardURL
     // if copyCached = true, it will also copy mFile and mHostA
     nsresult CopyMembers(nsStandardURL * source, RefHandlingEnum mode,
+                         const nsACString& newRef,
                          bool copyCached = false);
 
     // Helper for subclass implementation of GetFile().  Subclasses that map
@@ -174,10 +181,14 @@ protected:
 private:
     int32_t  Port() { return mPort == -1 ? mDefaultPort : mPort; }
 
+    void     ReplacePortInSpec(int32_t aNewPort);
     void     Clear();
     void     InvalidateCache(bool invalidateCachedFile = true);
 
     bool     ValidIPv6orHostname(const char *host, uint32_t aLen);
+    static bool     IsValidOfBase(unsigned char c, const uint32_t base);
+    static nsresult ParseIPv4Number(nsCString &input, uint32_t &number);
+    static nsresult NormalizeIPv4(const nsCSubstring &host, nsCString &result);
     nsresult NormalizeIDN(const nsCSubstring &host, nsCString &result);
     void     CoalescePath(netCoalesceFlags coalesceFlag, char *path);
 
@@ -387,5 +398,8 @@ nsStandardURL::Filename()
     }
     return Substring(mSpec, pos, len);
 }
+
+} // namespace net
+} // namespace mozilla
 
 #endif // nsStandardURL_h__

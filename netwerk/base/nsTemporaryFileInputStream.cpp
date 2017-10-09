@@ -7,7 +7,12 @@
 #include "nsStreamUtils.h"
 #include <algorithm>
 
-NS_IMPL_ISUPPORTS(nsTemporaryFileInputStream, nsIInputStream, nsISeekableStream)
+typedef mozilla::ipc::FileDescriptor::PlatformHandleType FileHandleType;
+
+NS_IMPL_ISUPPORTS(nsTemporaryFileInputStream,
+                  nsIInputStream,
+                  nsISeekableStream,
+                  nsIIPCSerializableInputStream)
 
 nsTemporaryFileInputStream::nsTemporaryFileInputStream(FileDescOwner* aFileDescOwner, uint64_t aStartPos, uint64_t aEndPos)
   : mFileDescOwner(aFileDescOwner),
@@ -17,6 +22,14 @@ nsTemporaryFileInputStream::nsTemporaryFileInputStream(FileDescOwner* aFileDescO
     mClosed(false)
 { 
   NS_ASSERTION(aStartPos <= aEndPos, "StartPos should less equal than EndPos!");
+}
+
+nsTemporaryFileInputStream::nsTemporaryFileInputStream()
+  : mStartPos(0),
+    mCurPos(0),
+    mEndPos(0),
+    mClosed(false)
+{
 }
 
 NS_IMETHODIMP
@@ -59,7 +72,10 @@ nsTemporaryFileInputStream::ReadSegments(nsWriteSegmentFun writer,
   }
 
   mozilla::MutexAutoLock lock(mFileDescOwner->FileMutex());
-  PR_Seek64(mFileDescOwner->mFD, mCurPos, PR_SEEK_SET);
+  int64_t offset = PR_Seek64(mFileDescOwner->mFD, mCurPos, PR_SEEK_SET);
+  if (offset == -1) {
+    return NS_ErrorAccordingToNSPR();
+  }
 
   // Limit requested count to the amount remaining in our section of the file.
   count = std::min(count, uint32_t(mEndPos - mCurPos));
@@ -68,6 +84,11 @@ nsTemporaryFileInputStream::ReadSegments(nsWriteSegmentFun writer,
   while (*result < count) {
     uint32_t bufCount = std::min(count - *result, (uint32_t) sizeof(buf));
     int32_t bytesRead = PR_Read(mFileDescOwner->mFD, buf, bufCount);
+    if (bytesRead == 0) {
+      mClosed = true;
+      return NS_OK;
+    }
+
     if (bytesRead < 0) {
       return NS_ErrorAccordingToNSPR();
     }
@@ -160,4 +181,72 @@ nsTemporaryFileInputStream::SetEOF()
   }
 
   return Close();
+}
+
+void
+nsTemporaryFileInputStream::Serialize(InputStreamParams& aParams,
+                                      FileDescriptorArray& aFileDescriptors)
+{
+  TemporaryFileInputStreamParams params;
+
+  MutexAutoLock lock(mFileDescOwner->FileMutex());
+  MOZ_ASSERT(mFileDescOwner->mFD);
+  if (!mClosed) {
+    FileHandleType fd = FileHandleType(PR_FileDesc2NativeHandle(mFileDescOwner->mFD));
+    NS_ASSERTION(fd, "This should never be null!");
+
+    DebugOnly<FileDescriptor*> dbgFD = aFileDescriptors.AppendElement(fd);
+    NS_ASSERTION(dbgFD->IsValid(), "Sending an invalid file descriptor!");
+
+    params.fileDescriptorIndex() = aFileDescriptors.Length() - 1;
+
+    Close();
+  } else {
+    NS_WARNING("The stream is already closed. "
+               "Sending an invalid file descriptor to the other process!");
+
+    params.fileDescriptorIndex() = UINT32_MAX;
+  }
+  params.startPos() = mCurPos;
+  params.endPos() = mEndPos;
+  aParams = params;
+}
+
+bool
+nsTemporaryFileInputStream::Deserialize(const InputStreamParams& aParams,
+                                        const FileDescriptorArray& aFileDescriptors)
+{
+  const TemporaryFileInputStreamParams& params = aParams.get_TemporaryFileInputStreamParams();
+
+  uint32_t fileDescriptorIndex = params.fileDescriptorIndex();
+  FileDescriptor fd;
+  if (fileDescriptorIndex < aFileDescriptors.Length()) {
+    fd = aFileDescriptors[fileDescriptorIndex];
+    NS_WARNING_ASSERTION(fd.IsValid(),
+                         "Received an invalid file descriptor!");
+  } else {
+    NS_WARNING("Received a bad file descriptor index!");
+  }
+
+  if (fd.IsValid()) {
+    auto rawFD = fd.ClonePlatformHandle();
+    PRFileDesc* fileDesc = PR_ImportFile(PROsfd(rawFD.release()));
+    if (!fileDesc) {
+      NS_WARNING("Failed to import file handle!");
+      return false;
+    }
+    mFileDescOwner = new FileDescOwner(fileDesc);
+  } else {
+    mClosed = true;
+  }
+
+  mStartPos = mCurPos = params.startPos();
+  mEndPos = params.endPos();
+  return true;
+}
+
+Maybe<uint64_t>
+nsTemporaryFileInputStream::ExpectedSerializedLength()
+{
+  return Nothing();
 }

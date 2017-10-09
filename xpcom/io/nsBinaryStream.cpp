@@ -23,7 +23,7 @@
 
 #include "nsBinaryStream.h"
 
-#include "mozilla/Endian.h"
+#include "mozilla/EndianUtils.h"
 #include "mozilla/PodOperations.h"
 #include "mozilla/UniquePtr.h"
 
@@ -33,6 +33,7 @@
 #include "nsIClassInfo.h"
 #include "nsComponentManagerUtils.h"
 #include "nsIURI.h" // for NS_IURI_IID
+#include "nsIX509Cert.h" // for NS_IX509CERT_IID
 
 #include "jsfriendapi.h"
 
@@ -437,7 +438,7 @@ struct MOZ_STACK_CLASS ReadSegmentsClosure
 };
 
 // the thunking function
-static NS_METHOD
+static nsresult
 ReadSegmentForwardingThunk(nsIInputStream* aStream,
                            void* aClosure,
                            const char* aFromSegment,
@@ -616,7 +617,7 @@ nsBinaryInputStream::ReadDouble(double* aDouble)
   return Read64(reinterpret_cast<uint64_t*>(aDouble));
 }
 
-static NS_METHOD
+static nsresult
 WriteSegmentToCString(nsIInputStream* aStream,
                       void* aClosure,
                       const char* aFromSegment,
@@ -683,7 +684,7 @@ struct WriteStringClosure
 
 
 // same version of the above, but with correct casting and endian swapping
-static NS_METHOD
+static nsresult
 WriteSegmentToString(nsIInputStream* aStream,
                      void* aClosure,
                      const char* aFromSegment,
@@ -931,6 +932,23 @@ nsBinaryInputStream::ReadObject(bool aIsStrongRef, nsISupports** aObject)
       iid.Equals(oldURIiid4)) {
     const nsIID newURIiid = NS_IURI_IID;
     iid = newURIiid;
+  }
+  // END HACK
+
+  // HACK:  Service workers store resource security info on disk in the dom
+  //        Cache API.  When the uuid of the nsIX509Cert interface changes
+  //        these serialized objects cannot be loaded any more.  This hack
+  //        works around this issue.
+
+  // hackaround for bug 1247580 (FF45 to FF46 transition)
+  static const nsIID oldCertIID = {
+    0xf8ed8364, 0xced9, 0x4c6e,
+    { 0x86, 0xba, 0x48, 0xaf, 0x53, 0xc3, 0x93, 0xe6 }
+  };
+
+  if (iid.Equals(oldCertIID)) {
+    const nsIID newCertIID = NS_IX509CERT_IID;
+    iid = newCertIID;
   }
   // END HACK
 

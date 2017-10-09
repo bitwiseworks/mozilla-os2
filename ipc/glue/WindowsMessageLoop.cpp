@@ -1,6 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * vim: sw=2 ts=2 et :
- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -15,11 +14,12 @@
 #include "nsServiceManagerUtils.h"
 #include "nsString.h"
 #include "nsIXULAppInfo.h"
-#include "nsWindowsDllInterceptor.h"
 #include "WinUtils.h"
 
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/ipc/ProtocolUtils.h"
 #include "mozilla/PaintTracker.h"
+#include "mozilla/WindowsVersion.h"
 
 using namespace mozilla;
 using namespace mozilla::ipc;
@@ -437,95 +437,6 @@ ProcessOrDeferMessage(HWND hwnd,
   return res;
 }
 
-/*
- * It is bad to subclass a window when neutering is active because you'll end
- * up subclassing the *neutered* window procedure instead of the real window
- * procedure. Since CreateWindow* fires WM_CREATE (and could thus trigger
- * neutering), we intercept these calls and suppress neutering for the duration
- * of the call. This ensures that any subsequent subclassing replaces the
- * correct window procedure.
- */
-WindowsDllInterceptor sUser32Interceptor;
-typedef HWND (WINAPI *CreateWindowExWPtr)(DWORD,LPCWSTR,LPCWSTR,DWORD,int,int,int,int,HWND,HMENU,HINSTANCE,LPVOID);
-typedef HWND (WINAPI *CreateWindowExAPtr)(DWORD,LPCSTR,LPCSTR,DWORD,int,int,int,int,HWND,HMENU,HINSTANCE,LPVOID);
-typedef HWND (WINAPI *CreateWindowWPtr)(LPCWSTR,LPCWSTR,DWORD,int,int,int,int,HWND,HMENU,HINSTANCE,LPVOID);
-typedef HWND (WINAPI *CreateWindowAPtr)(LPCSTR,LPCSTR,DWORD,int,int,int,int,HWND,HMENU,HINSTANCE,LPVOID);
-
-CreateWindowExWPtr sCreateWindowExWStub = nullptr;
-CreateWindowExAPtr sCreateWindowExAStub = nullptr;
-CreateWindowWPtr sCreateWindowWStub = nullptr;
-CreateWindowAPtr sCreateWindowAStub = nullptr;
-
-HWND WINAPI
-CreateWindowExWHook(DWORD aExStyle, LPCWSTR aClassName, LPCWSTR aWindowName,
-                    DWORD aStyle, int aX, int aY, int aWidth, int aHeight,
-                    HWND aParent, HMENU aMenu, HINSTANCE aInstance,
-                    LPVOID aParam)
-{
-  SuppressedNeuteringRegion doNotNeuterThisWindowYet;
-  return sCreateWindowExWStub(aExStyle, aClassName, aWindowName, aStyle, aX, aY,
-                              aWidth, aHeight, aParent, aMenu, aInstance, aParam);
-}
-
-HWND WINAPI
-CreateWindowExAHook(DWORD aExStyle, LPCSTR aClassName, LPCSTR aWindowName,
-                    DWORD aStyle, int aX, int aY, int aWidth, int aHeight,
-                    HWND aParent, HMENU aMenu, HINSTANCE aInstance,
-                    LPVOID aParam)
-{
-  SuppressedNeuteringRegion doNotNeuterThisWindowYet;
-  return sCreateWindowExAStub(aExStyle, aClassName, aWindowName, aStyle, aX, aY,
-                              aWidth, aHeight, aParent, aMenu, aInstance, aParam);
-}
-
-HWND WINAPI
-CreateWindowWHook(LPCWSTR aClassName, LPCWSTR aWindowName, DWORD aStyle, int aX,
-                  int aY, int aWidth, int aHeight, HWND aParent, HMENU aMenu,
-                  HINSTANCE aInstance, LPVOID aParam)
-{
-  SuppressedNeuteringRegion doNotNeuterThisWindowYet;
-  return sCreateWindowWStub(aClassName, aWindowName, aStyle, aX, aY, aWidth,
-                            aHeight, aParent, aMenu, aInstance, aParam);
-}
-
-HWND WINAPI
-CreateWindowAHook(LPCSTR aClassName, LPCSTR aWindowName, DWORD aStyle, int aX,
-                  int aY, int aWidth, int aHeight, HWND aParent, HMENU aMenu,
-                  HINSTANCE aInstance, LPVOID aParam)
-{
-  SuppressedNeuteringRegion doNotNeuterThisWindowYet;
-  return sCreateWindowAStub(aClassName, aWindowName, aStyle, aX, aY, aWidth,
-                            aHeight, aParent, aMenu, aInstance, aParam);
-}
-
-void
-InitCreateWindowHook()
-{
-  // Forcing these interceptions to be detours due to conflicts with
-  // NVIDIA Optimus DLLs that are injected into our process.
-  sUser32Interceptor.Init("user32.dll");
-  if (!sCreateWindowExWStub) {
-    sUser32Interceptor.AddDetour("CreateWindowExW",
-                               reinterpret_cast<intptr_t>(CreateWindowExWHook),
-                               (void**) &sCreateWindowExWStub);
-  }
-  if (!sCreateWindowExAStub) {
-    sUser32Interceptor.AddDetour("CreateWindowExA",
-                               reinterpret_cast<intptr_t>(CreateWindowExAHook),
-                               (void**) &sCreateWindowExAStub);
-  }
-  if (!sCreateWindowWStub) {
-    sUser32Interceptor.AddDetour("CreateWindowW",
-                               reinterpret_cast<intptr_t>(CreateWindowWHook),
-                               (void**) &sCreateWindowWStub);
-  }
-  if (!sCreateWindowAStub) {
-    sUser32Interceptor.AddDetour("CreateWindowA",
-                               reinterpret_cast<intptr_t>(CreateWindowAHook),
-                               (void**) &sCreateWindowAStub);
-  }
-}
-
 } // namespace
 
 // We need the pointer value of this in PluginInstanceChild.
@@ -802,8 +713,6 @@ InitUIThread()
     gCOMWindow = FindCOMWindow();
   }
   MOZ_ASSERT(gWinEventHook);
-
-  InitCreateWindowHook();
 }
 
 } // namespace windows
@@ -830,7 +739,7 @@ MessageChannel::SyncStackFrame::SyncStackFrame(MessageChannel* channel, bool int
 
   if (!mStaticPrev) {
     NS_ASSERTION(!gNeuteredWindows, "Should only set this once!");
-    gNeuteredWindows = new nsAutoTArray<HWND, 20>();
+    gNeuteredWindows = new AutoTArray<HWND, 20>();
     NS_ASSERTION(gNeuteredWindows, "Out of memory!");
   }
 }
@@ -1057,12 +966,79 @@ SuppressedNeuteringRegion::~SuppressedNeuteringRegion()
 
 bool SuppressedNeuteringRegion::sSuppressNeutering = false;
 
+#if defined(ACCESSIBILITY)
+bool
+MessageChannel::WaitForSyncNotifyWithA11yReentry()
+{
+  mMonitor->AssertCurrentThreadOwns();
+  MonitorAutoUnlock unlock(*mMonitor);
+
+  const DWORD waitStart = ::GetTickCount();
+  DWORD elapsed = 0;
+  DWORD timeout = mTimeoutMs == kNoTimeout ? INFINITE :
+                  static_cast<DWORD>(mTimeoutMs);
+  bool timedOut = false;
+
+  while (true) {
+    { // Scope for lock
+      MonitorAutoLock lock(*mMonitor);
+      if (!Connected()) {
+        break;
+      }
+    }
+    if (timeout != static_cast<DWORD>(kNoTimeout)) {
+      elapsed = ::GetTickCount() - waitStart;
+    }
+    if (elapsed >= timeout) {
+      timedOut = true;
+      break;
+    }
+    DWORD waitResult = 0;
+    ::SetLastError(ERROR_SUCCESS);
+    HRESULT hr = ::CoWaitForMultipleHandles(COWAIT_ALERTABLE,
+                                            timeout - elapsed,
+                                            1, &mEvent, &waitResult);
+    if (hr == RPC_S_CALLPENDING) {
+      timedOut = true;
+      break;
+    }
+    if (hr == S_OK) {
+      if (waitResult == 0) {
+        // mEvent is signaled
+        BOOL success = ::ResetEvent(mEvent);
+        if (!success) {
+          gfxDevCrash(mozilla::gfx::LogReason::MessageChannelInvalidHandle) <<
+                      "WindowsMessageChannel::WaitForSyncNotifyWithA11yReentry failed to reset event. GetLastError: " <<
+                      GetLastError();
+        }
+        break;
+      }
+      if (waitResult == WAIT_IO_COMPLETION) {
+        // APC fired, keep waiting
+        continue;
+      }
+    }
+    NS_ERROR("CoWaitForMultipleHandles failed");
+    break;
+  }
+
+  return WaitResponse(timedOut);
+}
+#endif
+
 bool
 MessageChannel::WaitForSyncNotify(bool aHandleWindowsMessages)
 {
   mMonitor->AssertCurrentThreadOwns();
 
   MOZ_ASSERT(gUIThreadId, "InitUIThread was not called!");
+
+#if defined(ACCESSIBILITY)
+  if (IsVistaOrLater() && (mFlags & REQUIRE_A11Y_REENTRY)) {
+    MOZ_ASSERT(!(mFlags & REQUIRE_DEFERRED_MESSAGE_PROTECTION));
+    return WaitForSyncNotifyWithA11yReentry();
+  }
+#endif
 
   // Use a blocking wait if this channel does not require
   // Windows message deferral behavior.
@@ -1134,7 +1110,12 @@ MessageChannel::WaitForSyncNotify(bool aHandleWindowsMessages)
                                                QS_ALLINPUT);
       if (result == WAIT_OBJECT_0) {
         // Our NotifyWorkerThread event was signaled
-        ResetEvent(mEvent);
+        BOOL success = ResetEvent(mEvent);
+        if (!success) {
+          gfxDevCrash(mozilla::gfx::LogReason::MessageChannelInvalidHandle) <<
+                      "WindowsMessageChannel::WaitForSyncNotify failed to reset event. GetLastError: " <<
+                      GetLastError();
+        }
         break;
       } else
       if (result != (WAIT_OBJECT_0 + 1)) {
@@ -1238,7 +1219,12 @@ MessageChannel::WaitForInterruptNotify()
       }
       DeneuteredWindowRegion deneuteredRgn;
       SpinInternalEventLoop();
-      ResetEvent(mEvent);
+      BOOL success = ResetEvent(mEvent);
+      if (!success) {
+        gfxDevCrash(mozilla::gfx::LogReason::MessageChannelInvalidHandle) <<
+                    "WindowsMessageChannel::WaitForInterruptNotify::SpinNestedEvents failed to reset event. GetLastError: " <<
+                    GetLastError();
+      }
       return true;
     }
 
@@ -1264,7 +1250,12 @@ MessageChannel::WaitForInterruptNotify()
                                              QS_ALLINPUT);
     if (result == WAIT_OBJECT_0) {
       // Our NotifyWorkerThread event was signaled
-      ResetEvent(mEvent);
+      BOOL success = ResetEvent(mEvent);
+      if (!success) {
+        gfxDevCrash(mozilla::gfx::LogReason::MessageChannelInvalidHandle) <<
+                    "WindowsMessageChannel::WaitForInterruptNotify::WaitForMultipleObjects failed to reset event. GetLastError: " <<
+                    GetLastError();
+      }
       break;
     } else
     if (result != (WAIT_OBJECT_0 + 1)) {
@@ -1317,9 +1308,12 @@ MessageChannel::NotifyWorkerThread()
     return;
   }
 
-  NS_ASSERTION(mEvent, "No signal event to set, this is really bad!");
+  MOZ_RELEASE_ASSERT(mEvent, "No signal event to set, this is really bad!");
   if (!SetEvent(mEvent)) {
     NS_WARNING("Failed to set NotifyWorkerThread event!");
+    gfxDevCrash(mozilla::gfx::LogReason::MessageChannelInvalidHandle) <<
+                "WindowsMessageChannel failed to SetEvent. GetLastError: " <<
+                GetLastError();
   }
 }
 

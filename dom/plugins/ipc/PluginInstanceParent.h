@@ -18,13 +18,13 @@
 #endif
 
 #include "npfunctions.h"
-#include "nsAutoPtr.h"
 #include "nsDataHashtable.h"
 #include "nsHashKeys.h"
 #include "nsRect.h"
 #include "PluginDataResolver.h"
 
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
+#include "mozilla/EventForwards.h"
 
 class gfxASurface;
 class gfxContext;
@@ -60,6 +60,8 @@ public:
 #endif // defined(XP_WIN)
 
 public:
+    typedef mozilla::gfx::DrawTarget DrawTarget;
+
     PluginInstanceParent(PluginModuleParent* parent,
                          NPP npp,
                          const nsCString& mimeType,
@@ -314,18 +316,6 @@ public:
         aOutput = mSrcAttribute;
     }
 
-    /**
-     * This function tells us whether this plugin instance would have been
-     * whitelisted for Shumway if Shumway had been enabled. This is being used
-     * for the purpose of gathering telemetry on Flash hangs that could
-     * potentially be avoided by using Shumway instead.
-     */
-    bool
-    IsWhitelistedForShumway() const
-    {
-        return mIsWhitelistedForShumway;
-    }
-
     virtual bool
     AnswerPluginFocusChange(const bool& gotFocus) override;
 
@@ -334,13 +324,18 @@ public:
     nsresult GetImageSize(nsIntSize* aSize);
 #ifdef XP_MACOSX
     nsresult IsRemoteDrawingCoreAnimation(bool *aDrawing);
+#endif
+#if defined(XP_MACOSX) || defined(XP_WIN)
     nsresult ContentsScaleFactorChanged(double aContentsScaleFactor);
 #endif
     nsresult SetBackgroundUnknown();
     nsresult BeginUpdateBackground(const nsIntRect& aRect,
-                                   gfxContext** aCtx);
-    nsresult EndUpdateBackground(gfxContext* aCtx,
-                                 const nsIntRect& aRect);
+                                   DrawTarget** aDrawTarget);
+    nsresult EndUpdateBackground(const nsIntRect& aRect);
+#if defined(XP_WIN)
+    nsresult SetScrollCaptureId(uint64_t aScrollCaptureId);
+    nsresult GetScrollCaptureContainer(mozilla::layers::ImageContainer** aContainer);
+#endif
     void DidComposite();
 
     bool IsUsingDirectDrawing();
@@ -352,8 +347,24 @@ public:
     static PluginInstanceParent* Cast(NPP instance,
                                       PluginAsyncSurrogate** aSurrogate = nullptr);
 
+    // for IME hook
     virtual bool
-    RecvPluginDidSetCursor() override;
+    RecvGetCompositionString(const uint32_t& aIndex,
+                             nsTArray<uint8_t>* aBuffer,
+                             int32_t* aLength) override;
+    virtual bool
+    RecvSetCandidateWindow(
+        const mozilla::widget::CandidateWindowPosition& aPosition) override;
+    virtual bool
+    RecvRequestCommitOrCancel(const bool& aCommitted) override;
+
+    // for reserved shortcut key handling with windowed plugin on Windows
+    nsresult HandledWindowedPluginKeyEvent(
+      const mozilla::NativeEventData& aKeyEventData,
+      bool aIsConsumed);
+    virtual bool
+    RecvOnWindowedPluginKeyEvent(
+      const mozilla::NativeEventData& aKeyEventData) override;
 
 private:
     // Create an appropriate platform surface for a background of size
@@ -389,7 +400,6 @@ private:
     NPP mNPP;
     const NPNetscapeFuncs* mNPNIface;
     nsCString mSrcAttribute;
-    bool mIsWhitelistedForShumway;
     NPWindowType mWindowType;
     int16_t mDrawingModel;
 

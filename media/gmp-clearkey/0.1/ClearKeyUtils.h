@@ -23,8 +23,6 @@
 #include <assert.h>
 #include "gmp-api/gmp-decryption.h"
 
-#define CLEARKEY_KEY_LEN ((size_t)16)
-
 #if 0
 void CK_Log(const char* aFmt, ...);
 #define CK_LOGE(...) CK_Log(__VA_ARGS__)
@@ -42,6 +40,14 @@ extern GMPPlatformAPI* GetPlatform();
 typedef std::vector<uint8_t> KeyId;
 typedef std::vector<uint8_t> Key;
 
+// The session response size should be within a reasonable limit.
+// The size 64 KB is referenced from web-platform-test.
+static const uint32_t kMaxSessionResponseLength = 65536;
+
+// Provide limitation for KeyIds length and webm initData size.
+static const uint32_t kMaxWebmInitDataSize = 65536;
+static const uint32_t kMaxKeyIdsLength = 512;
+
 struct KeyIdPair
 {
   KeyId mKeyId;
@@ -54,14 +60,9 @@ public:
   static void DecryptAES(const std::vector<uint8_t>& aKey,
                          std::vector<uint8_t>& aData, std::vector<uint8_t>& aIV);
 
-  static void ParseCENCInitData(const uint8_t* aInitData,
-                                uint32_t aInitDataSize,
-                                std::vector<Key>& aOutKeyIds);
-
   static bool ParseKeyIdsInitData(const uint8_t* aInitData,
                                   uint32_t aInitDataSize,
-                                  std::vector<KeyId>& aOutKeyIds,
-                                  std::string& aOutSessionType);
+                                  std::vector<KeyId>& aOutKeyIds);
 
   static void MakeKeyRequest(const std::vector<KeyId>& aKeyIds,
                              std::string& aOutRequest,

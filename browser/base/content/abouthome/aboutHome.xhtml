@@ -42,10 +42,9 @@
       <div id="searchIconAndTextContainer">
         <div id="searchIcon"/>
         <input type="text" name="q" value="" id="searchText" maxlength="256"
-               aria-label="&contentSearchInput.label;" autofocus="autofocus"
-               dir="auto"/>
-        <input id="searchSubmit" type="button" value="" onclick="onSearchSubmit(event)"
-               aria-label="&contentSearchSubmit.label;"/>
+               aria-label="&contentSearchInput.label;" autofocus="autofocus"/>
+        <input id="searchSubmit" type="button" onclick="onSearchSubmit(event)"
+               title="&contentSearchSubmit.tooltip;"/>
       </div>
 
       <div id="snippetContainer">
@@ -74,6 +73,7 @@
       <button class="launchButton" id="restorePreviousSession">&historyRestoreLastSession.label;</button>
     </div>
 
-    <a id="aboutMozilla" href="https://www.mozilla.org/about/?utm_source=about-home&amp;utm_medium=Referral"/>
+    <a id="aboutMozilla" href="https://www.mozilla.org/about/?utm_source=about-home&amp;utm_medium=Referral"
+       aria-label="&abouthome.aboutMozilla.label;"/>
   </body>
 </html>

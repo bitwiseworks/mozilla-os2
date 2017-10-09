@@ -2,8 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 /* import-globals-from performance-controller.js */
+/* globals OverviewView, window */
 "use strict";
-
 /**
  * Master view handler for the performance tool.
  */
@@ -19,26 +19,96 @@ var PerformanceView = {
   // from the main profiler view. Used in `PerformanceView.setState()`
   states: {
     "unavailable": [
-      { sel: "#performance-view", opt: "selectedPanel", val: () => $("#unavailable-notice") },
+      {
+        sel: "#performance-view",
+        opt: "selectedPanel",
+        val: () => $("#unavailable-notice")
+      },
+      {
+        sel: "#performance-view-content",
+        opt: "hidden",
+        val: () => true
+      },
     ],
     "empty": [
-      { sel: "#performance-view", opt: "selectedPanel", val: () => $("#empty-notice") }
+      {
+        sel: "#performance-view",
+        opt: "selectedPanel",
+        val: () => $("#empty-notice")
+      },
+      {
+        sel: "#performance-view-content",
+        opt: "hidden",
+        val: () => true
+      },
     ],
     "recording": [
-      { sel: "#performance-view", opt: "selectedPanel", val: () => $("#performance-view-content") },
-      { sel: "#details-pane-container", opt: "selectedPanel", val: () => $("#recording-notice") }
+      {
+        sel: "#performance-view",
+        opt: "selectedPanel",
+        val: () => $("#performance-view-content")
+      },
+      {
+        sel: "#performance-view-content",
+        opt: "hidden",
+        val: () => false
+      },
+      {
+        sel: "#details-pane-container",
+        opt: "selectedPanel",
+        val: () => $("#recording-notice")
+      },
     ],
     "console-recording": [
-      { sel: "#performance-view", opt: "selectedPanel", val: () => $("#performance-view-content") },
-      { sel: "#details-pane-container", opt: "selectedPanel", val: () => $("#console-recording-notice") }
+      {
+        sel: "#performance-view",
+        opt: "selectedPanel",
+        val: () => $("#performance-view-content")
+      },
+      {
+        sel: "#performance-view-content",
+        opt: "hidden",
+        val: () => false
+      },
+      {
+        sel: "#details-pane-container",
+        opt: "selectedPanel",
+        val: () => $("#console-recording-notice")
+      },
     ],
     "recorded": [
-      { sel: "#performance-view", opt: "selectedPanel", val: () => $("#performance-view-content") },
-      { sel: "#details-pane-container", opt: "selectedPanel", val: () => $("#details-pane") }
+      {
+        sel: "#performance-view",
+        opt: "selectedPanel",
+        val: () => $("#performance-view-content")
+      },
+      {
+        sel: "#performance-view-content",
+        opt: "hidden",
+        val: () => false
+      },
+      {
+        sel: "#details-pane-container",
+        opt: "selectedPanel",
+        val: () => $("#details-pane")
+      },
     ],
     "loading": [
-      { sel: "#performance-view", opt: "selectedPanel", val: () => $("#performance-view-content") },
-      { sel: "#details-pane-container", opt: "selectedPanel", val: () => $("#loading-notice") }
+      {
+        sel: "#performance-view",
+        opt: "selectedPanel",
+        val: () => $("#performance-view-content")
+      },
+      {
+        sel: "#performance-view-content",
+        opt: "hidden",
+        val: () => false
+      },
+      {
+        sel: "#details-pane-container",
+        opt: "selectedPanel",
+        val: () => $("#loading-notice")
+      },
     ]
   },
 
@@ -46,10 +116,6 @@ var PerformanceView = {
    * Sets up the view with event binding and main subviews.
    */
   initialize: Task.async(function* () {
-    this._recordButton = $("#main-record-button");
-    this._importButton = $("#import-button");
-    this._clearButton = $("#clear-button");
-
     this._onRecordButtonClick = this._onRecordButtonClick.bind(this);
     this._onImportButtonClick = this._onImportButtonClick.bind(this);
     this._onClearButtonClick = this._onClearButtonClick.bind(this);
@@ -58,18 +124,14 @@ var PerformanceView = {
     this._onRecordingStateChange = this._onRecordingStateChange.bind(this);
     this._onNewRecordingFailed = this._onNewRecordingFailed.bind(this);
 
-    for (let button of $$(".record-button")) {
-      button.addEventListener("click", this._onRecordButtonClick);
-    }
-    this._importButton.addEventListener("click", this._onImportButtonClick);
-    this._clearButton.addEventListener("click", this._onClearButtonClick);
-
     // Bind to controller events to unlock the record button
     PerformanceController.on(EVENTS.RECORDING_SELECTED, this._onRecordingSelected);
-    PerformanceController.on(EVENTS.PROFILER_STATUS_UPDATED, this._onProfilerStatusUpdated);
+    PerformanceController.on(EVENTS.RECORDING_PROFILER_STATUS_UPDATE,
+                             this._onProfilerStatusUpdated);
     PerformanceController.on(EVENTS.RECORDING_STATE_CHANGE, this._onRecordingStateChange);
-    PerformanceController.on(EVENTS.NEW_RECORDING, this._onRecordingStateChange);
-    PerformanceController.on(EVENTS.NEW_RECORDING_FAILED, this._onNewRecordingFailed);
+    PerformanceController.on(EVENTS.RECORDING_ADDED, this._onRecordingStateChange);
+    PerformanceController.on(EVENTS.BACKEND_FAILED_AFTER_RECORDING_START,
+                             this._onNewRecordingFailed);
 
     if (yield PerformanceController.canCurrentlyRecord()) {
       this.setState("empty");
@@ -83,23 +145,47 @@ var PerformanceView = {
     yield RecordingsView.initialize();
     yield OverviewView.initialize();
     yield DetailsView.initialize();
+
+    // DE-XUL: Begin migrating the toolbar to React. Temporarily hold state here.
+    this._recordingControlsState = {
+      onRecordButtonClick: this._onRecordButtonClick,
+      onImportButtonClick: this._onImportButtonClick,
+      onClearButtonClick: this._onClearButtonClick,
+      isRecording: false,
+      isDisabled: false
+    };
+    // Mount to an HTML element.
+    const {createHtmlMount} = PerformanceUtils;
+    this._recordingControlsMount = createHtmlMount($("#recording-controls-mount"));
+    this._recordingButtonsMounts = Array.from($$(".recording-button-mount"))
+                                        .map(createHtmlMount);
+
+    this._renderRecordingControls();
   }),
+
+  /**
+   * DE-XUL: Render the recording controls and buttons using React.
+   */
+  _renderRecordingControls: function () {
+    ReactDOM.render(RecordingControls(this._recordingControlsState),
+                    this._recordingControlsMount);
+    for (let button of this._recordingButtonsMounts) {
+      ReactDOM.render(RecordingButton(this._recordingControlsState), button);
+    }
+  },
 
   /**
    * Unbinds events and destroys subviews.
    */
   destroy: Task.async(function* () {
-    for (let button of $$(".record-button")) {
-      button.removeEventListener("click", this._onRecordButtonClick);
-    }
-    this._importButton.removeEventListener("click", this._onImportButtonClick);
-    this._clearButton.removeEventListener("click", this._onClearButtonClick);
-
     PerformanceController.off(EVENTS.RECORDING_SELECTED, this._onRecordingSelected);
-    PerformanceController.off(EVENTS.PROFILER_STATUS_UPDATED, this._onProfilerStatusUpdated);
-    PerformanceController.off(EVENTS.RECORDING_STATE_CHANGE, this._onRecordingStateChange);
-    PerformanceController.off(EVENTS.NEW_RECORDING, this._onRecordingStateChange);
-    PerformanceController.off(EVENTS.NEW_RECORDING_FAILED, this._onNewRecordingFailed);
+    PerformanceController.off(EVENTS.RECORDING_PROFILER_STATUS_UPDATE,
+                              this._onProfilerStatusUpdated);
+    PerformanceController.off(EVENTS.RECORDING_STATE_CHANGE,
+                              this._onRecordingStateChange);
+    PerformanceController.off(EVENTS.RECORDING_ADDED, this._onRecordingStateChange);
+    PerformanceController.off(EVENTS.BACKEND_FAILED_AFTER_RECORDING_START,
+                              this._onNewRecordingFailed);
 
     yield ToolbarView.destroy();
     yield RecordingsView.destroy();
@@ -112,6 +198,14 @@ var PerformanceView = {
    * "empty", "recording", "console-recording", "recorded".
    */
   setState: function (state) {
+    // Make sure that the focus isn't captured on a hidden iframe. This fixes a
+    // XUL bug where shortcuts stop working.
+    const iframes = window.document.querySelectorAll("iframe");
+    for (let iframe of iframes) {
+      iframe.blur();
+    }
+    window.focus();
+
     let viewConfig = this.states[state];
     if (!viewConfig) {
       throw new Error(`Invalid state for PerformanceView: ${state}`);
@@ -181,7 +275,7 @@ var PerformanceView = {
     }
 
     $bufferLabel.value = L10N.getFormatStr("profiler.bufferFull", percent);
-    this.emit(EVENTS.UI_BUFFER_STATUS_UPDATED, percent);
+    this.emit(EVENTS.UI_RECORDING_PROFILER_STATUS_RENDERED, percent);
   },
 
   /**
@@ -191,13 +285,8 @@ var PerformanceView = {
    * @param {boolean} lock
    */
   _lockRecordButtons: function (lock) {
-    for (let button of $$(".record-button")) {
-      if (lock) {
-        button.setAttribute("locked", "true");
-      } else {
-        button.removeAttribute("locked");
-      }
-    }
+    this._recordingControlsState.isLocked = lock;
+    this._renderRecordingControls();
   },
 
   /*
@@ -207,13 +296,8 @@ var PerformanceView = {
    * @param {boolean} activate
    */
   _toggleRecordButtons: function (activate) {
-    for (let button of $$(".record-button")) {
-      if (activate) {
-        button.setAttribute("checked", "true");
-      } else {
-        button.removeAttribute("checked");
-      }
-    }
+    this._recordingControlsState.isRecording = !!activate;
+    this._renderRecordingControls();
   },
 
   /**
@@ -256,7 +340,7 @@ var PerformanceView = {
    * Handler for clicking the record button.
    */
   _onRecordButtonClick: function (e) {
-    if (this._recordButton.hasAttribute("checked")) {
+    if (this._recordingControlsState.isRecording) {
       this.emit(EVENTS.UI_STOP_RECORDING);
     } else {
       this._lockRecordButtons(true);
@@ -268,9 +352,10 @@ var PerformanceView = {
   /**
    * Handler for clicking the import button.
    */
-  _onImportButtonClick: function(e) {
+  _onImportButtonClick: function (e) {
     let fp = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
-    fp.init(window, L10N.getStr("recordingsList.importDialogTitle"), Ci.nsIFilePicker.modeOpen);
+    fp.init(window, L10N.getStr("recordingsList.importDialogTitle"),
+            Ci.nsIFilePicker.modeOpen);
     fp.appendFilter(L10N.getStr("recordingsList.saveDialogJSONFilter"), "*.json");
     fp.appendFilter(L10N.getStr("recordingsList.saveDialogAllFilter"), "*.*");
 
@@ -298,10 +383,10 @@ var PerformanceView = {
    * Fired when the controller has updated information on the buffer's status.
    * Update the buffer status display if shown.
    */
-  _onProfilerStatusUpdated: function (_, data) {
+  _onProfilerStatusUpdated: function (_, profilerStatus) {
     // We only care about buffer status here, so check to see
     // if it has position.
-    if (!data || data.position === void 0) {
+    if (!profilerStatus || profilerStatus.position === void 0) {
       return;
     }
     // If this is our first buffer event, set the status and add a class

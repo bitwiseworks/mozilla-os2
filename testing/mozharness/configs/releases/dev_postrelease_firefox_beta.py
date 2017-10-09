@@ -5,9 +5,10 @@ config = {
     "repo": {
         # date is used for staging mozilla-beta
         "repo": "https://hg.mozilla.org/projects/date",
-        "revision": "default",
+        "branch": "default",
         "dest": "date",
         "vcs": "hg",
+        "clone_upstream_url": "https://hg.mozilla.org/mozilla-unified",
     },
     # date is used for staging mozilla-beta
     "push_dest": "ssh://hg.mozilla.org/projects/date",

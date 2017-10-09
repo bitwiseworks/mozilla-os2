@@ -13,7 +13,7 @@ if (!cachedLeftPaneFolderIdGetter && typeof(getter) == "function") {
 }
 
 // ...And restore it when test ends.
-registerCleanupFunction(function(){
+registerCleanupFunction(function() {
   let getter = PlacesUIUtils.__lookupGetter__("leftPaneFolderId");
   if (cachedLeftPaneFolderIdGetter && typeof(getter) != "function") {
     PlacesUIUtils.__defineGetter__("leftPaneFolderId", cachedLeftPaneFolderIdGetter);
@@ -136,7 +136,7 @@ function synthesizeClickOnSelectedTreeCell(aTree, aOptions) {
   var y = rect.y + rect.height / 2;
   // Simulate the click.
   EventUtils.synthesizeMouse(aTree.body, x, y, aOptions || {},
-                             aTree.ownerDocument.defaultView);
+                             aTree.ownerGlobal);
 }
 
 /**
@@ -159,7 +159,7 @@ function promiseIsURIVisited(aURI) {
 
 function promiseBookmarksNotification(notification, conditionFn) {
   info(`promiseBookmarksNotification: waiting for ${notification}`);
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     let proxifiedObserver = new Proxy({}, {
       get: (target, name) => {
         if (name == "QueryInterface")
@@ -168,7 +168,6 @@ function promiseBookmarksNotification(notification, conditionFn) {
         if (name == notification)
           return (...args) => {
             if (conditionFn.apply(this, args)) {
-              clearTimeout(timeout);
               PlacesUtils.bookmarks.removeObserver(proxifiedObserver, false);
               executeSoon(resolve);
             } else {
@@ -179,16 +178,12 @@ function promiseBookmarksNotification(notification, conditionFn) {
       }
     });
     PlacesUtils.bookmarks.addObserver(proxifiedObserver, false);
-    let timeout = setTimeout(() => {
-      PlacesUtils.bookmarks.removeObserver(proxifiedObserver, false);
-      reject(new Error("Timed out while waiting for bookmarks notification"));
-    }, 2000);
   });
 }
 
 function promiseHistoryNotification(notification, conditionFn) {
   info(`Waiting for ${notification}`);
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     let proxifiedObserver = new Proxy({}, {
       get: (target, name) => {
         if (name == "QueryInterface")
@@ -196,7 +191,6 @@ function promiseHistoryNotification(notification, conditionFn) {
         if (name == notification)
           return (...args) => {
             if (conditionFn.apply(this, args)) {
-              clearTimeout(timeout);
               PlacesUtils.history.removeObserver(proxifiedObserver, false);
               executeSoon(resolve);
             }
@@ -205,10 +199,6 @@ function promiseHistoryNotification(notification, conditionFn) {
       }
     });
     PlacesUtils.history.addObserver(proxifiedObserver, false);
-    let timeout = setTimeout(() => {
-      PlacesUtils.history.removeObserver(proxifiedObserver, false);
-      reject(new Error("Timed out while waiting for history notification"));
-    }, 2000);
   });
 }
 
@@ -350,7 +340,9 @@ var withBookmarksDialog = Task.async(function* (autoCancel, openFn, taskFn) {
  *
  * @param selector
  *        Valid selector syntax
- * @return the target DOM node.
+ * @return Promise
+ *         Returns a Promise that resolves once the context menu has been
+ *         opened.
  */
 var openContextMenuForContentSelector = Task.async(function* (browser, selector) {
   info("wait for the context menu");
@@ -372,8 +364,6 @@ var openContextMenuForContentSelector = Task.async(function* (browser, selector)
                                   1, 0, false, 0, 0, true);
   });
   yield contextPromise;
-
-  return gContextMenuContentData.popupNode;
 });
 
 /**

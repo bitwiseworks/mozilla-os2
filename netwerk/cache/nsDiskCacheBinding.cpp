@@ -12,7 +12,7 @@
 #include "nsDiskCacheBinding.h"
 #include "nsCacheService.h"
 
-
+using namespace mozilla;
 
 /******************************************************************************
  *  static hash table callback functions
@@ -24,16 +24,15 @@ struct HashTableEntry : PLDHashEntryHdr {
 
 
 static PLDHashNumber
-HashKey( PLDHashTable *table, const void *key)
+HashKey(const void *key)
 {
     return (PLDHashNumber) NS_PTR_TO_INT32(key);
 }
 
 
 static bool
-MatchEntry(PLDHashTable *              /* table */,
-            const PLDHashEntryHdr *       header,
-            const void *                  key)
+MatchEntry(const PLDHashEntryHdr *       header,
+           const void *                  key)
 {
     HashTableEntry * hashEntry = (HashTableEntry *) header;
     return (hashEntry->mBinding->mRecord.HashNumber() == (PLDHashNumber) NS_PTR_TO_INT32(key));
@@ -89,7 +88,7 @@ nsDiskCacheBinding::~nsDiskCacheBinding()
     // Grab the cache lock since the binding is stored in nsCacheEntry::mData
     // and it is released using nsCacheService::ReleaseObject_Locked() which
     // releases the object outside the cache lock.
-    nsCacheServiceAutoLock lock(LOCK_TELEM(NSDISKCACHEBINDING_DESTRUCTOR));
+    nsCacheServiceAutoLock lock;
 
     NS_ASSERTION(PR_CLIST_IS_EMPTY(this), "binding deleted while still on list");
     if (!PR_CLIST_IS_EMPTY(this))

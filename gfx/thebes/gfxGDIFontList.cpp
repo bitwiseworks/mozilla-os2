@@ -7,6 +7,7 @@
 #include <algorithm>
 
 #include "mozilla/Logging.h"
+#include "mozilla/Sprintf.h"
 
 #include "gfxGDIFontList.h"
 #include "gfxWindowsPlatform.h"
@@ -75,12 +76,12 @@ public:
 #if DEBUG
         if (!success) {
             char buf[256];
-            sprintf(buf, "error deleting font handle (%p) - RemoveFontMemResourceEx failed", mFontRef);
+            SprintfLiteral(buf, "error deleting font handle (%p) - RemoveFontMemResourceEx failed", mFontRef);
             NS_ASSERTION(success, buf);
         }
 #endif
     }
-    
+
     HANDLE mFontRef;
 };
 
@@ -130,7 +131,7 @@ GDIFontEntry::GDIFontEntry(const nsAString& aFaceName,
       mFamilyHasItalicFace(aFamilyHasItalicFace),
       mCharset(), mUnicodeRanges()
 {
-    mUserFontData = aUserFontData;
+    mUserFontData.reset(aUserFontData);
     mStyle = aStyle;
     mWeight = aWeight;
     mStretch = aStretch;
@@ -173,7 +174,7 @@ GDIFontEntry::ReadCMAP(FontInfoData *aFontInfoData)
     } else {
         uint32_t kCMAP = TRUETYPE_TAG('c','m','a','p');
         charmap = new gfxCharacterMap();
-        AutoFallibleTArray<uint8_t,16384> cmap;
+        AutoTArray<uint8_t, 16384> cmap;
         rv = CopyFontTable(kCMAP, cmap);
 
         if (NS_SUCCEEDED(rv)) {
@@ -202,8 +203,8 @@ GDIFontEntry::ReadCMAP(FontInfoData *aFontInfoData)
                   charmap->mHash, mCharacterMap == charmap ? " new" : ""));
     if (LOG_CMAPDATA_ENABLED()) {
         char prefix[256];
-        sprintf(prefix, "(cmapdata) name: %.220s",
-                NS_ConvertUTF16toUTF8(mName).get());
+        SprintfLiteral(prefix, "(cmapdata) name: %.220s",
+                       NS_ConvertUTF16toUTF8(mName).get());
         charmap->Dump(prefix, eGfxLog_cmapdata);
     }
 
@@ -234,8 +235,7 @@ GDIFontEntry::CreateFontInstance(const gfxFontStyle* aFontStyle, bool aNeedsBold
 }
 
 nsresult
-GDIFontEntry::CopyFontTable(uint32_t aTableTag,
-                            FallibleTArray<uint8_t>& aBuffer)
+GDIFontEntry::CopyFontTable(uint32_t aTableTag, nsTArray<uint8_t>& aBuffer)
 {
     if (!IsTrueType()) {
         return NS_ERROR_FAILURE;
@@ -326,7 +326,7 @@ GDIFontEntry::TestCharacterMap(uint32_t aCh)
         HFONT hfont = font->GetHFONT();
         HFONT oldFont = (HFONT)SelectObject(dc, hfont);
 
-        wchar_t str[1] = { aCh };
+        wchar_t str[1] = { (wchar_t)aCh };
         WORD glyph[1];
 
         bool hasGlyph = false;
@@ -652,13 +652,10 @@ gfxGDIFontList::GetFontSubstitutes()
 }
 
 nsresult
-gfxGDIFontList::InitFontList()
+gfxGDIFontList::InitFontListForPlatform()
 {
     Telemetry::AutoTimer<Telemetry::GDI_INITFONTLIST_TOTAL> timer;
 
-    // reset font lists
-    gfxPlatformFontList::InitFontList();
-    
     mFontSubstitutes.Clear();
     mNonExistingFonts.Clear();
 
@@ -752,6 +749,63 @@ gfxGDIFontList::LookupLocalFont(const nsAString& aFontName,
     return fe;
 }
 
+// If aFontData contains only a MS/Symbol cmap subtable, not MS/Unicode,
+// we modify the subtable header to mark it as Unicode instead, because
+// otherwise GDI will refuse to load the font.
+// NOTE that this function does not bounds-check every access to the font data.
+// This is OK because we only use it on data that has already been validated
+// by OTS, and therefore we will not hit out-of-bounds accesses here.
+static bool
+FixupSymbolEncodedFont(uint8_t* aFontData, uint32_t aLength)
+{
+    struct CmapHeader {
+        AutoSwap_PRUint16 version;
+        AutoSwap_PRUint16 numTables;
+    };
+    struct CmapEncodingRecord {
+        AutoSwap_PRUint16 platformID;
+        AutoSwap_PRUint16 encodingID;
+        AutoSwap_PRUint32 offset;
+    };
+    const uint32_t kCMAP = TRUETYPE_TAG('c','m','a','p');
+    const TableDirEntry* dir =
+        gfxFontUtils::FindTableDirEntry(aFontData, kCMAP);
+    if (dir && uint32_t(dir->length) >= sizeof(CmapHeader)) {
+        CmapHeader *cmap =
+            reinterpret_cast<CmapHeader*>(aFontData + uint32_t(dir->offset));
+        CmapEncodingRecord *encRec =
+            reinterpret_cast<CmapEncodingRecord*>(cmap + 1);
+        int32_t symbolSubtable = -1;
+        for (uint32_t i = 0; i < (uint16_t)cmap->numTables; ++i) {
+            if (uint16_t(encRec[i].platformID) !=
+                gfxFontUtils::PLATFORM_ID_MICROSOFT) {
+                continue; // only interested in MS platform
+            }
+            if (uint16_t(encRec[i].encodingID) ==
+                gfxFontUtils::ENCODING_ID_MICROSOFT_UNICODEBMP) {
+                // We've got a Microsoft/Unicode table, so don't interfere.
+                symbolSubtable = -1;
+                break;
+            }
+            if (uint16_t(encRec[i].encodingID) ==
+                gfxFontUtils::ENCODING_ID_MICROSOFT_SYMBOL) {
+                // Found a symbol subtable; remember it for possible fixup,
+                // but if we subsequently find a Microsoft/Unicode subtable,
+                // we'll cancel this.
+                symbolSubtable = i;
+            }
+        }
+        if (symbolSubtable != -1) {
+            // We found a windows/symbol cmap table, and no windows/unicode one;
+            // change the encoding ID so that AddFontMemResourceEx will accept it
+            encRec[symbolSubtable].encodingID =
+                gfxFontUtils::ENCODING_ID_MICROSOFT_UNICODEBMP;
+            return true;
+        }
+    }
+    return false;
+}
+
 gfxFontEntry*
 gfxGDIFontList::MakePlatformFont(const nsAString& aFontName,
                                  uint16_t aWeight,
@@ -799,8 +853,14 @@ gfxGDIFontList::MakePlatformFont(const nsAString& aFontName,
     //  to the process that made the call and is not enumerable."
     fontRef = AddFontMemResourceEx(fontData, fontLength, 
                                     0 /* reserved */, &numFonts);
-    if (!fontRef)
+    if (!fontRef) {
+        if (FixupSymbolEncodedFont(fontData, fontLength)) {
+            fontRef = AddFontMemResourceEx(fontData, fontLength, 0, &numFonts);
+        }
+    }
+    if (!fontRef) {
         return nullptr;
+    }
 
     // only load fonts with a single face contained in the data
     // AddFontMemResourceEx generates an additional face name for
@@ -833,27 +893,31 @@ gfxGDIFontList::MakePlatformFont(const nsAString& aFontName,
     return fe;
 }
 
-gfxFontFamily*
-gfxGDIFontList::FindFamily(const nsAString& aFamily, gfxFontStyle* aStyle,
-                           gfxFloat aDevToCssSize)
+bool
+gfxGDIFontList::FindAndAddFamilies(const nsAString& aFamily,
+                                   nsTArray<gfxFontFamily*>* aOutput,
+                                   gfxFontStyle* aStyle,
+                                   gfxFloat aDevToCssSize)
 {
     nsAutoString keyName(aFamily);
     BuildKeyNameFromFontName(keyName);
 
     gfxFontFamily *ff = mFontSubstitutes.GetWeak(keyName);
     if (ff) {
-        return ff;
+        aOutput->AppendElement(ff);
+        return true;
     }
 
     if (mNonExistingFonts.Contains(keyName)) {
-        return nullptr;
+        return false;
     }
 
-    return gfxPlatformFontList::FindFamily(aFamily);
+    return gfxPlatformFontList::FindAndAddFamilies(aFamily, aOutput, aStyle,
+                                                   aDevToCssSize);
 }
 
 gfxFontFamily*
-gfxGDIFontList::GetDefaultFont(const gfxFontStyle* aStyle)
+gfxGDIFontList::GetDefaultFontForPlatform(const gfxFontStyle* aStyle)
 {
     gfxFontFamily *ff = nullptr;
 
@@ -975,7 +1039,7 @@ int CALLBACK GDIFontInfo::EnumerateFontsForFamily(
         uint32_t kNAME =
             NativeEndian::swapToBigEndian(TRUETYPE_TAG('n','a','m','e'));
         uint32_t nameSize;
-        AutoFallibleTArray<uint8_t, 1024> nameData;
+        AutoTArray<uint8_t, 1024> nameData;
 
         nameSize = ::GetFontData(hdc, kNAME, 0, nullptr, 0);
         if (nameSize != GDI_ERROR &&
@@ -1018,7 +1082,7 @@ int CALLBACK GDIFontInfo::EnumerateFontsForFamily(
         uint32_t kCMAP =
             NativeEndian::swapToBigEndian(TRUETYPE_TAG('c','m','a','p'));
         uint32_t cmapSize;
-        AutoFallibleTArray<uint8_t, 1024> cmapData;
+        AutoTArray<uint8_t, 1024> cmapData;
 
         cmapSize = ::GetFontData(hdc, kCMAP, 0, nullptr, 0);
         if (cmapSize != GDI_ERROR &&
@@ -1047,7 +1111,7 @@ int CALLBACK GDIFontInfo::EnumerateFontsForFamily(
         famData->mFontInfo.mFontFaceData.Put(fontName, fontData);
     }
 
-    return 1;
+    return famData->mFontInfo.mCanceled ? 0 : 1;
 }
 
 void
@@ -1120,11 +1184,11 @@ gfxGDIFontList::ActivateBundledFonts()
         if (!file) {
             continue;
         }
-        nsCString path;
-        if (NS_FAILED(file->GetNativePath(path))) {
+        nsAutoString path;
+        if (NS_FAILED(file->GetPath(path))) {
             continue;
         }
-        AddFontResourceEx(path.get(), FR_PRIVATE, nullptr);
+        AddFontResourceExW(path.get(), FR_PRIVATE, nullptr);
     }
 }
 

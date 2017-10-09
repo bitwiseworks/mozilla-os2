@@ -8,7 +8,6 @@
 
 #include "mozilla/Attributes.h"
 #include "nscore.h"
-#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsCOMArray.h"
 #include "nsIPluginTag.h"
@@ -31,6 +30,9 @@ struct FakePluginTagInit;
 { 0xe8fdd227, 0x27da, 0x46ee,     \
   { 0xbe, 0xf3, 0x1a, 0xef, 0x5a, 0x8f, 0xc5, 0xb4 } }
 
+#define NS_PLUGINTAG_IID \
+  { 0xcce2e8b9, 0x9702, 0x4d4b, \
+   { 0xbe, 0xa4, 0x7c, 0x1e, 0x13, 0x1f, 0xaf, 0x78 } }
 class nsIInternalPluginTag : public nsIPluginTag
 {
 public:
@@ -91,6 +93,8 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsIInternalPluginTag, NS_IINTERNALPLUGINTAG_IID)
 class nsPluginTag final : public nsIInternalPluginTag
 {
 public:
+  NS_DECLARE_STATIC_IID_ACCESSOR(NS_PLUGINTAG_IID)
+
   NS_DECL_ISUPPORTS
   NS_DECL_NSIPLUGINTAG
 
@@ -129,8 +133,10 @@ public:
               bool aIsJavaPlugin,
               bool aIsFlashPlugin,
               bool aSupportsAsyncInit,
+              bool aSupportsAsyncRender,
               int64_t aLastModifiedTime,
-              bool aFromExtension);
+              bool aFromExtension,
+              int32_t aSandboxLevel);
 
   void TryUnloadPlugin(bool inShutdown);
 
@@ -144,9 +150,6 @@ public:
 
   PluginState GetPluginState();
   void SetPluginState(PluginState state);
-
-  // import legacy flags from plugin registry into the preferences
-  void ImportFlagsToPrefs(uint32_t flag);
 
   bool HasSameNameAndMimes(const nsPluginTag *aPluginTag) const;
   const nsCString& GetNiceFileName() override;
@@ -167,9 +170,11 @@ public:
   bool          mIsJavaPlugin;
   bool          mIsFlashPlugin;
   bool          mSupportsAsyncInit;
+  bool          mSupportsAsyncRender;
   nsCString     mFullPath; // UTF-8
   int64_t       mLastModifiedTime;
   nsCOMPtr<nsITimer> mUnloadTimer;
+  int32_t       mSandboxLevel;
 
   void          InvalidateBlocklistState();
 
@@ -185,11 +190,13 @@ private:
                 const char* const* aMimeDescriptions,
                 const char* const* aExtensions,
                 uint32_t aVariantCount);
+  void InitSandboxLevel();
   nsresult EnsureMembersAreUTF8();
   void FixupVersion();
 
   static uint32_t sNextId;
 };
+NS_DEFINE_STATIC_IID_ACCESSOR(nsPluginTag, NS_PLUGINTAG_IID)
 
 // A class representing "fake" plugin tags; that is plugin tags not
 // corresponding to actual NPAPI plugins.  In practice these are all

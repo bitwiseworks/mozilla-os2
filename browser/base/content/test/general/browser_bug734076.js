@@ -24,8 +24,9 @@ add_task(function* ()
         });
       },
       verify: function () {
-        return ContentTask.spawn(gBrowser.selectedBrowser, { }, function* (arg) {
-          return [content.document.body.textContent, "no domain was inherited for view background image"];
+        return ContentTask.spawn(gBrowser.selectedBrowser, null, function* (arg) {
+          Assert.ok(!content.document.body.textContent,
+            "no domain was inherited for view background image");
         });
       }
     },
@@ -37,6 +38,8 @@ add_task(function* ()
         return ContentTask.spawn(gBrowser.selectedBrowser, { writeDomainURL: writeDomainURL }, function* (arg) {
           let doc = content.document;
           let img = doc.createElement("img");
+          img.height = 100;
+          img.width = 100;
           img.setAttribute("src", arg.writeDomainURL);
           doc.body.insertBefore(img, doc.body.firstChild);
 
@@ -44,8 +47,9 @@ add_task(function* ()
         });
       },
       verify: function () {
-        return ContentTask.spawn(gBrowser.selectedBrowser, { }, function* (arg) {
-          return [content.document.body.textContent, "no domain was inherited for view image"];
+        return ContentTask.spawn(gBrowser.selectedBrowser, null, function* (arg) {
+          Assert.ok(!content.document.body.textContent,
+            "no domain was inherited for view image");
         });
       }
     },
@@ -70,8 +74,9 @@ add_task(function* ()
         });
       },
       verify: function () {
-        return ContentTask.spawn(gBrowser.selectedBrowser, { writeDomainURL: writeDomainURL }, function* (arg) {
-          return [content.document.body.textContent, "no domain was inherited for 'show only this frame'"];
+        return ContentTask.spawn(gBrowser.selectedBrowser, null, function* (arg) {
+          Assert.ok(!content.document.body.textContent,
+            "no domain was inherited for 'show only this frame'");
         });
       }
     }
@@ -91,13 +96,14 @@ add_task(function* ()
     yield BrowserTestUtils.synthesizeMouse(test.element, 3, 3,
           { type: "contextmenu", button: 2 }, gBrowser.selectedBrowser);
     yield popupShownPromise;
+    info("onImage: " + gContextMenu.onImage);
+    info("target: " + gContextMenu.target.tagName);
 
     let loadedAfterCommandPromise = BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser);
     document.getElementById(commandToRun).click();
     yield loadedAfterCommandPromise;
 
-    let result = yield test.verify();
-    ok(!result[0], result[1]);
+    yield test.verify();
 
     let popupHiddenPromise = BrowserTestUtils.waitForEvent(contentAreaContextMenu, "popuphidden");
     contentAreaContextMenu.hidePopup();

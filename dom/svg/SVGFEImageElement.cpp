@@ -31,9 +31,10 @@ SVGFEImageElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
   return SVGFEImageElementBinding::Wrap(aCx, this, aGivenProto);
 }
 
-nsSVGElement::StringInfo SVGFEImageElement::sStringInfo[2] =
+nsSVGElement::StringInfo SVGFEImageElement::sStringInfo[3] =
 {
   { &nsGkAtoms::result, kNameSpaceID_None, true },
+  { &nsGkAtoms::href, kNameSpaceID_None, true },
   { &nsGkAtoms::href, kNameSpaceID_XLink, true }
 };
 
@@ -69,7 +70,11 @@ SVGFEImageElement::LoadSVGImage(bool aForce, bool aNotify)
   nsCOMPtr<nsIURI> baseURI = GetBaseURI();
 
   nsAutoString href;
-  mStringAttributes[HREF].GetAnimValue(href, this);
+  if (mStringAttributes[HREF].IsExplicitlySet()) {
+    mStringAttributes[HREF].GetAnimValue(href, this);
+  } else {
+    mStringAttributes[XLINK_HREF].GetAnimValue(href, this);
+  }
   href.Trim(" \t\n\r");
 
   if (baseURI && !href.IsEmpty())
@@ -90,6 +95,15 @@ SVGFEImageElement::LoadSVGImage(bool aForce, bool aNotify)
 }
 
 //----------------------------------------------------------------------
+// EventTarget methods:
+
+void
+SVGFEImageElement::AsyncEventRunning(AsyncEventDispatcher* aEvent)
+{
+  nsImageLoadingContent::AsyncEventRunning(aEvent);
+}
+
+//----------------------------------------------------------------------
 // nsIContent methods:
 
 NS_IMETHODIMP_(bool)
@@ -107,7 +121,9 @@ nsresult
 SVGFEImageElement::AfterSetAttr(int32_t aNamespaceID, nsIAtom* aName,
                                 const nsAttrValue* aValue, bool aNotify)
 {
-  if (aNamespaceID == kNameSpaceID_XLink && aName == nsGkAtoms::href) {
+  if (aName == nsGkAtoms::href &&
+      (aNamespaceID == kNameSpaceID_XLink ||
+       aNamespaceID == kNameSpaceID_None)) {
 
     // If there isn't a frame we still need to load the image in case
     // the frame is created later e.g. by attaching to a document.
@@ -129,7 +145,8 @@ SVGFEImageElement::AfterSetAttr(int32_t aNamespaceID, nsIAtom* aName,
 void
 SVGFEImageElement::MaybeLoadSVGImage()
 {
-  if (mStringAttributes[HREF].IsExplicitlySet() &&
+  if ((mStringAttributes[HREF].IsExplicitlySet() ||
+       mStringAttributes[XLINK_HREF].IsExplicitlySet() ) &&
       (NS_FAILED(LoadSVGImage(false, true)) ||
        !LoadingEnabled())) {
     CancelImageRequests(true);
@@ -149,13 +166,14 @@ SVGFEImageElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
   nsImageLoadingContent::BindToTree(aDocument, aParent, aBindingParent,
                                     aCompileEventHandlers);
 
-  if (mStringAttributes[HREF].IsExplicitlySet()) {
+  if (mStringAttributes[HREF].IsExplicitlySet() ||
+      mStringAttributes[XLINK_HREF].IsExplicitlySet()) {
     // FIXME: Bug 660963 it would be nice if we could just have
     // ClearBrokenState update our state and do it fast...
     ClearBrokenState();
     RemoveStatesSilently(NS_EVENT_STATE_BROKEN);
     nsContentUtils::AddScriptRunner(
-      NS_NewRunnableMethod(this, &SVGFEImageElement::MaybeLoadSVGImage));
+      NewRunnableMethod(this, &SVGFEImageElement::MaybeLoadSVGImage));
   }
 
   return rv;
@@ -183,7 +201,9 @@ NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFEImageElement)
 already_AddRefed<SVGAnimatedString>
 SVGFEImageElement::Href()
 {
-  return mStringAttributes[HREF].ToDOMAnimatedString(this);
+  return mStringAttributes[HREF].IsExplicitlySet()
+         ? mStringAttributes[HREF].ToDOMAnimatedString(this)
+         : mStringAttributes[XLINK_HREF].ToDOMAnimatedString(this);
 }
 
 //----------------------------------------------------------------------
@@ -230,10 +250,10 @@ SVGFEImageElement::GetPrimitiveDescription(nsSVGFilterInstance* aInstance,
   Matrix TM = viewBoxTM;
   TM.PostTranslate(aFilterSubregion.x, aFilterSubregion.y);
 
-  Filter filter = nsLayoutUtils::GetGraphicsFilterForFrame(frame);
+  SamplingFilter samplingFilter = nsLayoutUtils::GetSamplingFilterForFrame(frame);
 
   FilterPrimitiveDescription descr(PrimitiveType::Image);
-  descr.Attributes().Set(eImageFilter, (uint32_t)filter);
+  descr.Attributes().Set(eImageFilter, (uint32_t)samplingFilter);
   descr.Attributes().Set(eImageTransform, TM);
 
   // Append the image to aInputImages and store its index in the description.

@@ -56,14 +56,14 @@ ClusterManager.prototype = {
           this._log.trace("_findCluster successfully returning " + node);
           return node;
         default:
-          this.service.errorHandler.checkServerError(node, "node/weave");
+          this.service.errorHandler.checkServerError(node);
           fail = "Unexpected response code: " + node.status;
           break;
       }
     } catch (e) {
       this._log.debug("Network error on findCluster");
       this.service.status.login = LOGIN_FAILED_NETWORK_ERROR;
-      this.service.errorHandler.checkServerError(e, "node/weave");
+      this.service.errorHandler.checkServerError(e);
       fail = e;
     }
     throw fail;
@@ -80,6 +80,9 @@ ClusterManager.prototype = {
       return false;
     }
 
+    // Convert from the funky "String object with additional properties" that
+    // resource.js returns to a plain-old string.
+    cluster = cluster.toString();
     // Don't update stuff if we already have the right cluster
     if (cluster == this.service.clusterURL) {
       return false;
@@ -87,7 +90,6 @@ ClusterManager.prototype = {
 
     this._log.debug("Setting cluster to " + cluster);
     this.service.clusterURL = cluster;
-    Svc.Prefs.set("lastClusterUpdate", Date.now().toString());
 
     return true;
   },

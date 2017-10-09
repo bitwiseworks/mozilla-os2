@@ -82,7 +82,7 @@ gfxDWriteFont::gfxDWriteFont(gfxFontEntry *aFontEntry,
     , mAllowManualShowGlyphs(true)
 {
     gfxDWriteFontEntry *fe =
-        static_cast<gfxDWriteFontEntry*>(aFontEntry);
+	        static_cast<gfxDWriteFontEntry*>(aFontEntry);
     nsresult rv;
     DWRITE_FONT_SIMULATIONS sims = DWRITE_FONT_SIMULATIONS_NONE;
     if ((GetStyle()->style != NS_FONT_STYLE_NORMAL) &&
@@ -201,6 +201,7 @@ gfxDWriteFont::ComputeMetrics(AntialiasOption anAAOption)
     mFUnitsConvFactor = float(mAdjustedSize / fontMetrics.designUnitsPerEm);
 
     mMetrics->xHeight = fontMetrics.xHeight * mFUnitsConvFactor;
+    mMetrics->capHeight = fontMetrics.capHeight * mFUnitsConvFactor;
 
     mMetrics->maxAscent = ceil(fontMetrics.ascent * mFUnitsConvFactor);
     mMetrics->maxDescent = ceil(fontMetrics.descent * mFUnitsConvFactor);
@@ -232,7 +233,7 @@ gfxDWriteFont::ComputeMetrics(AntialiasOption anAAOption)
 
     UINT32 ucs = L' ';
     UINT16 glyph;
-    HRESULT hr = mFontFace->GetGlyphIndicesA(&ucs, 1, &glyph);
+    HRESULT hr = mFontFace->GetGlyphIndicesW(&ucs, 1, &glyph);
     if (FAILED(hr)) {
         mMetrics->spaceWidth = 0;
     } else {
@@ -262,7 +263,7 @@ gfxDWriteFont::ComputeMetrics(AntialiasOption anAAOption)
 
     if (mMetrics->aveCharWidth < 1) {
         ucs = L'x';
-        if (SUCCEEDED(mFontFace->GetGlyphIndicesA(&ucs, 1, &glyph))) {
+        if (SUCCEEDED(mFontFace->GetGlyphIndicesW(&ucs, 1, &glyph))) {
             mMetrics->aveCharWidth = MeasureGlyphWidth(glyph);
         }
         if (mMetrics->aveCharWidth < 1) {
@@ -272,7 +273,7 @@ gfxDWriteFont::ComputeMetrics(AntialiasOption anAAOption)
     }
 
     ucs = L'0';
-    if (SUCCEEDED(mFontFace->GetGlyphIndicesA(&ucs, 1, &glyph))) {
+    if (SUCCEEDED(mFontFace->GetGlyphIndicesW(&ucs, 1, &glyph))) {
         mMetrics->zeroOrAveCharWidth = MeasureGlyphWidth(glyph);
     }
     if (mMetrics->zeroOrAveCharWidth < 1) {
@@ -296,8 +297,9 @@ gfxDWriteFont::ComputeMetrics(AntialiasOption anAAOption)
     printf("    emHeight: %f emAscent: %f emDescent: %f\n", mMetrics->emHeight, mMetrics->emAscent, mMetrics->emDescent);
     printf("    maxAscent: %f maxDescent: %f maxAdvance: %f\n", mMetrics->maxAscent, mMetrics->maxDescent, mMetrics->maxAdvance);
     printf("    internalLeading: %f externalLeading: %f\n", mMetrics->internalLeading, mMetrics->externalLeading);
-    printf("    spaceWidth: %f aveCharWidth: %f zeroOrAve: %f xHeight: %f\n",
-           mMetrics->spaceWidth, mMetrics->aveCharWidth, mMetrics->zeroOrAveCharWidth, mMetrics->xHeight);
+    printf("    spaceWidth: %f aveCharWidth: %f zeroOrAve: %f\n",
+           mMetrics->spaceWidth, mMetrics->aveCharWidth, mMetrics->zeroOrAveCharWidth);
+    printf("    xHeight: %f capHeight: %f\n", mMetrics->xHeight, mMetrics->capHeight);
     printf("    uOff: %f uSize: %f stOff: %f stSize: %f\n",
            mMetrics->underlineOffset, mMetrics->underlineSize, mMetrics->strikeoutOffset, mMetrics->strikeoutSize);
 #endif
@@ -454,7 +456,7 @@ gfxDWriteFont::GetSpaceGlyph()
 }
 
 bool
-gfxDWriteFont::SetupCairoFont(gfxContext *aContext)
+gfxDWriteFont::SetupCairoFont(DrawTarget* aDrawTarget)
 {
     cairo_scaled_font_t *scaledFont = GetCairoScaledFont();
     if (cairo_scaled_font_status(scaledFont) != CAIRO_STATUS_SUCCESS) {
@@ -462,7 +464,7 @@ gfxDWriteFont::SetupCairoFont(gfxContext *aContext)
         // the cairo_t, precluding any further drawing.
         return false;
     }
-    cairo_set_scaled_font(aContext->GetCairo(), scaledFont);
+    cairo_set_scaled_font(gfxFont::RefCairo(aDrawTarget), scaledFont);
     return true;
 }
 
@@ -544,17 +546,16 @@ gfxDWriteFont::GetCairoScaledFont()
 }
 
 gfxFont::RunMetrics
-gfxDWriteFont::Measure(gfxTextRun *aTextRun,
-                    uint32_t aStart, uint32_t aEnd,
-                    BoundingBoxType aBoundingBoxType,
-                    gfxContext *aRefContext,
-                    Spacing *aSpacing,
-                    uint16_t aOrientation)
+gfxDWriteFont::Measure(const gfxTextRun* aTextRun,
+                       uint32_t aStart, uint32_t aEnd,
+                       BoundingBoxType aBoundingBoxType,
+                       DrawTarget* aRefDrawTarget,
+                       Spacing* aSpacing,
+                       uint16_t aOrientation)
 {
     gfxFont::RunMetrics metrics =
-        gfxFont::Measure(aTextRun, aStart, aEnd,
-                         aBoundingBoxType, aRefContext, aSpacing,
-                         aOrientation);
+        gfxFont::Measure(aTextRun, aStart, aEnd, aBoundingBoxType,
+                         aRefDrawTarget, aSpacing, aOrientation);
 
     // if aBoundingBoxType is LOOSE_INK_EXTENTS
     // and the underlying cairo font may be antialiased,
@@ -583,7 +584,7 @@ int32_t
 gfxDWriteFont::GetGlyphWidth(DrawTarget& aDrawTarget, uint16_t aGID)
 {
     if (!mGlyphWidths) {
-        mGlyphWidths = new nsDataHashtable<nsUint32HashKey,int32_t>(128);
+        mGlyphWidths = MakeUnique<nsDataHashtable<nsUint32HashKey,int32_t>>(128);
     }
 
     int32_t width = -1;
@@ -685,6 +686,17 @@ gfxDWriteFont::GetScaledFont(mozilla::gfx::DrawTarget *aTarget)
     mAzureScaledFont = Factory::CreateScaledFontWithCairo(nativeFont,
                                                         GetAdjustedSize(),
                                                         GetCairoScaledFont());
+  } else if (aTarget->GetBackendType() == BackendType::SKIA) {
+    gfxDWriteFontEntry *fe =
+        static_cast<gfxDWriteFontEntry*>(mFontEntry.get());
+    bool useEmbeddedBitmap = (fe->IsCJKFont() && HasBitmapStrikeForSize(NS_lround(mAdjustedSize)));
+
+    const gfxFontStyle* fontStyle = GetStyle();
+    mAzureScaledFont =
+            Factory::CreateScaledFontForDWriteFont(mFontFace, fontStyle,
+                                                   GetAdjustedSize(),
+                                                   useEmbeddedBitmap,
+                                                   GetForceGDIClassic());
   } else {
     mAzureScaledFont = Factory::CreateScaledFontForNativeFont(nativeFont,
                                                             GetAdjustedSize());

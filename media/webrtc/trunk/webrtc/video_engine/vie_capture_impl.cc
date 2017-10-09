@@ -69,11 +69,12 @@ int ViECaptureImpl::GetCaptureDevice(unsigned int list_number,
                                      char* device_nameUTF8,
                                      unsigned int device_nameUTF8Length,
                                      char* unique_idUTF8,
-                                     unsigned int unique_idUTF8Length) {
+                                     unsigned int unique_idUTF8Length,
+                                     pid_t* pid) {
   return shared_data_->input_manager()->GetDeviceName(
       list_number,
       device_nameUTF8, device_nameUTF8Length,
-      unique_idUTF8, unique_idUTF8Length);
+      unique_idUTF8, unique_idUTF8Length, pid);
 }
 
 int ViECaptureImpl::AllocateCaptureDevice(
@@ -293,15 +294,6 @@ int ViECaptureImpl::NumberOfCapabilities(
     const char* unique_idUTF8,
     const unsigned int unique_idUTF8Length) {
 
-#if defined(WEBRTC_MAC)
-  // TODO(mflodman) Move to capture module!
-  // QTKit framework handles all capabilities and capture settings
-  // automatically (mandatory).
-  // Thus this function cannot be supported on the Mac platform.
-  shared_data_->SetLastError(kViECaptureDeviceMacQtkitNotSupported);
-  LOG_F(LS_ERROR) << "API not supported on Mac OS X.";
-  return -1;
-#endif
   return shared_data_->input_manager()->NumberOfCaptureCapabilities(
       unique_idUTF8);
 }
@@ -312,15 +304,6 @@ int ViECaptureImpl::GetCaptureCapability(const char* unique_idUTF8,
                                          const unsigned int capability_number,
                                          CaptureCapability& capability) {
 
-#if defined(WEBRTC_MAC)
-  // TODO(mflodman) Move to capture module!
-  // QTKit framework handles all capabilities and capture settings
-  // automatically (mandatory).
-  // Thus this function cannot be supported on the Mac platform.
-  LOG_F(LS_ERROR) << "API not supported on Mac OS X.";
-  shared_data_->SetLastError(kViECaptureDeviceMacQtkitNotSupported);
-  return -1;
-#endif
   if (shared_data_->input_manager()->GetCaptureCapability(
           unique_idUTF8, capability_number, capability) != 0) {
     shared_data_->SetLastError(kViECaptureDeviceUnknownError);
@@ -336,15 +319,6 @@ int ViECaptureImpl::ShowCaptureSettingsDialogBox(
     void* parent_window,
     const unsigned int x,
     const unsigned int y) {
-#if defined(WEBRTC_MAC)
-  // TODO(mflodman) Move to capture module
-  // QTKit framework handles all capabilities and capture settings
-  // automatically (mandatory).
-  // Thus this function cannot be supported on the Mac platform.
-  shared_data_->SetLastError(kViECaptureDeviceMacQtkitNotSupported);
-  LOG_F(LS_ERROR) << "API not supported on Mac OS X.";
-  return -1;
-#endif
   return shared_data_->input_manager()->DisplayCaptureSettingsDialogBox(
            unique_idUTF8, dialog_title,
            parent_window, x, y);
@@ -400,6 +374,14 @@ int ViECaptureImpl::RegisterObserver(const int capture_id,
   return 0;
 }
 
+int ViECaptureImpl::RegisterInputObserver(ViEInputObserver* observer) {
+  if (shared_data_->input_manager()->RegisterObserver(observer) != 0) {
+    shared_data_->SetLastError(kViECaptureDeviceUnknownError);
+    return -1;
+  }
+  return 0;
+}
+
 int ViECaptureImpl::DeregisterObserver(const int capture_id) {
   ViEInputManagerScoped is(*(shared_data_->input_manager()));
   ViECapturer* vie_capture = is.Capture(capture_id);
@@ -413,6 +395,14 @@ int ViECaptureImpl::DeregisterObserver(const int capture_id) {
   }
 
   if (vie_capture->DeRegisterObserver() != 0) {
+    shared_data_->SetLastError(kViECaptureDeviceUnknownError);
+    return -1;
+  }
+  return 0;
+}
+
+int ViECaptureImpl::DeregisterInputObserver() {
+  if (shared_data_->input_manager()->DeRegisterObserver() != 0) {
     shared_data_->SetLastError(kViECaptureDeviceUnknownError);
     return -1;
   }

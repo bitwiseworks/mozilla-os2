@@ -104,8 +104,8 @@ class ReleaseFirefoxUIUpdateTests(FirefoxUIUpdateTests):
         self.vcs_checkout(
             repo=self.tools_repo,
             dest=dirs['abs_tools_dir'],
-            revision=self.tools_tag,
-            vcs='hgtool'
+            branch=self.tools_tag,
+            vcs='hg'
         )
 
     def query_abs_dirs(self):
@@ -117,7 +117,7 @@ class ReleaseFirefoxUIUpdateTests(FirefoxUIUpdateTests):
             'abs_tools_dir': os.path.join(abs_dirs['abs_work_dir'], 'tools'),
         }
 
-        for key in dirs.keys():
+        for key in dirs:
             if key not in abs_dirs:
                 abs_dirs[key] = dirs[key]
         self.abs_dirs = abs_dirs

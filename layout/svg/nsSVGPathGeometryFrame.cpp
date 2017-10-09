@@ -10,11 +10,11 @@
 #include "gfx2DGlue.h"
 #include "gfxContext.h"
 #include "gfxPlatform.h"
-#include "gfxSVGGlyphs.h"
 #include "gfxUtils.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/Helpers.h"
 #include "mozilla/RefPtr.h"
+#include "mozilla/SVGContextPaint.h"
 #include "nsDisplayList.h"
 #include "nsGkAtoms.h"
 #include "nsLayoutUtils.h"
@@ -31,6 +31,7 @@
 
 using namespace mozilla;
 using namespace mozilla::gfx;
+using namespace mozilla::image;
 
 //----------------------------------------------------------------------
 // Implementation
@@ -50,7 +51,7 @@ NS_IMPL_FRAMEARENA_HELPERS(nsSVGPathGeometryFrame)
 NS_QUERYFRAME_HEAD(nsSVGPathGeometryFrame)
   NS_QUERYFRAME_ENTRY(nsISVGChildFrame)
   NS_QUERYFRAME_ENTRY(nsSVGPathGeometryFrame)
-NS_QUERYFRAME_TAIL_INHERITING(nsSVGPathGeometryFrameBase)
+NS_QUERYFRAME_TAIL_INHERITING(nsFrame)
 
 //----------------------------------------------------------------------
 // Display list item:
@@ -69,13 +70,22 @@ public:
     MOZ_COUNT_DTOR(nsDisplaySVGPathGeometry);
   }
 #endif
- 
+
   NS_DISPLAY_DECL_NAME("nsDisplaySVGPathGeometry", TYPE_SVG_PATH_GEOMETRY)
 
   virtual void HitTest(nsDisplayListBuilder* aBuilder, const nsRect& aRect,
                        HitTestState* aState, nsTArray<nsIFrame*> *aOutFrames) override;
   virtual void Paint(nsDisplayListBuilder* aBuilder,
                      nsRenderingContext* aCtx) override;
+
+  nsDisplayItemGeometry* AllocateGeometry(nsDisplayListBuilder* aBuilder) override
+  {
+    return new nsDisplayItemGenericImageGeometry(this, aBuilder);
+  }
+
+  void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
+                                 const nsDisplayItemGeometry* aGeometry,
+                                 nsRegion *aInvalidRegion) override;
 };
 
 void
@@ -111,7 +121,28 @@ nsDisplaySVGPathGeometry::Paint(nsDisplayListBuilder* aBuilder,
 
   gfxMatrix tm = nsSVGIntegrationUtils::GetCSSPxToDevPxMatrix(mFrame) *
                    gfxMatrix::Translation(devPixelOffset);
-  static_cast<nsSVGPathGeometryFrame*>(mFrame)->PaintSVG(*aCtx->ThebesContext(), tm);
+  DrawResult result =
+    static_cast<nsSVGPathGeometryFrame*>(mFrame)->PaintSVG(*aCtx->ThebesContext(), tm);
+
+  nsDisplayItemGenericImageGeometry::UpdateDrawResult(this, result);
+}
+
+void
+nsDisplaySVGPathGeometry::ComputeInvalidationRegion(
+  nsDisplayListBuilder* aBuilder,
+  const nsDisplayItemGeometry* aGeometry,
+  nsRegion* aInvalidRegion)
+{
+  auto geometry =
+    static_cast<const nsDisplayItemGenericImageGeometry*>(aGeometry);
+
+  if (aBuilder->ShouldSyncDecodeImages() &&
+      geometry->ShouldInvalidateToSyncDecodeImages()) {
+    bool snap;
+    aInvalidRegion->Or(*aInvalidRegion, GetBounds(aBuilder, &snap));
+  }
+
+  nsDisplayItem::ComputeInvalidationRegion(aBuilder, aGeometry, aInvalidRegion);
 }
 
 //----------------------------------------------------------------------
@@ -123,7 +154,7 @@ nsSVGPathGeometryFrame::Init(nsIContent*       aContent,
                              nsIFrame*         aPrevInFlow)
 {
   AddStateBits(aParent->GetStateBits() & NS_STATE_SVG_CLIPPATH_CHILD);
-  nsSVGPathGeometryFrameBase::Init(aContent, aParent, aPrevInFlow);
+  nsFrame::Init(aContent, aParent, aPrevInFlow);
 }
 
 nsresult
@@ -150,12 +181,12 @@ nsSVGPathGeometryFrame::AttributeChanged(int32_t         aNameSpaceID,
 /* virtual */ void
 nsSVGPathGeometryFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
 {
-  nsSVGPathGeometryFrameBase::DidSetStyleContext(aOldStyleContext);
+  nsFrame::DidSetStyleContext(aOldStyleContext);
 
   if (aOldStyleContext) {
-    auto oldStyleDisplay = aOldStyleContext->PeekStyleDisplay();
-    if (oldStyleDisplay &&
-        StyleDisplay()->mOpacity != oldStyleDisplay->mOpacity &&
+    auto oldStyleEffects = aOldStyleContext->PeekStyleEffects();
+    if (oldStyleEffects &&
+        StyleEffects()->mOpacity != oldStyleEffects->mOpacity &&
         nsSVGUtils::CanOptimizeOpacity(this)) {
       // nsIFrame::BuildDisplayListForStackingContext() is not going to create an
       // nsDisplayOpacity display list item, so DLBI won't invalidate for us.
@@ -231,9 +262,11 @@ nsSVGPathGeometryFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                          const nsRect&           aDirtyRect,
                                          const nsDisplayListSet& aLists)
 {
-  if (!static_cast<const nsSVGElement*>(mContent)->HasValidDimensions()) {
+  if (!static_cast<const nsSVGElement*>(mContent)->HasValidDimensions() ||
+      (!IsVisibleForPainting(aBuilder) && aBuilder->IsForPainting())) {
     return;
   }
+  DisplayOutline(aBuilder, aLists);
   aLists.Content()->AppendNewToTop(
     new (aBuilder) nsDisplaySVGPathGeometry(aBuilder, this));
 }
@@ -241,19 +274,26 @@ nsSVGPathGeometryFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 //----------------------------------------------------------------------
 // nsISVGChildFrame methods
 
-nsresult
+DrawResult
 nsSVGPathGeometryFrame::PaintSVG(gfxContext& aContext,
                                  const gfxMatrix& aTransform,
                                  const nsIntRect* aDirtyRect)
 {
   if (!StyleVisibility()->IsVisible())
-    return NS_OK;
+    return DrawResult::SUCCESS;
+
+  gfxMatrix childToUserSpace = aTransform;
+  if (GetContent()->IsSVGElement()) {
+    childToUserSpace = static_cast<const nsSVGElement*>(GetContent())->
+                         PrependLocalTransformsTo(childToUserSpace,
+                                                  eChildToUserSpace);
+  }
 
   // Matrix to the geometry's user space:
   gfxMatrix newMatrix =
-    aContext.CurrentMatrix().PreMultiply(aTransform).NudgeToIntegers();
+    aContext.CurrentMatrix().PreMultiply(childToUserSpace).NudgeToIntegers();
   if (newMatrix.IsSingular()) {
-    return NS_OK;
+    return DrawResult::BAD_ARGS;
   }
 
   uint32_t paintOrder = StyleSVG()->mPaintOrder;
@@ -279,7 +319,7 @@ nsSVGPathGeometryFrame::PaintSVG(gfxContext& aContext,
     }
   }
 
-  return NS_OK;
+  return DrawResult::SUCCESS;
 }
 
 nsIFrame*
@@ -333,7 +373,7 @@ nsSVGPathGeometryFrame::GetFrameForPoint(const gfxPoint& aPoint)
       // coordinate system in order for non-scaled stroke to be correct.
       // Naturally we also need to transform the point into the same
       // coordinate system in order to hit-test against the path.
-      point = ToMatrix(userToOuterSVG) * point;
+      point = ToMatrix(userToOuterSVG).TransformPoint(point);
       RefPtr<PathBuilder> builder =
         path->TransformedCopyToBuilder(ToMatrix(userToOuterSVG), fillRule);
       path = builder->Finish();
@@ -478,7 +518,7 @@ nsSVGPathGeometryFrame::GetBBoxContribution(const Matrix &aToBBoxUserspace,
 
   bool getFill = (aFlags & nsSVGUtils::eBBoxIncludeFillGeometry) ||
                  ((aFlags & nsSVGUtils::eBBoxIncludeFill) &&
-                  StyleSVG()->mFill.mType != eStyleSVGPaintType_None);
+                  StyleSVG()->mFill.Type() != eStyleSVGPaintType_None);
 
   bool getStroke = (aFlags & nsSVGUtils::eBBoxIncludeStrokeGeometry) ||
                    ((aFlags & nsSVGUtils::eBBoxIncludeStroke) &&
@@ -643,7 +683,8 @@ nsSVGPathGeometryFrame::GetBBoxContribution(const Matrix &aToBBoxUserspace,
         properties.GetMarkerMidFrame(),
         properties.GetMarkerEndFrame(),
       };
-      PR_STATIC_ASSERT(MOZ_ARRAY_LENGTH(markerFrames) == nsSVGMark::eTypeCount);
+      static_assert(MOZ_ARRAY_LENGTH(markerFrames) == nsSVGMark::eTypeCount,
+                    "Number of Marker frames should be equal to eTypeCount");
 
       for (uint32_t i = 0; i < num; i++) {
         nsSVGMark& mark = marks[i];
@@ -682,15 +723,20 @@ nsSVGPathGeometryFrame::GetMarkerProperties(nsSVGPathGeometryFrame *aFrame)
   NS_ASSERTION(!aFrame->GetPrevContinuation(), "aFrame should be first continuation");
 
   MarkerProperties result;
-  const nsStyleSVG *style = aFrame->StyleSVG();
+  nsCOMPtr<nsIURI> markerURL =
+    nsSVGEffects::GetMarkerURI(aFrame, &nsStyleSVG::mMarkerStart);
   result.mMarkerStart =
-    nsSVGEffects::GetMarkerProperty(style->mMarkerStart, aFrame,
+    nsSVGEffects::GetMarkerProperty(markerURL, aFrame,
                                     nsSVGEffects::MarkerBeginProperty());
+
+  markerURL = nsSVGEffects::GetMarkerURI(aFrame, &nsStyleSVG::mMarkerMid);
   result.mMarkerMid =
-    nsSVGEffects::GetMarkerProperty(style->mMarkerMid, aFrame,
+    nsSVGEffects::GetMarkerProperty(markerURL, aFrame,
                                     nsSVGEffects::MarkerMiddleProperty());
+
+  markerURL = nsSVGEffects::GetMarkerURI(aFrame, &nsStyleSVG::mMarkerEnd);
   result.mMarkerEnd =
-    nsSVGEffects::GetMarkerProperty(style->mMarkerEnd, aFrame,
+    nsSVGEffects::GetMarkerProperty(markerURL, aFrame,
                                     nsSVGEffects::MarkerEndProperty());
   return result;
 }
@@ -772,9 +818,7 @@ nsSVGPathGeometryFrame::Render(gfxContext* aContext,
     }
   }
 
-  gfxTextContextPaint *contextPaint =
-    (gfxTextContextPaint*)drawTarget->
-      GetUserData(&gfxTextContextPaint::sUserDataKey);
+  SVGContextPaint* contextPaint = SVGContextPaint::GetContextPaint(mContent);
 
   if (aRenderComponents & eRenderFill) {
     GeneralPattern fillPattern;
@@ -842,8 +886,7 @@ void
 nsSVGPathGeometryFrame::PaintMarkers(gfxContext& aContext,
                                      const gfxMatrix& aTransform)
 {
-  gfxTextContextPaint *contextPaint =
-    (gfxTextContextPaint*)aContext.GetDrawTarget()->GetUserData(&gfxTextContextPaint::sUserDataKey);
+  SVGContextPaint* contextPaint = SVGContextPaint::GetContextPaint(mContent);
 
   if (static_cast<nsSVGPathGeometryElement*>(mContent)->IsMarkable()) {
     MarkerProperties properties = GetMarkerProperties(this);
@@ -863,7 +906,8 @@ nsSVGPathGeometryFrame::PaintMarkers(gfxContext& aContext,
           properties.GetMarkerMidFrame(),
           properties.GetMarkerEndFrame(),
         };
-        PR_STATIC_ASSERT(MOZ_ARRAY_LENGTH(markerFrames) == nsSVGMark::eTypeCount);
+        static_assert(MOZ_ARRAY_LENGTH(markerFrames) == nsSVGMark::eTypeCount,
+                      "Number of Marker frames should be equal to eTypeCount");
 
         for (uint32_t i = 0; i < num; i++) {
           nsSVGMark& mark = marks[i];

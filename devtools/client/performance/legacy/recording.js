@@ -3,23 +3,19 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const { Cc, Ci, Cu, Cr } = require("chrome");
-const { Task } = require("resource://gre/modules/Task.jsm");
+const { Task } = require("devtools/shared/task");
 
-loader.lazyRequireGetter(this, "PerformanceIO",
-  "devtools/client/performance/modules/io");
-loader.lazyRequireGetter(this, "RecordingUtils",
-  "devtools/shared/performance/recording-utils");
-loader.lazyRequireGetter(this, "PerformanceRecordingCommon",
-  "devtools/shared/performance/recording-common", true);
-loader.lazyRequireGetter(this, "merge", "sdk/util/object", true);
+const PerformanceIO = require("devtools/client/performance/modules/io");
+const RecordingUtils = require("devtools/shared/performance/recording-utils");
+const { PerformanceRecordingCommon } = require("devtools/shared/performance/recording-common");
+const { merge } = require("sdk/util/object");
 
 /**
  * Model for a wholistic profile, containing the duration, profiling data,
  * frames data, timeline (marker, tick, memory) data, and methods to mark
  * a recording as 'in progress' or 'finished'.
  */
-const LegacyPerformanceRecording = function (options={}) {
+const LegacyPerformanceRecording = function (options = {}) {
   this._label = options.label || "";
   this._console = options.console || false;
 
@@ -28,7 +24,6 @@ const LegacyPerformanceRecording = function (options={}) {
     withTicks: options.withTicks || false,
     withMemory: options.withMemory || false,
     withAllocations: options.withAllocations || false,
-    withJITOptimizations: options.withJITOptimizations || false,
     allocationsSampleProbability: options.allocationsSampleProbability || 0,
     allocationsMaxLogLength: options.allocationsMaxLogLength || 0,
     bufferSize: options.bufferSize || 0,
@@ -47,7 +42,7 @@ LegacyPerformanceRecording.prototype = merge({
    * @param nsILocalFile file
    *        The file to stream the data into.
    */
-  exportRecording: Task.async(function *(file) {
+  exportRecording: Task.async(function* (file) {
     let recordingData = this.getAllData();
     yield PerformanceIO.saveRecordingToFile(recordingData, file);
   }),
@@ -98,7 +93,8 @@ LegacyPerformanceRecording.prototype = merge({
    * Sets results available from stopping a recording from PerformanceFront.
    * Should only be called by PerformanceFront.
    */
-  _onStopRecording: Task.async(function *({ profilerEndTime, profile, systemClient, systemHost }) {
+  _onStopRecording: Task.async(function* ({ profilerEndTime, profile, systemClient,
+                                            systemHost }) {
     // Update the duration with the accurate profilerEndTime, so we don't have
     // samples outside of the approximate duration set in `_onStoppingRecording`.
     this._duration = profilerEndTime - this._profilerStartTime;
@@ -143,7 +139,9 @@ LegacyPerformanceRecording.prototype = merge({
       // Accumulate timeline markers into an array. Furthermore, the timestamps
       // do not have a zero epoch, so offset all of them by the start time.
       case "markers": {
-        if (!config.withMarkers) { break; }
+        if (!config.withMarkers) {
+          break;
+        }
         let [markers] = data;
         RecordingUtils.offsetMarkerTimes(markers, this._timelineStartTime);
         RecordingUtils.pushAll(this._markers, markers);
@@ -151,14 +149,18 @@ LegacyPerformanceRecording.prototype = merge({
       }
       // Accumulate stack frames into an array.
       case "frames": {
-        if (!config.withMarkers) { break; }
+        if (!config.withMarkers) {
+          break;
+        }
         let [, frames] = data;
         RecordingUtils.pushAll(this._frames, frames);
         break;
       }
       // Save the accumulated refresh driver ticks.
       case "ticks": {
-        if (!config.withTicks) { break; }
+        if (!config.withTicks) {
+          break;
+        }
         let [, timestamps] = data;
         this._ticks = timestamps;
         break;

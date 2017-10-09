@@ -5,15 +5,15 @@
 "use strict";
 
 const { Ci, Cu } = require("chrome");
-const Services = require("Services");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 const { assert, fetch } = DevToolsUtils;
 const EventEmitter = require("devtools/shared/event-emitter");
 const { OriginalLocation, GeneratedLocation } = require("devtools/server/actors/common");
 const { resolve } = require("promise");
+const { joinURI } = require("devtools/shared/path");
 
-loader.lazyRequireGetter(this, "SourceActor", "devtools/server/actors/script", true);
-loader.lazyRequireGetter(this, "isEvalSource", "devtools/server/actors/script", true);
+loader.lazyRequireGetter(this, "SourceActor", "devtools/server/actors/source", true);
+loader.lazyRequireGetter(this, "isEvalSource", "devtools/server/actors/source", true);
 loader.lazyRequireGetter(this, "SourceMapConsumer", "source-map", true);
 loader.lazyRequireGetter(this, "SourceMapGenerator", "source-map", true);
 
@@ -21,7 +21,7 @@ loader.lazyRequireGetter(this, "SourceMapGenerator", "source-map", true);
  * Manages the sources for a thread. Handles source maps, locations in the
  * sources, etc for ThreadActors.
  */
-function TabSources(threadActor, allowSourceFn=() => true) {
+function TabSources(threadActor, allowSourceFn = () => true) {
   EventEmitter.decorate(this);
 
   this._thread = threadActor;
@@ -30,7 +30,7 @@ function TabSources(threadActor, allowSourceFn=() => true) {
   this._anonSourceMapId = 1;
   this.allowSource = source => {
     return !isHiddenSource(source) && allowSourceFn(source);
-  }
+  };
 
   this.blackBoxedSources = new Set();
   this.prettyPrintedSources = new Map();
@@ -57,16 +57,22 @@ TabSources.prototype = {
   /**
    * Update preferences and clear out existing sources
    */
-  reconfigure: function(options) {
-    if ('useSourceMaps' in options) {
+  setOptions: function (options) {
+    let shouldReset = false;
+
+    if ("useSourceMaps" in options) {
+      shouldReset = true;
       this._useSourceMaps = options.useSourceMaps;
     }
 
-    if ('autoBlackBox' in options) {
+    if ("autoBlackBox" in options) {
+      shouldReset = true;
       this._autoBlackBox = options.autoBlackBox;
     }
 
-    this.reset();
+    if (shouldReset) {
+      this.reset();
+    }
   },
 
   /**
@@ -76,7 +82,7 @@ TabSources.prototype = {
    *        Specify { sourceMaps: true } if you also want to clear
    *        the source map cache (usually done on reload).
    */
-  reset: function(opts={}) {
+  reset: function (opts = {}) {
     this._sourceActors = new Map();
     this._sourceMaps = new Map();
     this._sourceMappedSourceActors = Object.create(null);
@@ -102,7 +108,7 @@ TabSources.prototype = {
    *        The content type of the source, if immediately available.
    * @returns a SourceActor representing the source or null.
    */
-  source: function  ({ source, originalUrl, generatedSource,
+  source: function ({ source, originalUrl, generatedSource,
                        isInlineSource, contentType }) {
     assert(source || (originalUrl && generatedSource),
            "TabSources.prototype.source needs an originalUrl or a source");
@@ -189,12 +195,12 @@ TabSources.prototype = {
     return actor;
   },
 
-  _emitNewSource: function(actor) {
+  _emitNewSource: function (actor) {
     if (!actor.source) {
       // Always notify if we don't have a source because that means
       // it's something that has been sourcemapped, or it represents
       // the HTML file that contains inline sources.
-      this.emit('newSource', actor);
+      this.emit("newSource", actor);
     }
     else {
       // If sourcemapping is enabled and a source has sourcemaps, we
@@ -207,13 +213,13 @@ TabSources.prototype = {
       // it's a generated source), don't send the notification.
       this.fetchSourceMap(actor.source).then(map => {
         if (!map) {
-          this.emit('newSource', actor);
+          this.emit("newSource", actor);
         }
       });
     }
   },
 
-  getSourceActor: function(source) {
+  getSourceActor: function (source) {
     if (source.url in this._sourceMappedSourceActors) {
       return this._sourceMappedSourceActors[source.url];
     }
@@ -222,11 +228,11 @@ TabSources.prototype = {
       return this._sourceActors.get(source);
     }
 
-    throw new Error('getSource: could not find source actor for ' +
-                    (source.url || 'source'));
+    throw new Error("getSource: could not find source actor for " +
+                    (source.url || "source"));
   },
 
-  getSourceActorByURL: function(url) {
+  getSourceActorByURL: function (url) {
     if (url) {
       for (let [source, actor] of this._sourceActors) {
         if (source.url === url) {
@@ -239,7 +245,8 @@ TabSources.prototype = {
       }
     }
 
-    throw new Error('getSourceByURL: could not find source for ' + url);
+    throw new Error("getSourceActorByURL: could not find source for " + url);
+    return null;
   },
 
   /**
@@ -251,10 +258,14 @@ TabSources.prototype = {
    * @returns Boolean
    */
   _isMinifiedURL: function (aURL) {
+    if (!aURL) {
+      return false;
+    }
+
     try {
-      let url = Services.io.newURI(aURL, null, null)
-                           .QueryInterface(Ci.nsIURL);
-      return MINIFIED_SOURCE_REGEXP.test(url.fileName);
+      let url = new URL(aURL);
+      let pathname = url.pathname;
+      return MINIFIED_SOURCE_REGEXP.test(pathname.slice(pathname.lastIndexOf("/") + 1));
     } catch (e) {
       // Not a valid URL so don't try to parse out the filename, just test the
       // whole thing with the minified source regexp.
@@ -293,24 +304,41 @@ TabSources.prototype = {
     let element = aSource.element ? aSource.element.unsafeDereference() : null;
     if (element && (element.tagName !== "SCRIPT" || !element.hasAttribute("src"))) {
       spec.isInlineSource = true;
+    } else if (aSource.introductionType === "wasm") {
+      // Wasm sources are not JavaScript. Give them their own content-type.
+      spec.contentType = "text/wasm";
     } else {
       if (url) {
-        try {
-          let urlInfo = Services.io.newURI(url, null, null).QueryInterface(Ci.nsIURL);
-          if (urlInfo.fileExtension === "xml") {
-            // XUL inline scripts may not correctly have the
-            // `source.element` property, so do a blunt check here if
-            // it's an xml page.
-            spec.isInlineSource = true;
-          }
-          else if (urlInfo.fileExtension === "js") {
-            spec.contentType = "text/javascript";
-          }
-        } catch(ex) {
-          // There are a few special URLs that we know are JavaScript:
-          // inline `javascript:` and code coming from the console
-          if (url.indexOf("javascript:") === 0 || url === 'debugger eval code') {
-            spec.contentType = "text/javascript";
+        // There are a few special URLs that we know are JavaScript:
+        // inline `javascript:` and code coming from the console
+        if (url.indexOf("Scratchpad/") === 0 ||
+            url.indexOf("javascript:") === 0 ||
+            url === "debugger eval code") {
+          spec.contentType = "text/javascript";
+        } else {
+          try {
+            let pathname = new URL(url).pathname;
+            let filename = pathname.slice(pathname.lastIndexOf("/") + 1);
+            let index = filename.lastIndexOf(".");
+            let extension = index >= 0 ? filename.slice(index + 1) : "";
+            if (extension === "xml") {
+              // XUL inline scripts may not correctly have the
+              // `source.element` property, so do a blunt check here if
+              // it's an xml page.
+              spec.isInlineSource = true;
+            }
+            else if (extension === "js") {
+              spec.contentType = "text/javascript";
+            }
+          } catch (e) {
+            // This only needs to be here because URL is not yet exposed to
+            // workers. (BUG 1258892)
+            const filename = url;
+            const index = filename.lastIndexOf(".");
+            const extension = index >= 0 ? filename.slice(index + 1) : "";
+            if (extension === "js") {
+              spec.contentType = "text/javascript";
+            }
           }
         }
       }
@@ -360,7 +388,7 @@ TabSources.prototype = {
    *        The source instance to create actors for.
    * @param Promise of an array of source actors
    */
-  createSourceActors: function(aSource) {
+  createSourceActors: function (aSource) {
     return this._createSourceMappedActors(aSource).then(actors => {
       let actor = this.createNonSourceMappedActor(aSource);
       return (actors || [actor]).filter(isNotNull);
@@ -378,7 +406,10 @@ TabSources.prototype = {
    * @return Promise of a SourceMapConsumer
    */
   fetchSourceMap: function (aSource) {
-    if (this._sourceMaps.has(aSource)) {
+    if (!this._useSourceMaps) {
+      return resolve(null);
+    }
+    else if (this._sourceMaps.has(aSource)) {
       return this._sourceMaps.get(aSource);
     }
     else if (!aSource || !aSource.sourceMapURL) {
@@ -387,12 +418,13 @@ TabSources.prototype = {
 
     let sourceMapURL = aSource.sourceMapURL;
     if (aSource.url) {
-      sourceMapURL = this._normalize(sourceMapURL, aSource.url);
+      sourceMapURL = joinURI(aSource.url, sourceMapURL);
     }
     let result = this._fetchSourceMap(sourceMapURL, aSource.url);
 
     // The promises in `_sourceMaps` must be the exact same instances
-    // as returned by `_fetchSourceMap` for `clearSourceMapCache` to work.
+    // as returned by `_fetchSourceMap` for `clearSourceMapCache` to
+    // work.
     this._sourceMaps.set(aSource, result);
     return result;
   },
@@ -402,7 +434,7 @@ TabSources.prototype = {
    * `aSource`. The resolved result may be null if the source does not
    * have a source map or source maps are disabled.
    */
-  getSourceMap: function(aSource) {
+  getSourceMap: function (aSource) {
     return resolve(this._sourceMaps.get(aSource));
   },
 
@@ -410,7 +442,7 @@ TabSources.prototype = {
    * Set a SourceMapConsumer for the source map for
    * |aSource|.
    */
-  setSourceMap: function(aSource, aMap) {
+  setSourceMap: function (aSource, aMap) {
     this._sourceMaps.set(aSource, resolve(aMap));
   },
 
@@ -428,10 +460,10 @@ TabSources.prototype = {
    *        them from aScriptURL.
    */
   _fetchSourceMap: function (aAbsSourceMapURL, aSourceURL) {
-    if (!this._useSourceMaps) {
-      return resolve(null);
-    }
-    else if (this._sourceMapCache[aAbsSourceMapURL]) {
+    assert(this._useSourceMaps,
+           "Cannot fetch sourcemaps if they are disabled");
+
+    if (this._sourceMapCache[aAbsSourceMapURL]) {
       return this._sourceMapCache[aAbsSourceMapURL];
     }
 
@@ -466,13 +498,14 @@ TabSources.prototype = {
         ? aScriptURL
         : aAbsSourceMapURL);
     aSourceMap.sourceRoot = aSourceMap.sourceRoot
-      ? this._normalize(aSourceMap.sourceRoot, base)
+      ? joinURI(base, aSourceMap.sourceRoot)
       : base;
   },
 
   _dirname: function (aPath) {
-    return Services.io.newURI(
-      ".", null, Services.io.newURI(aPath, null, null)).spec;
+    let url = new URL(aPath);
+    let href = url.href;
+    return href.slice(0, href.lastIndexOf("/"));
   },
 
   /**
@@ -490,7 +523,7 @@ TabSources.prototype = {
    *        - hard: Also remove the lower-level URL cache, which will
    *          make us completely forget about the source map.
    */
-  clearSourceMapCache: function(aSourceMapURL, opts = { hard: false }) {
+  clearSourceMapCache: function (aSourceMapURL, opts = { hard: false }) {
     let oldSm = this._sourceMapCache[aSourceMapURL];
 
     if (opts.hard) {
@@ -521,7 +554,7 @@ TabSources.prototype = {
    * @param aMap SourceMapConsumer
    *        The source map instance
    */
-  setSourceMapHard: function(aSource, aUrl, aMap) {
+  setSourceMapHard: function (aSource, aUrl, aMap) {
     let url = aUrl;
     if (!url) {
       // This is a littly hacky, but we want to forcefully set a
@@ -531,13 +564,14 @@ TabSources.prototype = {
       // instances are per-debugger, so we can't key off that). To
       // avoid tons of work serializing the sourcemap into a data url,
       // just make a fake URL and stick the sourcemap there.
-      url = "internal://sourcemap" + (this._anonSourceMapId++) + '/';
+      url = "internal://sourcemap" + (this._anonSourceMapId++) + "/";
     }
     aSource.sourceMapURL = url;
 
     // Forcefully set the sourcemap cache. This will be used even if
     // sourcemaps are disabled.
     this._sourceMapCache[url] = resolve(aMap);
+    this.emit("updatedSource", this.getSourceActor(aSource));
   },
 
   /**
@@ -625,8 +659,8 @@ TabSources.prototype = {
       originalColumn
     } = originalLocation;
 
-    let source = originalSourceActor.source ||
-                 originalSourceActor.generatedSource;
+    let source = (originalSourceActor.source ||
+                  originalSourceActor.generatedSource);
 
     return this.fetchSourceMap(source).then((map) => {
       if (map) {
@@ -766,19 +800,6 @@ TabSources.prototype = {
     this.prettyPrintedSources.delete(aURL);
   },
 
-  /**
-   * Normalize multiple relative paths towards the base paths on the right.
-   */
-  _normalize: function (...aURLs) {
-    assert(aURLs.length > 1, "Should have more than 1 URL");
-    let base = Services.io.newURI(aURLs.pop(), null, null);
-    let url;
-    while ((url = aURLs.pop())) {
-      base = Services.io.newURI(url, null, base);
-    }
-    return base.spec;
-  },
-
   iter: function () {
     let actors = Object.keys(this._sourceMappedSourceActors).map(k => {
       return this._sourceMappedSourceActors[k];
@@ -798,7 +819,7 @@ TabSources.prototype = {
  */
 function isHiddenSource(aSource) {
   // Ignore the internal Function.prototype script
-  return aSource.text === '() {\n}';
+  return aSource.text === "() {\n}";
 }
 
 /**

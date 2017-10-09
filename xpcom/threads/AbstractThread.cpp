@@ -13,7 +13,7 @@
 #include "mozilla/StateWatching.h" // We initialize the StateWatching logging in this file.
 #include "mozilla/TaskQueue.h"
 #include "mozilla/TaskDispatcher.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 
 #include "nsThreadUtils.h"
 #include "nsContentUtils.h"
@@ -26,7 +26,7 @@ LazyLogModule gMozPromiseLog("MozPromise");
 LazyLogModule gStateWatchingLog("StateWatching");
 
 StaticRefPtr<AbstractThread> sMainThread;
-ThreadLocal<AbstractThread*> AbstractThread::sCurrentThreadTLS;
+MOZ_THREAD_LOCAL(AbstractThread*) AbstractThread::sCurrentThreadTLS;
 
 class XPCOMThreadWrapper : public AbstractThread
 {
@@ -70,7 +70,6 @@ public:
     PRThread* thread = nullptr;
     mTarget->GetPRThread(&thread);
     bool in = PR_GetCurrentThread() == thread;
-    MOZ_ASSERT(in == (GetCurrent() == this));
     return in;
   }
 
@@ -88,11 +87,16 @@ public:
     if (!mTailDispatcher.isSome()) {
       mTailDispatcher.emplace(/* aIsTailDispatcher = */ true);
 
-      nsCOMPtr<nsIRunnable> event = NS_NewRunnableMethod(this, &XPCOMThreadWrapper::FireTailDispatcher);
+      nsCOMPtr<nsIRunnable> event = NewRunnableMethod(this, &XPCOMThreadWrapper::FireTailDispatcher);
       nsContentUtils::RunInStableState(event.forget());
     }
 
     return mTailDispatcher.ref();
+  }
+
+  virtual bool MightHaveTailTasks() override
+  {
+    return mTailDispatcher.isSome();
   }
 
   virtual nsIThread* AsXPCOMThread() override { return mTarget; }
@@ -102,12 +106,37 @@ private:
   Maybe<AutoTaskDispatcher> mTailDispatcher;
 };
 
+void
+AbstractThread::TailDispatchTasksFor(AbstractThread* aThread)
+{
+  if (MightHaveTailTasks()) {
+    TailDispatcher().DispatchTasksFor(aThread);
+  }
+}
+
+bool
+AbstractThread::HasTailTasksFor(AbstractThread* aThread)
+{
+  if (!MightHaveTailTasks()) {
+    return false;
+  }
+  return TailDispatcher().HasTasksFor(aThread);
+}
+
 bool
 AbstractThread::RequiresTailDispatch(AbstractThread* aThread) const
 {
+  MOZ_ASSERT(aThread);
   // We require tail dispatch if both the source and destination
   // threads support it.
   return SupportsTailDispatch() && aThread->SupportsTailDispatch();
+}
+
+bool
+AbstractThread::RequiresTailDispatchFromCurrentThread() const
+{
+  AbstractThread* current = GetCurrent();
+  return current && RequiresTailDispatch(current);
 }
 
 AbstractThread*
@@ -146,10 +175,17 @@ AbstractThread::DispatchDirectTask(already_AddRefed<nsIRunnable> aRunnable)
   GetCurrent()->TailDispatcher().AddDirectTask(Move(aRunnable));
 }
 
+/* static */
 already_AddRefed<AbstractThread>
-CreateXPCOMAbstractThreadWrapper(nsIThread* aThread, bool aRequireTailDispatch)
+AbstractThread::CreateXPCOMThreadWrapper(nsIThread* aThread, bool aRequireTailDispatch)
 {
   RefPtr<XPCOMThreadWrapper> wrapper = new XPCOMThreadWrapper(aThread, aRequireTailDispatch);
+  // Set the thread-local sCurrentThreadTLS to point to the wrapper on the
+  // target thread. This ensures that sCurrentThreadTLS is as expected by
+  // AbstractThread::GetCurrent() on the target thread.
+  nsCOMPtr<nsIRunnable> r =
+    NS_NewRunnableFunction([wrapper]() { sCurrentThreadTLS.set(wrapper); });
+  aThread->Dispatch(r.forget(), NS_DISPATCH_NORMAL);
   return wrapper.forget();
 }
 

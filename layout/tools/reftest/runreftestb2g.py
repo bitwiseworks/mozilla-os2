@@ -15,13 +15,15 @@ if here not in sys.path:
 
 from automation import Automation
 from b2gautomation import B2GRemoteAutomation
-from runreftestmulet import run_test_harness as run_mulet
+from runreftestmulet import run_test_harness as run_mulet_reftests
+from output import OutputHandler
 from remotereftest import RemoteReftestResolver, ReftestServer
 from runreftest import RefTest
 import reftestcommandline
 
+from marionette_harness import Marionette
 from mozdevice import DeviceManagerADB, DMError
-from marionette import Marionette
+
 
 class ProfileConfigParser(ConfigParser.RawConfigParser):
     """Subclass of RawConfigParser that outputs .ini files in the exact
@@ -51,6 +53,7 @@ class ProfileConfigParser(ConfigParser.RawConfigParser):
 class B2GRemoteReftest(RefTest):
 
     _devicemanager = None
+    use_marionette = False
     localProfile = None
     remoteApp = ''
     profile = None
@@ -249,22 +252,14 @@ class B2GRemoteReftest(RefTest):
         prefs["reftest.browser.iframe.enabled"] = False
         prefs["reftest.remote"] = True
 
-        # Set a future policy version to avoid the telemetry prompt.
-        prefs["toolkit.telemetry.prompted"] = 999
-        prefs["toolkit.telemetry.notifiedOptOut"] = 999
         # Make sure we disable system updates
         prefs["app.update.enabled"] = False
         prefs["app.update.url"] = ""
-        prefs["app.update.url.override"] = ""
         # Disable webapp updates
         prefs["webapps.update.enabled"] = False
         # Disable tiles also
         prefs["browser.newtabpage.directory.source"] = ""
         prefs["browser.newtabpage.directory.ping"] = ""
-
-        if options.oop:
-            prefs['browser.tabs.remote.autostart'] = True
-            prefs['reftest.browser.iframe.enabled'] = True
 
         # Set the extra prefs.
         profile.set_preferences(prefs)
@@ -311,6 +306,8 @@ class B2GRemoteReftest(RefTest):
                timeout=None, debuggerInfo=None,
                symbolsPath=None, options=None,
                valgrindPath=None, valgrindArgs=None, valgrindSuppFiles=None):
+
+        outputHandler = OutputHandler(self.log, options.utilityPath, options.symbolsPath)
         status = self.automation.runApp(None, env,
                                         binary,
                                         profile.profile,
@@ -319,12 +316,16 @@ class B2GRemoteReftest(RefTest):
                                         xrePath=options.xrePath,
                                         debuggerInfo=debuggerInfo,
                                         symbolsPath=symbolsPath,
-                                        timeout=timeout)
+                                        timeout=timeout,
+                                        outputHandler=outputHandler)
         return status
 
 
-def run_remote_reftests(parser, options):
-    auto = B2GRemoteAutomation(None, "fennec", context_chrome=True)
+def run_test_harness(parser, options):
+    if options.mulet:
+        return run_mulet_reftests(parser, options)
+
+    auto = B2GRemoteAutomation(None, "fennec")
 
     # create our Marionette instance
     kwargs = {}
@@ -380,7 +381,6 @@ def run_remote_reftests(parser, options):
     auto.setProduct("b2g")
     auto.test_script = os.path.join(here, 'b2g_start_script.js')
     auto.test_script_args = [options.remoteWebServer, options.httpPort]
-    auto.logFinish = "REFTEST TEST-START | Shutdown"
 
     reftest = B2GRemoteReftest(auto, dm, options, here)
     parser.validate(options, reftest)
@@ -418,23 +418,8 @@ def run_remote_reftests(parser, options):
     reftest.stopWebServer(options)
     return retVal
 
-def run_remote(**kwargs):
-    # Tests need to be served from a subdirectory of the server. Symlink
-    # topsrcdir here to get around this.
-    parser = reftestcommandline.B2GArgumentParser()
-    parser.set_defaults(**kwargs)
-    options = parser.parse_args(kwargs["tests"])
-    return run_remote_reftests(parser, options)
-
-def main():
-    parser = reftestcommandline.B2GArgumentParser()
-    options = parser.parse_args()
-
-    if options.mulet:
-        return run_mulet(parser, options)
-    return run_remote_reftests(parser, options)
-
 
 if __name__ == "__main__":
-    sys.exit(main())
-
+    parser = reftestcommandline.B2GArgumentParser()
+    options = parser.parse_args()
+    sys.exit(run_test_harness(parser, options))

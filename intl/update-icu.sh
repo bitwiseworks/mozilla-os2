@@ -6,7 +6,7 @@
 set -e
 
 # Usage: update-icu.sh <URL of ICU SVN with release>
-# E.g., for ICU 55.1: update-icu.sh http://source.icu-project.org/repos/icu/icu/tags/release-55-1/
+# E.g., for ICU 58.1: update-icu.sh https://ssl.icu-project.org/repos/icu/icu/tags/release-58-1/
 
 if [ $# -lt 1 ]; then
   echo "Usage: update-icu.sh <URL of ICU SVN with release>"
@@ -17,20 +17,22 @@ fi
 # so that this script's behavior is consistent when run from any time zone.
 export TZ=UTC
 
+# Also ensure SVN-INFO isn't localized.
+export LANG=C
+
 icu_dir=`dirname $0`/icu
 
 # Remove intl/icu/source, then replace it with a clean export.
 rm -rf ${icu_dir}/source
 svn export $1/source/ ${icu_dir}/source
 
-# remove layout, tests, and samples, but leave makefiles in place
-find ${icu_dir}/source/layout -name '*Makefile.in' -prune -or -type f -print | xargs rm
+# remove layoutex, tests, and samples, but leave makefiles in place
 find ${icu_dir}/source/layoutex -name '*Makefile.in' -prune -or -type f -print | xargs rm
 find ${icu_dir}/source/test -name '*Makefile.in' -prune -or -type f -print | xargs rm
 find ${icu_dir}/source/samples -name '*Makefile.in' -prune -or -type f -print | xargs rm
 
 # remove data that we currently don't need
-rm ${icu_dir}/source/data/brkitr/*
+rm -rf ${icu_dir}/source/data/brkitr/*
 rm ${icu_dir}/source/data/lang/*.mk
 rm ${icu_dir}/source/data/lang/*.txt
 rm ${icu_dir}/source/data/mappings/*.mk
@@ -52,16 +54,26 @@ rm ${icu_dir}/source/data/unit/*.txt
 # the tree.)
 svn info $1 | grep -v '^Revision: [[:digit:]]\+$' > ${icu_dir}/SVN-INFO
 
-patch -d ${icu_dir}/../../ -p1 < ${icu_dir}/../icu-patches/bug-915735
-patch -d ${icu_dir}/../../ -p1 < ${icu_dir}/../icu-patches/suppress-warnings.diff
-patch -d ${icu_dir}/../../ -p1 < ${icu_dir}/../icu-patches/bug-1172609-icu-fix.diff
-patch -d ${icu_dir}/../../ -p1 < ${icu_dir}/../icu-patches/bug-1172609-timezone-recreateDefault.diff
-patch -d ${icu_dir}/../../ -p1 < ${icu_dir}/../icu-patches/bug-1198952-workaround-make-3.82-bug.diff
-patch -d ${icu_dir}/../../ -p1 < ${icu_dir}/../icu-patches/icu-release-56-1-flagparser-fix.patch
-patch -d ${icu_dir}/../../ -p1 < ${icu_dir}/../icu-patches/bug-1228227-libc++-gcc_hidden.diff
+for patch in \
+ bug-915735 \
+ suppress-warnings.diff \
+ bug-1172609-timezone-recreateDefault.diff \
+ bug-1198952-workaround-make-3.82-bug.diff \
+ bug-1228227-bug-1263325-libc++-gcc_hidden.diff \
+ ucol_getKeywordValuesForLocale-ulist_resetList.diff \
+; do
+  echo "Applying local patch $patch"
+  patch -d ${icu_dir}/../../ -p1 --no-backup-if-mismatch < ${icu_dir}/../icu-patches/$patch
+done
 
-# NOTE: If you're updating this script for a new ICU version, you have to rerun
-# js/src/tests/ecma_6/String/make-normalize-generateddata-input.py for any
-# normalization changes the new ICU implements.
+topsrcdir=`dirname $0`/../
+python ${topsrcdir}/js/src/tests/ecma_6/String/make-normalize-generateddata-input.py $topsrcdir
 
-hg addremove ${icu_dir}
+# Update our moz.build files in config/external/icu, and
+# build a new ICU data file.
+python `dirname $0`/icu_sources_data.py $topsrcdir
+
+hg addremove ${icu_dir} ${topsrcdir}/config/external/icu
+
+# Check local tzdata version.
+`dirname $0`/update-tzdata.sh -c

@@ -2,7 +2,13 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MOZ_APP_BUILDID=$(shell cat $(DEPTH)/config/buildid)
+# We call mach -> Make -> gradle -> mach, which races to find and
+# create .mozconfig files and to generate targets.
+ifdef MOZ_BUILD_MOBILE_ANDROID_WITH_GRADLE
+.NOTPARALLEL:
+endif
+
+MOZ_BUILDID := $(shell awk '{print $$3}' $(DEPTH)/buildid.h)
 
 # Set the appropriate version code, based on the existance of the
 # MOZ_APP_ANDROID_VERSION_CODE variable.
@@ -15,15 +21,13 @@ else
         --with-android-cpu-arch=$(ANDROID_CPU_ARCH) \
         $(if $(MOZ_ANDROID_MIN_SDK_VERSION),--with-android-min-sdk=$(MOZ_ANDROID_MIN_SDK_VERSION)) \
         $(if $(MOZ_ANDROID_MAX_SDK_VERSION),--with-android-max-sdk=$(MOZ_ANDROID_MAX_SDK_VERSION)) \
-        $(MOZ_APP_BUILDID))
+        $(MOZ_BUILDID))
 endif
 
 DEFINES += \
   -DANDROID_VERSION_CODE=$(ANDROID_VERSION_CODE) \
   -DMOZ_ANDROID_SHARED_ID="$(MOZ_ANDROID_SHARED_ID)" \
-  -DMOZ_ANDROID_SHARED_ACCOUNT_TYPE="$(MOZ_ANDROID_SHARED_ACCOUNT_TYPE)" \
-  -DMOZ_ANDROID_SHARED_FXACCOUNT_TYPE="$(MOZ_ANDROID_SHARED_FXACCOUNT_TYPE)" \
-  -DMOZ_APP_BUILDID=$(MOZ_APP_BUILDID) \
+  -DMOZ_BUILDID=$(MOZ_BUILDID) \
   $(NULL)
 
 GARBAGE += \
@@ -33,11 +37,12 @@ GARBAGE += \
   res/raw/browsersearch.json \
   res/raw/suggestedsites.json \
   .aapt.deps \
-  javah.out \
-  jni-stubs.inc \
   GeneratedJNINatives.h \
   GeneratedJNIWrappers.cpp \
   GeneratedJNIWrappers.h \
+  FennecJNINatives.h \
+  FennecJNIWrappers.cpp \
+  FennecJNIWrappers.h \
   $(NULL)
 
 GARBAGE_DIRS += classes db jars res sync services generated
@@ -58,8 +63,13 @@ JAVA_CLASSPATH += \
     $(ANDROID_SUPPORT_V4_AAR_LIB) \
     $(ANDROID_SUPPORT_V4_AAR_INTERNAL_LIB) \
     $(ANDROID_APPCOMPAT_V7_AAR_LIB) \
+    $(ANDROID_SUPPORT_VECTOR_DRAWABLE_AAR_LIB) \
+    $(ANDROID_ANIMATED_VECTOR_DRAWABLE_AAR_LIB) \
+    $(ANDROID_CARDVIEW_V7_AAR_LIB) \
     $(ANDROID_DESIGN_AAR_LIB) \
     $(ANDROID_RECYCLERVIEW_V7_AAR_LIB) \
+    $(ANDROID_CUSTOMTABS_AAR_LIB) \
+    $(ANDROID_PALETTE_V7_AAR_LIB) \
     $(NULL)
 
 # If native devices are enabled, add Google Play Services and some of the v7
@@ -79,14 +89,13 @@ ifdef MOZ_ANDROID_GCM
         $(ANDROID_PLAY_SERVICES_BASE_AAR_LIB) \
         $(ANDROID_PLAY_SERVICES_BASEMENT_AAR_LIB) \
         $(ANDROID_PLAY_SERVICES_GCM_AAR_LIB) \
+        $(ANDROID_PLAY_SERVICES_MEASUREMENT_AAR_LIB) \
         $(NULL)
 endif
 
 ifdef MOZ_INSTALL_TRACKING
     JAVA_CLASSPATH += \
         $(ANDROID_PLAY_SERVICES_ADS_AAR_LIB) \
-        $(ANDROID_PLAY_SERVICES_ANALYTICS_AAR_LIB) \
-        $(ANDROID_PLAY_SERVICES_APPINDEXING_AAR_LIB) \
         $(ANDROID_PLAY_SERVICES_BASEMENT_AAR_LIB) \
         $(NULL)
 endif
@@ -99,8 +108,13 @@ java_bundled_libs := \
     $(ANDROID_SUPPORT_V4_AAR_LIB) \
     $(ANDROID_SUPPORT_V4_AAR_INTERNAL_LIB) \
     $(ANDROID_APPCOMPAT_V7_AAR_LIB) \
+    $(ANDROID_SUPPORT_VECTOR_DRAWABLE_AAR_LIB) \
+    $(ANDROID_ANIMATED_VECTOR_DRAWABLE_AAR_LIB) \
+    $(ANDROID_CARDVIEW_V7_AAR_LIB) \
     $(ANDROID_DESIGN_AAR_LIB) \
     $(ANDROID_RECYCLERVIEW_V7_AAR_LIB) \
+    $(ANDROID_CUSTOMTABS_AAR_LIB) \
+    $(ANDROID_PALETTE_V7_AAR_LIB) \
     $(NULL)
 
 ifdef MOZ_NATIVE_DEVICES
@@ -118,14 +132,13 @@ ifdef MOZ_ANDROID_GCM
         $(ANDROID_PLAY_SERVICES_BASE_AAR_LIB) \
         $(ANDROID_PLAY_SERVICES_BASEMENT_AAR_LIB) \
         $(ANDROID_PLAY_SERVICES_GCM_AAR_LIB) \
+        $(ANDROID_PLAY_SERVICES_MEASUREMENT_AAR_LIB) \
         $(NULL)
 endif
 
 ifdef MOZ_INSTALL_TRACKING
     java_bundled_libs += \
         $(ANDROID_PLAY_SERVICES_ADS_AAR_LIB) \
-        $(ANDROID_PLAY_SERVICES_ANALYTICS_AAR_LIB) \
-        $(ANDROID_PLAY_SERVICES_APPINDEXING_AAR_LIB) \
         $(ANDROID_PLAY_SERVICES_BASEMENT_AAR_LIB) \
         $(NULL)
 endif
@@ -136,35 +149,46 @@ uniq = $(if $1,$(firstword $1) $(call uniq,$(filter-out $(firstword $1),$1)))
 java_bundled_libs := $(call uniq,$(java_bundled_libs))
 java_bundled_libs := $(subst $(NULL) ,:,$(strip $(java_bundled_libs)))
 
-# All the jars we're compiling from source. (not to be confused with
-# java_bundled_libs, which holds the jars which we're including as binaries).
-ALL_JARS = \
+GECKOVIEW_JARS = \
   constants.jar \
   gecko-R.jar \
-  gecko-browser.jar \
   gecko-mozglue.jar \
-  gecko-thirdparty.jar \
   gecko-util.jar \
-  services.jar \
+  gecko-view.jar \
   sync-thirdparty.jar \
+  $(NULL)
+
+ifdef MOZ_INSTALL_TRACKING
+GECKOVIEW_JARS += gecko-thirdparty-adjust_sdk.jar
+endif
+
+geckoview_jars_classpath := $(subst $(NULL) ,:,$(strip $(GECKOVIEW_JARS)))
+
+FENNEC_JARS = \
+  gecko-browser.jar \
+  gecko-thirdparty.jar \
+  services.jar \
   ../javaaddons/javaaddons-1.0.jar \
   $(NULL)
 
 ifdef MOZ_WEBRTC
-ALL_JARS += webrtc.jar
+FENNEC_JARS += webrtc.jar
 endif
 
 ifdef MOZ_ANDROID_SEARCH_ACTIVITY
-ALL_JARS += search-activity.jar
+FENNEC_JARS += search-activity.jar
 endif
 
 ifdef MOZ_ANDROID_MLS_STUMBLER
-ALL_JARS += ../stumbler/stumbler.jar
+FENNEC_JARS += ../stumbler/stumbler.jar
 endif
 
-ifdef MOZ_INSTALL_TRACKING
-ALL_JARS += gecko-thirdparty-adjust_sdk.jar
-endif
+# All the jars we're compiling from source. (not to be confused with
+# java_bundled_libs, which holds the jars which we're including as binaries).
+ALL_JARS = \
+  $(GECKOVIEW_JARS) \
+  $(FENNEC_JARS) \
+  $(NULL)
 
 # The list of jars in Java classpath notation (colon-separated).
 all_jars_classpath := $(subst $(NULL) ,:,$(strip $(ALL_JARS)))
@@ -201,9 +225,22 @@ endif # MOZ_INSTALL_TRACKING
 
 library_jars := $(subst $(NULL) ,:,$(strip $(library_jars)))
 
+gradle_dir := $(topobjdir)/gradle/build/mobile/android
+
+ifdef MOZ_BUILD_MOBILE_ANDROID_WITH_GRADLE
+.gradle.deps: .aapt.deps FORCE
+	@$(TOUCH) $@
+	$(topsrcdir)/mach gradle \
+		app:assembleAutomationDebug app:assembleAutomationDebugAndroidTest -x lint
+
+classes.dex: .gradle.deps
+	$(REPORT_BUILD)
+	cp $(gradle_dir)/app/intermediates/transforms/dex/automation/debug/folders/1000/1f/main/classes.dex $@
+else
 classes.dex: .proguard.deps
 	$(REPORT_BUILD)
 	$(DX) --dex --output=classes.dex jars-proguarded
+endif
 
 ifdef MOZ_DISABLE_PROGUARD
   PROGUARD_PASSES=0
@@ -272,31 +309,21 @@ classycle_jar := $(topsrcdir)/mobile/android/build/classycle/classycle-1.4.1.jar
 		-outjars jars-proguarded \
 		-libraryjars $(library_jars)
 
-CLASSES_WITH_JNI= \
-    org.mozilla.gecko.GeckoAppShell \
-    org.mozilla.gecko.GeckoJavaSampler \
-    org.mozilla.gecko.GeckoSmsManager \
-    org.mozilla.gecko.gfx.NativePanZoomController \
-    $(NULL)
-
-jni-stubs.inc: gecko-browser.jar constants.jar gecko-mozglue.jar gecko-util.jar sync-thirdparty.jar
-	$(JAVAH) -o javah.out -bootclasspath $(JAVA_BOOTCLASSPATH) -classpath $(subst $(NULL) $(NULL),:,$^) $(CLASSES_WITH_JNI)
-	$(PYTHON) $(topsrcdir)/mobile/android/base/jni-generator.py javah.out $@
-
 ANNOTATION_PROCESSOR_JAR_FILES := $(DEPTH)/build/annotationProcessors/annotationProcessors.jar
 
 # This annotation processing step also generates
 # GeneratedJNIWrappers.h and GeneratedJNINatives.h
-GeneratedJNIWrappers.cpp: $(ANNOTATION_PROCESSOR_JAR_FILES)
-GeneratedJNIWrappers.cpp: $(ALL_JARS)
-	$(JAVA) -classpath constants.jar:$(JAVA_BOOTCLASSPATH):$(JAVA_CLASSPATH):$(ANNOTATION_PROCESSOR_JAR_FILES) org.mozilla.gecko.annotationProcessors.AnnotationProcessor $(ALL_JARS)
+GeneratedJNIWrappers.cpp: $(ANNOTATION_PROCESSOR_JAR_FILES) $(GECKOVIEW_JARS)
+	$(JAVA) -classpath $(geckoview_jars_classpath):$(JAVA_BOOTCLASSPATH):$(JAVA_CLASSPATH):$(ANNOTATION_PROCESSOR_JAR_FILES) \
+		org.mozilla.gecko.annotationProcessors.AnnotationProcessor \
+		Generated $(GECKOVIEW_JARS)
 
-manifest := \
-  AndroidManifest.xml.in \
-  fennec_ids.txt.in \
-  $(NULL)
-
-PP_TARGETS += manifest
+# This annotation processing step also generates
+# FennecJNIWrappers.h and FennecJNINatives.h
+FennecJNIWrappers.cpp: $(ANNOTATION_PROCESSOR_JAR_FILES) $(FENNEC_JARS)
+	$(JAVA) -classpath $(all_jars_classpath):$(JAVA_BOOTCLASSPATH):$(JAVA_CLASSPATH):$(ANNOTATION_PROCESSOR_JAR_FILES) \
+		org.mozilla.gecko.annotationProcessors.AnnotationProcessor \
+		Fennec $(FENNEC_JARS)
 
 # Certain source files need to be preprocessed.  This special rule
 # generates these files into generated/org/mozilla/gecko for
@@ -313,25 +340,6 @@ preprocessed := $(addsuffix .in,$(subst generated/preprocessed/org/mozilla/gecko
 preprocessed_PATH := generated/preprocessed/org/mozilla/gecko
 preprocessed_KEEP_PATH := 1
 preprocessed_FLAGS := --marker='//\\\#'
-
-ifdef MOZ_INSTALL_TRACKING
-ifdef MOZ_INSTALL_TRACKING_ADJUST_SDK_APP_TOKEN
-# The value of MOZ_INSTALL_TRACKING_ADJUST_SDK_APP_TOKEN is sensitive: we don't
-# want to expose it in build logs.  Following the model set by
-# toolkit/components/urlformatter/Makefile.in, we expose it to AppConstants.java
-# quietly here.  Be aware that the included line's marker needs to agree with
-# --marker above.
-
-adjust_sdk_app_token:
-	@echo '//#define MOZ_INSTALL_TRACKING_ADJUST_SDK_APP_TOKEN $(MOZ_INSTALL_TRACKING_ADJUST_SDK_APP_TOKEN)' > $@
-
-export:: adjust_sdk_app_token
-
-preprocessed_FLAGS += -I adjust_sdk_app_token
-endif # MOZ_INSTALL_TRACKING
-endif # MOZ_INSTALL_TRACKING_ADJUST_SDK_APP_TOKEN
-
-GARBAGE += adjust_sdk_app_token
 
 PP_TARGETS += preprocessed
 
@@ -385,37 +393,10 @@ res/raw/browsersearch.json: .locales.deps ;
 res/raw/suggestedsites.json: .locales.deps ;
 
 all_resources = \
-  $(abspath $(CURDIR)/AndroidManifest.xml) \
+  $(DEPTH)/mobile/android/base/AndroidManifest.xml \
   $(android_res_files) \
   $(ANDROID_GENERATED_RESFILES) \
   $(NULL)
-
-# For GeckoView, we want a zip of an Android res/ directory that
-# merges the contents of all the ANDROID_RES_DIRS.  The inner res/
-# directory must have the Android resource two-layer hierarchy.
-
-# The following helper zips files in a directory into a zip file while
-# maintaining the directory structure rooted below the directory.
-# (adding or creating said file as appropriate).  For example, if the
-# dir contains dir/subdir/file, calling with directory dir would
-# create a zip containing subdir/file.  Note: the trailing newline is
-# necessary.
-
-# $(1): zip file to add to (or create).
-# $(2): directory to zip contents of.
-define zip_directory_with_relative_paths
-cd $(2) && zip -q $(1) -r * -x $(subst *,\*,$(not_android_res_files))
-
-endef
-
-ifndef MOZ_DISABLE_GECKOVIEW
-# We delete the archive before updating so that resources removed from
-# the filesystem are removed from the archive.
-geckoview_resources.zip: $(all_resources) $(GLOBAL_DEPS)
-	$(REPORT_BUILD)
-	$(RM) -rf $@
-	$(foreach dir,$(ANDROID_RES_DIRS),$(call zip_directory_with_relative_paths,$(CURDIR)/$@,$(dir)))
-endif
 
 # All of generated/org/mozilla/gecko/R.java, gecko.ap_, and R.txt are
 # produced by aapt; this saves aapt invocations.  The trailing
@@ -425,19 +406,32 @@ endif
 
 generated/org/mozilla/gecko/R.java: .aapt.deps ;
 
+# Only add libraries that contain resources here. We (unecessarily) generate an identical R.java which
+# is copied into each of these locations, and each of these files contains thousands of fields.
+# Each unnecessary copy therefore wastes unnecessary fields in the output dex file.
+# Note: usually proguard will help clean this up after the fact, but having too many fields will cause
+# dexing to fail, regardless of any later optimisations proguard could later make to bring us back
+# under the limit.
+# Ideally we would fix our aapt invocations to correctly generate minimal copies of R.java for each
+# package, but that seems redundant since gradle builds are able to correctly generate these files.
+
 # If native devices are enabled, add Google Play Services, build their resources
-generated/android/support/v4/R.java: .aapt.deps ;
+# (no resources) generated/android/support/v4/R.java: .aapt.deps ;
 generated/android/support/v7/appcompat/R.java: .aapt.deps ;
+# (no resources) generated/android/support/graphics/drawable/animated/R.java: .aapt.deps ;
+# (no resources) generated/android/support/graphics/drawable/R.java: .aapt.deps ;
+generated/android/support/v7/cardview/R.java: .aapt.deps ;
 generated/android/support/design/R.java: .aapt.deps ;
 generated/android/support/v7/mediarouter/R.java: .aapt.deps ;
 generated/android/support/v7/recyclerview/R.java: .aapt.deps ;
+# (no resources) generated/android/support/customtabs/R.java: .aapt.deps ;
+# (no resources) generated/android/support/v7/palette/R.java: .aapt.deps ;
 generated/com/google/android/gms/R.java: .aapt.deps ;
 generated/com/google/android/gms/ads/R.java: .aapt.deps ;
-generated/com/google/android/gms/analytics/R.java: .aapt.deps ;
-generated/com/google/android/gms/appindexing/R.java: .aapt.deps ;
 generated/com/google/android/gms/base/R.java: .aapt.deps ;
 generated/com/google/android/gms/cast/R.java: .aapt.deps ;
-generated/com/google/android/gms/gcm/R.java: .aapt.deps ;
+# (no resources) generated/com/google/android/gms/gcm/R.java: .aapt.deps ;
+# (no resources) generated/com/google/android/gms/measurement/R.java: .aapt.deps ;
 
 gecko.ap_: .aapt.deps ;
 R.txt: .aapt.deps ;
@@ -469,8 +463,6 @@ ANDROID_AAPT_IGNORE := !.svn:!.git:.*:<dir>_*:!CVS:!thumbs.db:!picasa.ini:!*.scc
 # thinking aapt's outputs are stale.  This is safe because Make
 # removes the target file if any recipe command fails.
 
-CONSTRAINED_AAPT_CONFIGURATIONS := hdpi
-
 define aapt_command
 $(1): $$(call mkdir_deps,$(filter-out ./,$(dir $(3) $(4) $(5)))) $(2)
 	@$$(TOUCH) $$@
@@ -484,11 +476,10 @@ $(1): $$(call mkdir_deps,$(filter-out ./,$(dir $(3) $(4) $(5)))) $(2)
 		$(if $(ANDROID_EXTRA_PACKAGES),--extra-packages $$(subst $$(NULL) ,:,$$(strip $$(ANDROID_EXTRA_PACKAGES)))) \
 		$(if $(ANDROID_EXTRA_RES_DIRS),$$(addprefix -S ,$$(ANDROID_EXTRA_RES_DIRS))) \
 		--custom-package org.mozilla.gecko \
-		--non-constant-id \
+		--no-version-vectors \
 		-F $(3) \
 		-J $(4) \
 		--output-text-symbols $(5) \
-		$(if $(MOZ_ANDROID_RESOURCE_CONSTRAINED),-c $(CONSTRAINED_AAPT_CONFIGURATIONS),) \
 		--ignore-assets "$$(ANDROID_AAPT_IGNORE)"
 endef
 
@@ -502,16 +493,28 @@ endef
 # .aapt.deps: $(all_resources)
 $(eval $(call aapt_command,.aapt.deps,$(all_resources),gecko.ap_,generated/,./))
 
-# .aapt.nodeps: $(abspath $(CURDIR)/AndroidManifest.xml) FORCE
-$(eval $(call aapt_command,.aapt.nodeps,$(abspath $(CURDIR)/AndroidManifest.xml) FORCE,gecko-nodeps.ap_,gecko-nodeps/,gecko-nodeps/))
+ifdef MOZ_BUILD_MOBILE_ANDROID_WITH_GRADLE
+.aapt.nodeps: FORCE
+	cp $(gradle_dir)/app/intermediates/res/resources-automation-debug.ap_ gecko-nodeps.ap_
+else
+# .aapt.nodeps: $(DEPTH)/mobile/android/base/AndroidManifest.xml FORCE
+$(eval $(call aapt_command,.aapt.nodeps,$(DEPTH)/mobile/android/base/AndroidManifest.xml FORCE,gecko-nodeps.ap_,gecko-nodeps/,gecko-nodeps/))
+endif
 
 # Override the Java settings with some specific android settings
 include $(topsrcdir)/config/android-common.mk
 
 update-generated-wrappers:
-	@cp $(CURDIR)/jni-stubs.inc $(topsrcdir)/mozglue/android
-	@cp $(CURDIR)/GeneratedJNIWrappers.cpp $(CURDIR)/GeneratedJNIWrappers.h $(CURDIR)/GeneratedJNINatives.h $(topsrcdir)/widget/android
+	@cp $(CURDIR)/GeneratedJNIWrappers.cpp \
+	    $(CURDIR)/GeneratedJNIWrappers.h \
+	    $(CURDIR)/GeneratedJNINatives.h $(topsrcdir)/widget/android
 	@echo Updated generated JNI code
+
+update-fennec-wrappers:
+	@cp $(CURDIR)/FennecJNIWrappers.cpp \
+	    $(CURDIR)/FennecJNIWrappers.h \
+	    $(CURDIR)/FennecJNINatives.h $(topsrcdir)/widget/android/fennec
+	@echo Updated Fennec JNI code
 
 .PHONY: update-generated-wrappers
 
@@ -520,7 +523,7 @@ update-generated-wrappers:
 # does most of the packaging step, and then updates omni.ja in
 # place. If you're not using an IDE, you should be using |mach build
 # mobile/android && mach package|.
-$(abspath $(DIST)/fennec/$(OMNIJAR_NAME)): FORCE
+$(ABS_DIST)/fennec/$(OMNIJAR_NAME): FORCE
 	$(REPORT_BUILD)
 	$(MAKE) -C ../../../faster
 	$(MAKE) -C ../installer stage-package
@@ -530,24 +533,27 @@ $(abspath $(DIST)/fennec/$(OMNIJAR_NAME)): FORCE
 
 # Targets built very early during a Gradle build.
 gradle-targets: $(foreach f,$(constants_PP_JAVAFILES),$(f))
-gradle-targets: $(abspath AndroidManifest.xml)
+gradle-targets: $(DEPTH)/mobile/android/base/AndroidManifest.xml
 gradle-targets: $(ANDROID_GENERATED_RESFILES)
 
+ifndef MOZILLA_OFFICIAL
+# Local developers update omni.ja during their builds.  There's a
+# chicken-and-egg problem here.
 gradle-omnijar: $(abspath $(DIST)/fennec/$(OMNIJAR_NAME))
+else
+# In automation, omni.ja is built only during packaging.
+gradle-omnijar:
+endif
 
 .PHONY: gradle-targets gradle-omnijar
 
-ifndef MOZ_DISABLE_GECKOVIEW
-libs:: geckoview_resources.zip
-	$(INSTALL) geckoview_resources.zip $(FINAL_TARGET)
-endif
-
 # GeneratedJNIWrappers.cpp target also generates
-# GeneratedJNIWrappers.h and GeneratedJNINatives.h
-libs:: classes.dex jni-stubs.inc GeneratedJNIWrappers.cpp $(CURDIR)/fennec_ids.txt
-	$(INSTALL) classes.dex $(FINAL_TARGET)
-	@(diff jni-stubs.inc $(topsrcdir)/mozglue/android/jni-stubs.inc >/dev/null && \
-	  diff GeneratedJNIWrappers.cpp $(topsrcdir)/widget/android/GeneratedJNIWrappers.cpp >/dev/null && \
+#   GeneratedJNIWrappers.h and GeneratedJNINatives.h
+# FennecJNIWrappers.cpp target also generates
+#   FennecJNIWrappers.h and FennecJNINatives.h
+ifndef MOZ_BUILD_MOBILE_ANDROID_WITH_GRADLE
+libs:: GeneratedJNIWrappers.cpp
+	@(diff GeneratedJNIWrappers.cpp $(topsrcdir)/widget/android/GeneratedJNIWrappers.cpp >/dev/null && \
 	  diff GeneratedJNIWrappers.h $(topsrcdir)/widget/android/GeneratedJNIWrappers.h >/dev/null && \
 	  diff GeneratedJNINatives.h $(topsrcdir)/widget/android/GeneratedJNINatives.h >/dev/null) || \
 	 (echo '*****************************************************' && \
@@ -559,3 +565,30 @@ libs:: classes.dex jni-stubs.inc GeneratedJNIWrappers.cpp $(CURDIR)/fennec_ids.t
 	  echo '* Repeat the build, and check in any changes.       *' && \
 	  echo '*****************************************************' && \
 	  exit 1)
+
+libs:: FennecJNIWrappers.cpp
+	@(diff FennecJNIWrappers.cpp $(topsrcdir)/widget/android/fennec/FennecJNIWrappers.cpp >/dev/null && \
+	  diff FennecJNIWrappers.h $(topsrcdir)/widget/android/fennec/FennecJNIWrappers.h >/dev/null && \
+	  diff FennecJNINatives.h $(topsrcdir)/widget/android/fennec/FennecJNINatives.h >/dev/null) || \
+	 (echo '*****************************************************' && \
+	  echo '***     Error: The Fennec JNI code has changed    ***' && \
+	  echo '* To update generated code in the tree, please run  *' && \
+	  echo && \
+	  echo '  make -C $(CURDIR) update-fennec-wrappers' && \
+	  echo && \
+	  echo '* Repeat the build, and check in any changes.       *' && \
+	  echo '*****************************************************' && \
+	  exit 1)
+endif
+
+libs:: classes.dex
+	$(INSTALL) classes.dex $(FINAL_TARGET)
+
+# Generate Java binder interfaces from AIDL files.
+aidl_src_path := $(srcdir)/aidl
+aidl_target_path := generated
+media_pkg := org/mozilla/gecko/media
+
+$(aidl_target_path)/$(media_pkg)/%.java:$(aidl_src_path)/$(media_pkg)/%.aidl
+	@echo "Processing AIDL: $< => $@"
+	$(AIDL) -p$(ANDROID_SDK)/framework.aidl -I$(aidl_src_path) -o$(aidl_target_path) $<

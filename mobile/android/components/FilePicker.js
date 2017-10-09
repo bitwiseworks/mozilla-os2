@@ -140,7 +140,8 @@ FilePicker.prototype = {
     });
   },
 
-  get domfile() {
+  // We don't support directory selection yet.
+  get domFileOrDirectory() {
     let f = this.file;
     if (!f) {
         return null;
@@ -152,10 +153,10 @@ FilePicker.prototype = {
       return utils.wrapDOMFile(f);
     }
 
-    return new File(f);
+    return File.createFromNsIFile(f);
   },
 
-  get domfiles() {
+  get domFileOrDirectoryEnumerator() {
     let win = this._domWin;
     return this.getEnumerator([this.file], function(file) {
       if (win) {
@@ -163,7 +164,7 @@ FilePicker.prototype = {
         return utils.wrapDOMFile(file);
       }
 
-      return new File(file);
+      return File.createFromNsIFile(file);
     });
   },
 

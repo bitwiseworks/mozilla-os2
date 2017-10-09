@@ -20,6 +20,7 @@
 
 #include "mozilla/BasePrincipal.h"
 
+class nsIDocShell;
 class nsIURI;
 
 #define NS_NULLPRINCIPAL_CID \
@@ -41,22 +42,23 @@ public:
 
   NS_IMETHOD QueryInterface(REFNSIID aIID, void** aInstancePtr) override;
   NS_IMETHOD GetHashValue(uint32_t* aHashValue) override;
+  NS_IMETHOD SetCsp(nsIContentSecurityPolicy* aCsp) override;
   NS_IMETHOD GetURI(nsIURI** aURI) override;
   NS_IMETHOD GetDomain(nsIURI** aDomain) override;
   NS_IMETHOD SetDomain(nsIURI* aDomain) override;
   NS_IMETHOD GetBaseDomain(nsACString& aBaseDomain) override;
   nsresult GetOriginInternal(nsACString& aOrigin) override;
 
-  // Returns null on failure.
-  static already_AddRefed<nsNullPrincipal> CreateWithInheritedAttributes(nsIPrincipal *aInheritFrom);
+  static already_AddRefed<nsNullPrincipal> CreateWithInheritedAttributes(nsIPrincipal* aInheritFrom);
 
-  // Returns null on failure.
+  static already_AddRefed<nsNullPrincipal> CreateWithInheritedAttributes(nsIDocShell* aDocShell);
+
   static already_AddRefed<nsNullPrincipal>
   Create(const mozilla::PrincipalOriginAttributes& aOriginAttributes = mozilla::PrincipalOriginAttributes());
 
   nsresult Init(const mozilla::PrincipalOriginAttributes& aOriginAttributes = mozilla::PrincipalOriginAttributes());
 
-  virtual void GetScriptLocation(nsACString &aStr) override;
+  virtual nsresult GetScriptLocation(nsACString &aStr) override;
 
   PrincipalKind Kind() override { return eNullPrincipal; }
 

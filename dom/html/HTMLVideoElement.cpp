@@ -17,6 +17,7 @@
 #include "prlock.h"
 #include "nsThreadUtils.h"
 #include "ImageContainer.h"
+#include "VideoFrameContainer.h"
 
 #include "nsIScriptSecurityManager.h"
 #include "nsIXPConnect.h"
@@ -28,8 +29,11 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/dom/WakeLock.h"
 #include "mozilla/dom/power/PowerManagerService.h"
-#include "nsPerformance.h"
+#include "mozilla/dom/Performance.h"
 #include "mozilla/dom/VideoPlaybackQuality.h"
+
+#include <algorithm>
+#include <limits>
 
 NS_IMPL_NS_NEW_HTML_ELEMENT(Video)
 
@@ -60,8 +64,21 @@ nsresult HTMLVideoElement::GetVideoSize(nsIntSize* size)
     return NS_ERROR_FAILURE;
   }
 
-  size->height = mMediaInfo.mVideo.mDisplay.height;
-  size->width = mMediaInfo.mVideo.mDisplay.width;
+  switch (mMediaInfo.mVideo.mRotation) {
+    case VideoInfo::Rotation::kDegree_90:
+    case VideoInfo::Rotation::kDegree_270: {
+      size->width = mMediaInfo.mVideo.mDisplay.height;
+      size->height = mMediaInfo.mVideo.mDisplay.width;
+      break;
+    }
+    case VideoInfo::Rotation::kDegree_0:
+    case VideoInfo::Rotation::kDegree_180:
+    default: {
+      size->height = mMediaInfo.mVideo.mDisplay.height;
+      size->width = mMediaInfo.mVideo.mDisplay.width;
+      break;
+    }
+  }
   return NS_OK;
 }
 
@@ -113,9 +130,7 @@ HTMLVideoElement::GetAttributeMappingFunction() const
 nsresult HTMLVideoElement::SetAcceptHeader(nsIHttpChannel* aChannel)
 {
   nsAutoCString value(
-#ifdef MOZ_WEBM
       "video/webm,"
-#endif
       "video/ogg,"
       "video/*;q=0.9,"
       "application/ogg;q=0.7,"
@@ -206,35 +221,54 @@ HTMLVideoElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
   return HTMLVideoElementBinding::Wrap(aCx, this, aGivenProto);
 }
 
-bool
-HTMLVideoElement::NotifyOwnerDocumentActivityChangedInternal()
+void
+HTMLVideoElement::NotifyOwnerDocumentActivityChanged()
 {
-  bool pauseElement = HTMLMediaElement::NotifyOwnerDocumentActivityChangedInternal();
+  HTMLMediaElement::NotifyOwnerDocumentActivityChanged();
   UpdateScreenWakeLock();
-  return pauseElement;
+}
+
+FrameStatistics*
+HTMLVideoElement::GetFrameStatistics()
+{
+  return mDecoder ? &(mDecoder->GetFrameStatistics()) : nullptr;
 }
 
 already_AddRefed<VideoPlaybackQuality>
 HTMLVideoElement::GetVideoPlaybackQuality()
 {
   DOMHighResTimeStamp creationTime = 0;
-  uint64_t totalFrames = 0;
-  uint64_t droppedFrames = 0;
-  uint64_t corruptedFrames = 0;
+  uint32_t totalFrames = 0;
+  uint32_t droppedFrames = 0;
+  uint32_t corruptedFrames = 0;
 
   if (sVideoStatsEnabled) {
-    nsPIDOMWindow* window = OwnerDoc()->GetInnerWindow();
-    if (window) {
-      nsPerformance* perf = window->GetPerformance();
+    if (nsPIDOMWindowInner* window = OwnerDoc()->GetInnerWindow()) {
+      Performance* perf = window->GetPerformance();
       if (perf) {
         creationTime = perf->Now();
       }
     }
 
     if (mDecoder) {
-      FrameStatistics& stats = mDecoder->GetFrameStatistics();
-      totalFrames = stats.GetParsedFrames();
-      droppedFrames = stats.GetDroppedFrames();
+      FrameStatisticsData stats =
+        mDecoder->GetFrameStatistics().GetFrameStatisticsData();
+      if (sizeof(totalFrames) >= sizeof(stats.mParsedFrames)) {
+        totalFrames = stats.mPresentedFrames + stats.mDroppedFrames;
+        droppedFrames = stats.mDroppedFrames;
+      } else {
+        uint64_t total = stats.mPresentedFrames + stats.mDroppedFrames;
+        const auto maxNumber = std::numeric_limits<uint32_t>::max();
+        if (total <= maxNumber) {
+          totalFrames = uint32_t(total);
+          droppedFrames = uint32_t(stats.mDroppedFrames);
+        } else {
+          // Too big number(s) -> Resize everything to fit in 32 bits.
+          double ratio = double(maxNumber) / double(total);
+          totalFrames = maxNumber; // === total * ratio
+          droppedFrames = uint32_t(double(stats.mDroppedFrames) * ratio);
+        }
+      }
       corruptedFrames = 0;
     }
   }

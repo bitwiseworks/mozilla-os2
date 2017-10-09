@@ -4,18 +4,19 @@
 
 include protocol PBackground;
 include protocol PContent;
+include protocol PContentBridge;
 
 namespace mozilla {
 namespace ipc {
 
 protocol PFileDescriptorSet
 {
-  manager PBackground or PContent;
+  manager PBackground or PContent or PContentBridge;
 
 both:
-  AddFileDescriptor(FileDescriptor fd);
+  async AddFileDescriptor(FileDescriptor fd);
 
-  __delete__();
+  async __delete__();
 };
 
 } // namespace ipc

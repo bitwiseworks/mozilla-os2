@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -12,24 +12,28 @@ UNIFIED_SOURCES += [
     'testArgumentsObject.cpp',
     'testArrayBuffer.cpp',
     'testArrayBufferView.cpp',
+    'testBoundFunction.cpp',
     'testBug604087.cpp',
+    'testCallArgs.cpp',
     'testCallNonGenericMethodOnProxy.cpp',
     'testChromeBuffer.cpp',
     'testClassGetter.cpp',
     'testCloneScript.cpp',
-    'testContexts.cpp',
     'testDateToLocaleString.cpp',
     'testDebugger.cpp',
     'testDeepFreeze.cpp',
     'testDefineGetterSetterNonEnumerable.cpp',
     'testDefineProperty.cpp',
     'testDefinePropertyIgnoredAttributes.cpp',
+    'testDeflateStringToUTF8Buffer.cpp',
     'testDifferentNewTargetInvokeConstructor.cpp',
     'testEnclosingFunction.cpp',
     'testErrorCopying.cpp',
     'testException.cpp',
+    'testExternalArrayBuffer.cpp',
     'testExternalStrings.cpp',
     'testFindSCCs.cpp',
+    'testForceLexicalInitialization.cpp',
     'testForOfIterator.cpp',
     'testForwardSetProperty.cpp',
     'testFreshGlobalEvalRedefinition.cpp',
@@ -40,10 +44,12 @@ UNIFIED_SOURCES += [
     'testGCExactRooting.cpp',
     'testGCFinalizeCallback.cpp',
     'testGCHeapPostBarriers.cpp',
+    'testGCHooks.cpp',
     'testGCMarking.cpp',
     'testGCOutOfMemory.cpp',
     'testGCStoreBufferRemoval.cpp',
     'testGCUniqueId.cpp',
+    'testGCWeakCache.cpp',
     'testGCWeakRef.cpp',
     'testGetPropertyDescriptor.cpp',
     'testHashTable.cpp',
@@ -53,6 +59,7 @@ UNIFIED_SOURCES += [
     'testIntString.cpp',
     'testIntTypesABI.cpp',
     'testIsInsideNursery.cpp',
+    'testIteratorObject.cpp',
     'testJSEvaluateScript.cpp',
     'testLookup.cpp',
     'testLooselyEqual.cpp',
@@ -66,6 +73,8 @@ UNIFIED_SOURCES += [
     'testParseJSON.cpp',
     'testPersistentRooted.cpp',
     'testPreserveJitCode.cpp',
+    'testPrintf.cpp',
+    'testPrivateGCThingValue.cpp',
     'testProfileStrings.cpp',
     'testPropCache.cpp',
     'testRegExp.cpp',
@@ -77,15 +86,21 @@ UNIFIED_SOURCES += [
     'testScriptObject.cpp',
     'testSetProperty.cpp',
     'testSetPropertyIgnoringNamedGetter.cpp',
+    'testSharedImmutableStringsCache.cpp',
     'testSourcePolicy.cpp',
     'testStringBuffer.cpp',
     'testStructuredClone.cpp',
     'testSymbol.cpp',
+    'testThreadingConditionVariable.cpp',
+    'testThreadingExclusiveData.cpp',
+    'testThreadingMutex.cpp',
+    'testThreadingThread.cpp',
     'testToIntWidth.cpp',
     'testTypedArrays.cpp',
     'testUbiNode.cpp',
-    'testUncaughtError.cpp',
+    'testUncaughtSymbol.cpp',
     'testUTF8.cpp',
+    'testWasmLEB128.cpp',
     'testWeakMap.cpp',
     'testXDR.cpp',
 ]
@@ -100,11 +115,17 @@ if CONFIG['ENABLE_ION']:
         'testJitDCEinGVN.cpp',
         'testJitFoldsTo.cpp',
         'testJitGVN.cpp',
+        'testJitMacroAssembler.cpp',
         'testJitMoveEmitterCycles-mips32.cpp',
         'testJitMoveEmitterCycles.cpp',
         'testJitRangeAnalysis.cpp',
         'testJitRegisterSet.cpp',
         'testJitRValueAlloc.cpp',
+    ]
+
+if CONFIG['SPIDERMONKEY_PROMISE']:
+    UNIFIED_SOURCES += [
+        'testPromise.cpp',
     ]
 
 DEFINES['EXPORT_JS_API'] = True
@@ -114,8 +135,23 @@ LOCAL_INCLUDES += [
     '..',
 ]
 
+if CONFIG['ENABLE_INTL_API'] and CONFIG['MOZ_ICU_DATA_ARCHIVE']:
+    # The ICU libraries linked into libmozjs will not include the ICU data,
+    # so link it directly.
+    USE_LIBS += ['icudata']
+
 USE_LIBS += [
     'static:js',
 ]
 
 OS_LIBS += CONFIG['MOZ_ZLIB_LIBS']
+
+if CONFIG['GNU_CXX']:
+    CXXFLAGS += ['-Wno-shadow', '-Werror=format']
+
+# This is intended as a temporary workaround to enable VS2015.
+if CONFIG['_MSC_VER']:
+    CXXFLAGS += ['-wd4312']
+
+DEFINES['topsrcdir'] = '%s/js/src' % TOPSRCDIR
+OBJDIR_PP_FILES.js.src['jsapi-tests'] += ['jsapi-tests-gdb.py.in']

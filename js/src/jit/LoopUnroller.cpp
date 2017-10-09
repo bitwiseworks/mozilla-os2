@@ -21,7 +21,10 @@ struct LoopUnroller
                     PointerHasher<MDefinition*, 2>, SystemAllocPolicy> DefinitionMap;
 
     explicit LoopUnroller(MIRGraph& graph)
-      : graph(graph), alloc(graph.alloc())
+      : graph(graph), alloc(graph.alloc()),
+        header(nullptr), backedge(nullptr),
+        unrolledHeader(nullptr), unrolledBackedge(nullptr),
+        oldPreheader(nullptr), newPreheader(nullptr)
     {}
 
     MIRGraph& graph;
@@ -68,7 +71,7 @@ LoopUnroller::getReplacementDefinition(MDefinition* def)
         // the block itself.
         MOZ_ASSERT(def->isConstant());
 
-        MConstant* constant = MConstant::New(alloc, def->toConstant()->value());
+        MConstant* constant = MConstant::Copy(alloc, def->toConstant());
         oldPreheader->insertBefore(*oldPreheader->begin(), constant);
         return constant;
     }
@@ -216,9 +219,9 @@ LoopUnroller::go(LoopIterationBound* bound)
             MBasicBlock::New(graph, nullptr, info,
                              unrolledHeader, oldPreheader->trackedSite(), MBasicBlock::NORMAL);
     } else {
-        unrolledHeader = MBasicBlock::NewAsmJS(graph, info, oldPreheader, MBasicBlock::LOOP_HEADER);
-        unrolledBackedge = MBasicBlock::NewAsmJS(graph, info, unrolledHeader, MBasicBlock::NORMAL);
-        newPreheader = MBasicBlock::NewAsmJS(graph, info, unrolledHeader, MBasicBlock::NORMAL);
+        unrolledHeader = MBasicBlock::New(graph, info, oldPreheader, MBasicBlock::LOOP_HEADER);
+        unrolledBackedge = MBasicBlock::New(graph, info, unrolledHeader, MBasicBlock::NORMAL);
+        newPreheader = MBasicBlock::New(graph, info, unrolledHeader, MBasicBlock::NORMAL);
     }
 
     unrolledHeader->discardAllResumePoints();

@@ -3,6 +3,8 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 /* import-globals-from ../performance-controller.js */
 /* import-globals-from ../performance-view.js */
+/* globals WaterfallView, JsCallTreeView, JsFlameGraphView, MemoryCallTreeView,
+           MemoryFlameGraphView */
 "use strict";
 
 /**
@@ -44,7 +46,7 @@ var DetailsView = {
   /**
    * Sets up the view with event binding, initializes subviews.
    */
-  initialize: Task.async(function *() {
+  initialize: Task.async(function* () {
     this.el = $("#details-pane");
     this.toolbar = $("#performance-toolbar-controls-detail-views");
 
@@ -58,39 +60,44 @@ var DetailsView = {
 
     yield this.setAvailableViews();
 
-    PerformanceController.on(EVENTS.RECORDING_STATE_CHANGE, this._onRecordingStoppedOrSelected);
-    PerformanceController.on(EVENTS.RECORDING_SELECTED, this._onRecordingStoppedOrSelected);
+    PerformanceController.on(EVENTS.RECORDING_STATE_CHANGE,
+                             this._onRecordingStoppedOrSelected);
+    PerformanceController.on(EVENTS.RECORDING_SELECTED,
+                             this._onRecordingStoppedOrSelected);
     PerformanceController.on(EVENTS.PREF_CHANGED, this.setAvailableViews);
   }),
 
   /**
    * Unbinds events, destroys subviews.
    */
-  destroy: Task.async(function *() {
+  destroy: Task.async(function* () {
     for (let button of $$("toolbarbutton[data-view]", this.toolbar)) {
       button.removeEventListener("command", this._onViewToggle);
     }
 
-    for (let [_, component] of Iterator(this.components)) {
+    for (let component of Object.values(this.components)) {
       component.initialized && (yield component.view.destroy());
     }
 
-    PerformanceController.off(EVENTS.RECORDING_STATE_CHANGE, this._onRecordingStoppedOrSelected);
-    PerformanceController.off(EVENTS.RECORDING_SELECTED, this._onRecordingStoppedOrSelected);
+    PerformanceController.off(EVENTS.RECORDING_STATE_CHANGE,
+                              this._onRecordingStoppedOrSelected);
+    PerformanceController.off(EVENTS.RECORDING_SELECTED,
+                              this._onRecordingStoppedOrSelected);
     PerformanceController.off(EVENTS.PREF_CHANGED, this.setAvailableViews);
   }),
 
   /**
    * Sets the possible views based off of recording features and server actor support
    * by hiding/showing the buttons that select them and going to default view
-   * if currently selected. Called when a preference changes in `devtools.performance.ui.`.
+   * if currently selected. Called when a preference changes in
+   * `devtools.performance.ui.`.
    */
   setAvailableViews: Task.async(function* () {
     let recording = PerformanceController.getCurrentRecording();
     let isCompleted = recording && recording.isCompleted();
     let invalidCurrentView = false;
 
-    for (let [name, { view }] of Iterator(this.components)) {
+    for (let [name, { view }] of Object.entries(this.components)) {
       let isSupported = this._isViewSupported(name);
 
       $(`toolbarbutton[data-view=${name}]`).hidden = !isSupported;
@@ -110,7 +117,7 @@ var DetailsView = {
     //
     // 2. If we have a finished recording and no panel was selected yet,
     // use a default now that we have the recording configurations
-    if ((this._initialized  && isCompleted && invalidCurrentView) ||
+    if ((this._initialized && isCompleted && invalidCurrentView) ||
         (!this._initialized && isCompleted && recording)) {
       yield this.selectDefaultView();
     }
@@ -144,7 +151,7 @@ var DetailsView = {
    * @param String viewName
    *        Name of the view to be shown.
    */
-  selectView: Task.async(function *(viewName) {
+  selectView: Task.async(function* (viewName) {
     let component = this.components[viewName];
     this.el.selectedPanel = $("#" + component.id);
 
@@ -162,7 +169,7 @@ var DetailsView = {
     // recording's features.
     this._initialized = true;
 
-    this.emit(EVENTS.DETAILS_VIEW_SELECTED, viewName);
+    this.emit(EVENTS.UI_DETAILS_VIEW_SELECTED, viewName);
   }),
 
   /**
@@ -175,11 +182,10 @@ var DetailsView = {
     // occur temporarily via bug 1156499
     if (this._isViewSupported("waterfall")) {
       return this.selectView("waterfall");
-    } else {
-      // The JS CallTree should always be supported since the profiler
-      // actor is as old as the world.
-      return this.selectView("js-calltree");
     }
+    // The JS CallTree should always be supported since the profiler
+    // actor is as old as the world.
+    return this.selectView("js-calltree");
   },
 
   /**
@@ -188,7 +194,7 @@ var DetailsView = {
    * @param object viewObject
    * @return boolean
    */
-  isViewSelected: function(viewObject) {
+  isViewSelected: function (viewObject) {
     // If not initialized, and we have no recordings,
     // no views are selected (even though there's a selected panel)
     if (!this._initialized) {
@@ -198,7 +204,7 @@ var DetailsView = {
     let selectedPanel = this.el.selectedPanel;
     let selectedId = selectedPanel.id;
 
-    for (let [, { id, view }] of Iterator(this.components)) {
+    for (let { id, view } of Object.values(this.components)) {
       if (id == selectedId && view == viewObject) {
         return true;
       }
@@ -208,28 +214,13 @@ var DetailsView = {
   },
 
   /**
-   * Resolves when the provided view is selected. If already selected,
-   * the returned promise resolves immediately.
-   *
-   * @param object viewObject
-   * @return object
-   */
-  whenViewSelected: Task.async(function*(viewObject) {
-    if (this.isViewSelected(viewObject)) {
-      return promise.resolve();
-    }
-    yield this.once(EVENTS.DETAILS_VIEW_SELECTED);
-    return this.whenViewSelected(viewObject);
-  }),
-
-  /**
    * Initializes a subview if it wasn't already set up, and makes sure
    * it's populated with recording data if there is some available.
    *
    * @param object component
    *        A component descriptor from DetailsView.components
    */
-  _whenViewInitialized: Task.async(function *(component) {
+  _whenViewInitialized: Task.async(function* (component) {
     if (component.initialized) {
       return;
     }
@@ -249,7 +240,7 @@ var DetailsView = {
   /**
    * Called when recording stops or is selected.
    */
-  _onRecordingStoppedOrSelected: function(_, state, recording) {
+  _onRecordingStoppedOrSelected: function (_, state, recording) {
     if (typeof state === "string" && state !== "recording-stopped") {
       return;
     }

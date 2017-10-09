@@ -1,9 +1,4 @@
-# AUTOMATICALLY GENERATED FROM mozbuild.template AND mach.  DO NOT EDIT.
-# This Source Code Form is subject to the terms of the Mozilla Public
-# License, v. 2.0. If a copy of the MPL was not distributed with this
-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
-
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -13,8 +8,62 @@
 HAS_MISC_RULE = True
 
 BROWSER_CHROME_MANIFESTS += ['test/browser.ini']
-JETPACK_PACKAGE_MANIFESTS += ['source/test/jetpack-package.ini']
+JETPACK_PACKAGE_MANIFESTS += ['source/test/jetpack-package.ini',
+                              'source/test/leak/jetpack-package.ini']
 JETPACK_ADDON_MANIFESTS += ['source/test/addons/jetpack-addon.ini']
+
+DIRS += ['source/test/fixtures']
+
+addons = [
+    'addon-manager',
+    'author-email',
+    'child_process',
+    'chrome',
+    'content-permissions',
+    'content-script-messages-latency',
+    'contributors',
+    'curly-id',
+    'developers',
+    'e10s-content',
+    'e10s-l10n',
+    'e10s-remote',
+    'e10s-tabs',
+    'e10s',
+    'embedded-webextension',
+    'l10n-properties',
+    'l10n',
+    'layout-change',
+    'main',
+    'name-in-numbers-plus',
+    'name-in-numbers',
+    'packaging',
+    'packed',
+    'page-mod-debugger-post',
+    'page-mod-debugger-pre',
+    'page-worker',
+    'places',
+    'predefined-id-with-at',
+    'preferences-branch',
+    'private-browsing-supported',
+    'remote',
+    'require',
+    'self',
+    'simple-prefs-l10n',
+    'simple-prefs-regression',
+    'simple-prefs',
+    'standard-id',
+    'tab-close-on-startup',
+    'toolkit-require-reload',
+    'translators',
+    'unsafe-content-script',
+]
+
+addons = ['%s.xpi' % f for f in addons]
+GENERATED_FILES += addons
+
+TEST_HARNESS_FILES.testing.mochitest['jetpack-addon']['addon-sdk'].source.test.addons += [
+    '!%s' % f for f in addons
+]
 
 EXTRA_JS_MODULES.sdk += [
     'source/app-extension/bootstrap.js',
@@ -130,6 +179,10 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] != "gonk":
 EXTRA_JS_MODULES.commonjs += [
     'source/lib/index.js',
     'source/lib/test.js',
+]
+
+EXTRA_JS_MODULES.commonjs.sdk += [
+    'source/lib/sdk/webextension.js',
 ]
 
 EXTRA_JS_MODULES.commonjs.dev += [
@@ -424,8 +477,6 @@ EXTRA_JS_MODULES.commonjs.sdk.system += [
 
 EXTRA_JS_MODULES.commonjs.sdk.system.child_process += [
     'source/lib/sdk/system/child_process/subprocess.js',
-    'source/lib/sdk/system/child_process/subprocess_worker_unix.js',
-    'source/lib/sdk/system/child_process/subprocess_worker_win.js',
 ]
 
 EXTRA_JS_MODULES.commonjs.sdk.tab += [

@@ -22,7 +22,7 @@ ClipboardEvent::ClipboardEvent(EventTarget* aOwner,
     mEventIsInternal = false;
   } else {
     mEventIsInternal = true;
-    mEvent->time = PR_Now();
+    mEvent->mTime = PR_Now();
   }
 }
 
@@ -53,8 +53,10 @@ ClipboardEvent::InitClipboardEvent(const nsAString& aType, bool aCanBubble,
                                    bool aCancelable,
                                    DataTransfer* aClipboardData)
 {
+  NS_ENSURE_TRUE_VOID(!mEvent->mFlags.mIsBeingDispatched);
+
   Event::InitEvent(aType, aCanBubble, aCancelable);
-  mEvent->AsClipboardEvent()->clipboardData = aClipboardData;
+  mEvent->AsClipboardEvent()->mClipboardData = aClipboardData;
 }
 
 already_AddRefed<ClipboardEvent>
@@ -75,7 +77,8 @@ ClipboardEvent::Constructor(const GlobalObject& aGlobal,
       // support other types of events, make sure that read/write privileges are
       // checked properly within DataTransfer.
       clipboardData = new DataTransfer(ToSupports(e), eCopy, false, -1);
-      clipboardData->SetData(aParam.mDataType, aParam.mData, aRv);
+      clipboardData->SetData(aParam.mDataType, aParam.mData,
+                             *aGlobal.GetSubjectPrincipal(), aRv);
       NS_ENSURE_TRUE(!aRv.Failed(), nullptr);
     }
   }
@@ -83,6 +86,7 @@ ClipboardEvent::Constructor(const GlobalObject& aGlobal,
   e->InitClipboardEvent(aType, aParam.mBubbles, aParam.mCancelable,
                         clipboardData);
   e->SetTrusted(trusted);
+  e->SetComposed(aParam.mComposed);
   return e.forget();
 }
 
@@ -98,19 +102,19 @@ ClipboardEvent::GetClipboardData()
 {
   InternalClipboardEvent* event = mEvent->AsClipboardEvent();
 
-  if (!event->clipboardData) {
+  if (!event->mClipboardData) {
     if (mEventIsInternal) {
-      event->clipboardData =
+      event->mClipboardData =
         new DataTransfer(ToSupports(this), eCopy, false, -1);
     } else {
-      event->clipboardData =
+      event->mClipboardData =
         new DataTransfer(ToSupports(this), event->mMessage,
                          event->mMessage == ePaste,
                          nsIClipboard::kGlobalClipboard);
     }
   }
 
-  return event->clipboardData;
+  return event->mClipboardData;
 }
 
 } // namespace dom

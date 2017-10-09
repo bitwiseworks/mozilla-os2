@@ -112,7 +112,7 @@ PowerManagerService::Notify(const WakeLockInformation& aWakeLockInfo)
    * because the callbacks may install new listeners. We expect no
    * more than one listener per window, so it shouldn't be too long.
    */
-  nsAutoTArray<nsCOMPtr<nsIDOMMozWakeLockListener>, 2> listeners(mWakeLockListeners);
+  AutoTArray<nsCOMPtr<nsIDOMMozWakeLockListener>, 2> listeners(mWakeLockListeners);
 
   for (uint32_t i = 0; i < listeners.Length(); ++i) {
     listeners[i]->Callback(aWakeLockInfo.topic(), state);
@@ -128,7 +128,8 @@ PowerManagerService::SyncProfile()
     obsServ->NotifyObservers(nullptr, "profile-change-net-teardown", context.get());
     obsServ->NotifyObservers(nullptr, "profile-change-teardown", context.get());
     obsServ->NotifyObservers(nullptr, "profile-before-change", context.get());
-    obsServ->NotifyObservers(nullptr, "profile-before-change2", context.get());
+    obsServ->NotifyObservers(nullptr, "profile-before-change-qm", context.get());
+    obsServ->NotifyObservers(nullptr, "profile-before-change-telemetry", context.get());
   }
 }
 
@@ -210,7 +211,7 @@ PowerManagerService::GetWakeLockState(const nsAString &aTopic, nsAString &aState
 
 already_AddRefed<WakeLock>
 PowerManagerService::NewWakeLock(const nsAString& aTopic,
-                                 nsIDOMWindow* aWindow,
+                                 nsPIDOMWindowInner* aWindow,
                                  mozilla::ErrorResult& aRv)
 {
   RefPtr<WakeLock> wakelock = new WakeLock();
@@ -224,11 +225,12 @@ PowerManagerService::NewWakeLock(const nsAString& aTopic,
 
 NS_IMETHODIMP
 PowerManagerService::NewWakeLock(const nsAString &aTopic,
-                                 nsIDOMWindow *aWindow,
+                                 mozIDOMWindow *aWindow,
                                  nsISupports **aWakeLock)
 {
   mozilla::ErrorResult rv;
-  RefPtr<WakeLock> wakelock = NewWakeLock(aTopic, aWindow, rv);
+  RefPtr<WakeLock> wakelock =
+    NewWakeLock(aTopic, nsPIDOMWindowInner::From(aWindow), rv);
   if (rv.Failed()) {
     return rv.StealNSResult();
   }

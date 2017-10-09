@@ -1,12 +1,13 @@
-/* vim:set ts=2 sw=2 sts=2 et: */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
-   http://creativecommons.org/publicdomain/zero/1.0/ */
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 "use strict";
 
 const TEST_URI = 'data:text/html;charset=utf-8,<div style="-moz-opacity:0;">' +
                  'test repeated css warnings</div><p style="-moz-opacity:0">' +
-                 'hi</p>';
+                 "hi</p>";
 var hud;
 
 /**
@@ -14,7 +15,7 @@ var hud;
  * Repeated CSS messages get collapsed into one.
  */
 
-var test = asyncTest(function* () {
+add_task(function* () {
   yield loadTab(TEST_URI);
 
   hud = yield openConsole();
@@ -30,7 +31,7 @@ var test = asyncTest(function* () {
 });
 
 function onContentLoaded() {
-  let cssWarning = "Unknown property '-moz-opacity'.  Declaration dropped.";
+  let cssWarning = "Unknown property \u2018-moz-opacity\u2019.  Declaration dropped.";
 
   return waitForMessages({
     webconsole: hud,

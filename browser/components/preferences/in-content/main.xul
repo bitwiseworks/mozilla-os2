@@ -16,6 +16,9 @@
     <preference id="e10sTempPref"
                 name="browser.tabs.remote.autostart.2"
                 type="bool"/>
+    <preference id="e10sForceEnable"
+                name="browser.tabs.remote.force-enable"
+                type="bool"/>
 #endif
 
     <!-- Startup -->
@@ -102,6 +105,9 @@
                 name="browser.taskbar.previews.enable"
                 type="bool"/>
 #endif
+    <preference id="browser.ctrlTab.previews"
+                name="browser.ctrlTab.previews"
+                type="bool"/>
 </preferences>
 
 <hbox id="header-general"
@@ -109,8 +115,7 @@
       hidden="true"
       data-category="paneGeneral">
   <label class="header-name" flex="1">&paneGeneral.title;</label>
-  <button class="help-button"
-          aria-label="&helpButton.label;"/>
+  <html:a class="help-button" target="_blank" aria-label="&helpButton.label;"></html:a>
 </hbox>
 
 <!-- Startup -->
@@ -189,7 +194,7 @@
         <textbox id="browserHomePage"
                  class="padded uri-element content-cell-item"
                  type="autocomplete"
-                 autocompletesearch="history"
+                 autocompletesearch="unifiedcomplete"
                  onsyncfrompreference="return gMainPane.syncFromHomePref();"
                  onsynctopreference="return gMainPane.syncToHomePref(this.value);"
                  placeholder="&abouthome.pageTitle;"
@@ -265,6 +270,11 @@
 <groupbox data-category="paneGeneral"
           hidden="true" align="start">
     <caption><label>&tabsGroup.label;</label></caption>
+
+    <checkbox id="ctrlTabRecentlyUsedOrder" label="&ctrlTabRecentlyUsedOrder.label;"
+              accesskey="&ctrlTabRecentlyUsedOrder.accesskey;"
+              preference="browser.ctrlTab.previews"/>
+
     <checkbox id="linkTargeting" label="&newWindowsAsTabs.label;"
               accesskey="&newWindowsAsTabs.accesskey;"
               preference="browser.link.open_newwindow"
@@ -278,10 +288,6 @@
     <checkbox id="warnOpenMany" label="&warnOpenManyTabs.label;"
               accesskey="&warnOpenManyTabs.accesskey;"
               preference="browser.tabs.warnOnOpen"/>
-
-    <checkbox id="restoreOnDemand" label="&restoreTabsOnDemand.label;"
-              accesskey="&restoreTabsOnDemand.accesskey;"
-              preference="browser.sessionstore.restore_on_demand"/>
 
     <checkbox id="switchToNewTabs" label="&switchToNewTabs.label;"
               accesskey="&switchToNewTabs.accesskey;"

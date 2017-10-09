@@ -12,8 +12,7 @@
  * This test is for global testing sorting containers queries.
  */
 
-////////////////////////////////////////////////////////////////////////////////
-//// Globals and Constants
+// Globals and Constants
 
 var hs = Cc["@mozilla.org/browser/nav-history-service;1"].
          getService(Ci.nsINavHistoryService);
@@ -54,8 +53,7 @@ var tags = [
   "test",
 ];
 
-////////////////////////////////////////////////////////////////////////////////
-//// Test Runner
+// Test Runner
 
 /**
  * Enumerates all the sequences of the cartesian product of the arrays contained
@@ -312,7 +310,7 @@ function test_result_sortingMode_change(aResult, aResultType, aOriginalSortingMo
 function check_children_sorting(aRootNode, aExpectedSortingMode) {
   var results = [];
   print("Found children:");
-  for (var i = 0; i < aRootNode.childCount; i++) {
+  for (let i = 0; i < aRootNode.childCount; i++) {
     results[i] = aRootNode.getChild(i);
     print(i + " " + results[i].title);
   }
@@ -330,7 +328,7 @@ function check_children_sorting(aRootNode, aExpectedSortingMode) {
 
   // Get a comparator based on expected sortingMode.
   var comparator;
-  switch(aExpectedSortingMode) {
+  switch (aExpectedSortingMode) {
     case Ci.nsINavHistoryQueryOptions.SORT_BY_NONE:
       comparator = function (a, b) {
         return 0;
@@ -373,7 +371,7 @@ function check_children_sorting(aRootNode, aExpectedSortingMode) {
   var sortedResults = results.slice();
   sortedResults.sort(comparator);
   // Actually compare returned children with our sorted array.
-  for (var i = 0; i < sortedResults.length; i++) {
+  for (let i = 0; i < sortedResults.length; i++) {
     if (sortedResults[i].title != results[i].title)
       print(i + " index wrong, expected " + sortedResults[i].title +
             " found " + results[i].title);
@@ -381,8 +379,7 @@ function check_children_sorting(aRootNode, aExpectedSortingMode) {
   }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-//// Main
+// Main
 
 function run_test()
 {

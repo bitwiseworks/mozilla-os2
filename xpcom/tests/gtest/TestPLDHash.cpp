@@ -1,10 +1,12 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim:set ts=2 sw=2 sts=2 et cindent: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "PLDHashTable.h"
+#include "nsCOMPtr.h"
+#include "nsServiceManagerUtils.h"
 #include "gtest/gtest.h"
 
 // This test mostly focuses on edge cases. But more coverage of normal
@@ -17,6 +19,10 @@
 
 // This global variable is defined in toolkit/xre/nsSigHandlers.cpp.
 extern unsigned int _gdb_sleep_duration;
+#endif
+
+#ifdef MOZ_CRASHREPORTER
+#include "nsICrashReporter.h"
 #endif
 
 // We can test that certain operations cause expected aborts by forking
@@ -40,7 +46,19 @@ TestCrashyOperation(void (*aCrashyOperation)())
   ASSERT_NE(pid, -1);
 
   if (pid == 0) {
+    // Disable the crashreporter -- writing a crash dump in the child will
+    // prevent the parent from writing a subsequent dump. Crashes here are
+    // expected, so we don't want their stacks to show up in the log anyway.
+#ifdef MOZ_CRASHREPORTER
+    nsCOMPtr<nsICrashReporter> crashreporter =
+      do_GetService("@mozilla.org/toolkit/crash-reporter;1");
+    if (crashreporter) {
+      crashreporter->SetEnabled(false);
+    }
+#endif
+
     // Child: perform the crashy operation.
+    fprintf(stderr, "TestCrashyOperation: The following crash is expected. Do not panic.\n");
     aCrashyOperation();
     fprintf(stderr, "TestCrashyOperation: didn't crash?!\n");
     ASSERT_TRUE(false);   // shouldn't reach here
@@ -144,7 +162,7 @@ TEST(PLDHashTableTest, LazyStorage)
 // GrowToMaxCapacity test because we insert the integers 0.., which means it's
 // collision-free.
 static PLDHashNumber
-TrivialHash(PLDHashTable *table, const void *key)
+TrivialHash(const void *key)
 {
   return (PLDHashNumber)(size_t)key;
 }
@@ -314,9 +332,13 @@ TEST(PLDHashTableTest, Iterator)
   ASSERT_EQ(t.Capacity(), unsigned(PLDHashTable::kMinCapacity));
 }
 
-// See bug 931062, we skip this test on Android due to OOM. Also, it's slow,
-// and so should always be last.
-#ifndef MOZ_WIDGET_ANDROID
+// This test involves resizing a table repeatedly up to 512 MiB in size. On
+// 32-bit platforms (Win32, Android) it sometimes OOMs, causing the test to
+// fail. (See bug 931062 and bug 1267227.) Therefore, we only run it on 64-bit
+// platforms where OOM is much less likely.
+//
+// Also, it's slow, and so should always be last.
+#ifdef HAVE_64BIT_BUILD
 TEST(PLDHashTableTest, GrowToMaxCapacity)
 {
   // This is infallible.
@@ -332,8 +354,8 @@ TEST(PLDHashTableTest, GrowToMaxCapacity)
     numInserted++;
   }
 
-  // We stop when the element count is 96.875% of PL_DHASH_MAX_SIZE (see
-  // MaxLoadOnGrowthFailure()).
+  // We stop when the element count is 96.875% of PLDHashTable::kMaxCapacity
+  // (see MaxLoadOnGrowthFailure()).
   if (numInserted !=
       PLDHashTable::kMaxCapacity - (PLDHashTable::kMaxCapacity >> 5)) {
     delete t;

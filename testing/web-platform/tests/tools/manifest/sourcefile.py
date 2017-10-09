@@ -1,5 +1,7 @@
+import imp
 import os
-import urlparse
+import re
+from six.moves.urllib.parse import urljoin
 from fnmatch import fnmatch
 try:
     from xml.etree import cElementTree as ElementTree
@@ -8,18 +10,29 @@ except ImportError:
 
 import html5lib
 
-import vcs
-from item import Stub, ManualTest, WebdriverSpecTest, RefTest, TestharnessTest
-from utils import rel_path_to_url, is_blacklisted, ContextManagerStringIO, cached_property
+from . import vcs
+from .item import Stub, ManualTest, WebdriverSpecTest, RefTest, TestharnessTest
+from .utils import rel_path_to_url, is_blacklisted, ContextManagerBytesIO, cached_property
 
 wd_pattern = "*.py"
+meta_re = re.compile("//\s*<meta>\s*(\w*)=(.*)$")
+
+def replace_end(s, old, new):
+    """
+    Given a string `s` that ends with `old`, replace that occurrence of `old`
+    with `new`.
+    """
+    assert s.endswith(old)
+    return s[:-len(old)] + new
+
 
 class SourceFile(object):
     parsers = {"html":lambda x:html5lib.parse(x, treebuilder="etree"),
                "xhtml":ElementTree.parse,
                "svg":ElementTree.parse}
 
-    def __init__(self, tests_root, rel_path, url_base, use_committed=False):
+    def __init__(self, tests_root, rel_path, url_base, use_committed=False,
+                 contents=None):
         """Object representing a file in a source tree.
 
         :param tests_root: Path to the root of the source tree
@@ -27,12 +40,16 @@ class SourceFile(object):
         :param url_base: Base URL used when converting file paths to urls
         :param use_committed: Work with the last committed version of the file
                               rather than the on-disk version.
+        :param contents: Byte array of the contents of the file or ``None``.
         """
+
+        assert not (use_committed and contents is not None)
 
         self.tests_root = tests_root
         self.rel_path = rel_path
         self.url_base = url_base
         self.use_committed = use_committed
+        self.contents = contents
 
         self.url = rel_path_to_url(rel_path, url_base)
         self.path = os.path.join(tests_root, rel_path)
@@ -42,7 +59,7 @@ class SourceFile(object):
 
         self.type_flag = None
         if "-" in self.name:
-            self.type_flag = self.name.rsplit("-", 1)[1]
+            self.type_flag = self.name.rsplit("-", 1)[1].split(".")[0]
 
         self.meta_flags = self.name.split(".")[1:]
 
@@ -64,24 +81,36 @@ class SourceFile(object):
         :param prefix: The prefix to check"""
         return self.name.startswith(prefix)
 
-    def open(self):
-        """Return a File object opened for reading the file contents,
-        or the contents of the file when last committed, if
-        use_comitted is true."""
+    def is_dir(self):
+        """Return whether this file represents a directory."""
+        if self.contents is not None:
+            return False
 
-        if self.use_committed:
+        return os.path.isdir(self.rel_path)
+
+    def open(self):
+        """
+        Return either
+        * the contents specified in the constructor, if any;
+        * the contents of the file when last committed, if use_committed is true; or
+        * a File object opened for reading the file contents.
+        """
+
+        if self.contents is not None:
+            file_obj = ContextManagerBytesIO(self.contents)
+        elif self.use_committed:
             git = vcs.get_git_func(os.path.dirname(__file__))
             blob = git("show", "HEAD:%s" % self.rel_path)
-            file_obj = ContextManagerStringIO(blob)
+            file_obj = ContextManagerBytesIO(blob)
         else:
-            file_obj = open(self.path)
+            file_obj = open(self.path, 'rb')
         return file_obj
 
     @property
     def name_is_non_test(self):
         """Check if the file name matches the conditions for the file to
         be a non-test file"""
-        return (os.path.isdir(self.rel_path) or
+        return (self.is_dir() or
                 self.name_prefix("MANIFEST") or
                 self.filename.startswith(".") or
                 is_blacklisted(self.url))
@@ -99,6 +128,12 @@ class SourceFile(object):
         return self.type_flag == "manual"
 
     @property
+    def name_is_multi_global(self):
+        """Check if the file name matches the conditions for the file to
+        be a multi-global js test file"""
+        return "any" in self.meta_flags and self.ext == ".js"
+
+    @property
     def name_is_worker(self):
         """Check if the file name matches the conditions for the file to
         be a worker js test file"""
@@ -112,7 +147,7 @@ class SourceFile(object):
         # files.
         rel_dir_tree = self.rel_path.split(os.path.sep)
         return (rel_dir_tree[0] == "webdriver" and
-                len(rel_dir_tree) > 2 and
+                len(rel_dir_tree) > 1 and
                 self.filename != "__init__.py" and
                 fnmatch(self.filename, wd_pattern))
 
@@ -172,6 +207,15 @@ class SourceFile(object):
     def timeout(self):
         """The timeout of a test or reference file. "long" if the file has an extended timeout
         or None otherwise"""
+        if self.name_is_worker:
+            with self.open() as f:
+                for line in f:
+                    m = meta_re.match(line)
+                    if m and m.groups()[0] == "timeout":
+                        if m.groups()[1].lower() == "long":
+                            return "long"
+                        return
+
         if not self.root:
             return
 
@@ -179,6 +223,40 @@ class SourceFile(object):
             timeout_str = self.timeout_nodes[0].attrib.get("content", None)
             if timeout_str and timeout_str.lower() == "long":
                 return timeout_str
+
+    @cached_property
+    def viewport_nodes(self):
+        """List of ElementTree Elements corresponding to nodes in a test that
+        specify viewport sizes"""
+        return self.root.findall(".//{http://www.w3.org/1999/xhtml}meta[@name='viewport-size']")
+
+    @cached_property
+    def viewport_size(self):
+        """The viewport size of a test or reference file"""
+        if not self.root:
+            return None
+
+        if not self.viewport_nodes:
+            return None
+
+        return self.viewport_nodes[0].attrib.get("content", None)
+
+    @cached_property
+    def dpi_nodes(self):
+        """List of ElementTree Elements corresponding to nodes in a test that
+        specify device pixel ratios"""
+        return self.root.findall(".//{http://www.w3.org/1999/xhtml}meta[@name='device-pixel-ratio']")
+
+    @cached_property
+    def dpi(self):
+        """The device pixel ratio of a test or reference file"""
+        if not self.root:
+            return None
+
+        if not self.dpi_nodes:
+            return None
+
+        return self.dpi_nodes[0].attrib.get("content", None)
 
     @cached_property
     def testharness_nodes(self):
@@ -233,7 +311,7 @@ class SourceFile(object):
         rel_map = {"match": "==", "mismatch": "!="}
         for item in self.reftest_nodes:
             if "href" in item.attrib:
-                ref_url = urlparse.urljoin(self.url, item.attrib["href"])
+                ref_url = urljoin(self.url, item.attrib["href"])
                 ref_type = rel_map[item.attrib["rel"]]
                 rv.append((ref_url, ref_type))
         return rv
@@ -258,11 +336,18 @@ class SourceFile(object):
         elif self.name_is_manual:
             rv = [ManualTest(self, self.url)]
 
+        elif self.name_is_multi_global:
+            rv = [
+                TestharnessTest(self, replace_end(self.url, ".any.js", ".any.html")),
+                TestharnessTest(self, replace_end(self.url, ".any.js", ".any.worker")),
+            ]
+
         elif self.name_is_worker:
-            rv = [TestharnessTest(self, self.url[:-3])]
+            rv = [TestharnessTest(self, replace_end(self.url, ".worker.js", ".worker"),
+                                  timeout=self.timeout)]
 
         elif self.name_is_webdriver:
-            rv = [WebdriverSpecTest(self)]
+            rv = [WebdriverSpecTest(self, self.url)]
 
         elif self.content_is_testharness:
             rv = []
@@ -271,7 +356,8 @@ class SourceFile(object):
                 rv.append(TestharnessTest(self, url, timeout=self.timeout))
 
         elif self.content_is_ref_node:
-            rv = [RefTest(self, self.url, self.references, timeout=self.timeout)]
+            rv = [RefTest(self, self.url, self.references, timeout=self.timeout,
+                          viewport_size=self.viewport_size, dpi=self.dpi)]
 
         else:
             # If nothing else it's a helper file, which we don't have a specific type for

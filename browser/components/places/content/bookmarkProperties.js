@@ -533,7 +533,7 @@ var BookmarkPropertiesPanel = {
       childTransactions.push(setLoadTxn);
     }
 
-    //XXX TODO: this should be in a transaction!
+    // XXX TODO: this should be in a transaction!
     if (this._charSet && !PrivateBrowsingUtils.isWindowPrivate(window))
       PlacesUtils.setCharsetForURI(this._uri, this._charSet);
 
@@ -557,10 +557,15 @@ var BookmarkPropertiesPanel = {
   _getTransactionsForURIList: function BPP__getTransactionsForURIList() {
     var transactions = [];
     for (let uri of this._URIs) {
-      let title = this._getURITitleFromHistory(uri);
-      let createTxn = new PlacesCreateBookmarkTransaction(uri, -1,
-                                                          PlacesUtils.bookmarks.DEFAULT_INDEX,
-                                                          title);
+      // uri should be an object in the form { url, title }. Though add-ons
+      // could still use the legacy form, where it's an nsIURI.
+      let [_uri, _title] = uri instanceof Ci.nsIURI ?
+        [uri, this._getURITitleFromHistory(uri)] : [uri.uri, uri.title];
+
+      let createTxn =
+        new PlacesCreateBookmarkTransaction(_uri, -1,
+                                            PlacesUtils.bookmarks.DEFAULT_INDEX,
+                                            _title);
       transactions.push(createTxn);
     }
     return transactions;
@@ -627,12 +632,6 @@ var BookmarkPropertiesPanel = {
   _promiseNewItem: Task.async(function* () {
     if (!PlacesUIUtils.useAsyncTransactions)
       return this._createNewItem();
-
-    let txnFunc =
-      { [BOOKMARK_FOLDER]: PlacesTransactions.NewFolder,
-        [LIVEMARK_CONTAINER]: PlacesTransactions.NewLivemark,
-        [BOOKMARK_ITEM]: PlacesTransactions.NewBookmark
-      }[this._itemType];
 
     let [containerId, index] = this._getInsertionPointDetails();
     let parentGuid = yield PlacesUtils.promiseItemGuid(containerId);

@@ -4,20 +4,23 @@
 
 package org.mozilla.gecko.fxa.authenticator;
 
-import java.io.UnsupportedEncodingException;
-import java.net.URISyntaxException;
-import java.security.GeneralSecurityException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.EnumSet;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Semaphore;
+import android.accounts.Account;
+import android.accounts.AccountManager;
+import android.annotation.SuppressLint;
+import android.app.Activity;
+import android.content.ContentResolver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.ResultReceiver;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
+import android.support.v4.content.LocalBroadcastManager;
+import android.text.TextUtils;
+import android.util.Log;
 
-import org.mozilla.gecko.AppConstants;
-import org.mozilla.gecko.background.ReadingListConstants;
 import org.mozilla.gecko.background.common.GlobalConstants;
 import org.mozilla.gecko.background.common.log.Logger;
 import org.mozilla.gecko.background.fxa.FxAccountUtils;
@@ -27,24 +30,23 @@ import org.mozilla.gecko.fxa.FxAccountConstants;
 import org.mozilla.gecko.fxa.login.State;
 import org.mozilla.gecko.fxa.login.State.StateLabel;
 import org.mozilla.gecko.fxa.login.StateFactory;
+import org.mozilla.gecko.fxa.login.TokensAndKeysState;
 import org.mozilla.gecko.fxa.sync.FxAccountProfileService;
 import org.mozilla.gecko.sync.ExtendedJSONObject;
 import org.mozilla.gecko.sync.Utils;
 import org.mozilla.gecko.sync.setup.Constants;
 import org.mozilla.gecko.util.ThreadUtils;
 
-import android.accounts.Account;
-import android.accounts.AccountManager;
-import android.app.Activity;
-import android.content.ContentResolver;
-import android.content.Context;
-import android.content.Intent;
-import android.content.SharedPreferences;
-import android.os.Bundle;
-import android.os.Handler;
-import android.os.ResultReceiver;
-import android.util.Log;
-import android.support.v4.content.LocalBroadcastManager;
+import java.io.UnsupportedEncodingException;
+import java.net.URISyntaxException;
+import java.security.GeneralSecurityException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Semaphore;
 
 /**
  * A Firefox Account that stores its details and state as user data attached to
@@ -76,6 +78,9 @@ public class AndroidFxAccount {
   public static final String BUNDLE_KEY_STATE = "state";
   public static final String BUNDLE_KEY_PROFILE_JSON = "profile";
 
+  public static final String ACCOUNT_KEY_DEVICE_ID = "deviceId";
+  public static final String ACCOUNT_KEY_DEVICE_REGISTRATION_VERSION = "deviceRegistrationVersion";
+
   // Account authentication token type for fetching account profile.
   public static final String PROFILE_OAUTH_TOKEN_TYPE = "oauth::profile";
 
@@ -87,9 +92,6 @@ public class AndroidFxAccount {
 
   static {
     final List<String> list = new ArrayList<>();
-    if (AppConstants.MOZ_ANDROID_READING_LIST_SERVICE) {
-      list.add(ReadingListConstants.AUTH_TOKEN_TYPE);
-    }
     list.add(PROFILE_OAUTH_TOKEN_TYPE);
     KNOWN_OAUTH_TOKEN_TYPES = Collections.unmodifiableList(list);
   }
@@ -143,6 +145,15 @@ public class AndroidFxAccount {
     this.context = applicationContext;
     this.account = account;
     this.accountManager = AccountManager.get(this.context);
+  }
+
+  public static AndroidFxAccount fromContext(Context context) {
+    context = context.getApplicationContext();
+    Account account = FirefoxAccounts.getFirefoxAccount(context);
+    if (account == null) {
+      return null;
+    }
+    return new AndroidFxAccount(context, account);
   }
 
   /**
@@ -299,16 +310,27 @@ public class AndroidFxAccount {
   }
 
   public String getProfileServerURI() {
-    return accountManager.getUserData(account, ACCOUNT_KEY_PROFILE_SERVER);
+    String profileURI = accountManager.getUserData(account, ACCOUNT_KEY_PROFILE_SERVER);
+    if (profileURI == null) {
+      if (isStaging()) {
+        return FxAccountConstants.STAGE_PROFILE_SERVER_ENDPOINT;
+      }
+      return FxAccountConstants.DEFAULT_PROFILE_SERVER_ENDPOINT;
+    }
+    return profileURI;
   }
 
   public String getOAuthServerURI() {
     // Allow testing against stage.
-    if (FxAccountConstants.STAGE_AUTH_SERVER_ENDPOINT.equals(getAccountServerURI())) {
+    if (isStaging()) {
       return FxAccountConstants.STAGE_OAUTH_SERVER_ENDPOINT;
     } else {
       return FxAccountConstants.DEFAULT_OAUTH_SERVER_ENDPOINT;
     }
+  }
+
+  private boolean isStaging() {
+    return FxAccountConstants.STAGE_AUTH_SERVER_ENDPOINT.equals(getAccountServerURI());
   }
 
   private String constructPrefsPath(String product, long version, String extra) throws GeneralSecurityException, UnsupportedEncodingException {
@@ -378,6 +400,8 @@ public class AndroidFxAccount {
     } catch (UnsupportedEncodingException e) {
       // Ignore.
     }
+    o.put("fxaDeviceId", getDeviceId());
+    o.put("fxaDeviceRegistrationVersion", getDeviceRegistrationVersion());
     return o;
   }
 
@@ -528,30 +552,24 @@ public class AndroidFxAccount {
   }
 
   /**
-   * Request a sync.  See {@link FirefoxAccounts#requestSync(Account, EnumSet, String[], String[])}.
+   * Request an immediate sync.  Use this to sync as soon as possible in response to user action.
+   *
+   * @param stagesToSync stage names to sync; can be null to sync <b>all</b> known stages.
+   * @param stagesToSkip stage names to skip; can be null to skip <b>no</b> known stages.
    */
-  public void requestSync() {
-    requestSync(FirefoxAccounts.SOON, null, null);
+  public void requestImmediateSync(String[] stagesToSync, String[] stagesToSkip) {
+    FirefoxAccounts.requestImmediateSync(getAndroidAccount(), stagesToSync, stagesToSkip);
   }
 
   /**
-   * Request a sync.  See {@link FirefoxAccounts#requestSync(Account, EnumSet, String[], String[])}.
+   * Request an eventual sync.  Use this to request the system queue a sync for some time in the
+   * future.
    *
-   * @param syncHints to pass to sync.
+   * @param stagesToSync stage names to sync; can be null to sync <b>all</b> known stages.
+   * @param stagesToSkip stage names to skip; can be null to skip <b>no</b> known stages.
    */
-  public void requestSync(EnumSet<FirefoxAccounts.SyncHint> syncHints) {
-    requestSync(syncHints, null, null);
-  }
-
-  /**
-   * Request a sync.  See {@link FirefoxAccounts#requestSync(Account, EnumSet, String[], String[])}.
-   *
-   * @param syncHints to pass to sync.
-   * @param stagesToSync stage names to sync.
-   * @param stagesToSkip stage names to skip.
-   */
-  public void requestSync(EnumSet<FirefoxAccounts.SyncHint> syncHints, String[] stagesToSync, String[] stagesToSkip) {
-    FirefoxAccounts.requestSync(getAndroidAccount(), syncHints, stagesToSync, stagesToSkip);
+  public void requestEventualSync(String[] stagesToSync, String[] stagesToSkip) {
+    FirefoxAccounts.requestEventualSync(getAndroidAccount(), stagesToSync, stagesToSkip);
   }
 
   public synchronized void setState(State state) {
@@ -569,7 +587,7 @@ public class AndroidFxAccount {
   protected void broadcastAccountStateChangedIntent() {
     final Intent intent = new Intent(FxAccountConstants.ACCOUNT_STATE_CHANGED_ACTION);
     intent.putExtra(Constants.JSON_KEY_ACCOUNT, account.name);
-    context.sendBroadcast(intent, FxAccountConstants.PER_ACCOUNT_TYPE_PERMISSION);
+    LocalBroadcastManager.getInstance(context).sendBroadcast(intent);
   }
 
   public synchronized State getState() {
@@ -587,6 +605,24 @@ public class AndroidFxAccount {
       return StateFactory.fromJSONObject(stateLabel, new ExtendedJSONObject(stateString));
     } catch (Exception e) {
       throw new IllegalStateException("could not get state", e);
+    }
+  }
+
+  public byte[] getSessionToken() throws InvalidFxAState {
+    State state = getState();
+    StateLabel stateLabel = state.getStateLabel();
+    if (stateLabel == StateLabel.Cohabiting || stateLabel == StateLabel.Married) {
+      TokensAndKeysState tokensAndKeysState = (TokensAndKeysState) state;
+      return tokensAndKeysState.getSessionToken();
+    }
+    throw new InvalidFxAState("Cannot get sessionToken: not in a TokensAndKeysState state");
+  }
+
+  public static class InvalidFxAState extends Exception {
+    private static final long serialVersionUID = -8537626959811195978L;
+
+    public InvalidFxAState(String message) {
+      super(message);
     }
   }
 
@@ -629,17 +665,18 @@ public class AndroidFxAccount {
   }
 
   /**
-   * Create an intent announcing that a Firefox account will be deleted.
+   * Populate an intent used for starting FxAccountDeletedService service.
    *
-   * @return <code>Intent</code> to broadcast.
+   * @param intent Intent to populate with necessary extras
+   * @return <code>Intent</code> with a deleted action and account/OAuth information extras
    */
-  public Intent makeDeletedAccountIntent() {
-    final Intent intent = new Intent(FxAccountConstants.ACCOUNT_DELETED_ACTION);
+  public Intent populateDeletedAccountIntent(final Intent intent) {
     final List<String> tokens = new ArrayList<>();
 
     intent.putExtra(FxAccountConstants.ACCOUNT_DELETED_INTENT_VERSION_KEY,
         Long.valueOf(FxAccountConstants.ACCOUNT_DELETED_INTENT_VERSION));
     intent.putExtra(FxAccountConstants.ACCOUNT_DELETED_INTENT_ACCOUNT_KEY, account.name);
+    intent.putExtra(FxAccountConstants.ACCOUNT_DELETED_INTENT_ACCOUNT_PROFILE, getProfile());
 
     // Get the tokens from AccountManager. Note: currently, only reading list service supports OAuth. The following logic will
     // be extended in future to support OAuth for other services.
@@ -773,6 +810,45 @@ public class AndroidFxAccount {
     });
   }
 
+  @Nullable
+  public synchronized String getDeviceId() {
+    return accountManager.getUserData(account, ACCOUNT_KEY_DEVICE_ID);
+  }
+
+  @NonNull
+  public synchronized int getDeviceRegistrationVersion() {
+    String versionStr = accountManager.getUserData(account, ACCOUNT_KEY_DEVICE_REGISTRATION_VERSION);
+    if (TextUtils.isEmpty(versionStr)) {
+      return 0;
+    } else {
+      try {
+        return Integer.parseInt(versionStr);
+      } catch (NumberFormatException ex) {
+        return 0;
+      }
+    }
+  }
+
+  public synchronized void setDeviceId(String id) {
+    accountManager.setUserData(account, ACCOUNT_KEY_DEVICE_ID, id);
+  }
+
+  public synchronized void setDeviceRegistrationVersion(int deviceRegistrationVersion) {
+    accountManager.setUserData(account, ACCOUNT_KEY_DEVICE_REGISTRATION_VERSION,
+        Integer.toString(deviceRegistrationVersion));
+  }
+
+  public synchronized void resetDeviceRegistrationVersion() {
+    setDeviceRegistrationVersion(0);
+  }
+
+  public synchronized void setFxAUserData(String id, int deviceRegistrationVersion) {
+    accountManager.setUserData(account, ACCOUNT_KEY_DEVICE_ID, id);
+    accountManager.setUserData(account, ACCOUNT_KEY_DEVICE_REGISTRATION_VERSION,
+        Integer.toString(deviceRegistrationVersion));
+  }
+
+  @SuppressLint("ParcelCreator") // The CREATOR field is defined in the super class.
   private class ProfileResultReceiver extends ResultReceiver {
     public ProfileResultReceiver(Handler handler) {
       super(handler);

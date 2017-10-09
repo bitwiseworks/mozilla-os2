@@ -7,6 +7,7 @@
 #ifndef mozilla_dom_HTMLContentElement_h__
 #define mozilla_dom_HTMLContentElement_h__
 
+#include "nsAutoPtr.h"
 #include "nsINodeList.h"
 #include "nsGenericHTMLElement.h"
 
@@ -22,13 +23,22 @@ class HTMLContentElement final : public nsGenericHTMLElement
 public:
   explicit HTMLContentElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo);
 
-  NS_IMPL_FROMCONTENT_HTML_WITH_TAG(HTMLContentElement, content)
-
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
 
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(HTMLContentElement,
                                            nsGenericHTMLElement)
+
+  static HTMLContentElement* FromContent(nsIContent* aContent)
+  {
+    if (aContent->IsHTMLContentElement()) {
+      return static_cast<HTMLContentElement*>(aContent);
+    }
+
+    return nullptr;
+  }
+
+  virtual bool IsHTMLContentElement() const override { return true; }
 
   virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const override;
 

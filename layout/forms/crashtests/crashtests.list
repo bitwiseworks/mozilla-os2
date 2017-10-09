@@ -44,7 +44,7 @@ load 455451-1.html
 load 457537-1.html
 load 457537-2.html
 load 478219-1.xhtml
-skip-if(B2G) load 498698-1.html # bug 833371
+load 498698-1.html
 load 513113-1.html
 load 538062-1.xhtml
 load 570624-1.html
@@ -55,6 +55,7 @@ load 639733.xhtml
 load 669767.html
 load 682684.xhtml
 load 865602.html
+load 893332-1.html
 load 944198.html
 load 949891.xhtml
 load 959311.html
@@ -65,3 +66,4 @@ load 1140216.html
 load 1182414.html
 load 1212688.html
 load 1228670.xhtml
+load 1279354.html

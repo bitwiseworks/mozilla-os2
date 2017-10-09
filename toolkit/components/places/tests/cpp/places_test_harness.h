@@ -269,7 +269,7 @@ do_get_place(nsIURI* aURI, PlaceRecord& result)
 
   rv = dbConn->CreateStatement(NS_LITERAL_CSTRING(
     "SELECT id, hidden, typed, visit_count, guid FROM moz_places "
-    "WHERE url=?1 "
+    "WHERE url_hash = hash(?1) AND url = ?1"
   ), getter_AddRefs(stmt));
   do_check_success(rv);
 
@@ -388,7 +388,7 @@ public:
       do_GetService(NS_OBSERVERSERVICE_CONTRACTID);
     MOZ_ASSERT(os);
     if (os) {
-      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(os->AddObserver(this, TOPIC_PROFILE_CHANGE, false)));
+      MOZ_ALWAYS_SUCCEEDS(os->AddObserver(this, TOPIC_PROFILE_CHANGE, false));
     }
     mSpinner = new WaitForTopicSpinner(TOPIC_PLACES_CONNECTION_CLOSED);
   }
@@ -401,7 +401,7 @@ public:
       do_GetService(NS_OBSERVERSERVICE_CONTRACTID);
     MOZ_ASSERT(os);
     if (os) {
-      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(os->RemoveObserver(this, aTopic)));
+      MOZ_ALWAYS_SUCCEEDS(os->RemoveObserver(this, aTopic));
     }
 
     mSpinner->Spin();

@@ -12,7 +12,6 @@
 #include "nsIAtom.h"
 #include "nsIDocument.h"
 #include "nsThreadUtils.h"
-#include "nsAutoPtr.h"
 
 class nsIURI;
 
@@ -37,7 +36,9 @@ class nsReferencedElement {
 public:
   typedef mozilla::dom::Element Element;
 
-  nsReferencedElement() {}
+  nsReferencedElement()
+    : mReferencingImage(false)
+  {}
   ~nsReferencedElement() {
     Unlink();
   }
@@ -123,7 +124,7 @@ private:
     nsReferencedElement* mTarget;
   };
 
-  class ChangeNotification : public nsRunnable,
+  class ChangeNotification : public mozilla::Runnable,
                              public Notification
   {
   public:

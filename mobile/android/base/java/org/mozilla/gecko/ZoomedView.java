@@ -6,6 +6,7 @@
 package org.mozilla.gecko;
 
 import org.mozilla.gecko.animation.ViewHelper;
+import org.mozilla.gecko.annotation.WrapForJNI;
 import org.mozilla.gecko.gfx.ImmutableViewportMetrics;
 import org.mozilla.gecko.gfx.LayerView;
 import org.mozilla.gecko.gfx.PanZoomController;
@@ -66,8 +67,7 @@ public class ZoomedView extends FrameLayout implements LayerView.DynamicToolbarL
     private int currentZoomFactorIndex;
     private boolean isSimplifiedUI;
     private int defaultZoomFactor;
-    private int prefDefaultZoomFactorObserverId;
-    private int prefSimplifiedUIObserverId;
+    private PrefsHelper.PrefHandler prefObserver;
 
     private ImageView zoomedImageView;
     private LayerView layerView;
@@ -161,8 +161,7 @@ public class ZoomedView extends FrameLayout implements LayerView.DynamicToolbarL
                     dragged = false;
                 } else {
                     if (isClickInZoomedView(event.getY())) {
-                        GeckoEvent eClickInZoomedView = GeckoEvent.createBroadcastEvent("Gesture:ClickInZoomedView", "");
-                        GeckoAppShell.sendEventToGecko(eClickInZoomedView);
+                        GeckoAppShell.notifyObservers("Gesture:ClickInZoomedView", "");
                         layerView.dispatchTouchEvent(actionDownEvent);
                         actionDownEvent.recycle();
                         PointF convertedPosition = getUnzoomedPositionFromPointInZoomedView(event.getX(), event.getY());
@@ -241,17 +240,19 @@ public class ZoomedView extends FrameLayout implements LayerView.DynamicToolbarL
             }
         };
         touchListener = new ZoomedViewTouchListener();
-        EventDispatcher.getInstance().registerGeckoThreadListener(this,
+        GeckoApp.getEventDispatcher().registerGeckoThreadListener(this,
                 "Gesture:clusteredLinksClicked", "Window:Resize", "Content:LocationChange",
                 "Gesture:CloseZoomedView", "Browser:ZoomToPageWidth", "Browser:ZoomToRect",
                 "FormAssist:AutoComplete", "FormAssist:Hide");
     }
 
     void destroy() {
-        PrefsHelper.removeObserver(prefDefaultZoomFactorObserverId);
-        PrefsHelper.removeObserver(prefSimplifiedUIObserverId);
+        if (prefObserver != null) {
+            PrefsHelper.removeObserver(prefObserver);
+            prefObserver = null;
+        }
         ThreadUtils.removeCallbacksFromUiThread(requestRenderRunnable);
-        EventDispatcher.getInstance().unregisterGeckoThreadListener(this,
+        GeckoApp.getEventDispatcher().unregisterGeckoThreadListener(this,
                 "Gesture:clusteredLinksClicked", "Window:Resize", "Content:LocationChange",
                 "Gesture:CloseZoomedView", "Browser:ZoomToPageWidth", "Browser:ZoomToRect",
                 "FormAssist:AutoComplete", "FormAssist:Hide");
@@ -518,7 +519,7 @@ public class ZoomedView extends FrameLayout implements LayerView.DynamicToolbarL
     }
 
     private void getPrefs() {
-        prefSimplifiedUIObserverId = PrefsHelper.getPref("ui.zoomedview.simplified", new PrefsHelper.PrefHandlerBase() {
+        prefObserver = new PrefsHelper.PrefHandlerBase() {
             @Override
             public void prefValue(String pref, boolean simplified) {
                 isSimplifiedUI = simplified;
@@ -531,13 +532,6 @@ public class ZoomedView extends FrameLayout implements LayerView.DynamicToolbarL
             }
 
             @Override
-            public boolean isObserver() {
-                return true;
-            }
-        });
-
-        prefDefaultZoomFactorObserverId = PrefsHelper.getPref("ui.zoomedview.defaultZoomFactor", new PrefsHelper.PrefHandlerBase() {
-            @Override
             public void prefValue(String pref, int defaultZoomFactorFromSettings) {
                 defaultZoomFactor = defaultZoomFactorFromSettings;
                 if (isSimplifiedUI) {
@@ -547,12 +541,10 @@ public class ZoomedView extends FrameLayout implements LayerView.DynamicToolbarL
                 }
                 updateUI();
             }
-
-            @Override
-            public boolean isObserver() {
-                return true;
-            }
-        });
+        };
+        PrefsHelper.addObserver(new String[] { "ui.zoomedview.simplified",
+                                               "ui.zoomedview.defaultZoomFactor" },
+                                prefObserver);
     }
 
     private void startZoomDisplay(LayerView aLayerView, final int leftFromGecko, final int topFromGecko) {
@@ -615,7 +607,7 @@ public class ZoomedView extends FrameLayout implements LayerView.DynamicToolbarL
     }
 
     private void setTextInZoomFactorButton(float zoom) {
-        final String percentageValue = Integer.toString((int) (100*zoom));
+        final String percentageValue = Integer.toString((int) (100 * zoom));
         changeZoomFactorButton.setText("- " + getResources().getString(R.string.percent, percentageValue) + " +");
     }
 
@@ -787,6 +779,11 @@ public class ZoomedView extends FrameLayout implements LayerView.DynamicToolbarL
         return ((System.nanoTime() - lastStartTimeReRender) < MINIMUM_DELAY_BETWEEN_TWO_RENDER_CALLS_NS);
     }
 
+    @WrapForJNI(dispatchTo = "gecko")
+    private static native void requestZoomedViewData(ByteBuffer buffer, int tabId,
+                                                     int xPos, int yPos, int width,
+                                                     int height, float scale);
+
     @Override
     public void requestZoomedViewRender() {
         if (stopUpdateView) {
@@ -834,9 +831,8 @@ public class ZoomedView extends FrameLayout implements LayerView.DynamicToolbarL
         final int xPos = (int)origin.x + lastPosition.x;
         final int yPos = (int)origin.y + lastPosition.y;
 
-        GeckoEvent e = GeckoEvent.createZoomedViewEvent(tabId, xPos, yPos, viewWidth,
-                viewHeight, zoomFactor * metrics.zoomFactor, buffer);
-        GeckoAppShell.sendEventToGecko(e);
+        requestZoomedViewData(buffer, tabId, xPos, yPos, viewWidth, viewHeight,
+                              zoomFactor * metrics.zoomFactor);
     }
 
 }

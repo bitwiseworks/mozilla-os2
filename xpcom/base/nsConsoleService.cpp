@@ -121,14 +121,14 @@ nsConsoleService::~nsConsoleService()
   ClearMessages();
 }
 
-class AddConsolePrefWatchers : public nsRunnable
+class AddConsolePrefWatchers : public Runnable
 {
 public:
   explicit AddConsolePrefWatchers(nsConsoleService* aConsole) : mConsole(aConsole)
   {
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     Preferences::AddBoolVarCache(&sLoggingEnabled, "consoleservice.enabled", true);
     Preferences::AddBoolVarCache(&sLoggingBuffered, "consoleservice.buffered", true);
@@ -161,7 +161,7 @@ nsConsoleService::Init()
 
 namespace {
 
-class LogMessageRunnable : public nsRunnable
+class LogMessageRunnable : public Runnable
 {
 public:
   LogMessageRunnable(nsIConsoleMessage* aMessage, nsConsoleService* aService)
@@ -317,7 +317,7 @@ nsConsoleService::LogMessageWithMode(nsIConsoleMessage* aMessage,
     // Release |retiredMessage| on the main thread in case it is an instance of
     // a mainthread-only class like nsScriptErrorWithStack and we're off the
     // main thread.
-    NS_ReleaseOnMainThread(retiredMessage);
+    NS_ReleaseOnMainThread(retiredMessage.forget());
   }
 
   if (r) {
@@ -386,7 +386,7 @@ nsConsoleService::GetMessageArray(uint32_t* aCount,
     nsCOMPtr<nsIConsoleMessage> m = e->Get();
     m.forget(&messageArray[i]);
     i++;
-  };
+  }
 
   MOZ_ASSERT(i == mCurrentSize);
 
@@ -463,7 +463,7 @@ nsConsoleService::Observe(nsISupports* aSubject, const char* aTopic,
     MOZ_ASSERT(supportsInt);
 
     uint64_t windowId;
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(supportsInt->GetData(&windowId)));
+    MOZ_ALWAYS_SUCCEEDS(supportsInt->GetData(&windowId));
 
     ClearMessagesForWindowID(windowId);
   } else {

@@ -11,6 +11,8 @@
  * features greater than JavaScript 1.7.
  */
 
+/* eslint-disable no-undef */
+
 const FILE_SIMPLE_MAR = "simple.mar";
 const SIZE_SIMPLE_MAR = "1031";
 const MD5_HASH_SIMPLE_MAR    = "1f8c038577bb6845d94ccec4999113ee";
@@ -35,14 +37,23 @@ const STATE_SUCCEEDED       = "succeeded";
 const STATE_DOWNLOAD_FAILED = "download-failed";
 const STATE_FAILED          = "failed";
 
-const LOADSOURCE_ERROR_WRONG_SIZE      = 2;
-const CRC_ERROR                        = 4;
-const READ_ERROR                       = 6;
-const WRITE_ERROR                      = 7;
-const MAR_CHANNEL_MISMATCH_ERROR       = 22;
-const VERSION_DOWNGRADE_ERROR          = 23;
-const INVALID_APPLYTO_DIR_STAGED_ERROR = 72;
-const INVALID_APPLYTO_DIR_ERROR        = 74;
+const LOADSOURCE_ERROR_WRONG_SIZE              = 2;
+const CRC_ERROR                                = 4;
+const READ_ERROR                               = 6;
+const WRITE_ERROR                              = 7;
+const MAR_CHANNEL_MISMATCH_ERROR               = 22;
+const VERSION_DOWNGRADE_ERROR                  = 23;
+const SERVICE_COULD_NOT_COPY_UPDATER           = 49;
+const SERVICE_INVALID_APPLYTO_DIR_STAGED_ERROR = 52;
+const SERVICE_INVALID_APPLYTO_DIR_ERROR        = 54;
+const SERVICE_INVALID_INSTALL_DIR_PATH_ERROR   = 55;
+const SERVICE_INVALID_WORKING_DIR_PATH_ERROR   = 56;
+const INVALID_APPLYTO_DIR_STAGED_ERROR         = 72;
+const INVALID_APPLYTO_DIR_ERROR                = 74;
+const INVALID_INSTALL_DIR_PATH_ERROR           = 75;
+const INVALID_WORKING_DIR_PATH_ERROR           = 76;
+const INVALID_CALLBACK_PATH_ERROR              = 77;
+const INVALID_CALLBACK_DIR_ERROR               = 78;
 
 const STATE_FAILED_DELIMETER = ": ";
 
@@ -58,10 +69,28 @@ const STATE_FAILED_MAR_CHANNEL_MISMATCH_ERROR =
   STATE_FAILED + STATE_FAILED_DELIMETER + MAR_CHANNEL_MISMATCH_ERROR;
 const STATE_FAILED_VERSION_DOWNGRADE_ERROR =
   STATE_FAILED + STATE_FAILED_DELIMETER + VERSION_DOWNGRADE_ERROR;
+const STATE_FAILED_SERVICE_COULD_NOT_COPY_UPDATER =
+  STATE_FAILED + STATE_FAILED_DELIMETER + SERVICE_COULD_NOT_COPY_UPDATER
+const STATE_FAILED_SERVICE_INVALID_APPLYTO_DIR_STAGED_ERROR =
+  STATE_FAILED + STATE_FAILED_DELIMETER + SERVICE_INVALID_APPLYTO_DIR_STAGED_ERROR;
+const STATE_FAILED_SERVICE_INVALID_APPLYTO_DIR_ERROR =
+  STATE_FAILED + STATE_FAILED_DELIMETER + SERVICE_INVALID_APPLYTO_DIR_ERROR;
+const STATE_FAILED_SERVICE_INVALID_INSTALL_DIR_PATH_ERROR =
+  STATE_FAILED + STATE_FAILED_DELIMETER + SERVICE_INVALID_INSTALL_DIR_PATH_ERROR;
+const STATE_FAILED_SERVICE_INVALID_WORKING_DIR_PATH_ERROR =
+  STATE_FAILED + STATE_FAILED_DELIMETER + SERVICE_INVALID_WORKING_DIR_PATH_ERROR;
 const STATE_FAILED_INVALID_APPLYTO_DIR_STAGED_ERROR =
   STATE_FAILED + STATE_FAILED_DELIMETER + INVALID_APPLYTO_DIR_STAGED_ERROR;
 const STATE_FAILED_INVALID_APPLYTO_DIR_ERROR =
   STATE_FAILED + STATE_FAILED_DELIMETER + INVALID_APPLYTO_DIR_ERROR;
+const STATE_FAILED_INVALID_INSTALL_DIR_PATH_ERROR =
+  STATE_FAILED + STATE_FAILED_DELIMETER + INVALID_INSTALL_DIR_PATH_ERROR;
+const STATE_FAILED_INVALID_WORKING_DIR_PATH_ERROR =
+  STATE_FAILED + STATE_FAILED_DELIMETER + INVALID_WORKING_DIR_PATH_ERROR;
+const STATE_FAILED_INVALID_CALLBACK_PATH_ERROR =
+  STATE_FAILED + STATE_FAILED_DELIMETER + INVALID_CALLBACK_PATH_ERROR;
+const STATE_FAILED_INVALID_CALLBACK_DIR_ERROR =
+  STATE_FAILED + STATE_FAILED_DELIMETER + INVALID_CALLBACK_DIR_ERROR;
 
 /**
  * Constructs a string representing a remote update xml file.
@@ -86,16 +115,13 @@ function getRemoteUpdatesXMLString(aUpdates) {
  * @return The string representing an update element for an update xml file.
  */
 function getRemoteUpdateString(aPatches, aType, aName, aDisplayVersion,
-                               aAppVersion, aPlatformVersion, aBuildID,
-                               aDetailsURL, aBillboardURL, aLicenseURL,
-                               aShowPrompt, aShowNeverForVersion, aPromptWaitTime,
-                               aShowSurvey, aVersion, aExtensionVersion, aCustom1,
-                               aCustom2) {
+                               aAppVersion, aBuildID, aDetailsURL, aShowPrompt,
+                               aShowNeverForVersion, aPromptWaitTime,
+                               aBackgroundInterval, aCustom1, aCustom2) {
   return getUpdateString(aType, aName, aDisplayVersion, aAppVersion,
-                         aPlatformVersion, aBuildID, aDetailsURL,
-                         aBillboardURL, aLicenseURL, aShowPrompt,
-                         aShowNeverForVersion, aPromptWaitTime, aShowSurvey,
-                         aVersion, aExtensionVersion, aCustom1, aCustom2) + ">\n" +
+                         aBuildID, aDetailsURL, aShowPrompt,
+                         aShowNeverForVersion, aPromptWaitTime,
+                         aBackgroundInterval, aCustom1, aCustom2) + ">\n" +
               aPatches +
          "  </update>\n";
 }
@@ -120,11 +146,11 @@ function getRemotePatchString(aType, aURL, aHashFunction, aHashValue, aSize) {
  */
 function getLocalUpdatesXMLString(aUpdates) {
   if (!aUpdates || aUpdates == "") {
-    return "<updates xmlns=\"http://www.mozilla.org/2005/app-update\"/>"
+    return "<updates xmlns=\"http://www.mozilla.org/2005/app-update\"/>";
   }
   return ("<updates xmlns=\"http://www.mozilla.org/2005/app-update\">" +
             aUpdates +
-          "</updates>").replace(/>\s+\n*</g,'><');
+          "</updates>").replace(/>\s+\n*</g, '><');
 }
 
 /**
@@ -154,30 +180,27 @@ function getLocalUpdatesXMLString(aUpdates) {
  * @return The string representing an update element for an update xml file.
  */
 function getLocalUpdateString(aPatches, aType, aName, aDisplayVersion,
-                              aAppVersion, aPlatformVersion, aBuildID,
-                              aDetailsURL, aBillboardURL, aLicenseURL,
-                              aServiceURL, aInstallDate, aStatusText,
-                              aIsCompleteUpdate, aChannel, aForegroundDownload,
-                              aShowPrompt, aShowNeverForVersion, aPromptWaitTime,
-                              aShowSurvey, aVersion, aExtensionVersion,
-                              aPreviousAppVersion, aCustom1, aCustom2) {
+                              aAppVersion, aBuildID, aDetailsURL, aServiceURL,
+                              aInstallDate, aStatusText, aIsCompleteUpdate,
+                              aChannel, aForegroundDownload, aShowPrompt,
+                              aShowNeverForVersion, aPromptWaitTime,
+                              aBackgroundInterval, aPreviousAppVersion,
+                              aCustom1, aCustom2) {
   let serviceURL = aServiceURL ? aServiceURL : "http://test_service/";
   let installDate = aInstallDate ? aInstallDate : "1238441400314";
   let statusText = aStatusText ? aStatusText : "Install Pending";
   let isCompleteUpdate =
-    typeof(aIsCompleteUpdate) == "string" ? aIsCompleteUpdate : "true";
+    typeof aIsCompleteUpdate == "string" ? aIsCompleteUpdate : "true";
   let channel = aChannel ? aChannel
                          : gDefaultPrefBranch.getCharPref(PREF_APP_UPDATE_CHANNEL);
   let foregroundDownload =
-    typeof(aForegroundDownload) == "string" ? aForegroundDownload : "true";
+    typeof aForegroundDownload == "string" ? aForegroundDownload : "true";
   let previousAppVersion = aPreviousAppVersion ? "previousAppVersion=\"" +
                                                  aPreviousAppVersion + "\" "
                                                : "";
-  return getUpdateString(aType, aName, aDisplayVersion, aAppVersion,
-                         aPlatformVersion, aBuildID, aDetailsURL, aBillboardURL,
-                         aLicenseURL, aShowPrompt, aShowNeverForVersion,
-                         aPromptWaitTime, aShowSurvey, aVersion, aExtensionVersion,
-                         aCustom1, aCustom2) +
+  return getUpdateString(aType, aName, aDisplayVersion, aAppVersion, aBuildID,
+                         aDetailsURL, aShowPrompt, aShowNeverForVersion,
+                         aPromptWaitTime, aBackgroundInterval, aCustom1, aCustom2) +
                    " " +
                    previousAppVersion +
                    "serviceURL=\"" + serviceURL + "\" " +
@@ -185,7 +208,7 @@ function getLocalUpdateString(aPatches, aType, aName, aDisplayVersion,
                    "statusText=\"" + statusText + "\" " +
                    "isCompleteUpdate=\"" + isCompleteUpdate + "\" " +
                    "channel=\"" + channel + "\" " +
-                   "foregroundDownload=\"" + foregroundDownload + "\">"  +
+                   "foregroundDownload=\"" + foregroundDownload + "\">" +
               aPatches +
          "  </update>";
 }
@@ -205,7 +228,7 @@ function getLocalUpdateString(aPatches, aType, aName, aDisplayVersion,
  */
 function getLocalPatchString(aType, aURL, aHashFunction, aHashValue, aSize,
                              aSelected, aState) {
-  let selected = typeof(aSelected) == "string" ? aSelected : "true";
+  let selected = typeof aSelected == "string" ? aSelected : "true";
   let state = aState ? aState : STATE_SUCCEEDED;
   return getPatchString(aType, aURL, aHashFunction, aHashValue, aSize) + " " +
          "selected=\"" + selected + "\" " +
@@ -230,10 +253,6 @@ function getLocalPatchString(aType, aURL, aHashFunction, aHashValue, aSize,
  *         The update's application version.
  *         If not specified it will default to the value of
  *         DEFAULT_UPDATE_VERSION.
- * @param  aPlatformVersion (optional)
- *         The update's platform version.
- *         If not specified it will default to the value of
- *         DEFAULT_UPDATE_VERSION.
  * @param  aBuildID (optional)
  *         The update's build id.
  *         If not specified it will default to '20080811053724'.
@@ -241,12 +260,6 @@ function getLocalPatchString(aType, aURL, aHashFunction, aHashValue, aSize,
  *         The update's details url.
  *         If not specified it will default to 'http://test_details/' due to due
  *         to bug 470244.
- * @param  aBillboardURL (optional)
- *         The update's billboard url.
- *         If not specified it will not be present.
- * @param  aLicenseURL (optional)
- *         The update's license url.
- *         If not specified it will not be present.
  * @param  aShowPrompt (optional)
  *         Whether to show the prompt for the update when auto update is
  *         enabled.
@@ -258,16 +271,8 @@ function getLocalPatchString(aType, aURL, aHashFunction, aHashValue, aSize,
  *         default to false.
  * @param  aPromptWaitTime (optional)
  *         Override for the app.update.promptWaitTime preference.
- * @param  aShowSurvey (optional)
- *         Whether to show the 'No Thanks' button in the update prompt.
- *         If not specified it will not be present and the update service will
- *         default to false.
- * @param  aVersion (optional)
- *         The update's application version from 1.9.2.
- *         If not specified it will not be present.
- * @param  aExtensionVersion (optional)
- *         The update's application version from 1.9.2.
- *         If not specified it will not be present.
+ * @param  aBackgroundInterval (optional)
+ *         Override for the app.update.download.backgroundInterval preference.
  * @param  aCustom1 (optional)
  *         A custom attribute name and attribute value to add to the xml.
  *         Example: custom1_attribute="custom1 value"
@@ -278,49 +283,24 @@ function getLocalPatchString(aType, aURL, aHashFunction, aHashValue, aSize,
  *         If not specified it will not be present.
  * @return The string representing an update element for an update xml file.
  */
-function getUpdateString(aType, aName, aDisplayVersion, aAppVersion,
-                         aPlatformVersion, aBuildID, aDetailsURL, aBillboardURL,
-                         aLicenseURL, aShowPrompt, aShowNeverForVersion,
-                         aPromptWaitTime, aShowSurvey, aVersion, aExtensionVersion,
-                         aCustom1, aCustom2) {
+function getUpdateString(aType, aName, aDisplayVersion, aAppVersion, aBuildID,
+                         aDetailsURL, aShowPrompt, aShowNeverForVersion,
+                         aPromptWaitTime, aBackgroundInterval, aCustom1,
+                         aCustom2) {
   let type = aType ? aType : "major";
   let name = aName ? aName : "App Update Test";
-  let displayVersion = "";
-  if (aDisplayVersion || !aVersion) {
-    displayVersion = "displayVersion=\"" +
-                     (aDisplayVersion ? aDisplayVersion
-                                      : "version " + DEFAULT_UPDATE_VERSION) +
-                     "\" ";
-  }
-  // version has been deprecated in favor of displayVersion but it still needs
-  // to be tested for forward compatibility.
-  let version = aVersion ? "version=\"" + aVersion + "\" " : "";
-  let appVersion = "";
-  if (aAppVersion || !aExtensionVersion) {
-    appVersion = "appVersion=\"" +
-                 (aAppVersion ? aAppVersion : DEFAULT_UPDATE_VERSION) +
-                 "\" ";
-  }
-  // extensionVersion has been deprecated in favor of appVersion but it still
-  // needs to be tested for forward compatibility.
-  let extensionVersion = aExtensionVersion ? "extensionVersion=\"" +
-                                             aExtensionVersion + "\" "
-                                           : "";
-  let platformVersion = "";
-  if (aPlatformVersion) {
-    platformVersion = "platformVersion=\"" +
-                      (aPlatformVersion ? aPlatformVersion
-                                        : DEFAULT_UPDATE_VERSION) + "\" ";
-  }
+  let displayVersion = aDisplayVersion ? "displayVersion=\"" +
+                                         aDisplayVersion + "\" "
+                                       : "";
+  let appVersion = "appVersion=\"" +
+                   (aAppVersion ? aAppVersion : DEFAULT_UPDATE_VERSION) +
+                   "\" ";
   let buildID = aBuildID ? aBuildID : "20080811053724";
   // XXXrstrong - not specifying a detailsURL will cause a leak due to bug 470244
 //   let detailsURL = aDetailsURL ? "detailsURL=\"" + aDetailsURL + "\" " : "";
   let detailsURL = "detailsURL=\"" +
                    (aDetailsURL ? aDetailsURL
                                 : "http://test_details/") + "\" ";
-  let billboardURL = aBillboardURL ? "billboardURL=\"" + aBillboardURL + "\" "
-                                   : "";
-  let licenseURL = aLicenseURL ? "licenseURL=\"" + aLicenseURL + "\" " : "";
   let showPrompt = aShowPrompt ? "showPrompt=\"" + aShowPrompt + "\" " : "";
   let showNeverForVersion = aShowNeverForVersion ? "showNeverForVersion=\"" +
                                                    aShowNeverForVersion + "\" "
@@ -328,21 +308,20 @@ function getUpdateString(aType, aName, aDisplayVersion, aAppVersion,
   let promptWaitTime = aPromptWaitTime ? "promptWaitTime=\"" + aPromptWaitTime +
                                          "\" "
                                        : "";
+  let backgroundInterval = aBackgroundInterval ? "backgroundInterval=\"" +
+                                                 aBackgroundInterval + "\" "
+                                               : "";
   let custom1 = aCustom1 ? aCustom1 + " " : "";
   let custom2 = aCustom2 ? aCustom2 + " " : "";
   return "  <update type=\"" + type + "\" " +
                    "name=\"" + name + "\" " +
                     displayVersion +
-                    version +
                     appVersion +
-                    extensionVersion +
-                    platformVersion +
                     detailsURL +
-                    billboardURL +
-                    licenseURL +
                     showPrompt +
                     showNeverForVersion +
                     promptWaitTime +
+                    backgroundInterval +
                     custom1 +
                     custom2 +
                    "buildID=\"" + buildID + "\"";

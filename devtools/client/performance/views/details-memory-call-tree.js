@@ -3,6 +3,7 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 /* import-globals-from ../performance-controller.js */
 /* import-globals-from ../performance-view.js */
+/* globals DetailsSubview */
 "use strict";
 
 /**
@@ -14,7 +15,8 @@ var MemoryCallTreeView = Heritage.extend(DetailsSubview, {
     "invert-call-tree"
   ],
 
-  rangeChangeDebounceTime: 100, // ms
+  // Units are in milliseconds.
+  rangeChangeDebounceTime: 100,
 
   /**
    * Sets up the view with event binding.
@@ -40,7 +42,7 @@ var MemoryCallTreeView = Heritage.extend(DetailsSubview, {
    * @param object interval [optional]
    *        The { startTime, endTime }, in milliseconds.
    */
-  render: function (interval={}) {
+  render: function (interval = {}) {
     let options = {
       invertTree: PerformanceController.getOption("invert-call-tree")
     };
@@ -48,7 +50,7 @@ var MemoryCallTreeView = Heritage.extend(DetailsSubview, {
     let allocations = recording.getAllocations();
     let threadNode = this._prepareCallTree(allocations, interval, options);
     this._populateCallTree(threadNode, options);
-    this.emit(EVENTS.MEMORY_CALL_TREE_RENDERED);
+    this.emit(EVENTS.UI_MEMORY_CALL_TREE_RENDERED);
   },
 
   /**
@@ -79,7 +81,7 @@ var MemoryCallTreeView = Heritage.extend(DetailsSubview, {
   /**
    * Renders the call tree.
    */
-  _populateCallTree: function (frameNode, options={}) {
+  _populateCallTree: function (frameNode, options = {}) {
     // If we have an empty profile (no samples), then don't invert the tree, as
     // it would hide the root node and a completely blank call tree space can be
     // mis-interpreted as an error.

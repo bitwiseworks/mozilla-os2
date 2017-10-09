@@ -26,6 +26,8 @@
 
 #include "jit/arm64/vixl/MacroAssembler-vixl.h"
 
+#include <ctype.h>
+
 namespace vixl {
 
 MacroAssembler::MacroAssembler()
@@ -1564,11 +1566,14 @@ void MacroAssembler::Claim(const Operand& size) {
     }
   }
 
-  if (!sp.Is(GetStackPointer64())) {
-    BumpSystemStackPointer(size);
-  }
-
   Sub(GetStackPointer64(), GetStackPointer64(), size);
+
+  // Make sure the real stack pointer reflects the claimed stack space.
+  // We can't use stack memory below the stack pointer, it could be clobbered by
+  // interupts and signal handlers.
+  if (!sp.Is(GetStackPointer64())) {
+    Mov(sp, GetStackPointer64());
+  }
 }
 
 

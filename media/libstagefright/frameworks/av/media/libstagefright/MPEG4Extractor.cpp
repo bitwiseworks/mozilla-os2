@@ -25,9 +25,11 @@
 
 #include <algorithm>
 #include <ctype.h>
+#include <limits>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <type_traits>
 
 #include <media/stagefright/foundation/ABitReader.h>
 #include <media/stagefright/foundation/ABuffer.h>
@@ -37,12 +39,39 @@
 #include <media/stagefright/MediaDefs.h>
 #include <media/stagefright/MediaSource.h>
 #include <media/stagefright/MetaData.h>
-#include <utils/String8.h>
 
 static const uint32_t kMAX_ALLOCATION =
     (SIZE_MAX < INT32_MAX ? SIZE_MAX : INT32_MAX) - 128;
 
 namespace stagefright {
+
+static const int64_t OVERFLOW_ERROR = -INT64_MAX;
+
+// Calculate units*1,000,000/hz, trying to avoid overflow.
+// Return OVERFLOW_ERROR in case of unavoidable overflow, or div by hz==0.
+int64_t unitsToUs(int64_t units, int64_t hz) {
+    if (hz == 0) {
+        return OVERFLOW_ERROR;
+    }
+    const int64_t MAX_S = INT64_MAX / 1000000;
+    if (std::abs(units) <= MAX_S) {
+        return units * 1000000 / hz;
+    }
+    // Hard case, avoid overflow-inducing 'units*1M' by calculating:
+    // (units / hz) * 1M + ((units % hz) * 1M) / hz.
+    //              ^--  ^--             ^-- overflows still possible
+    int64_t units_div_hz = units / hz;
+    int64_t units_rem_hz = units % hz;
+    if (std::abs(units_div_hz) > MAX_S || std::abs(units_rem_hz) > MAX_S) {
+        return OVERFLOW_ERROR;
+    }
+    int64_t quot_us = units_div_hz * 1000000;
+    int64_t rem_us = (units_rem_hz * 1000000) / hz;
+    if (std::abs(quot_us) > INT64_MAX - std::abs(rem_us)) {
+        return OVERFLOW_ERROR;
+    }
+    return quot_us + rem_us;
+}
 
 class MPEG4Source : public MediaSource {
 public:
@@ -623,24 +652,6 @@ static bool underMetaDataPath(const nsTArray<uint32_t> &path) {
         && path[3] == FOURCC('i', 'l', 's', 't');
 }
 
-// Given a time in seconds since Jan 1 1904, produce a human-readable string.
-static bool convertTimeToDate(int64_t time_1904, String8 *s) {
-    if (!s) {
-        return false;
-    }
-
-    time_t time_1970 = time_1904 - (((66 * 365 + 17) * 24) * 3600);
-    if (time_1970 < 0) {
-        return false;
-    }
-
-    char tmp[32];
-    strftime(tmp, sizeof(tmp), "%Y%m%dT%H%M%S.000Z", gmtime(&time_1970));
-
-    s->setTo(tmp);
-    return true;
-}
-
 static bool ValidInputSize(int32_t size) {
   // Reject compressed samples larger than an uncompressed UHD
   // frame. This is a reasonable cut-off for a lossy codec,
@@ -854,6 +865,7 @@ status_t MPEG4Extractor::parseChunk(off64_t *offset, int depth) {
             }
 
             off64_t entriesoffset = data_offset + 8;
+            bool nonEmptyCount = false;
             for (uint32_t i = 0; i < entry_count; i++) {
                 if (mHeaderTimescale == 0) {
                     ALOGW("ignoring edit list because timescale is 0");
@@ -895,11 +907,14 @@ status_t MPEG4Extractor::parseChunk(off64_t *offset, int depth) {
                     }
                     mLastTrack->empty_duration = segment_duration;
                     continue;
-                } else if (i > 1) {
+                } else if (nonEmptyCount) {
                     // we only support a single non-empty entry at the moment, for gapless playback
                     ALOGW("multiple edit list entries, A/V sync will be wrong");
                     break;
+                } else {
+                    nonEmptyCount = true;
                 }
+
                 if (!mLastTrack) {
                   return ERROR_MALFORMED;
                 }
@@ -1078,6 +1093,9 @@ status_t MPEG4Extractor::parseChunk(off64_t *offset, int depth) {
               return ERROR_MALFORMED;
             }
             mLastTrack->timescale = ntohl(timescale);
+            if (!mLastTrack->timescale) {
+                return ERROR_MALFORMED;
+            }
 
             // Now that we've parsed the media timescale, we can interpret
             // the edit list data.
@@ -1090,7 +1108,12 @@ status_t MPEG4Extractor::parseChunk(off64_t *offset, int depth) {
                         < (ssize_t)sizeof(duration)) {
                     return ERROR_IO;
                 }
-                duration = ntoh64(duration);
+                // Avoid duration sets to -1, which is incorrect.
+                if (duration != -1) {
+                    duration = ntoh64(duration);
+                } else {
+                    duration = 0;
+                }
             } else {
                 uint32_t duration32;
                 if (mDataSource->readAt(
@@ -1101,13 +1124,18 @@ status_t MPEG4Extractor::parseChunk(off64_t *offset, int depth) {
                 // ffmpeg sets duration to -1, which is incorrect.
                 if (duration32 != 0xffffffff) {
                     duration = ntohl(duration32);
+                } else {
+                  duration = 0;
                 }
             }
-            if (!mLastTrack->timescale) {
+            if (duration < 0) {
                 return ERROR_MALFORMED;
             }
-            mLastTrack->meta->setInt64(
-                    kKeyDuration, (duration * 1000000) / mLastTrack->timescale);
+            int64_t duration_us = unitsToUs(duration, mLastTrack->timescale);
+            if (duration_us == OVERFLOW_ERROR) {
+                return ERROR_MALFORMED;
+            }
+            mLastTrack->meta->setInt64(kKeyDuration, duration_us);
 
             uint8_t lang[2];
             off64_t lang_offset;
@@ -1190,9 +1218,8 @@ status_t MPEG4Extractor::parseChunk(off64_t *offset, int depth) {
                 }
             }
 
-            if (*offset != stop_offset) {
-                return ERROR_MALFORMED;
-            }
+            // Some muxers add some padding after the stsd content. Skip it.
+            *offset = stop_offset;
             break;
         }
 
@@ -1770,20 +1797,12 @@ status_t MPEG4Extractor::parseChunk(off64_t *offset, int depth) {
                 return ERROR_IO;
             }
 
-            uint64_t creationTime;
             if (header[0] == 1) {
-                creationTime = U64_AT(&header[4]);
                 mHeaderTimescale = U32_AT(&header[20]);
             } else if (header[0] != 0) {
                 return ERROR_MALFORMED;
             } else {
-                creationTime = U32_AT(&header[4]);
                 mHeaderTimescale = U32_AT(&header[12]);
-            }
-
-            String8 s;
-            if (convertTimeToDate(creationTime, &s)) {
-                mFileMetaData->setCString(kKeyDate, s.string());
             }
 
             *offset += chunk_size;
@@ -1822,9 +1841,15 @@ status_t MPEG4Extractor::parseChunk(off64_t *offset, int depth) {
                 }
                 duration = ntohl(duration32);
             }
+            if (duration < 0) {
+                return ERROR_MALFORMED;
+            }
+            int64_t duration_us = unitsToUs(duration, mHeaderTimescale);
+            if (duration_us == OVERFLOW_ERROR) {
+                return ERROR_MALFORMED;
+            }
             if (duration && mHeaderTimescale) {
-                mFileMetaData->setInt64(
-                        kKeyMovieDuration, (duration * 1000000) / mHeaderTimescale);
+                mFileMetaData->setInt64(kKeyMovieDuration, duration_us);
             }
 
             *offset += chunk_size;
@@ -1989,11 +2014,21 @@ void MPEG4Extractor::storeEditList()
     return;
   }
 
-  uint64_t segment_duration = (mLastTrack->segment_duration * 1000000) / mHeaderTimescale;
+  if (mLastTrack->segment_duration > uint64_t(INT64_MAX) ||
+      mLastTrack->empty_duration > uint64_t(INT64_MAX)) {
+    return;
+  }
+  uint64_t segment_duration =
+    uint64_t(unitsToUs(mLastTrack->segment_duration, mHeaderTimescale));
   // media_time is measured in media time scale units.
-  int64_t media_time = (mLastTrack->media_time * 1000000) / mLastTrack->timescale;
+  int64_t media_time = unitsToUs(mLastTrack->media_time, mLastTrack->timescale);
   // empty_duration is in the Movie Header Box's timescale.
-  int64_t empty_duration = (mLastTrack->empty_duration * 1000000) / mHeaderTimescale;
+  int64_t empty_duration = unitsToUs(mLastTrack->empty_duration, mHeaderTimescale);
+  if (segment_duration == OVERFLOW_ERROR ||
+      media_time == OVERFLOW_ERROR ||
+      empty_duration == OVERFLOW_ERROR) {
+    return;
+  }
   media_time -= empty_duration;
   mLastTrack->meta->setInt64(kKeyMediaTime, media_time);
 
@@ -2094,7 +2129,7 @@ status_t MPEG4Extractor::parseSegmentIndex(off64_t offset, size_t size) {
         return -EINVAL;
     }
 
-    uint64_t total_duration = 0;
+    int64_t total_duration = 0;
     for (unsigned int i = 0; i < referenceCount; i++) {
         uint32_t d1, d2, d3;
 
@@ -2117,11 +2152,18 @@ status_t MPEG4Extractor::parseSegmentIndex(off64_t offset, size_t size) {
         ALOGV(" item %d, %08x %08x %08x", i, d1, d2, d3);
         SidxEntry se;
         se.mSize = d1 & 0x7fffffff;
-        se.mDurationUs = 1000000LL * d2 / timeScale;
+        int64_t durationUs = unitsToUs(d2, timeScale);
+        if (durationUs == OVERFLOW_ERROR || durationUs > int64_t(UINT32_MAX)) {
+          return ERROR_MALFORMED;
+        }
+        se.mDurationUs = uint32_t(durationUs);
         mSidxEntries.AppendElement(se);
     }
 
-    mSidxDuration = total_duration * 1000000 / timeScale;
+    mSidxDuration = unitsToUs(total_duration, timeScale);
+    if (mSidxDuration == OVERFLOW_ERROR) {
+      return ERROR_MALFORMED;
+    }
     ALOGV("duration: %lld", mSidxDuration);
 
     if (!mLastTrack) {
@@ -2489,6 +2531,58 @@ status_t MPEG4Extractor::verifyTrack(Track *track) {
     return OK;
 }
 
+typedef enum {
+    //AOT_NONE             = -1,
+    //AOT_NULL_OBJECT      = 0,
+    //AOT_AAC_MAIN         = 1, /**< Main profile                              */
+    AOT_AAC_LC           = 2,   /**< Low Complexity object                     */
+    //AOT_AAC_SSR          = 3,
+    //AOT_AAC_LTP          = 4,
+    AOT_SBR              = 5,
+    //AOT_AAC_SCAL         = 6,
+    //AOT_TWIN_VQ          = 7,
+    //AOT_CELP             = 8,
+    //AOT_HVXC             = 9,
+    //AOT_RSVD_10          = 10, /**< (reserved)                                */
+    //AOT_RSVD_11          = 11, /**< (reserved)                                */
+    //AOT_TTSI             = 12, /**< TTSI Object                               */
+    //AOT_MAIN_SYNTH       = 13, /**< Main Synthetic object                     */
+    //AOT_WAV_TAB_SYNTH    = 14, /**< Wavetable Synthesis object                */
+    //AOT_GEN_MIDI         = 15, /**< General MIDI object                       */
+    //AOT_ALG_SYNTH_AUD_FX = 16, /**< Algorithmic Synthesis and Audio FX object */
+    AOT_ER_AAC_LC        = 17,   /**< Error Resilient(ER) AAC Low Complexity    */
+    //AOT_RSVD_18          = 18, /**< (reserved)                                */
+    //AOT_ER_AAC_LTP       = 19, /**< Error Resilient(ER) AAC LTP object        */
+    AOT_ER_AAC_SCAL      = 20,   /**< Error Resilient(ER) AAC Scalable object   */
+    //AOT_ER_TWIN_VQ       = 21, /**< Error Resilient(ER) TwinVQ object         */
+    AOT_ER_BSAC          = 22,   /**< Error Resilient(ER) BSAC object           */
+    AOT_ER_AAC_LD        = 23,   /**< Error Resilient(ER) AAC LowDelay object   */
+    //AOT_ER_CELP          = 24, /**< Error Resilient(ER) CELP object           */
+    //AOT_ER_HVXC          = 25, /**< Error Resilient(ER) HVXC object           */
+    //AOT_ER_HILN          = 26, /**< Error Resilient(ER) HILN object           */
+    //AOT_ER_PARA          = 27, /**< Error Resilient(ER) Parametric object     */
+    //AOT_RSVD_28          = 28, /**< might become SSC                          */
+    AOT_PS               = 29,   /**< PS, Parametric Stereo (includes SBR)      */
+    //AOT_MPEGS            = 30, /**< MPEG Surround                             */
+
+    AOT_ESCAPE           = 31,   /**< Signal AOT uses more than 5 bits          */
+
+    //AOT_MP3ONMP4_L1      = 32, /**< MPEG-Layer1 in mp4                        */
+    //AOT_MP3ONMP4_L2      = 33, /**< MPEG-Layer2 in mp4                        */
+    //AOT_MP3ONMP4_L3      = 34, /**< MPEG-Layer3 in mp4                        */
+    //AOT_RSVD_35          = 35, /**< might become DST                          */
+    //AOT_RSVD_36          = 36, /**< might become ALS                          */
+    //AOT_AAC_SLS          = 37, /**< AAC + SLS                                 */
+    //AOT_SLS              = 38, /**< SLS                                       */
+    //AOT_ER_AAC_ELD       = 39, /**< AAC Enhanced Low Delay                    */
+
+    //AOT_USAC             = 42, /**< USAC                                      */
+    //AOT_SAOC             = 43, /**< SAOC                                      */
+    //AOT_LD_MPEGS         = 44, /**< Low Delay MPEG Surround                   */
+
+    //AOT_RSVD50           = 50,  /**< Interim AOT for Rsvd50                   */
+} AUDIO_OBJECT_TYPE;
+
 status_t MPEG4Extractor::updateAudioTrackInfoFromESDS_MPEG4Audio(
         const void *esds_data, size_t esds_size) {
     ESDS esds(esds_data, esds_size);
@@ -2500,9 +2594,9 @@ status_t MPEG4Extractor::updateAudioTrackInfoFromESDS_MPEG4Audio(
 
     if (objectTypeIndication == 0xe1) {
         // This isn't MPEG4 audio at all, it's QCELP 14k...
-        if (!mLastTrack) {
-          return ERROR_MALFORMED;
-        }
+        if (mLastTrack == NULL)
+            return ERROR_MALFORMED;
+
         mLastTrack->meta->setCString(kKeyMIMEType, MEDIA_MIMETYPE_AUDIO_QCELP);
         return OK;
     }
@@ -2523,8 +2617,10 @@ status_t MPEG4Extractor::updateAudioTrackInfoFromESDS_MPEG4Audio(
     }
 
 #if 0
-    printf("ESD of size %d\n", csd_size);
-    hexdump(csd, csd_size);
+    if (kUseHexDump) {
+        printf("ESD of size %zu\n", csd_size);
+        hexdump(csd, csd_size);
+    }
 #endif
 
     if (csd_size == 0) {
@@ -2539,6 +2635,11 @@ status_t MPEG4Extractor::updateAudioTrackInfoFromESDS_MPEG4Audio(
         return ERROR_MALFORMED;
     }
 
+    static uint32_t kSamplingRate[] = {
+        96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050,
+        16000, 12000, 11025, 8000, 7350
+    };
+
     ABitReader br(csd, csd_size);
     if (br.numBitsLeft() < 5) {
         return ERROR_MALFORMED;
@@ -2552,12 +2653,15 @@ status_t MPEG4Extractor::updateAudioTrackInfoFromESDS_MPEG4Audio(
         objectType = 32 + br.getBits(6);
     }
 
+    if (mLastTrack == NULL)
+        return ERROR_MALFORMED;
+
     if (objectType >= 1 && objectType <= 4) {
-        if (!mLastTrack) {
-          return ERROR_MALFORMED;
-        }
         mLastTrack->meta->setInt32(kKeyAACProfile, objectType);
     }
+
+    //keep AOT type
+    mLastTrack->meta->setInt32(kKeyAACAOT, objectType);
 
     if (br.numBitsLeft() < 4) {
         return ERROR_MALFORMED;
@@ -2567,47 +2671,179 @@ status_t MPEG4Extractor::updateAudioTrackInfoFromESDS_MPEG4Audio(
     int32_t sampleRate = 0;
     int32_t numChannels = 0;
     if (freqIndex == 15) {
-        if (csd_size < 5) {
-            return ERROR_MALFORMED;
-        }
-        if (br.numBitsLeft() < 24 + 4) {
-            return ERROR_MALFORMED;
-        }
+        if (br.numBitsLeft() < 28) return ERROR_MALFORMED;
         sampleRate = br.getBits(24);
         numChannels = br.getBits(4);
     } else {
-        if (br.numBitsLeft() < 4) {
+        if (br.numBitsLeft() < 4) return ERROR_MALFORMED;
+        numChannels = br.getBits(4);
+
+        if (freqIndex == 13 || freqIndex == 14) {
             return ERROR_MALFORMED;
         }
-        numChannels = br.getBits(4);
-        if (objectType == 5) {
-            // SBR specific config per 14496-3 table 1.13
-            if (br.numBitsLeft() < 4) {
+
+        sampleRate = kSamplingRate[freqIndex];
+    }
+
+    if (objectType == AOT_SBR || objectType == AOT_PS) {//SBR specific config per 14496-3 table 1.13
+        if (br.numBitsLeft() < 4) return ERROR_MALFORMED;
+        uint32_t extFreqIndex = br.getBits(4);
+        int32_t extSampleRate;
+        if (extFreqIndex == 15) {
+            if (csd_size < 8) {
                 return ERROR_MALFORMED;
             }
-            freqIndex = br.getBits(4);
-            if (freqIndex == 15) {
-                if (csd_size < 8) {
-                    return ERROR_MALFORMED;
-                }
-                if (br.numBitsLeft() < 24) {
-                    return ERROR_MALFORMED;
-                }
-                sampleRate = br.getBits(24);
+            if (br.numBitsLeft() < 24) return ERROR_MALFORMED;
+            extSampleRate = br.getBits(24);
+        } else {
+            if (extFreqIndex == 13 || extFreqIndex == 14) {
+                return ERROR_MALFORMED;
+            }
+            extSampleRate = kSamplingRate[extFreqIndex];
+        }
+        //TODO: save the extension sampling rate value in meta data =>
+        //      mLastTrack->meta->setInt32(kKeyExtSampleRate, extSampleRate);
+    }
+
+    switch (numChannels) {
+        // values defined in 14496-3_2009 amendment-4 Table 1.19 - Channel Configuration
+        case 0:
+        case 1:// FC
+        case 2:// FL FR
+        case 3:// FC, FL FR
+        case 4:// FC, FL FR, RC
+        case 5:// FC, FL FR, SL SR
+        case 6:// FC, FL FR, SL SR, LFE
+            //numChannels already contains the right value
+            break;
+        case 11:// FC, FL FR, SL SR, RC, LFE
+            numChannels = 7;
+            break;
+        case 7: // FC, FCL FCR, FL FR, SL SR, LFE
+        case 12:// FC, FL  FR,  SL SR, RL RR, LFE
+        case 14:// FC, FL  FR,  SL SR, LFE, FHL FHR
+            numChannels = 8;
+            break;
+        default:
+            return ERROR_UNSUPPORTED;
+    }
+
+    {
+        if (objectType == AOT_SBR || objectType == AOT_PS) {
+            if (br.numBitsLeft() < 5) return ERROR_MALFORMED;
+            objectType = br.getBits(5);
+
+            if (objectType == AOT_ESCAPE) {
+                if (br.numBitsLeft() < 6) return ERROR_MALFORMED;
+                objectType = 32 + br.getBits(6);
             }
         }
+        if (objectType == AOT_AAC_LC || objectType == AOT_ER_AAC_LC ||
+                objectType == AOT_ER_AAC_LD || objectType == AOT_ER_AAC_SCAL ||
+                objectType == AOT_ER_BSAC) {
+            if (br.numBitsLeft() < 2) return ERROR_MALFORMED;
+            const int32_t frameLengthFlag = br.getBits(1);
 
-        if (sampleRate == 0) {
-            static uint32_t kSamplingRate[] = {
-                96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050,
-                16000, 12000, 11025, 8000, 7350
-            };
+            const int32_t dependsOnCoreCoder = br.getBits(1);
 
-            if (freqIndex == 13 || freqIndex == 14) {
-                return ERROR_MALFORMED;
+            if (dependsOnCoreCoder ) {
+                if (br.numBitsLeft() < 14) return ERROR_MALFORMED;
+                const int32_t coreCoderDelay = br.getBits(14);
             }
 
-            sampleRate = kSamplingRate[freqIndex];
+            int32_t extensionFlag = -1;
+            if (br.numBitsLeft() > 0) {
+                extensionFlag = br.getBits(1);
+            } else {
+                switch (objectType) {
+                // 14496-3 4.5.1.1 extensionFlag
+                case AOT_AAC_LC:
+                    extensionFlag = 0;
+                    break;
+                case AOT_ER_AAC_LC:
+                case AOT_ER_AAC_SCAL:
+                case AOT_ER_BSAC:
+                case AOT_ER_AAC_LD:
+                    extensionFlag = 1;
+                    break;
+                default:
+                    return ERROR_MALFORMED;
+                    break;
+                }
+                ALOGW("csd missing extension flag; assuming %d for object type %u.",
+                        extensionFlag, objectType);
+            }
+
+            if (numChannels == 0) {
+                int32_t channelsEffectiveNum = 0;
+                int32_t channelsNum = 0;
+                if (br.numBitsLeft() < 32) {
+                    return ERROR_MALFORMED;
+                }
+                const int32_t ElementInstanceTag = br.getBits(4);
+                const int32_t Profile = br.getBits(2);
+                const int32_t SamplingFrequencyIndex = br.getBits(4);
+                const int32_t NumFrontChannelElements = br.getBits(4);
+                const int32_t NumSideChannelElements = br.getBits(4);
+                const int32_t NumBackChannelElements = br.getBits(4);
+                const int32_t NumLfeChannelElements = br.getBits(2);
+                const int32_t NumAssocDataElements = br.getBits(3);
+                const int32_t NumValidCcElements = br.getBits(4);
+
+                const int32_t MonoMixdownPresent = br.getBits(1);
+
+                if (MonoMixdownPresent != 0) {
+                    if (br.numBitsLeft() < 4) return ERROR_MALFORMED;
+                    const int32_t MonoMixdownElementNumber = br.getBits(4);
+                }
+
+                if (br.numBitsLeft() < 1) return ERROR_MALFORMED;
+                const int32_t StereoMixdownPresent = br.getBits(1);
+                if (StereoMixdownPresent != 0) {
+                    if (br.numBitsLeft() < 4) return ERROR_MALFORMED;
+                    const int32_t StereoMixdownElementNumber = br.getBits(4);
+                }
+
+                if (br.numBitsLeft() < 1) return ERROR_MALFORMED;
+                const int32_t MatrixMixdownIndexPresent = br.getBits(1);
+                if (MatrixMixdownIndexPresent != 0) {
+                    if (br.numBitsLeft() < 3) return ERROR_MALFORMED;
+                    const int32_t MatrixMixdownIndex = br.getBits(2);
+                    const int32_t PseudoSurroundEnable = br.getBits(1);
+                }
+
+                int i;
+                for (i=0; i < NumFrontChannelElements; i++) {
+                    if (br.numBitsLeft() < 5) return ERROR_MALFORMED;
+                    const int32_t FrontElementIsCpe = br.getBits(1);
+                    const int32_t FrontElementTagSelect = br.getBits(4);
+                    channelsNum += FrontElementIsCpe ? 2 : 1;
+                }
+
+                for (i=0; i < NumSideChannelElements; i++) {
+                    if (br.numBitsLeft() < 5) return ERROR_MALFORMED;
+                    const int32_t SideElementIsCpe = br.getBits(1);
+                    const int32_t SideElementTagSelect = br.getBits(4);
+                    channelsNum += SideElementIsCpe ? 2 : 1;
+                }
+
+                for (i=0; i < NumBackChannelElements; i++) {
+                    if (br.numBitsLeft() < 5) return ERROR_MALFORMED;
+                    const int32_t BackElementIsCpe = br.getBits(1);
+                    const int32_t BackElementTagSelect = br.getBits(4);
+                    channelsNum += BackElementIsCpe ? 2 : 1;
+                }
+                channelsEffectiveNum = channelsNum;
+
+                for (i=0; i < NumLfeChannelElements; i++) {
+                    if (br.numBitsLeft() < 4) return ERROR_MALFORMED;
+                    const int32_t LfeElementTagSelect = br.getBits(4);
+                    channelsNum += 1;
+                }
+                ALOGV("mpeg4 audio channelsNum = %d", channelsNum);
+                ALOGV("mpeg4 audio channelsEffectiveNum = %d", channelsEffectiveNum);
+                numChannels = channelsNum;
+            }
         }
     }
 
@@ -2615,9 +2851,9 @@ status_t MPEG4Extractor::updateAudioTrackInfoFromESDS_MPEG4Audio(
         return ERROR_UNSUPPORTED;
     }
 
-    if (!mLastTrack) {
-      return ERROR_MALFORMED;
-    }
+    if (mLastTrack == NULL)
+        return ERROR_MALFORMED;
+
     int32_t prevSampleRate;
     CHECK(mLastTrack->meta->findInt32(kKeySampleRate, &prevSampleRate));
 

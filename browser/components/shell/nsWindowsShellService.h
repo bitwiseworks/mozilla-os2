@@ -7,7 +7,7 @@
 #define nswindowsshellservice_h____
 
 #include "nscore.h"
-#include "nsStringAPI.h"
+#include "nsString.h"
 #include "nsIWindowsShellService.h"
 #include "nsITimer.h"
 
@@ -28,12 +28,10 @@ public:
 protected:
   bool IsDefaultBrowserVista(bool aCheckAllTypes, bool* aIsDefaultBrowser);
   nsresult LaunchControlPanelDefaultsSelectionUI();
+  nsresult LaunchControlPanelDefaultPrograms();
   nsresult LaunchModernSettingsDialogDefaultApps();
   nsresult InvokeHTTPOpenAsVerb();
   nsresult LaunchHTTPHandlerPane();
-
-private:
-  bool      mCheckedThisSession;
 };
 
 #endif // nswindowsshellservice_h____

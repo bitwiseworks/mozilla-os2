@@ -8,24 +8,26 @@ requestLongerTimeout(2);
 
 // Test that player widgets display information about target nodes
 
-add_task(function*() {
-  yield addTab(TEST_URL_ROOT + "doc_simple_animation.html");
+add_task(function* () {
+  yield addTab(URL_ROOT + "doc_simple_animation.html");
   let {inspector, panel} = yield openAnimationInspector();
 
   info("Select the simple animated node");
-  yield selectNode(".animated", inspector);
+  yield selectNodeAndWaitForAnimations(".animated", inspector);
 
   let targetNodeComponent = panel.animationsTimelineComponent.targetNodes[0];
+  let {previewer} = targetNodeComponent;
+
   // Make sure to wait for the target-retrieved event if the nodeFront hasn't
   // yet been retrieved by the TargetNodeComponent.
-  if (!targetNodeComponent.nodeFront) {
+  if (!previewer.nodeFront) {
     yield targetNodeComponent.once("target-retrieved");
   }
 
-  is(targetNodeComponent.el.textContent, "div#.ball.animated",
+  is(previewer.el.textContent, "div#.ball.animated",
     "The target element's content is correct");
 
-  let highlighterEl = targetNodeComponent.el.querySelector(".node-highlighter");
+  let highlighterEl = previewer.el.querySelector(".node-highlighter");
   ok(highlighterEl,
     "The icon to highlight the target element in the page exists");
 });

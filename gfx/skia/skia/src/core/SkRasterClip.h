@@ -11,12 +11,33 @@
 #include "SkRegion.h"
 #include "SkAAClip.h"
 
+class SkRRect;
+
+/**
+ *  Wraps a SkRegion and SkAAClip, so we have a single object that can represent either our
+ *  BW or antialiased clips.
+ *
+ *  This class is optimized for the raster backend of canvas, but can be expense to keep up2date,
+ *  so it supports a runtime option (force-conservative-rects) to turn it into a super-fast
+ *  rect-only tracker. The gpu backend uses this since it does not need the result (it uses
+ *  SkClipStack instead).
+ */
 class SkRasterClip {
 public:
-    SkRasterClip();
-    SkRasterClip(const SkIRect&);
+    SkRasterClip(bool forceConservativeRects = false);
+    SkRasterClip(const SkIRect&, bool forceConservativeRects = false);
+    SkRasterClip(const SkRegion&);
     SkRasterClip(const SkRasterClip&);
     ~SkRasterClip();
+
+    // Only compares the current state. Does not compare isForceConservativeRects(), so that field
+    // could be different but this could still return true.
+    bool operator==(const SkRasterClip&) const;
+    bool operator!=(const SkRasterClip& other) const {
+        return !(*this == other);
+    }
+
+    bool isForceConservativeRects() const { return fForceConservativeRects; }
 
     bool isBW() const { return fIsBW; }
     bool isAA() const { return !fIsBW; }
@@ -39,13 +60,11 @@ public:
     bool setEmpty();
     bool setRect(const SkIRect&);
 
-    bool setPath(const SkPath& path, const SkRegion& clip, bool doAA);
-    bool setPath(const SkPath& path, const SkIRect& clip, bool doAA);
-
     bool op(const SkIRect&, SkRegion::Op);
     bool op(const SkRegion&, SkRegion::Op);
-    bool op(const SkRasterClip&, SkRegion::Op);
-    bool op(const SkRect&, SkRegion::Op, bool doAA);
+    bool op(const SkRect&, const SkMatrix& matrix, const SkIRect&, SkRegion::Op, bool doAA);
+    bool op(const SkRRect&, const SkMatrix& matrix, const SkIRect&, SkRegion::Op, bool doAA);
+    bool op(const SkPath&, const SkMatrix& matrix, const SkIRect&, SkRegion::Op, bool doAA);
 
     void translate(int dx, int dy, SkRasterClip* dst) const;
     void translate(int dx, int dy) {
@@ -63,8 +82,7 @@ public:
      *  intersect, but returning true is a guarantee that they do not.
      */
     bool quickReject(const SkIRect& rect) const {
-        return this->isEmpty() || rect.isEmpty() ||
-               !SkIRect::Intersects(this->getBounds(), rect);
+        return !SkIRect::Intersects(this->getBounds(), rect);
     }
 
     // hack for SkCanvas::getTotalClip
@@ -79,6 +97,7 @@ public:
 private:
     SkRegion    fBW;
     SkAAClip    fAA;
+    bool        fForceConservativeRects;
     bool        fIsBW;
     // these 2 are caches based on querying the right obj based on fIsBW
     bool        fIsEmpty;
@@ -89,16 +108,29 @@ private:
     }
 
     bool computeIsRect() const {
-        return fIsBW ? fBW.isRect() : false;
+        return fIsBW ? fBW.isRect() : fAA.isRect();
     }
 
-    bool updateCacheAndReturnNonEmpty() {
+    bool updateCacheAndReturnNonEmpty(bool detectAARect = true) {
         fIsEmpty = this->computeIsEmpty();
+
+        // detect that our computed AA is really just a (hard-edged) rect
+        if (detectAARect && !fIsEmpty && !fIsBW && fAA.isRect()) {
+            fBW.setRect(fAA.getBounds());
+            fAA.setEmpty(); // don't need this guy anymore
+            fIsBW = true;
+        }
+
         fIsRect = this->computeIsRect();
         return !fIsEmpty;
     }
 
     void convertToAA();
+
+    bool setPath(const SkPath& path, const SkRegion& clip, bool doAA);
+    bool setPath(const SkPath& path, const SkIRect& clip, bool doAA);
+    bool op(const SkRasterClip&, SkRegion::Op);
+    bool setConservativeRect(const SkRect& r, const SkIRect& clipR, bool isInverse);
 };
 
 class SkAutoRasterClipValidate : SkNoncopyable {

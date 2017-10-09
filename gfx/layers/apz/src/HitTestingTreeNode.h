@@ -78,23 +78,31 @@ public:
 
   AsyncPanZoomController* GetApzc() const;
   AsyncPanZoomController* GetNearestContainingApzc() const;
-  AsyncPanZoomController* GetNearestContainingApzcWithSameLayersId() const;
   bool IsPrimaryHolder() const;
   uint64_t GetLayersId() const;
 
   /* Hit test related methods */
 
   void SetHitTestData(const EventRegions& aRegions,
-                      const gfx::Matrix4x4& aTransform,
+                      const CSSTransformMatrix& aTransform,
                       const Maybe<ParentLayerIntRegion>& aClipRegion,
                       const EventRegionsOverride& aOverride);
   bool IsOutsideClip(const ParentLayerPoint& aPoint) const;
 
   /* Scrollbar info */
 
-  void SetScrollbarData(FrameMetrics::ViewID aScrollViewId, Layer::ScrollDirection aDir, int32_t aScrollSize);
+  void SetScrollbarData(FrameMetrics::ViewID aScrollViewId,
+                        Layer::ScrollDirection aDir,
+                        int32_t aScrollSize,
+                        bool aIsScrollContainer);
   bool MatchesScrollDragMetrics(const AsyncDragMetrics& aDragMetrics) const;
   int32_t GetScrollSize() const;
+  bool IsScrollbarNode() const;
+
+  /* Fixed pos info */
+
+  void SetFixedPosData(FrameMetrics::ViewID aFixedPosTarget);
+  FrameMetrics::ViewID GetFixedPosTarget() const;
 
   /* Convert aPoint into the LayerPixel space for the layer corresponding to
    * this node. */
@@ -123,6 +131,9 @@ private:
   FrameMetrics::ViewID mScrollViewId;
   Layer::ScrollDirection mScrollDir;
   int32_t mScrollSize;
+  bool mIsScrollbarContainer;
+
+  FrameMetrics::ViewID mFixedPosTarget;
 
   /* Let {L,M} be the {layer, scrollable metrics} pair that this node
    * corresponds to in the layer tree. mEventRegions contains the event regions
@@ -135,7 +146,7 @@ private:
 
   /* This is the transform from layer L. This does NOT include any async
    * transforms. */
-  gfx::Matrix4x4 mTransform;
+  CSSTransformMatrix mTransform;
 
   /* This is clip rect for L that we wish to use for hit-testing purposes. Note
    * that this may not be exactly the same as the clip rect on layer L because

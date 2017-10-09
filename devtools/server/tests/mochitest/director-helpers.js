@@ -8,21 +8,19 @@ const Services = require("Services");
 Services.prefs.setBoolPref("devtools.debugger.log", true);
 Services.prefs.setBoolPref("dom.mozBrowserFramesEnabled", true);
 
-SimpleTest.registerCleanupFunction(function() {
+SimpleTest.registerCleanupFunction(function () {
   Services.prefs.clearUserPref("devtools.debugger.log");
   Services.prefs.clearUserPref("dom.mozBrowserFramesEnabled");
 });
 
-const {promiseInvoke} = require("devtools/shared/async-utils");
+const { DirectorRegistry } = require("devtools/server/actors/director-registry");
+const { DirectorRegistryFront } = require("devtools/shared/fronts/director-registry");
 
-const { DirectorRegistry,
-        DirectorRegistryFront } = require("devtools/server/actors/director-registry");
+const { DirectorManagerFront } = require("devtools/shared/fronts/director-manager");
 
-const { DirectorManagerFront } = require("devtools/server/actors/director-manager");
+const { Task } = require("devtools/shared/task");
 
-const {Task} = require("resource://gre/modules/Task.jsm");
-
-/***********************************
+/** *********************************
  *  director helpers functions
  **********************************/
 
@@ -30,9 +28,9 @@ function* newConnectedDebuggerClient(opts) {
   var transport = DebuggerServer.connectPipe();
   var client = new DebuggerClient(transport);
 
-  yield promiseInvoke(client, client.connect);
+  yield client.connect();
 
-  var root = yield promiseInvoke(client, client.listTabs);
+  var root = yield client.listTabs();
 
   return {
     client: client,

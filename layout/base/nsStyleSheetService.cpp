@@ -9,7 +9,9 @@
 #include "nsStyleSheetService.h"
 #include "mozilla/CSSStyleSheet.h"
 #include "mozilla/MemoryReporting.h"
-#include "mozilla/unused.h"
+#include "mozilla/StyleSheet.h"
+#include "mozilla/StyleSheetInlines.h"
+#include "mozilla/Unused.h"
 #include "mozilla/css/Loader.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/ipc/URIUtils.h"
@@ -19,6 +21,7 @@
 #include "nsISupportsPrimitives.h"
 #include "nsISimpleEnumerator.h"
 #include "nsNetUtil.h"
+#include "nsIConsoleService.h"
 #include "nsIObserverService.h"
 #include "nsLayoutStatics.h"
 
@@ -28,7 +31,8 @@ nsStyleSheetService *nsStyleSheetService::gInstance = nullptr;
 
 nsStyleSheetService::nsStyleSheetService()
 {
-  PR_STATIC_ASSERT(0 == AGENT_SHEET && 1 == USER_SHEET && 2 == AUTHOR_SHEET);
+  static_assert(0 == AGENT_SHEET && 1 == USER_SHEET && 2 == AUTHOR_SHEET,
+                "Convention for Style Sheet");
   NS_ASSERTION(!gInstance, "Someone is using CreateInstance instead of GetService");
   gInstance = this;
   nsLayoutStatics::AddRef();
@@ -78,7 +82,7 @@ nsStyleSheetService::RegisterFromEnumerator(nsICategoryManager  *aManager,
 }
 
 int32_t
-nsStyleSheetService::FindSheetByURI(const nsTArray<RefPtr<CSSStyleSheet>>& aSheets,
+nsStyleSheetService::FindSheetByURI(const nsTArray<RefPtr<StyleSheet>>& aSheets,
                                     nsIURI* aSheetURI)
 {
   for (int32_t i = aSheets.Length() - 1; i >= 0; i-- ) {
@@ -132,7 +136,27 @@ NS_IMETHODIMP
 nsStyleSheetService::LoadAndRegisterSheet(nsIURI *aSheetURI,
                                           uint32_t aSheetType)
 {
-  nsresult rv = LoadAndRegisterSheetInternal(aSheetURI, aSheetType);
+  // Warn developers if their stylesheet URL has a #ref at the end.
+  // Stylesheet URIs don't benefit from having a #ref suffix -- and if the
+  // sheet is a data URI, someone might've created this #ref by accident (and
+  // truncated their data-URI stylesheet) by using an unescaped # character in
+  // a #RRGGBB color or #foo() ID-selector in their data-URI representation.
+  bool hasRef;
+  nsresult rv = aSheetURI->GetHasRef(&hasRef);
+  NS_ENSURE_SUCCESS(rv, rv);
+  if (aSheetURI && hasRef) {
+    nsCOMPtr<nsIConsoleService> consoleService =
+      do_GetService(NS_CONSOLESERVICE_CONTRACTID);
+    NS_WARNING_ASSERTION(consoleService, "Failed to get console service!");
+    if (consoleService) {
+      const char16_t* message = u"nsStyleSheetService::LoadAndRegisterSheet: "
+        u"URI contains unescaped hash character, which might be truncating "
+        u"the sheet, if it's a data URI.";
+      consoleService->LogStringMessage(message);
+    }
+  }
+
+  rv = LoadAndRegisterSheetInternal(aSheetURI, aSheetType);
   if (NS_SUCCEEDED(rv)) {
     const char* message;
     switch (aSheetType) {
@@ -152,9 +176,17 @@ nsStyleSheetService::LoadAndRegisterSheet(nsIURI *aSheetURI,
     if (serv) {
       // We're guaranteed that the new sheet is the last sheet in
       // mSheets[aSheetType]
-      CSSStyleSheet* sheet = mSheets[aSheetType].LastElement();
-      serv->NotifyObservers(NS_ISUPPORTS_CAST(nsIDOMCSSStyleSheet*, sheet),
-                            message, nullptr);
+
+      // XXXheycam Once the nsStyleSheetService can hold ServoStyleSheets too,
+      // we'll need to include them in the notification.
+      StyleSheet* sheet = mSheets[aSheetType].LastElement();
+      if (sheet->IsGecko()) {
+        CSSStyleSheet* cssSheet = sheet->AsGecko();
+        serv->NotifyObservers(NS_ISUPPORTS_CAST(nsIDOMCSSStyleSheet*, cssSheet),
+                              message, nullptr);
+      } else {
+        NS_ERROR("stylo: can't notify observers of ServoStyleSheets");
+      }
     }
 
     if (XRE_IsParentProcess()) {
@@ -201,11 +233,12 @@ nsStyleSheetService::LoadAndRegisterSheetInternal(nsIURI *aSheetURI,
       return NS_ERROR_INVALID_ARG;
   }
 
-  RefPtr<css::Loader> loader = new css::Loader();
+  // XXXheycam We'll need to load and register both a Gecko- and Servo-backed
+  // style sheet.
+  RefPtr<css::Loader> loader = new css::Loader(StyleBackendType::Gecko);
 
-  RefPtr<CSSStyleSheet> sheet;
-  nsresult rv = loader->LoadSheetSync(aSheetURI, parsingMode, true,
-                                      getter_AddRefs(sheet));
+  RefPtr<StyleSheet> sheet;
+  nsresult rv = loader->LoadSheetSync(aSheetURI, parsingMode, true, &sheet);
   NS_ENSURE_SUCCESS(rv, rv);
 
   mSheets[aSheetType].AppendElement(sheet);
@@ -253,13 +286,21 @@ nsStyleSheetService::PreloadSheet(nsIURI *aSheetURI, uint32_t aSheetType,
       return NS_ERROR_INVALID_ARG;
   }
 
-  RefPtr<css::Loader> loader = new css::Loader();
+  // XXXheycam PreloadSheet can't support ServoStyleSheets until they implement
+  // nsIDOMStyleSheet.
 
-  RefPtr<CSSStyleSheet> sheet;
-  nsresult rv = loader->LoadSheetSync(aSheetURI, parsingMode, true,
-                                      getter_AddRefs(sheet));
+  RefPtr<css::Loader> loader = new css::Loader(StyleBackendType::Gecko);
+
+  RefPtr<StyleSheet> sheet;
+  nsresult rv = loader->LoadSheetSync(aSheetURI, parsingMode, true, &sheet);
   NS_ENSURE_SUCCESS(rv, rv);
-  sheet.forget(aSheet);
+
+  MOZ_ASSERT(sheet->IsGecko(),
+             "stylo: didn't expect Loader to create a ServoStyleSheet");
+
+  RefPtr<CSSStyleSheet> cssSheet = sheet->AsGecko();
+  cssSheet.forget(aSheet);
+
   return NS_OK;
 }
 
@@ -273,7 +314,7 @@ nsStyleSheetService::UnregisterSheet(nsIURI *aSheetURI, uint32_t aSheetType)
 
   int32_t foundIndex = FindSheetByURI(mSheets[aSheetType], aSheetURI);
   NS_ENSURE_TRUE(foundIndex >= 0, NS_ERROR_INVALID_ARG);
-  RefPtr<CSSStyleSheet> sheet = mSheets[aSheetType][foundIndex];
+  RefPtr<StyleSheet> sheet = mSheets[aSheetType][foundIndex];
   mSheets[aSheetType].RemoveElementAt(foundIndex);
 
   const char* message;
@@ -291,8 +332,15 @@ nsStyleSheetService::UnregisterSheet(nsIURI *aSheetURI, uint32_t aSheetType)
 
   nsCOMPtr<nsIObserverService> serv = services::GetObserverService();
   if (serv) {
-    serv->NotifyObservers(NS_ISUPPORTS_CAST(nsIDOMCSSStyleSheet*, sheet),
-                          message, nullptr);
+    // XXXheycam Once the nsStyleSheetService can hold ServoStyleSheets too,
+    // we'll need to include them in the notification.
+    if (sheet->IsGecko()) {
+      CSSStyleSheet* cssSheet = sheet->AsGecko();
+      serv->NotifyObservers(NS_ISUPPORTS_CAST(nsIDOMCSSStyleSheet*, cssSheet),
+                            message, nullptr);
+    } else {
+      NS_ERROR("stylo: can't notify observers of ServoStyleSheets");
+    }
   }
 
   if (XRE_IsParentProcess()) {
@@ -335,10 +383,12 @@ NS_IMETHODIMP
 nsStyleSheetService::CollectReports(nsIHandleReportCallback* aHandleReport,
                                     nsISupports* aData, bool aAnonymize)
 {
-  return MOZ_COLLECT_REPORT(
+  MOZ_COLLECT_REPORT(
     "explicit/layout/style-sheet-service", KIND_HEAP, UNITS_BYTES,
     SizeOfIncludingThis(StyleSheetServiceMallocSizeOf),
     "Memory used for style sheets held by the style sheet service.");
+
+  return NS_OK;
 }
 
 size_t
@@ -347,7 +397,7 @@ nsStyleSheetService::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) co
   size_t n = aMallocSizeOf(this);
   for (auto& sheetArray : mSheets) {
     n += sheetArray.ShallowSizeOfExcludingThis(aMallocSizeOf);
-    for (CSSStyleSheet* sheet : sheetArray) {
+    for (StyleSheet* sheet : sheetArray) {
       n += sheet->SizeOfIncludingThis(aMallocSizeOf);
     }
   }

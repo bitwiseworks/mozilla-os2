@@ -15,7 +15,6 @@
 #include "nsCRT.h"
 #include "nsPrintfCString.h"
 #include "nsIDateTimeFormat.h"
-#include "nsDateTimeFormatCID.h"
 #include "nsQuickSort.h"
 #include "nsIAtom.h"
 #include "nsIAutoCompleteResult.h"
@@ -131,13 +130,6 @@ NS_IMETHODIMP nsFileResult::GetMatchCount(uint32_t *aMatchCount)
 {
   NS_ENSURE_ARG_POINTER(aMatchCount);
   *aMatchCount = mValues.Length();
-  return NS_OK;
-}
-
-NS_IMETHODIMP nsFileResult::GetTypeAheadResult(bool *aTypeAheadResult)
-{
-  NS_ENSURE_ARG_POINTER(aTypeAheadResult);
-  *aTypeAheadResult = false;
   return NS_OK;
 }
 
@@ -299,7 +291,7 @@ nsFileView::~nsFileView()
 nsresult
 nsFileView::Init()
 {
-  mDateFormatter = do_CreateInstance(NS_DATETIMEFORMAT_CONTRACTID);
+  mDateFormatter = nsIDateTimeFormat::Create();
   if (!mDateFormatter)
     return NS_ERROR_OUT_OF_MEMORY;
 
@@ -862,7 +854,7 @@ nsFileView::FilterFiles()
       for (uint32_t j = 0; j < filterCount; ++j) {
         bool matched = false;
         if (!nsCRT::strcmp(mCurrentFilters.ElementAt(j),
-                           MOZ_UTF16("..apps")))
+                           u"..apps"))
         {
           file->IsExecutable(&matched);
         } else

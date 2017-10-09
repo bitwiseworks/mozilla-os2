@@ -6,6 +6,8 @@
 #ifndef nsExceptionHandler_h__
 #define nsExceptionHandler_h__
 
+#include "mozilla/Assertions.h"
+
 #include <stddef.h>
 #include <stdint.h>
 #include "nsError.h"
@@ -51,6 +53,8 @@ void SetUserAppDataDirectory(nsIFile* aDir);
 void SetProfileDirectory(nsIFile* aDir);
 void UpdateCrashEventsDir();
 void SetMemoryReportFile(nsIFile* aFile);
+nsresult GetDefaultMemoryReportFile(nsIFile** aFile);
+void SetTelemetrySessionId(const nsACString& id);
 
 /**
  * Get the path where crash event files should be written.
@@ -71,10 +75,12 @@ nsresult AnnotateCrashReport(const nsACString& key, const nsACString& data);
 nsresult RemoveCrashReportAnnotation(const nsACString& key);
 nsresult AppendAppNotesToCrashReport(const nsACString& data);
 
-// NOTE: If you change this definition, also change the definition in Assertions.h
-// as it is intended to be defining this same function.
-void AnnotateMozCrashReason(const char* aReason);
 void AnnotateOOMAllocationSize(size_t size);
+void AnnotateTexturesSize(size_t size);
+void AnnotatePendingIPC(size_t aNumOfPendingIPC,
+                        uint32_t aTopPendingIPCCount,
+                        const char* aTopPendingIPCName,
+                        uint32_t aTopPendingIPCType);
 nsresult SetGarbageCollecting(bool collecting);
 void SetEventloopNestingLevel(uint32_t level);
 
@@ -234,6 +240,7 @@ void UnregisterInjectorCallback(DWORD processID);
 
 // Child-side API
 bool SetRemoteExceptionHandler(const nsACString& crashPipe);
+void InitChildProcessTmpDir();
 
 #  elif defined(XP_LINUX)
 // Parent-side API for children

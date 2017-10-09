@@ -95,7 +95,7 @@ PrintParagraph(const char* text, unsigned startColno, const unsigned limitColno,
         ++it;
 
     while (*it != '\0') {
-        MOZ_ASSERT(!isspace(*it));
+        MOZ_ASSERT(!isspace(*it) || *it == '\n');
 
         /* Delimit the current token. */
         const char* limit = it;
@@ -106,9 +106,7 @@ PrintParagraph(const char* text, unsigned startColno, const unsigned limitColno,
          * If the current token is longer than the available number of columns,
          * then make a line break before printing the token.
          */
-        MOZ_ASSERT(limit - it > 0);
         size_t tokLen = limit - it;
-        MOZ_ASSERT(tokLen);
         if (tokLen + colno >= limitColno) {
             printf("\n%*s%.*s", startColno + indent, "", int(tokLen), it);
             colno = startColno + tokLen;
@@ -266,7 +264,7 @@ OptionParser::extractValue(size_t argc, char** argv, size_t* i, char** value)
     if (eq) {
         *value = eq + 1;
         if (*value[0] == '\0')
-            return error("A value is required for option %.*s", eq - argv[*i], argv[*i]);
+            return error("A value is required for option %.*s", (int) (eq - argv[*i]), argv[*i]);
         return Okay;
     }
 

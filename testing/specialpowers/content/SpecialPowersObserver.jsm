@@ -6,7 +6,6 @@
 // https://bugzilla.mozilla.org/show_bug.cgi?id=549539
 // https://bug549539.bugzilla.mozilla.org/attachment.cgi?id=429661
 // https://developer.mozilla.org/en/XPCOM/XPCOM_changes_in_Gecko_1.9.3
-// http://mxr.mozilla.org/mozilla-central/source/toolkit/components/console/hudservice/HUDService.jsm#3240
 // https://developer.mozilla.org/en/how_to_build_an_xpcom_component_in_javascript
 
 var EXPORTED_SYMBOLS = ["SpecialPowersObserver", "SpecialPowersObserverFactory"];
@@ -33,7 +32,6 @@ loader.loadSubScript("chrome://specialpowers/content/SpecialPowersObserverAPI.js
 /* XPCOM gunk */
 this.SpecialPowersObserver = function SpecialPowersObserver() {
   this._isFrameScriptLoaded = false;
-  this._mmIsGlobal = true;
   this._messageManager = Cc["@mozilla.org/globalmessagemanager;1"].
                          getService(Ci.nsIMessageBroadcaster);
 }
@@ -78,7 +76,6 @@ SpecialPowersObserver.prototype._loadFrameScript = function()
     this._messageManager.addMessageListener("SpecialPowers.CreateFiles", this);
     this._messageManager.addMessageListener("SpecialPowers.RemoveFiles", this);
     this._messageManager.addMessageListener("SPPermissionManager", this);
-    this._messageManager.addMessageListener("SPWebAppService", this);
     this._messageManager.addMessageListener("SPObserverService", this);
     this._messageManager.addMessageListener("SPLoadChromeScript", this);
     this._messageManager.addMessageListener("SPImportInMainProcess", this);
@@ -90,6 +87,7 @@ SpecialPowersObserver.prototype._loadFrameScript = function()
     this._messageManager.addMessageListener("SPUnloadExtension", this);
     this._messageManager.addMessageListener("SPExtensionMessage", this);
     this._messageManager.addMessageListener("SPCleanUpSTSData", this);
+    this._messageManager.addMessageListener("SPClearAppPrivateData", this);
 
     this._messageManager.loadFrameScript(CHILD_LOGGER_SCRIPT, true);
     this._messageManager.loadFrameScript(CHILD_SCRIPT_API, true);
@@ -101,19 +99,14 @@ SpecialPowersObserver.prototype._loadFrameScript = function()
 
 SpecialPowersObserver.prototype._sendAsyncMessage = function(msgname, msg)
 {
-  if (this._mmIsGlobal) {
-    this._messageManager.broadcastAsyncMessage(msgname, msg);
-  }
-  else {
-    this._messageManager.sendAsyncMessage(msgname, msg);
-  }
+  this._messageManager.broadcastAsyncMessage(msgname, msg);
 };
 
 SpecialPowersObserver.prototype._receiveMessage = function(aMessage) {
   return this._receiveMessageAPI(aMessage);
 };
 
-SpecialPowersObserver.prototype.init = function(messageManager)
+SpecialPowersObserver.prototype.init = function()
 {
   var obs = Services.obs;
   obs.addObserver(this, "chrome-document-global-created", false);
@@ -132,11 +125,6 @@ SpecialPowersObserver.prototype.init = function(messageManager)
                  autoRegister(manifestFile);
 
   obs.addObserver(this, "http-on-modify-request", false);
-
-  if (messageManager) {
-    this._messageManager = messageManager;
-    this._mmIsGlobal = false;
-  }
 
   this._loadFrameScript();
 };
@@ -160,7 +148,6 @@ SpecialPowersObserver.prototype.uninit = function()
     this._messageManager.removeMessageListener("SpecialPowers.CreateFiles", this);
     this._messageManager.removeMessageListener("SpecialPowers.RemoveFiles", this);
     this._messageManager.removeMessageListener("SPPermissionManager", this);
-    this._messageManager.removeMessageListener("SPWebAppService", this);
     this._messageManager.removeMessageListener("SPObserverService", this);
     this._messageManager.removeMessageListener("SPLoadChromeScript", this);
     this._messageManager.removeMessageListener("SPImportInMainProcess", this);
@@ -172,16 +159,13 @@ SpecialPowersObserver.prototype.uninit = function()
     this._messageManager.removeMessageListener("SPUnloadExtension", this);
     this._messageManager.removeMessageListener("SPExtensionMessage", this);
     this._messageManager.removeMessageListener("SPCleanUpSTSData", this);
+    this._messageManager.removeMessageListener("SPClearAppPrivateData", this);
 
     this._messageManager.removeDelayedFrameScript(CHILD_LOGGER_SCRIPT);
     this._messageManager.removeDelayedFrameScript(CHILD_SCRIPT_API);
     this._messageManager.removeDelayedFrameScript(CHILD_SCRIPT);
     this._isFrameScriptLoaded = false;
   }
-
-  this._mmIsGlobal = true;
-  this._messageManager = Cc["@mozilla.org/globalmessagemanager;1"].
-    getService(Ci.nsIMessageBroadcaster);
 };
 
 SpecialPowersObserver.prototype._addProcessCrashObservers = function() {
@@ -266,22 +250,27 @@ SpecialPowersObserver.prototype.receiveMessage = function(aMessage) {
       break;
     case "SpecialPowers.CreateFiles":
       let filePaths = new Array;
-      if (!this.createdFiles) {
+      if (!this._createdFiles) {
         this._createdFiles = new Array;
       }
       let createdFiles = this._createdFiles;
       try {
         aMessage.data.forEach(function(request) {
-              let testFile = Services.dirsvc.get("ProfD", Ci.nsIFile);
-              testFile.append(request.name);
-              let outStream = Cc["@mozilla.org/network/file-output-stream;1"].createInstance(Ci.nsIFileOutputStream);
-              outStream.init(testFile, 0x02 | 0x08 | 0x20, // PR_WRONLY | PR_CREATE_FILE | PR_TRUNCATE
-                             0666, 0);
-              if (request.data) {
-            outStream.write(request.data, request.data.length);
-            outStream.close();
+          const filePerms = 0666;
+          let testFile = Services.dirsvc.get("ProfD", Ci.nsIFile);
+          if (request.name) {
+            testFile.appendRelativePath(request.name);
+          } else {
+            testFile.createUnique(Ci.nsIFile.NORMAL_FILE_TYPE, filePerms);
           }
-          filePaths.push(new File(testFile.path));
+          let outStream = Cc["@mozilla.org/network/file-output-stream;1"].createInstance(Ci.nsIFileOutputStream);
+          outStream.init(testFile, 0x02 | 0x08 | 0x20, // PR_WRONLY | PR_CREATE_FILE | PR_TRUNCATE
+                         filePerms, 0);
+          if (request.data) {
+            outStream.write(request.data, request.data.length);
+          }
+          outStream.close();
+          filePaths.push(File.createFromFileName(testFile.path, request.options));
           createdFiles.push(testFile);
         });
         aMessage.target

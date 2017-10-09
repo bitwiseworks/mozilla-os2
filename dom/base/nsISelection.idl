@@ -26,7 +26,7 @@ class Selection;
  * @version 1.0
  */
 
-[builtinclass, uuid(4844124d-3c00-47c8-abc0-afe4119e60ca)]
+[builtinclass, uuid(e0a4d4b3-f34e-44bd-b1f2-4e3bde9b6915)]
 interface nsISelection : nsISupports
 {
     /**

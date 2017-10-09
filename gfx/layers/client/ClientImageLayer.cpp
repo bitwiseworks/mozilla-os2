@@ -12,7 +12,6 @@
 #include "mozilla/layers/ImageClient.h"  // for ImageClient, etc
 #include "mozilla/layers/LayersMessages.h"  // for ImageLayerAttributes, etc
 #include "mozilla/mozalloc.h"           // for operator delete, etc
-#include "nsAutoPtr.h"                  // for nsRefPtr, getter_AddRefs, etc
 #include "nsCOMPtr.h"                   // for already_AddRefed
 #include "nsDebug.h"                    // for NS_ASSERTION
 #include "nsISupportsImpl.h"            // for Layer::AddRef, etc
@@ -60,9 +59,16 @@ protected:
     DestroyBackBuffer();
   }
 
+  virtual void HandleMemoryPressure() override
+  {
+    if (mImageClient) {
+      mImageClient->HandleMemoryPressure();
+    }
+  }
+
   virtual void FillSpecificAttributes(SpecificLayerAttributes& aAttrs) override
   {
-    aAttrs = ImageLayerAttributes(mFilter, mScaleToSize, mScaleMode);
+    aAttrs = ImageLayerAttributes(mSamplingFilter, mScaleToSize, mScaleMode);
   }
 
   virtual Layer* AsLayer() override { return this; }
@@ -107,14 +113,6 @@ protected:
 
     AutoLockImage autoLock(mContainer);
 
-#ifdef MOZ_WIDGET_GONK
-    if (autoLock.HasImage() &&
-        autoLock.GetImage()->GetFormat() == ImageFormat::OVERLAY_IMAGE) {
-      mImageClientTypeContainer = CompositableType::IMAGE_OVERLAY;
-      return mImageClientTypeContainer;
-    }
-#endif
-
     mImageClientTypeContainer = autoLock.HasImage()
         ? CompositableType::IMAGE : CompositableType::UNKNOWN;
     return mImageClientTypeContainer;
@@ -140,9 +138,6 @@ ClientImageLayer::RenderLayer()
       return;
     }
     TextureFlags flags = TextureFlags::DEFAULT;
-    if (mDisallowBigImage) {
-      flags |= TextureFlags::DISALLOW_BIGIMAGE;
-    }
     mImageClient = ImageClient::CreateImageClient(type,
                                                   ClientManager()->AsShadowForwarder(),
                                                   flags);

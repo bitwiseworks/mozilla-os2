@@ -9,7 +9,7 @@
 #include "CacheStorageService.h"
 #include "CacheHashUtils.h"
 #include "CacheObserver.h"
-#include "mozilla/Endian.h"
+#include "mozilla/EndianUtils.h"
 #include "mozilla/BasePrincipal.h"
 #include "nsAutoPtr.h"
 #include "nsString.h"
@@ -36,7 +36,7 @@ static const uint32_t kCacheEntryIsPinned = 1 << 0;
   ((double)(aInt) / (double)CacheObserver::HalfLifeSeconds())
 
 
-#define kCacheEntryVersion 2
+#define kCacheEntryVersion 3
 
 
 #pragma pack(push)
@@ -81,7 +81,7 @@ public:
     mFrecency = BigEndian::readUint32(ptr); ptr += sizeof(uint32_t);
     mExpirationTime = BigEndian::readUint32(ptr); ptr += sizeof(uint32_t);
     mKeySize = BigEndian::readUint32(ptr); ptr += sizeof(uint32_t);
-    if (mVersion >= kCacheEntryVersion) {
+    if (mVersion >= 2) {
       mFlags = BigEndian::readUint32(ptr);
     } else {
       mFlags = 0;
@@ -116,6 +116,7 @@ public:
 
   NS_IMETHOD OnMetadataRead(nsresult aResult) = 0;
   NS_IMETHOD OnMetadataWritten(nsresult aResult) = 0;
+  virtual bool IsKilled() = 0;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(CacheFileMetadataListener,
@@ -183,6 +184,8 @@ public:
   NS_IMETHOD OnFileDoomed(CacheFileHandle *aHandle, nsresult aResult) override;
   NS_IMETHOD OnEOFSet(CacheFileHandle *aHandle, nsresult aResult) override;
   NS_IMETHOD OnFileRenamed(CacheFileHandle *aHandle, nsresult aResult) override;
+  virtual bool IsKilled() override { return mListener && mListener->IsKilled(); }
+  void InitEmptyMetadata();
 
   // Memory reporting
   size_t SizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
@@ -191,7 +194,6 @@ public:
 private:
   virtual ~CacheFileMetadata();
 
-  void     InitEmptyMetadata();
   nsresult ParseMetadata(uint32_t aMetaOffset, uint32_t aBufOffset, bool aHaveKey);
   nsresult CheckElements(const char *aBuf, uint32_t aSize);
   nsresult EnsureBuffer(uint32_t aSize);

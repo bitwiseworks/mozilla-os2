@@ -1,10 +1,13 @@
 #include "nsContentSecurityManager.h"
 #include "nsIChannel.h"
+#include "nsIHttpChannelInternal.h"
 #include "nsIStreamListener.h"
 #include "nsILoadInfo.h"
 #include "nsContentUtils.h"
 #include "nsCORSListenerProxy.h"
 #include "nsIStreamListener.h"
+#include "nsIDocument.h"
+#include "nsMixedContentBlocker.h"
 
 #include "mozilla/dom/Element.h"
 
@@ -39,6 +42,45 @@ static bool SchemeIs(nsIURI* aURI, const char* aScheme)
   return NS_SUCCEEDED(baseURI->SchemeIs(aScheme, &isScheme)) && isScheme;
 }
 
+
+static bool IsImageLoadInEditorAppType(nsILoadInfo* aLoadInfo)
+{
+  // Editor apps get special treatment here, editors can load images
+  // from anywhere.  This allows editor to insert images from file://
+  // into documents that are being edited.
+  nsContentPolicyType type = aLoadInfo->InternalContentPolicyType();
+  if (type != nsIContentPolicy::TYPE_INTERNAL_IMAGE  &&
+      type != nsIContentPolicy::TYPE_INTERNAL_IMAGE_PRELOAD &&
+      type != nsIContentPolicy::TYPE_INTERNAL_IMAGE_FAVICON &&
+      type != nsIContentPolicy::TYPE_IMAGESET) {
+    return false;
+  }
+
+  uint32_t appType = nsIDocShell::APP_TYPE_UNKNOWN;
+  nsINode* node = aLoadInfo->LoadingNode();
+  if (!node) {
+    return false;
+  }
+  nsIDocument* doc = node->OwnerDoc();
+  if (!doc) {
+    return false;
+  }
+
+  nsCOMPtr<nsIDocShellTreeItem> docShellTreeItem = doc->GetDocShell();
+  if (!docShellTreeItem) {
+    return false;
+  }
+
+  nsCOMPtr<nsIDocShellTreeItem> root;
+  docShellTreeItem->GetRootTreeItem(getter_AddRefs(root));
+  nsCOMPtr<nsIDocShell> docShell(do_QueryInterface(root));
+  if (!docShell || NS_FAILED(docShell->GetAppType(&appType))) {
+    appType = nsIDocShell::APP_TYPE_UNKNOWN;
+  }
+
+  return appType == nsIDocShell::APP_TYPE_EDITOR;
+}
+
 static nsresult
 DoCheckLoadURIChecks(nsIURI* aURI, nsILoadInfo* aLoadInfo)
 {
@@ -47,31 +89,25 @@ DoCheckLoadURIChecks(nsIURI* aURI, nsILoadInfo* aLoadInfo)
     return NS_OK;
   }
 
-  nsresult rv = NS_OK;
+  if (IsImageLoadInEditorAppType(aLoadInfo)) {
+    return NS_OK;
+  }
 
-  nsCOMPtr<nsIPrincipal> loadingPrincipal = aLoadInfo->LoadingPrincipal();
   uint32_t flags = nsIScriptSecurityManager::STANDARD;
   if (aLoadInfo->GetAllowChrome()) {
     flags |= nsIScriptSecurityManager::ALLOW_CHROME;
   }
+  if (aLoadInfo->GetDisallowScript()) {
+    flags |= nsIScriptSecurityManager::DISALLOW_SCRIPT;
+  }
 
-  rv = nsContentUtils::GetSecurityManager()->
-    CheckLoadURIWithPrincipal(loadingPrincipal,
-                              aURI,
-                              flags);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // If the loadingPrincipal and the triggeringPrincipal are different, then make
-  // sure the triggeringPrincipal is allowed to access that URI.
-  nsCOMPtr<nsIPrincipal> triggeringPrincipal = aLoadInfo->TriggeringPrincipal();
-  if (loadingPrincipal != triggeringPrincipal) {
-    rv = nsContentUtils::GetSecurityManager()->
-           CheckLoadURIWithPrincipal(triggeringPrincipal,
+  // Only call CheckLoadURIWithPrincipal() using the TriggeringPrincipal and not
+  // the LoadingPrincipal when SEC_ALLOW_CROSS_ORIGIN_* security flags are set,
+  // to allow, e.g. user stylesheets to load chrome:// URIs.
+  return nsContentUtils::GetSecurityManager()->
+           CheckLoadURIWithPrincipal(aLoadInfo->TriggeringPrincipal(),
                                      aURI,
                                      flags);
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
-  return NS_OK;
 }
 
 static bool
@@ -105,6 +141,14 @@ DoCORSChecks(nsIChannel* aChannel, nsILoadInfo* aLoadInfo,
              nsCOMPtr<nsIStreamListener>& aInAndOutListener)
 {
   MOZ_RELEASE_ASSERT(aInAndOutListener, "can not perform CORS checks without a listener");
+
+  // No need to set up CORS if TriggeringPrincipal is the SystemPrincipal.
+  // For example, allow user stylesheets to load XBL from external files
+  // without requiring CORS.
+  if (nsContentUtils::IsSystemPrincipal(aLoadInfo->TriggeringPrincipal())) {
+    return NS_OK;
+  }
+
   nsIPrincipal* loadingPrincipal = aLoadInfo->LoadingPrincipal();
   RefPtr<nsCORSListenerProxy> corsListener =
     new nsCORSListenerProxy(aInAndOutListener,
@@ -121,14 +165,25 @@ DoCORSChecks(nsIChannel* aChannel, nsILoadInfo* aLoadInfo,
 }
 
 static nsresult
-DoContentSecurityChecks(nsIURI* aURI, nsILoadInfo* aLoadInfo)
+DoContentSecurityChecks(nsIChannel* aChannel, nsILoadInfo* aLoadInfo)
 {
+  nsCOMPtr<nsIURI> uri;
+  nsresult rv = NS_GetFinalChannelURI(aChannel, getter_AddRefs(uri));
+  NS_ENSURE_SUCCESS(rv, rv);
+
   nsContentPolicyType contentPolicyType =
     aLoadInfo->GetExternalContentPolicyType();
   nsContentPolicyType internalContentPolicyType =
     aLoadInfo->InternalContentPolicyType();
   nsCString mimeTypeGuess;
   nsCOMPtr<nsINode> requestingContext = nullptr;
+
+#ifdef DEBUG
+  // Don't enforce TYPE_DOCUMENT assertions for loads
+  // initiated by javascript tests.
+  bool skipContentTypeCheck = false;
+  skipContentTypeCheck = Preferences::GetBool("network.loadinfo.skip_type_assertion");
+#endif
 
   switch(contentPolicyType) {
     case nsIContentPolicy::TYPE_OTHER: {
@@ -143,11 +198,26 @@ DoContentSecurityChecks(nsIURI* aURI, nsILoadInfo* aLoadInfo)
       break;
     }
 
-    case nsIContentPolicy::TYPE_IMAGE:
-    case nsIContentPolicy::TYPE_STYLESHEET:
-    case nsIContentPolicy::TYPE_OBJECT:
+    case nsIContentPolicy::TYPE_IMAGE: {
+      mimeTypeGuess = EmptyCString();
+      requestingContext = aLoadInfo->LoadingNode();
+      break;
+    }
+
+    case nsIContentPolicy::TYPE_STYLESHEET: {
+      mimeTypeGuess = NS_LITERAL_CSTRING("text/css");
+      requestingContext = aLoadInfo->LoadingNode();
+      break;
+    }
+
+    case nsIContentPolicy::TYPE_OBJECT: {
+      mimeTypeGuess = EmptyCString();
+      requestingContext = aLoadInfo->LoadingNode();
+      break;
+    }
+
     case nsIContentPolicy::TYPE_DOCUMENT: {
-      MOZ_ASSERT(false, "contentPolicyType not supported yet");
+      MOZ_ASSERT(skipContentTypeCheck || false, "contentPolicyType not supported yet");
       break;
     }
 
@@ -220,7 +290,8 @@ DoContentSecurityChecks(nsIURI* aURI, nsILoadInfo* aLoadInfo)
     }
 
     case nsIContentPolicy::TYPE_FONT: {
-      MOZ_ASSERT(false, "contentPolicyType not supported yet");
+      mimeTypeGuess = EmptyCString();
+      requestingContext = aLoadInfo->LoadingNode();
       break;
     }
 
@@ -239,7 +310,16 @@ DoContentSecurityChecks(nsIURI* aURI, nsILoadInfo* aLoadInfo)
     }
 
     case nsIContentPolicy::TYPE_WEBSOCKET: {
-      MOZ_ASSERT(false, "contentPolicyType not supported yet");
+      // Websockets have to use the proxied URI:
+      // ws:// instead of http:// for CSP checks
+      nsCOMPtr<nsIHttpChannelInternal> httpChannelInternal
+        = do_QueryInterface(aChannel);
+      MOZ_ASSERT(httpChannelInternal);
+      if (httpChannelInternal) {
+        httpChannelInternal->GetProxyURI(getter_AddRefs(uri));
+      }
+      mimeTypeGuess = EmptyCString();
+      requestingContext = aLoadInfo->LoadingNode();
       break;
     }
 
@@ -274,7 +354,14 @@ DoContentSecurityChecks(nsIURI* aURI, nsILoadInfo* aLoadInfo)
     }
 
     case nsIContentPolicy::TYPE_IMAGESET: {
-      MOZ_ASSERT(false, "contentPolicyType not supported yet");
+      mimeTypeGuess = EmptyCString();
+      requestingContext = aLoadInfo->LoadingNode();
+      break;
+    }
+
+    case nsIContentPolicy::TYPE_WEB_MANIFEST: {
+      mimeTypeGuess = NS_LITERAL_CSTRING("application/manifest+json");
+      requestingContext = aLoadInfo->LoadingNode();
       break;
     }
 
@@ -284,19 +371,27 @@ DoContentSecurityChecks(nsIURI* aURI, nsILoadInfo* aLoadInfo)
   }
 
   int16_t shouldLoad = nsIContentPolicy::ACCEPT;
-  nsresult rv = NS_CheckContentLoadPolicy(internalContentPolicyType,
-                                          aURI,
-                                          aLoadInfo->LoadingPrincipal(),
-                                          requestingContext,
-                                          mimeTypeGuess,
-                                          nullptr,        //extra,
-                                          &shouldLoad,
-                                          nsContentUtils::GetContentPolicy(),
-                                          nsContentUtils::GetSecurityManager());
+  rv = NS_CheckContentLoadPolicy(internalContentPolicyType,
+                                 uri,
+                                 aLoadInfo->LoadingPrincipal(),
+                                 requestingContext,
+                                 mimeTypeGuess,
+                                 nullptr,        //extra,
+                                 &shouldLoad,
+                                 nsContentUtils::GetContentPolicy(),
+                                 nsContentUtils::GetSecurityManager());
   NS_ENSURE_SUCCESS(rv, rv);
   if (NS_CP_REJECTED(shouldLoad)) {
     return NS_ERROR_CONTENT_BLOCKED;
   }
+
+  if (nsMixedContentBlocker::sSendHSTSPriming) {
+    rv = nsMixedContentBlocker::MarkLoadInfoForPriming(uri,
+                                                       requestingContext,
+                                                       aLoadInfo);
+    return rv;
+  }
+
   return NS_OK;
 }
 
@@ -346,8 +441,7 @@ nsContentSecurityManager::doContentSecurityCheck(nsIChannel* aChannel,
   // please note that some implementations of ::AsyncOpen2 might already
   // have set that flag to true (e.g. nsViewSourceChannel) in which case
   // we just set the flag again.
-  rv = loadInfo->SetEnforceSecurity(true);
-  NS_ENSURE_SUCCESS(rv, rv);
+  loadInfo->SetEnforceSecurity(true);
 
   if (loadInfo->GetSecurityMode() == nsILoadInfo::SEC_REQUIRE_CORS_DATA_INHERITS) {
     rv = DoCORSChecks(aChannel, loadInfo, aInAndOutListener);
@@ -357,17 +451,12 @@ nsContentSecurityManager::doContentSecurityCheck(nsIChannel* aChannel,
   rv = CheckChannel(aChannel);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<nsIURI> finalChannelURI;
-  rv = NS_GetFinalChannelURI(aChannel, getter_AddRefs(finalChannelURI));
-  NS_ENSURE_SUCCESS(rv, rv);
-
   // Perform all ContentPolicy checks (MixedContent, CSP, ...)
-  rv = DoContentSecurityChecks(finalChannelURI, loadInfo);
+  rv = DoContentSecurityChecks(aChannel, loadInfo);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // now lets set the initalSecurityFlag for subsequent calls
-  rv = loadInfo->SetInitialSecurityCheckDone(true);
-  NS_ENSURE_SUCCESS(rv, rv);
+  loadInfo->SetInitialSecurityCheckDone(true);
 
   // all security checks passed - lets allow the load
   return NS_OK;
@@ -411,7 +500,7 @@ nsContentSecurityManager::AsyncOnChannelRedirect(nsIChannel* aOldChannel,
       rv = nsContentUtils::GetSecurityManager()->
         CheckLoadURIWithPrincipal(oldPrincipal, newOriginalURI, flags);
   }
-  NS_ENSURE_SUCCESS(rv, rv);  
+  NS_ENSURE_SUCCESS(rv, rv);
 
   aCb->OnRedirectVerifyCallback(NS_OK);
   return NS_OK;
@@ -443,6 +532,10 @@ nsContentSecurityManager::CheckChannel(nsIChannel* aChannel)
   // Handle cookie policies
   uint32_t cookiePolicy = loadInfo->GetCookiePolicy();
   if (cookiePolicy == nsILoadInfo::SEC_COOKIES_SAME_ORIGIN) {
+
+    // We shouldn't have the SEC_COOKIES_SAME_ORIGIN flag for top level loads
+    MOZ_ASSERT(loadInfo->GetExternalContentPolicyType() !=
+               nsIContentPolicy::TYPE_DOCUMENT);
     nsIPrincipal* loadingPrincipal = loadInfo->LoadingPrincipal();
 
     // It doesn't matter what we pass for the third, data-inherits, argument.
@@ -463,6 +556,14 @@ nsContentSecurityManager::CheckChannel(nsIChannel* aChannel)
     if (NS_HasBeenCrossOrigin(aChannel)) {
       loadInfo->MaybeIncreaseTainting(LoadTainting::CORS);
     }
+    return NS_OK;
+  }
+
+  // Allow subresource loads if TriggeringPrincipal is the SystemPrincipal.
+  // For example, allow user stylesheets to load XBL from external files.
+  if (nsContentUtils::IsSystemPrincipal(loadInfo->TriggeringPrincipal()) &&
+      loadInfo->GetExternalContentPolicyType() != nsIContentPolicy::TYPE_DOCUMENT &&
+      loadInfo->GetExternalContentPolicyType() != nsIContentPolicy::TYPE_SUBDOCUMENT) {
     return NS_OK;
   }
 
@@ -505,29 +606,62 @@ nsContentSecurityManager::PerformSecurityCheck(nsIChannel* aChannel,
 }
 
 NS_IMETHODIMP
-nsContentSecurityManager::IsURIPotentiallyTrustworthy(nsIURI* aURI, bool* aIsTrustWorthy)
+nsContentSecurityManager::IsOriginPotentiallyTrustworthy(nsIPrincipal* aPrincipal,
+                                                         bool* aIsTrustWorthy)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  NS_ENSURE_ARG_POINTER(aURI);
+  NS_ENSURE_ARG_POINTER(aPrincipal);
   NS_ENSURE_ARG_POINTER(aIsTrustWorthy);
 
+  if (aPrincipal->GetIsSystemPrincipal()) {
+    *aIsTrustWorthy = true;
+    return NS_OK;
+  }
+
+  // The following implements:
+  // https://w3c.github.io/webappsec-secure-contexts/#is-origin-trustworthy
+
   *aIsTrustWorthy = false;
+
+  if (aPrincipal->GetIsNullPrincipal()) {
+    return NS_OK;
+  }
+
+  MOZ_ASSERT(aPrincipal->GetIsCodebasePrincipal(),
+             "Nobody is expected to call us with an nsIExpandedPrincipal");
+
+  nsCOMPtr<nsIURI> uri;
+  aPrincipal->GetURI(getter_AddRefs(uri));
+
   nsAutoCString scheme;
-  nsresult rv = aURI->GetScheme(scheme);
+  nsresult rv = uri->GetScheme(scheme);
   if (NS_FAILED(rv)) {
     return NS_OK;
   }
 
+  // Blobs are expected to inherit their principal so we don't expect to have
+  // a codebase principal with scheme 'blob' here.  We can't assert that though
+  // since someone could mess with a non-blob URI to give it that scheme.
+  NS_WARNING_ASSERTION(!scheme.EqualsLiteral("blob"),
+                       "IsOriginPotentiallyTrustworthy ignoring blob scheme");
+
+  // According to the specification, the user agent may choose to extend the
+  // trust to other, vendor-specific URL schemes. We use this for "resource:",
+  // which is technically a substituting protocol handler that is not limited to
+  // local resource mapping, but in practice is never mapped remotely as this
+  // would violate assumptions a lot of code makes.
   if (scheme.EqualsLiteral("https") ||
       scheme.EqualsLiteral("file") ||
+      scheme.EqualsLiteral("resource") ||
       scheme.EqualsLiteral("app") ||
+      scheme.EqualsLiteral("moz-extension") ||
       scheme.EqualsLiteral("wss")) {
     *aIsTrustWorthy = true;
     return NS_OK;
   }
 
   nsAutoCString host;
-  rv = aURI->GetHost(host);
+  rv = uri->GetHost(host);
   if (NS_FAILED(rv)) {
     return NS_OK;
   }
@@ -538,5 +672,24 @@ nsContentSecurityManager::IsURIPotentiallyTrustworthy(nsIURI* aURI, bool* aIsTru
     *aIsTrustWorthy = true;
     return NS_OK;
   }
+
+  // If a host is not considered secure according to the default algorithm, then
+  // check to see if it has been whitelisted by the user.  We only apply this
+  // whitelist for network resources, i.e., those with scheme "http" or "ws".
+  // The pref should contain a comma-separated list of hostnames.
+  if (scheme.EqualsLiteral("http") || scheme.EqualsLiteral("ws")) {
+    nsAdoptingCString whitelist = Preferences::GetCString("dom.securecontext.whitelist");
+    if (whitelist) {
+      nsCCharSeparatedTokenizer tokenizer(whitelist, ',');
+      while (tokenizer.hasMoreTokens()) {
+        const nsCSubstring& allowedHost = tokenizer.nextToken();
+        if (host.Equals(allowedHost)) {
+          *aIsTrustWorthy = true;
+          return NS_OK;
+        }
+      }
+    }
+  }
+
   return NS_OK;
 }

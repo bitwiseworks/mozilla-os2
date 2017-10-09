@@ -16,7 +16,7 @@
 
 "use strict";
 
-//---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 
 var Cc = Components.classes;
 var Ci = Components.interfaces;
@@ -35,6 +35,10 @@ const UNITS_PERCENTAGE       = Ci.nsIMemoryReporter.UNITS_PERCENTAGE;
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/NetUtil.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Downloads",
+ "resource://gre/modules/Downloads.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
+ "resource://gre/modules/FileUtils.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "nsBinaryStream",
                             () => CC("@mozilla.org/binaryinputstream;1",
@@ -57,7 +61,7 @@ const gUnnamedProcessStr = "Main Process";
 
 var gIsDiff = false;
 
-//---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 
 // Forward slashes in URLs in paths are represented with backslashes to avoid
 // being mistaken for path separators.  Paths/names where this hasn't been
@@ -78,7 +82,7 @@ function assert(aCond, aMsg)
 {
   if (!aCond) {
     reportAssertionFailure(aMsg)
-    throw(gAssertionFailureMsgPrefix + aMsg);
+    throw new Error(gAssertionFailureMsgPrefix + aMsg);
   }
 }
 
@@ -86,19 +90,19 @@ function assert(aCond, aMsg)
 function assertInput(aCond, aMsg)
 {
   if (!aCond) {
-    throw "Invalid memory report(s): " + aMsg;
+    throw new Error("Invalid memory report(s): " + aMsg);
   }
 }
 
 function handleException(ex)
 {
-  let str = ex.toString();
+  let str = "" + ex;
   if (str.startsWith(gAssertionFailureMsgPrefix)) {
     // Argh, assertion failure within this file!  Give up.
     throw ex;
   } else {
     // File or memory reporter problem.  Print a message.
-    updateMainAndFooter(ex.toString(), HIDE_FOOTER, "badInputWarning");
+    updateMainAndFooter(str, HIDE_FOOTER, "badInputWarning");
   }
 }
 
@@ -116,13 +120,13 @@ function debug(x)
   appendElementWithText(section, "div", "debug", JSON.stringify(x));
 }
 
-//---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 
 function onUnload()
 {
 }
 
-//---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 
 // The <div> holding everything but the header and footer (if they're present).
 // It's what is updated each time the page changes.
@@ -172,7 +176,7 @@ function updateTitleMainAndFooter(aTitleNote, aMsg, aFooterAction, aClassName)
   switch (aFooterAction) {
    case HIDE_FOOTER:   gFooter.classList.add('hidden');    break;
    case SHOW_FOOTER:   gFooter.classList.remove('hidden'); break;
-   default: assertInput(false, "bad footer action in updateTitleMainAndFooter");
+   default: assert(false, "bad footer action in updateTitleMainAndFooter");
   }
   return msgElement;
 }
@@ -209,7 +213,7 @@ function appendElementWithText(aP, aTagName, aClassName, aText)
   return e;
 }
 
-//---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 
 const explicitTreeDescription =
 "This tree covers explicit memory allocations by the application.  It includes \
@@ -230,7 +234,7 @@ and thread stacks. \
 most (including the entire heap), and therefore it is the single best number to \
 focus on when trying to reduce memory usage.";
 
-//---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 
 function appendButton(aP, aTitle, aOnClick, aText, aId)
 {
@@ -417,7 +421,7 @@ function onLoad()
   }
 }
 
-//---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 
 function doGC()
 {
@@ -635,8 +639,8 @@ function loadMemoryReportsFromFile(aFilename, aTitleNote, aFn)
 
   try {
     let reader = new FileReader();
-    reader.onerror = () => { throw "FileReader.onerror"; };
-    reader.onabort = () => { throw "FileReader.onabort"; };
+    reader.onerror = () => { throw new Error("FileReader.onerror"); };
+    reader.onabort = () => { throw new Error("FileReader.onabort"); };
     reader.onload = (aEvent) => {
       // Clear "Loading..." from above.
       updateTitleMainAndFooter(aTitleNote, "", SHOW_FOOTER);
@@ -645,7 +649,7 @@ function loadMemoryReportsFromFile(aFilename, aTitleNote, aFn)
 
     // If it doesn't have a .gz suffix, read it as a (legacy) ungzipped file.
     if (!aFilename.endsWith(".gz")) {
-      reader.readAsText(new File(aFilename));
+      reader.readAsText(File.createFromFileName(aFilename));
       return;
     }
 
@@ -661,7 +665,7 @@ function loadMemoryReportsFromFile(aFilename, aTitleNote, aFn)
       onStopRequest: function(aR, aC, aStatusCode) {
         try {
           if (!Components.isSuccessCode(aStatusCode)) {
-            throw aStatusCode;
+            throw new Components.Exception("Error while reading gzip file", aStatusCode);
           }
           reader.readAsText(new Blob(this.data));
         } catch (ex) {
@@ -723,7 +727,7 @@ function updateAboutMemoryFromTwoFiles(aFilename1, aFilename2)
   });
 }
 
-//---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 
 // Something unlikely to appear in a process name.
 var kProcessPathSep = "^:^:^";
@@ -940,7 +944,7 @@ function diffJSONObjects(aJson1, aJson2)
   };
 }
 
-//---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 
 // |PColl| is short for "process collection".
 function PColl()
@@ -1091,7 +1095,7 @@ function appendAboutMemoryMain(aProcessReports, aHasMozMallocUsableSize)
   aProcessReports(handleReport, displayReports);
 }
 
-//---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 
 // There are two kinds of TreeNode.
 // - Leaf TreeNodes correspond to reports.
@@ -1166,7 +1170,7 @@ TreeNode.prototype = {
       case UNITS_COUNT_CUMULATIVE: return formatInt(this._amount);
       case UNITS_PERCENTAGE:       return formatPercentage(this._amount);
       default:
-        assertInput(false, "bad units in TreeNode.toString");
+        throw "Invalid memory report(s): bad units in TreeNode.toString";
     }
   }
 };
@@ -1193,9 +1197,7 @@ TreeNode.compareAmounts = function(aA, aB) {
 };
 
 TreeNode.compareUnsafeNames = function(aA, aB) {
-  return aA._unsafeName < aB._unsafeName ? -1 :
-         aA._unsafeName > aB._unsafeName ?  1 :
-         0;
+  return aA._unsafeName.localeCompare(aB._unsafeName);
 };
 
 
@@ -1225,7 +1227,7 @@ function fillInTree(aRoot)
       } else {
         delete aT._kids;
       }
-      aT._amount = kid._amount;
+      aT._amount = kidBytes;
       aT._description = kid._description;
       if (kid._nMerged !== undefined) {
         aT._nMerged = kid._nMerged
@@ -1987,7 +1989,7 @@ function appendTreeElements(aP, aRoot, aProcess, aPadText)
                       aPadText, "", "", rootStringLength);
 }
 
-//---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 
 function appendSectionHeader(aP, aText)
 {
@@ -1995,7 +1997,7 @@ function appendSectionHeader(aP, aText)
   return appendElement(aP, "pre", "entries");
 }
 
-//---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 
 function saveReportsToFile()
 {
@@ -2025,12 +2027,15 @@ function saveReportsToFile()
 
   try {
     fp.init(window, "Save Memory Reports", Ci.nsIFilePicker.modeSave);
-  } catch(ex) {
+  } catch (ex) {
     // This will fail on Android, since there is no Save as file picker there.
     // Just save to the default downloads dir if it does.
-    let file = Services.dirsvc.get("DfltDwnld", Ci.nsIFile);
-    file.append(fp.defaultString);
-    fpFinish(file);
+    Downloads.getSystemDownloadsDirectory().then(function(dirPath) {
+      let file = FileUtils.File(dirPath);
+      file.append(fp.defaultString);
+      fpFinish(file);
+    });
+
     return;
   }
   fp.open(fpCallback);

@@ -28,7 +28,7 @@ namespace ipc {
 bool
 StructuredCloneData::Copy(const StructuredCloneData& aData)
 {
-  if (!aData.Data()) {
+  if (!aData.mInitialized) {
     return true;
   }
 
@@ -36,15 +36,19 @@ StructuredCloneData::Copy(const StructuredCloneData& aData)
     mSharedData = aData.SharedData();
   } else {
     mSharedData =
-      SharedJSAllocatedData::CreateFromExternalData(aData.Data(),
-                                                    aData.DataLength());
+      SharedJSAllocatedData::CreateFromExternalData(aData.Data());
     NS_ENSURE_TRUE(mSharedData, false);
   }
+
+  PortIdentifiers().AppendElements(aData.PortIdentifiers());
 
   MOZ_ASSERT(BlobImpls().IsEmpty());
   BlobImpls().AppendElements(aData.BlobImpls());
 
-  MOZ_ASSERT(GetImages().IsEmpty());
+  MOZ_ASSERT(GetSurfaces().IsEmpty());
+  MOZ_ASSERT(WasmModules().IsEmpty());
+
+  mInitialized = true;
 
   return true;
 }
@@ -54,12 +58,12 @@ StructuredCloneData::Read(JSContext* aCx,
                           JS::MutableHandle<JS::Value> aValue,
                           ErrorResult &aRv)
 {
-  MOZ_ASSERT(Data());
+  MOZ_ASSERT(mInitialized);
 
   nsIGlobalObject *global = xpc::NativeGlobal(JS::CurrentGlobalOrNull(aCx));
   MOZ_ASSERT(global);
 
-  ReadFromBuffer(global, aCx, Data(), DataLength(), aValue, aRv);
+  ReadFromBuffer(global, aCx, Data(), aValue, aRv);
 }
 
 void
@@ -67,69 +71,60 @@ StructuredCloneData::Write(JSContext* aCx,
                            JS::Handle<JS::Value> aValue,
                            ErrorResult &aRv)
 {
-  MOZ_ASSERT(!Data());
+  Write(aCx, aValue, JS::UndefinedHandleValue, aRv);
+}
 
-  StructuredCloneHolder::Write(aCx, aValue, aRv);
+void
+StructuredCloneData::Write(JSContext* aCx,
+                           JS::Handle<JS::Value> aValue,
+                           JS::Handle<JS::Value> aTransfer,
+                           ErrorResult &aRv)
+{
+  MOZ_ASSERT(!mInitialized);
+
+  StructuredCloneHolder::Write(aCx, aValue, aTransfer,
+                               JS::CloneDataPolicy().denySharedArrayBuffer(), aRv);
   if (NS_WARN_IF(aRv.Failed())) {
     return;
   }
 
-  uint64_t* data = nullptr;
-  size_t dataLength = 0;
-  mBuffer->steal(&data, &dataLength);
+  JSStructuredCloneData data;
+  mBuffer->abandon();
+  mBuffer->steal(&data);
   mBuffer = nullptr;
-  mSharedData = new SharedJSAllocatedData(data, dataLength);
+  mSharedData = new SharedJSAllocatedData(Move(data));
+  mInitialized = true;
 }
 
 void
 StructuredCloneData::WriteIPCParams(IPC::Message* aMsg) const
 {
-  WriteParam(aMsg, DataLength());
-
-  if (DataLength()) {
-    // Structured clone data must be 64-bit aligned.
-    aMsg->WriteBytes(Data(), DataLength(), sizeof(uint64_t));
-  }
+  WriteParam(aMsg, Data());
 }
 
 bool
 StructuredCloneData::ReadIPCParams(const IPC::Message* aMsg,
-                                   void** aIter)
+                                   PickleIterator* aIter)
 {
-  MOZ_ASSERT(!Data());
-
-  size_t dataLength = 0;
-  if (!ReadParam(aMsg, aIter, &dataLength)) {
+  MOZ_ASSERT(!mInitialized);
+  JSStructuredCloneData data;
+  if (!ReadParam(aMsg, aIter, &data)) {
     return false;
   }
-
-  if (!dataLength) {
-    return true;
-  }
-
-  uint64_t* dataBuffer = nullptr;
-  const char** buffer =
-    const_cast<const char**>(reinterpret_cast<char**>(&dataBuffer));
-  // Structured clone data must be 64-bit aligned.
-  if (!aMsg->ReadBytes(aIter, buffer, dataLength, sizeof(uint64_t))) {
-    return false;
-  }
-
-  mSharedData = SharedJSAllocatedData::CreateFromExternalData(dataBuffer,
-                                                              dataLength);
-  NS_ENSURE_TRUE(mSharedData, false);
-
+  mSharedData = new SharedJSAllocatedData(Move(data));
+  mInitialized = true;
   return true;
 }
 
 bool
-StructuredCloneData::CopyExternalData(const void* aData,
+StructuredCloneData::CopyExternalData(const char* aData,
                                       size_t aDataLength)
 {
-  MOZ_ASSERT(!Data());
+  MOZ_ASSERT(!mInitialized);
   mSharedData = SharedJSAllocatedData::CreateFromExternalData(aData,
                                                               aDataLength);
   NS_ENSURE_TRUE(mSharedData, false);
+  mInitialized = true;
   return true;
 }
 

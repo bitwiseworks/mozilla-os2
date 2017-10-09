@@ -68,7 +68,6 @@ function frameScript() {
     try {
       let reFullname = /Full name: (.+)/;
       let reFps = /Impact on framerate: (\d+)\/10( \((\d+) alerts\))?/;
-      let reCpu = /CPU usage: (\d+)%/
       let reCpow = /Blocking process calls: (\d+)%( \((\d+) alerts\))?/;
 
       let getContentOfSelector = function(eltContainer, selector, re) {
@@ -78,7 +77,7 @@ function frameScript() {
         }
 
         if (!re) {
-          return;
+          return undefined;
         }
 
         let match = elt.textContent.match(re);
@@ -272,7 +271,7 @@ add_task(function* test_close_tab() {
         if (found) {
           break;
         }
-      } while(true);
+      } while (true);
 
       if (mode == "close") {
         info(`Waiting for close`);

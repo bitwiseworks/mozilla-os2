@@ -18,8 +18,6 @@
 #include "mozilla/RefCountType.h"
 #include "mozilla/SheetType.h"
 #include "mozilla/UniquePtr.h"
-#include "nsAutoPtr.h"
-#include "nsCSSPseudoElements.h"
 #include "nsExpirationTracker.h"
 #include "nsIMediaList.h"
 #include "nsIStyleRuleProcessor.h"
@@ -40,6 +38,7 @@ class nsCSSCounterStyleRule;
 
 namespace mozilla {
 class CSSStyleSheet;
+enum class CSSPseudoElementType : uint8_t;
 namespace css {
 class DocumentRule;
 } // namespace css
@@ -65,6 +64,11 @@ public:
   // aPreviousCSSRuleProcessor is the rule processor (if any) that this
   // one is replacing.
   nsCSSRuleProcessor(const sheet_array_type& aSheets,
+                     mozilla::SheetType aSheetType,
+                     mozilla::dom::Element* aScopeElement,
+                     nsCSSRuleProcessor* aPreviousCSSRuleProcessor,
+                     bool aIsShared = false);
+  nsCSSRuleProcessor(sheet_array_type&& aSheets,
                      mozilla::SheetType aSheetType,
                      mozilla::dom::Element* aScopeElement,
                      nsCSSRuleProcessor* aPreviousCSSRuleProcessor,
@@ -112,7 +116,7 @@ public:
   /*
    * Helper to test whether a node is a link
    */
-  static bool IsLink(mozilla::dom::Element* aElement);
+  static bool IsLink(const mozilla::dom::Element* aElement);
 
   /**
    * Returns true if the given aElement matches aSelector.
@@ -234,7 +238,7 @@ private:
 
   nsRestyleHint HasStateDependentStyle(ElementDependentRuleProcessorData* aData,
                                        mozilla::dom::Element* aStatefulElement,
-                                       nsCSSPseudoElements::Type aPseudoType,
+                                       mozilla::CSSPseudoElementType aPseudoType,
                                        mozilla::EventStates aStateMask);
 
   void ClearSheets();

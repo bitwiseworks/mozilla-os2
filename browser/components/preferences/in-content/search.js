@@ -3,20 +3,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "AppConstants",
-                                  "resource://gre/modules/AppConstants.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
                                   "resource://gre/modules/PlacesUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Task",
                                   "resource://gre/modules/Task.jsm");
 
 const ENGINE_FLAVOR = "text/x-moz-search-engine";
-
-document.addEventListener("Initialized", () => {
-  if (!AppConstants.isPlatformAndVersionAtLeast("win", "10")) {
-    document.getElementById("redirectSearchCheckbox").hidden = true;
-  }
-});
 
 var gEngineView = null;
 
@@ -26,19 +18,8 @@ var gSearchPane = {
    * Initialize autocomplete to ensure prefs are in sync.
    */
   _initAutocomplete: function () {
-    let unifiedCompletePref = false;
-    try {
-      unifiedCompletePref =
-        Services.prefs.getBoolPref("browser.urlbar.unifiedcomplete");
-    } catch (ex) {}
-
-    if (unifiedCompletePref) {
-      Components.classes["@mozilla.org/autocomplete/search;1?name=unifiedcomplete"]
-                .getService(Components.interfaces.mozIPlacesAutoComplete);
-    } else {
-      Components.classes["@mozilla.org/autocomplete/search;1?name=history"]
-                .getService(Components.interfaces.mozIPlacesAutoComplete);
-    }
+    Components.classes["@mozilla.org/autocomplete/search;1?name=unifiedcomplete"]
+              .getService(Components.interfaces.mozIPlacesAutoComplete);
   },
 
   init: function ()
@@ -46,6 +27,11 @@ var gSearchPane = {
     gEngineView = new EngineView(new EngineStore());
     document.getElementById("engineList").view = gEngineView;
     this.buildDefaultEngineDropDown();
+
+    let addEnginesLink = document.getElementById("addEngines");
+    let searchEnginesURL = Services.wm.getMostRecentWindow('navigator:browser')
+                                      .BrowserSearch.searchEnginesURL;
+    addEnginesLink.setAttribute("href", searchEnginesURL);
 
     window.addEventListener("click", this, false);
     window.addEventListener("command", this, false);
@@ -70,14 +56,11 @@ var gSearchPane = {
   },
 
   updateSuggestsCheckbox() {
-    let urlbarSuggests = document.getElementById("urlBarSuggestion");
-    urlbarSuggests.hidden =
-      !Services.prefs.getBoolPref("browser.urlbar.unifiedcomplete");
-
     let suggestsPref =
       document.getElementById("browser.search.suggest.enabled");
     let permanentPB =
       Services.prefs.getBoolPref("browser.privatebrowsing.autostart");
+    let urlbarSuggests = document.getElementById("urlBarSuggestion");
     urlbarSuggests.disabled = !suggestsPref.value || permanentPB;
 
     let urlbarSuggestsPref =
@@ -120,9 +103,22 @@ var gSearchPane = {
   handleEvent: function(aEvent) {
     switch (aEvent.type) {
       case "click":
-        if (aEvent.target.id == "addEngines" && aEvent.button == 0) {
-          Services.wm.getMostRecentWindow('navigator:browser')
-                     .BrowserSearch.loadAddEngines();
+        if (aEvent.target.id != "engineChildren" &&
+            !aEvent.target.classList.contains("searchEngineAction")) {
+          let engineList = document.getElementById("engineList");
+          // We don't want to toggle off selection while editing keyword
+          // so proceed only when the input field is hidden.
+          // We need to check that engineList.view is defined here
+          // because the "click" event listener is on <window> and the
+          // view might have been destroyed if the pane has been navigated
+          // away from.
+          if (engineList.inputField.hidden && engineList.view) {
+            let selection = engineList.view.selection;
+            if (selection.count > 0) {
+              selection.toggleSelect(selection.currentIndex);
+            }
+            engineList.blur();
+          }
         }
         break;
       case "command":
@@ -138,7 +134,7 @@ var gSearchPane = {
             gSearchPane.onRestoreDefaults();
             break;
           case "removeEngineButton":
-            gSearchPane.remove();
+            Services.search.removeEngine(gEngineView.selectedEngine.originalEngine);
             break;
         }
         break;
@@ -180,7 +176,17 @@ var gSearchPane = {
         gEngineView.invalidate();
         break;
       case "engine-removed":
+        gSearchPane.remove(aEngine);
+        break;
       case "engine-current":
+        // If the user is going through the drop down using up/down keys, the
+        // dropdown may still be open (eg. on Windows) when engine-current is
+        // fired, so rebuilding the list unconditionally would get in the way.
+        let selectedEngine =
+          document.getElementById("defaultEngine").selectedItem.engine;
+        if (selectedEngine.name != aEngine.name)
+          gSearchPane.buildDefaultEngineDropDown();
+        break;
       case "engine-default":
         // Not relevant
         break;
@@ -188,14 +194,19 @@ var gSearchPane = {
     }
   },
 
-  onInputBlur: function() {
+  onInputBlur: function(aEvent) {
     let tree = document.getElementById("engineList");
-    tree.stopEditing(false);
+    if (!tree.hasAttribute("editing"))
+      return;
+
+    // Accept input unless discarded.
+    let accept = aEvent.charCode != KeyEvent.DOM_VK_ESCAPE;
+    tree.stopEditing(accept);
   },
 
   onTreeSelect: function() {
     document.getElementById("removeEngineButton").disabled =
-      gEngineView.selectedIndex == -1 || gEngineView.lastIndex == 0;
+      !gEngineView.isEngineSelectedAndRemovable();
   },
 
   onTreeKeyPress: function(aEvent) {
@@ -209,12 +220,21 @@ var gSearchPane = {
       let newValue = !gEngineView._engineStore.engines[index].shown;
       gEngineView.setCellValue(index, tree.columns.getFirstColumn(),
                                newValue.toString());
+      // Prevent page from scrolling on the space key.
+      aEvent.preventDefault();
     }
     else {
       let isMac = Services.appinfo.OS == "Darwin";
       if ((isMac && aEvent.keyCode == KeyEvent.DOM_VK_RETURN) ||
-          (!isMac && aEvent.keyCode == KeyEvent.DOM_VK_F2))
+          (!isMac && aEvent.keyCode == KeyEvent.DOM_VK_F2)) {
         tree.startEditing(index, tree.columns.getLastColumn());
+      } else if (aEvent.keyCode == KeyEvent.DOM_VK_DELETE ||
+                 (isMac && aEvent.shiftKey &&
+                  aEvent.keyCode == KeyEvent.DOM_VK_BACK_SPACE &&
+                  gEngineView.isEngineSelectedAndRemovable())) {
+        // Delete and Shift+Backspace (Mac) removes selected engine.
+        Services.search.removeEngine(gEngineView.selectedEngine.originalEngine);
+     }
     }
   },
 
@@ -228,9 +248,8 @@ var gSearchPane = {
     document.getElementById("restoreDefaultSearchEngines").disabled = !aEnable;
   },
 
-  remove: function() {
-    gEngineView._engineStore.removeEngine(gEngineView.selectedEngine);
-    let index = gEngineView.selectedIndex;
+  remove: function(aEngine) {
+    let index = gEngineView._engineStore.removeEngine(aEngine);
     gEngineView.rowCountChanged(index, -1);
     gEngineView.invalidate();
     gEngineView.selection.select(Math.min(index, gEngineView.lastIndex));
@@ -239,17 +258,18 @@ var gSearchPane = {
   },
 
   editKeyword: Task.async(function* (aEngine, aNewKeyword) {
-    if (aNewKeyword) {
+    let keyword = aNewKeyword.trim();
+    if (keyword) {
       let eduplicate = false;
       let dupName = "";
 
       // Check for duplicates in Places keywords.
-      let bduplicate = !!(yield PlacesUtils.keywords.fetch(aNewKeyword));
+      let bduplicate = !!(yield PlacesUtils.keywords.fetch(keyword));
 
       // Check for duplicates in changes we haven't committed yet
       let engines = gEngineView._engineStore.engines;
       for (let engine of engines) {
-        if (engine.alias == aNewKeyword &&
+        if (engine.alias == keyword &&
             engine.name != aEngine.name) {
           eduplicate = true;
           dupName = engine.name;
@@ -269,7 +289,7 @@ var gSearchPane = {
       }
     }
 
-    gEngineView._engineStore.changeEngine(aEngine, "alias", aNewKeyword);
+    gEngineView._engineStore.changeEngine(aEngine, "alias", keyword);
     gEngineView.invalidate();
     return true;
   }),
@@ -369,16 +389,22 @@ EngineStore.prototype = {
   },
 
   removeEngine: function ES_removeEngine(aEngine) {
-    var index = this._getIndexForEngine(aEngine);
+    if (this._engines.length == 1) {
+      throw new Error("Cannot remove last engine!");
+    }
+
+    let engineName = aEngine.name;
+    let index = this._engines.findIndex(element => element.name == engineName);
+
     if (index == -1)
       throw new Error("invalid engine?");
 
-    this._engines.splice(index, 1);
-    Services.search.removeEngine(aEngine.originalEngine);
+    let removedEngine = this._engines.splice(index, 1)[0];
 
-    if (this._defaultEngines.some(this._isSameEngine, aEngine))
+    if (this._defaultEngines.some(this._isSameEngine, removedEngine))
       gSearchPane.showRestoreDefaults(true);
     gSearchPane.buildDefaultEngineDropDown();
+    return index;
   },
 
   restoreDefaultEngines: function ES_restoreDefaultEngines() {
@@ -470,15 +496,25 @@ EngineView.prototype = {
     return column.id == "engineShown";
   },
 
+  isEngineSelectedAndRemovable: function() {
+    return this.selectedIndex != -1 && this.lastIndex != 0;
+  },
+
   // nsITreeView
   get rowCount() {
     return this._engineStore.engines.length;
   },
 
   getImageSrc: function(index, column) {
-    if (column.id == "engineName" && this._engineStore.engines[index].iconURI) {
-      return this._engineStore.engines[index].iconURI.spec;
+    if (column.id == "engineName") {
+      if (this._engineStore.engines[index].iconURI)
+        return this._engineStore.engines[index].iconURI.spec;
+
+      if (window.devicePixelRatio > 1)
+        return "chrome://browser/skin/search-engine-placeholder@2x.png";
+      return "chrome://browser/skin/search-engine-placeholder.png";
     }
+
     return "";
   },
 
@@ -509,9 +545,8 @@ EngineView.prototype = {
     if (dropIndex > sourceIndex) {
       if (orientation == nsITreeView.DROP_BEFORE)
         dropIndex--;
-    } else {
-      if (orientation == nsITreeView.DROP_AFTER)
-        dropIndex++;
+    } else if (orientation == nsITreeView.DROP_AFTER) {
+      dropIndex++;
     }
 
     this._engineStore.moveEngine(sourceEngine, dropIndex);

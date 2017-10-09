@@ -28,7 +28,6 @@ class SVGTests : public nsISupports
 {
 public:
   NS_DECLARE_STATIC_IID_ACCESSOR(MOZILLA_DOMSVGTESTS_IID)
-  NS_DECL_ISUPPORTS
 
   SVGTests();
 
@@ -95,6 +94,8 @@ public:
   already_AddRefed<DOMSVGStringList> RequiredExtensions();
   already_AddRefed<DOMSVGStringList> SystemLanguage();
   bool HasExtension(const nsAString& aExtension);
+
+  virtual bool IsInChromeDoc() const = 0;
 
 protected:
   virtual ~SVGTests() {}

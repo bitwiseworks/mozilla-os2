@@ -52,7 +52,7 @@ var OutputGenerator = {
       output.push.apply(output, self.genForObject(aAccessible, aContext));
     };
     let ignoreSubtree = function ignoreSubtree(aAccessible) {
-      let roleString = Utils.AccRetrieval.getStringRole(aAccessible.role);
+      let roleString = Utils.AccService.getStringRole(aAccessible.role);
       let nameRule = self.roleRuleMap[roleString] || 0;
       // Ignore subtree if the name is explicit and the role's name rule is the
       // NAME_FROM_SUBTREE_RULE.
@@ -108,7 +108,7 @@ var OutputGenerator = {
    *    determined by {@link roleRuleMap}.
    */
   genForObject: function genForObject(aAccessible, aContext) {
-    let roleString = Utils.AccRetrieval.getStringRole(aAccessible.role);
+    let roleString = Utils.AccService.getStringRole(aAccessible.role);
     let func = this.objectOutputFunctions[
       OutputGenerator._getOutputName(roleString)] ||
       this.objectOutputFunctions.defaultFunc;
@@ -276,10 +276,9 @@ var OutputGenerator = {
   _addMencloseNotations: function _addMencloseNotations(aOutput, aAccessible) {
     let notations = Utils.getAttributes(aAccessible).notation || 'longdiv';
     aOutput[this.outputOrder === OUTPUT_DESC_FIRST ? 'push' : 'unshift'].apply(
-      aOutput, [for (notation of notations.split(' '))
-        {string: this._getOutputName('notation-' + notation)}
-      ]
-    );
+      aOutput, notations.split(' ').map(notation => {
+        return { string: this._getOutputName('notation-' + notation) };
+      }));
   },
 
   /**

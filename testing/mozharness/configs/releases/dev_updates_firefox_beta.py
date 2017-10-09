@@ -4,10 +4,11 @@ config = {
     # TODO: use real repo
     "repo": {
         "repo": "https://hg.mozilla.org/users/raliiev_mozilla.com/tools",
-        "revision": "default",
+        "branch": "default",
         "dest": "tools",
         "vcs": "hg",
     },
+    "vcs_share_base": "/builds/hg-shared",
     # TODO: use real repo
     "push_dest": "ssh://hg.mozilla.org/users/raliiev_mozilla.com/tools",
     # date repo used for staging beta
@@ -20,7 +21,7 @@ config = {
     "previous_archive_prefix": "https://archive.mozilla.org/pub",
     "download_domain": "download.mozilla.org",
     "balrog_url": "http://ec2-54-241-39-23.us-west-1.compute.amazonaws.com",
-    "balrog_username": "stage-ffxbld",
+    "balrog_username": "balrog-stage-ffxbld",
     "update_channels": {
         "beta-dev": {
             "version_regex": r"^(\d+\.\d+(b\d+)?)$",

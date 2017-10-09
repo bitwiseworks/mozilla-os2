@@ -2,18 +2,21 @@
 /* vim: set sts=2 sw=2 et tw=80: */
 "use strict";
 
-const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
-
-Cu.import("resource://gre/modules/PlacesUtils.jsm");
-var Bookmarks = PlacesUtils.bookmarks;
+const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
 Cu.import("resource://gre/modules/ExtensionUtils.jsm");
-var {
-  runSafe,
+const {
+  SingletonEventManager,
 } = ExtensionUtils;
 
+XPCOMUtils.defineLazyModuleGetter(this, "EventEmitter",
+                                  "resource://devtools/shared/event-emitter.js");
+XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
+                                  "resource://gre/modules/PlacesUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Task",
                                   "resource://gre/modules/Task.jsm");
+
+let listenerCount = 0;
 
 function getTree(rootGuid, onlyChildren) {
   function convert(node, parent) {
@@ -24,7 +27,7 @@ function getTree(rootGuid, onlyChildren) {
       dateAdded: node.dateAdded / 1000,
     };
 
-    if (parent && node.guid != Bookmarks.rootGuid) {
+    if (parent && node.guid != PlacesUtils.bookmarks.rootGuid) {
       treenode.parentId = parent.guid;
     }
 
@@ -54,11 +57,10 @@ function getTree(rootGuid, onlyChildren) {
     if (onlyChildren) {
       let children = root.children || [];
       return children.map(child => convert(child, root));
-    } else {
-      // It seems like the array always just contains the root node.
-      return [convert(root, null)];
     }
-  });
+    // It seems like the array always just contains the root node.
+    return [convert(root, null)];
+  }).catch(e => Promise.reject({message: e.message}));
 }
 
 function convert(result) {
@@ -69,11 +71,11 @@ function convert(result) {
     dateAdded: result.dateAdded.getTime(),
   };
 
-  if (result.guid != Bookmarks.rootGuid) {
+  if (result.guid != PlacesUtils.bookmarks.rootGuid) {
     node.parentId = result.parentGuid;
   }
 
-  if (result.type == Bookmarks.TYPE_BOOKMARK) {
+  if (result.type == PlacesUtils.bookmarks.TYPE_BOOKMARK) {
     node.url = result.url.href; // Output is always URL object.
   } else {
     node.dateGroupModified = result.lastModified.getTime();
@@ -82,183 +84,291 @@ function convert(result) {
   return node;
 }
 
-extensions.registerPrivilegedAPI("bookmarks", (extension, context) => {
+let observer = {
+  skipTags: true,
+  skipDescendantsOnItemRemoval: true,
+
+  onBeginUpdateBatch() {},
+  onEndUpdateBatch() {},
+
+  onItemAdded(id, parentId, index, itemType, uri, title, dateAdded, guid, parentGuid, source) {
+    if (itemType == PlacesUtils.bookmarks.TYPE_SEPARATOR) {
+      return;
+    }
+
+    let bookmark = {
+      id: guid,
+      parentId: parentGuid,
+      index,
+      title,
+      dateAdded: dateAdded / 1000,
+    };
+
+    if (itemType == PlacesUtils.bookmarks.TYPE_BOOKMARK) {
+      bookmark.url = uri.spec;
+    } else {
+      bookmark.dateGroupModified = bookmark.dateAdded;
+    }
+
+    this.emit("created", bookmark);
+  },
+
+  onItemVisited() {},
+
+  onItemMoved(id, oldParentId, oldIndex, newParentId, newIndex, itemType, guid, oldParentGuid, newParentGuid, source) {
+    if (itemType == PlacesUtils.bookmarks.TYPE_SEPARATOR) {
+      return;
+    }
+
+    let info = {
+      parentId: newParentGuid,
+      index: newIndex,
+      oldParentId: oldParentGuid,
+      oldIndex,
+    };
+    this.emit("moved", {guid, info});
+  },
+
+  onItemRemoved(id, parentId, index, itemType, uri, guid, parentGuid, source) {
+    if (itemType == PlacesUtils.bookmarks.TYPE_SEPARATOR) {
+      return;
+    }
+
+    let node = {
+      id: guid,
+      parentId: parentGuid,
+      index,
+    };
+
+    if (itemType == PlacesUtils.bookmarks.TYPE_BOOKMARK) {
+      node.url = uri.spec;
+    }
+
+    this.emit("removed", {guid, info: {parentId: parentGuid, index, node}});
+  },
+
+  onItemChanged(id, prop, isAnno, val, lastMod, itemType, parentId, guid, parentGuid, oldVal, source) {
+    if (itemType == PlacesUtils.bookmarks.TYPE_SEPARATOR) {
+      return;
+    }
+
+    let info = {};
+    if (prop == "title") {
+      info.title = val;
+    } else if (prop == "uri") {
+      info.url = val;
+    } else {
+      // Not defined yet.
+      return;
+    }
+
+    this.emit("changed", {guid, info});
+  },
+};
+EventEmitter.decorate(observer);
+
+function decrementListeners() {
+  listenerCount -= 1;
+  if (!listenerCount) {
+    PlacesUtils.bookmarks.removeObserver(observer);
+  }
+}
+
+function incrementListeners() {
+  listenerCount++;
+  if (listenerCount == 1) {
+    PlacesUtils.bookmarks.addObserver(observer, false);
+  }
+}
+
+extensions.registerSchemaAPI("bookmarks", "addon_parent", context => {
   return {
     bookmarks: {
-      get: function(idOrIdList, callback) {
+      get: function(idOrIdList) {
         let list = Array.isArray(idOrIdList) ? idOrIdList : [idOrIdList];
 
-        Task.spawn(function* () {
+        return Task.spawn(function* () {
           let bookmarks = [];
           for (let id of list) {
-            let bookmark;
-            try {
-              bookmark = yield Bookmarks.fetch({guid: id});
-              if (!bookmark) {
-                // TODO: set lastError, not found
-                return [];
-              }
-            } catch (e) {
-              // TODO: set lastError, probably an invalid guid
-              return [];
+            let bookmark = yield PlacesUtils.bookmarks.fetch({guid: id});
+            if (!bookmark) {
+              throw new Error("Bookmark not found");
             }
             bookmarks.push(convert(bookmark));
           }
           return bookmarks;
-        }).then(results => runSafe(context, callback, results));
+        }).catch(error => Promise.reject({message: error.message}));
       },
 
-      getChildren: function(id, callback) {
+      getChildren: function(id) {
         // TODO: We should optimize this.
-        getTree(id, true).then(result => {
-          runSafe(context, callback, result);
-        }, reason => {
-          // TODO: Set lastError
-          runSafe(context, callback, []);
-        });
+        return getTree(id, true);
       },
 
-      getTree: function(callback) {
-        getTree(Bookmarks.rootGuid, false).then(result => {
-          runSafe(context, callback, result);
-        }, reason => {
-          runSafe(context, callback, []);
-        });
+      getTree: function() {
+        return getTree(PlacesUtils.bookmarks.rootGuid, false);
       },
 
-      getSubTree: function(id, callback) {
-        getTree(id, false).then(result => {
-          runSafe(context, callback, result);
-        }, reason => {
-          runSafe(context, callback, []);
-        });
+      getSubTree: function(id) {
+        return getTree(id, false);
       },
 
-      // search
+      search: function(query) {
+        return PlacesUtils.bookmarks.search(query).then(result => result.map(convert));
+      },
 
-      create: function(bookmark, callback) {
+      getRecent: function(numberOfItems) {
+        return PlacesUtils.bookmarks.getRecent(numberOfItems).then(result => result.map(convert));
+      },
+
+      create: function(bookmark) {
         let info = {
           title: bookmark.title || "",
         };
 
         // If url is NULL or missing, it will be a folder.
-        if ("url" in bookmark && bookmark.url !== null) {
-          info.type = Bookmarks.TYPE_BOOKMARK;
+        if (bookmark.url !== null) {
+          info.type = PlacesUtils.bookmarks.TYPE_BOOKMARK;
           info.url = bookmark.url || "";
         } else {
-          info.type = Bookmarks.TYPE_FOLDER;
+          info.type = PlacesUtils.bookmarks.TYPE_FOLDER;
         }
 
-        if ("index" in bookmark) {
+        if (bookmark.index !== null) {
           info.index = bookmark.index;
         }
 
-        if ("parentId" in bookmark) {
+        if (bookmark.parentId !== null) {
           info.parentGuid = bookmark.parentId;
         } else {
-          info.parentGuid = Bookmarks.unfiledGuid;
+          info.parentGuid = PlacesUtils.bookmarks.unfiledGuid;
         }
 
-        let failure = reason => {
-          // TODO: set lastError.
-          if (callback) {
-            runSafe(context, callback, null);
-          }
-        };
-
         try {
-          Bookmarks.insert(info).then(result => {
-            if (callback) {
-              runSafe(context, callback, convert(result));
-            }
-          }, failure);
+          return PlacesUtils.bookmarks.insert(info).then(convert)
+            .catch(error => Promise.reject({message: error.message}));
         } catch (e) {
-          failure(e);
+          return Promise.reject({message: `Invalid bookmark: ${JSON.stringify(info)}`});
         }
       },
 
-      move: function(id, destination, callback) {
+      move: function(id, destination) {
         let info = {
           guid: id,
         };
 
-        if ("parentId" in destination) {
+        if (destination.parentId !== null) {
           info.parentGuid = destination.parentId;
         }
-        if ("index" in destination) {
-          info.index = destination.index;
-        }
-
-        let failure = reason => {
-          if (callback) {
-            runSafe(context, callback, null);
-          }
-        };
+        info.index = (destination.index === null) ?
+          PlacesUtils.bookmarks.DEFAULT_INDEX : destination.index;
 
         try {
-          Bookmarks.update(info).then(result => {
-            if (callback) {
-              runSafe(context, callback, convert(result));
-            }
-          }, failure);
+          return PlacesUtils.bookmarks.update(info).then(convert)
+            .catch(error => Promise.reject({message: error.message}));
         } catch (e) {
-          failure(e);
+          return Promise.reject({message: `Invalid bookmark: ${JSON.stringify(info)}`});
         }
       },
 
-      update: function(id, changes, callback) {
+      update: function(id, changes) {
         let info = {
           guid: id,
         };
 
-        if ("title" in changes) {
+        if (changes.title !== null) {
           info.title = changes.title;
         }
-        if ("url" in changes) {
+        if (changes.url !== null) {
           info.url = changes.url;
         }
 
-        let failure = reason => {
-          if (callback) {
-            runSafe(context, callback, null);
-          }
-        };
-
         try {
-          Bookmarks.update(info).then(result => {
-            if (callback) {
-              runSafe(context, callback, convert(result));
-            }
-          }, failure);
+          return PlacesUtils.bookmarks.update(info).then(convert)
+            .catch(error => Promise.reject({message: error.message}));
         } catch (e) {
-          failure(e);
+          return Promise.reject({message: `Invalid bookmark: ${JSON.stringify(info)}`});
         }
       },
 
-      remove: function(id, callback) {
+      remove: function(id) {
         let info = {
           guid: id,
         };
 
-        let failure = reason => {
-          if (callback) {
-            runSafe(context, callback, null);
-          }
+        // The API doesn't give you the old bookmark at the moment
+        try {
+          return PlacesUtils.bookmarks.remove(info, {preventRemovalOfNonEmptyFolders: true}).then(result => {})
+            .catch(error => Promise.reject({message: error.message}));
+        } catch (e) {
+          return Promise.reject({message: `Invalid bookmark: ${JSON.stringify(info)}`});
+        }
+      },
+
+      removeTree: function(id) {
+        let info = {
+          guid: id,
         };
 
         try {
-          Bookmarks.remove(info).then(result => {
-            if (callback) {
-              // The API doesn't give you the old bookmark at the moment
-              runSafe(context, callback);
-            }
-          }, failure);
+          return PlacesUtils.bookmarks.remove(info).then(result => {})
+            .catch(error => Promise.reject({message: error.message}));
         } catch (e) {
-          failure(e);
+          return Promise.reject({message: `Invalid bookmark: ${JSON.stringify(info)}`});
         }
       },
+
+      onCreated: new SingletonEventManager(context, "bookmarks.onCreated", fire => {
+        let listener = (event, bookmark) => {
+          context.runSafe(fire, bookmark.id, bookmark);
+        };
+
+        observer.on("created", listener);
+        incrementListeners();
+        return () => {
+          observer.off("created", listener);
+          decrementListeners();
+        };
+      }).api(),
+
+      onRemoved: new SingletonEventManager(context, "bookmarks.onRemoved", fire => {
+        let listener = (event, data) => {
+          context.runSafe(fire, data.guid, data.info);
+        };
+
+        observer.on("removed", listener);
+        incrementListeners();
+        return () => {
+          observer.off("removed", listener);
+          decrementListeners();
+        };
+      }).api(),
+
+      onChanged: new SingletonEventManager(context, "bookmarks.onChanged", fire => {
+        let listener = (event, data) => {
+          context.runSafe(fire, data.guid, data.info);
+        };
+
+        observer.on("changed", listener);
+        incrementListeners();
+        return () => {
+          observer.off("changed", listener);
+          decrementListeners();
+        };
+      }).api(),
+
+      onMoved: new SingletonEventManager(context, "bookmarks.onMoved", fire => {
+        let listener = (event, data) => {
+          context.runSafe(fire, data.guid, data.info);
+        };
+
+        observer.on("moved", listener);
+        incrementListeners();
+        return () => {
+          observer.off("moved", listener);
+          decrementListeners();
+        };
+      }).api(),
     },
   };
 });
-
-

@@ -16,10 +16,6 @@ DASH_R		= -r
 
 # Define keyword generator before rules.mk, see bug 323979 comment 50
 
-GARBAGE += jsautokw.h host_jskwgen$(HOST_BIN_SUFFIX)
-
-GARBAGE += selfhosted.out.h
-
 USE_HOST_CXX = 1
 
 ifdef HAVE_DTRACE
@@ -41,16 +37,6 @@ symverscript: symverscript.in
 EXTRA_DEPS += symverscript
 endif
 
-export_files = js-config.h
-ifdef HAVE_DTRACE
-export_files += $(CURDIR)/javascript-trace.h
-endif
-
-INSTALL_TARGETS += jsconfig
-jsconfig_FILES = $(export_files)
-jsconfig_DEST = $(DIST)/include
-jsconfig_TARGET := export
-
 include $(topsrcdir)/config/rules.mk
 
 # check_vanilla_allocations.py is tailored to Linux, so only run it there.
@@ -64,7 +50,9 @@ check-vanilla-allocations-aggressive:
 	$(PYTHON) $(topsrcdir)/config/check_vanilla_allocations.py --aggressive $(REAL_LIBRARY)
 
 ifeq ($(OS_ARCH),Linux)
+ifeq (,$(filter -flto,$(CFLAGS) $(CXXFLAGS) $(LDFLAGS)))
 check:: check-vanilla-allocations
+endif
 endif
 
 # Help ensure that the number of OOM errors in SpiderMonkey doesn't increase.
@@ -89,7 +77,10 @@ ifdef MOZ_ASAN
 JITTEST_SANITIZER_ENV=ASAN_SYMBOLIZER_PATH='$(LLVM_SYMBOLIZER)'
 endif
 ifdef MOZ_TSAN
-JITTEST_SANITIZER_ENV=TSAN_OPTIONS='external_symbolizer_path=$(LLVM_SYMBOLIZER)'
+JITTEST_SANITIZER_ENV=TSAN_OPTIONS="external_symbolizer_path=$(LLVM_SYMBOLIZER) $$TSAN_OPTIONS"
+endif
+ifdef MOZ_MSAN
+JITTEST_SANITIZER_ENV=MSAN_SYMBOLIZER_PATH='$(LLVM_SYMBOLIZER)'
 endif
 endif
 
@@ -99,6 +90,9 @@ check-style::
 check-masm::
 	(cd $(srcdir) && $(PYTHON) $(topsrcdir)/config/check_macroassembler_style.py);
 
+check-js-msg::
+	(cd $(topsrcdir) && $(PYTHON) $(topsrcdir)/config/check_js_msg_encoding.py);
+
 check-jit-test::
 	$(JITTEST_SANITIZER_ENV) $(wildcard $(RUN_TEST_PROGRAM)) $(PYTHON) -u $(srcdir)/jit-test/jit_test.py \
 	        --no-slow --no-progress --format=automation --jitflags=all \
@@ -106,7 +100,7 @@ check-jit-test::
 			$(JITTEST_EXTRA_ARGS) \
 	        $(DIST)/bin/$(JS_SHELL_NAME)$(BIN_SUFFIX) $(JITTEST_TEST_ARGS)
 
-check:: check-style check-masm
+check:: check-style check-masm check-js-msg
 
 check-jstests:
 	$(wildcard $(RUN_TEST_PROGRAM)) $(PYTHON) -u $(srcdir)/tests/jstests.py \
@@ -172,14 +166,13 @@ endif # GNU_CC
 endif
 endif
 
-SCRIPTS = $(JS_CONFIG_NAME)
-SDK_BINARY = $(JS_CONFIG_NAME)
-
 $(LIBRARY_NAME).pc: js.pc
 	cp $^ $@
 
+# Install versioned file, for parallel installability in Linux distributions
 install:: $(LIBRARY_NAME).pc
-	$(SYSINSTALL) $^ $(DESTDIR)$(libdir)/pkgconfig
+	cp $^ $(JS_LIBRARY_NAME).pc
+	$(SYSINSTALL) $(JS_LIBRARY_NAME).pc $(DESTDIR)$(libdir)/pkgconfig
 
 install:: js-config.h
 	$(SYSINSTALL) $^ $(DESTDIR)$(includedir)
@@ -209,15 +202,19 @@ install:: js-config.h
 #
 
 install::
-	$(call py_action,process_install_manifest,--no-remove $(DESTDIR)$(includedir) $(DEPTH)/_build_manifests/install/dist_include)
+	$(call py_action,process_install_manifest,--no-remove --no-symlinks $(DESTDIR)$(includedir) $(DEPTH)/_build_manifests/install/dist_include)
 
 #
 # END SpiderMonkey header installation
 #############################################
 
-install:: $(SCRIPTS)
-	$(SYSINSTALL) $^ $(DESTDIR)$(bindir)
+# Install versioned script, for parallel installability in Linux distributions
+install:: js-config
+	cp $^ js$(MOZJS_MAJOR_VERSION)-config
+	$(SYSINSTALL) js$(MOZJS_MAJOR_VERSION)-config $(DESTDIR)$(bindir)
 
+# Use install_name_tool to set the install_name properly for standalone
+# installed libraries on macOS
 install:: $(REAL_LIBRARY) $(SHARED_LIBRARY) $(IMPORT_LIBRARY)
 ifneq (,$(REAL_LIBRARY))
 	$(SYSINSTALL) $(REAL_LIBRARY) $(DESTDIR)$(libdir)
@@ -225,36 +222,19 @@ ifneq (,$(REAL_LIBRARY))
 endif
 ifneq (,$(SHARED_LIBRARY))
 	$(SYSINSTALL) $(SHARED_LIBRARY) $(DESTDIR)$(libdir)
+ifeq ($(OS_ARCH),Darwin)
+	install_name_tool -id $(abspath $(libdir)/$(SHARED_LIBRARY)) $(DESTDIR)$(libdir)/$(SHARED_LIBRARY)
+endif
 endif
 ifneq (,$(IMPORT_LIBRARY))
+ifneq ($(IMPORT_LIBRARY),$(SHARED_LIBRARY))
 	$(SYSINSTALL) $(IMPORT_LIBRARY) $(DESTDIR)$(libdir)
+endif
 endif
 	$(MAKE) -C shell install
 
-# Use CURDIR to avoid finding a jsautokw.h in the source tree (from a
-# previous build?) via VPATH when we're building in a separate tree.
-$(CURDIR)/jsautokw.h: host_jskwgen$(HOST_BIN_SUFFIX)
-	./host_jskwgen$(HOST_BIN_SUFFIX) $@
-
-# Force auto-header generation before compiling any source that may use them
-$(OBJS): $(CURDIR)/jsautokw.h
-
-ifdef MOZ_ETW
-ETWProvider.h ETWProvider.rc ETWProvider.mof: ETWProvider.man
-	$(MC) -um -mof $^
-
-ETWProvider.res: ETWProvider.rc
-	$(RC) -r -i '$(SDKDIR)Include' $^
-
-export:: ETWProvider.res
-
-install:: ETWProvider.mof ETWProvider.man
-	$(SYSINSTALL) $^ $(DESTDIR)$(bindir)
-
-endif
-
 ifdef HAVE_DTRACE
-$(CURDIR)/javascript-trace.h: $(srcdir)/devtools/javascript-trace.d
+javascript-trace.h: $(srcdir)/devtools/javascript-trace.d
 	dtrace -x nolibs -h -s $(srcdir)/devtools/javascript-trace.d -o javascript-trace.h.in
 	sed -e 's/if _DTRACE_VERSION/ifdef INCLUDE_MOZILLA_DTRACE/' \
 	    -e '/const/!s/char \*/const char */g' \
@@ -273,9 +253,9 @@ ifneq (,$(TAR))
 source-package:
 	SRCDIR=$(srcdir) \
 	DIST=$(DIST) \
-	MAKE=$(MAKE) \
 	MKDIR=$(MKDIR) \
 	TAR=$(TAR) \
+	AUTOCONF=$(AUTOCONF) \
 	MOZJS_MAJOR_VERSION=$(MOZJS_MAJOR_VERSION) \
 	MOZJS_MINOR_VERSION=$(MOZJS_MINOR_VERSION) \
 	MOZJS_PATCH_VERSION=$(MOZJS_PATCH_VERSION) \

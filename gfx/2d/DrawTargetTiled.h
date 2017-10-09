@@ -41,6 +41,7 @@ public:
   virtual DrawTargetType GetType() const override { return mTiles[0].mDrawTarget->GetType(); }
   virtual BackendType GetBackendType() const override { return mTiles[0].mDrawTarget->GetBackendType(); }
   virtual already_AddRefed<SourceSurface> Snapshot() override;
+  virtual void DetachAllSnapshots() override;
   virtual IntSize GetSize() override {
     MOZ_ASSERT(mRect.width > 0 && mRect.height > 0);
     return IntSize(mRect.XMost(), mRect.YMost());
@@ -61,7 +62,7 @@ public:
                                      const Color &aColor,
                                      const Point &aOffset,
                                      Float aSigma,
-                                     CompositionOp aOperator) override { /* Not implemented */ MOZ_CRASH(); }
+                                     CompositionOp aOperator) override { /* Not implemented */ MOZ_CRASH("GFX: DrawSurfaceWithShadow"); }
 
   virtual void ClearRect(const Rect &aRect) override;
   virtual void MaskSurface(const Pattern &aSource,
@@ -103,6 +104,13 @@ public:
   virtual void PushClip(const Path *aPath) override;
   virtual void PushClipRect(const Rect &aRect) override;
   virtual void PopClip() override;
+  virtual void PushLayer(bool aOpaque, Float aOpacity,
+                         SourceSurface* aMask,
+                         const Matrix& aMaskTransform,
+                         const IntRect& aBounds = IntRect(),
+                         bool aCopyBackground = false) override;
+  virtual void PopLayer() override;
+
 
   virtual void SetTransform(const Matrix &aTransform) override;
 

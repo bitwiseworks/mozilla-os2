@@ -84,7 +84,7 @@ struct ScopedArrayBufferContentsTraits {
     type result = {0, 0};
     return result;
   }
-  const static void release(type ptr) {
+  static void release(type ptr) {
     js_free(ptr.data);
     ptr.data = nullptr;
     ptr.nbytes = 0;
@@ -228,7 +228,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(AbstractResult)
 NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(AbstractResult)
-  NS_IMPL_CYCLE_COLLECTION_TRACE_JSVAL_MEMBER_CALLBACK(mCachedResult)
+  NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mCachedResult)
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(AbstractResult)
@@ -390,7 +390,7 @@ TypedArrayResult::GetCacheableResult(JSContext* cx, JS::MutableHandle<JS::Value>
 /**
  * An event used to notify asynchronously of an error.
  */
-class ErrorEvent final : public nsRunnable {
+class ErrorEvent final : public Runnable {
 public:
   /**
    * @param aOnSuccess The success callback.
@@ -421,7 +421,7 @@ public:
       MOZ_ASSERT(!NS_IsMainThread());
     }
 
-  NS_METHOD Run() {
+  NS_IMETHOD Run() override {
     MOZ_ASSERT(NS_IsMainThread());
     (void)mOnError->Complete(mOperation, mOSError);
 
@@ -448,7 +448,7 @@ public:
 /**
  * An event used to notify of a success.
  */
-class SuccessEvent final : public nsRunnable {
+class SuccessEvent final : public Runnable {
 public:
   /**
    * @param aOnSuccess The success callback.
@@ -471,7 +471,7 @@ public:
       MOZ_ASSERT(!NS_IsMainThread());
     }
 
-  NS_METHOD Run() {
+  NS_IMETHOD Run() override {
     MOZ_ASSERT(NS_IsMainThread());
     (void)mOnSuccess->Complete(mResult);
 
@@ -499,7 +499,7 @@ public:
 /**
  * Base class shared by actions.
  */
-class AbstractDoEvent: public nsRunnable {
+class AbstractDoEvent: public Runnable {
 public:
   AbstractDoEvent(nsMainThreadPtrHandle<nsINativeOSFileSuccessCallback>& aOnSuccess,
                   nsMainThreadPtrHandle<nsINativeOSFileErrorCallback>& aOnError)
@@ -529,8 +529,7 @@ public:
       // Last ditch attempt to release on the main thread - some of
       // the members of event are not thread-safe, so letting the
       // pointer go out of scope would cause a crash.
-      nsCOMPtr<nsIThread> main = do_GetMainThread();
-      NS_ProxyRelease(main, event);
+      NS_ReleaseOnMainThread(event.forget());
     }
   }
 
@@ -547,8 +546,7 @@ public:
       // Last ditch attempt to release on the main thread - some of
       // the members of event are not thread-safe, so letting the
       // pointer go out of scope would cause a crash.
-      nsCOMPtr<nsIThread> main = do_GetMainThread();
-      NS_ProxyRelease(main, event);
+      NS_ReleaseOnMainThread(event.forget());
     }
 
   }
@@ -596,7 +594,7 @@ public:
     MOZ_ASSERT(NS_IsMainThread());
   }
 
-  NS_METHOD Run() override {
+  NS_IMETHOD Run() override {
     MOZ_ASSERT(!NS_IsMainThread());
     TimeStamp dispatchDate = TimeStamp::Now();
 
@@ -749,8 +747,7 @@ public:
     if (!mResult) {
       return;
     }
-    nsCOMPtr<nsIThread> main = do_GetMainThread();
-    (void)NS_ProxyRelease(main, mResult);
+    NS_ReleaseOnMainThread(mResult.forget());
   }
 
 protected:
@@ -787,8 +784,7 @@ public:
     if (!mResult) {
       return;
     }
-    nsCOMPtr<nsIThread> main = do_GetMainThread();
-    (void)NS_ProxyRelease(main, mResult);
+    NS_ReleaseOnMainThread(mResult.forget());
   }
 
 protected:

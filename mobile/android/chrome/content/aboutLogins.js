@@ -19,6 +19,7 @@ XPCOMUtils.defineLazyGetter(window, "gChromeWin", () =>
     .getInterface(Ci.nsIDOMWindow)
     .QueryInterface(Ci.nsIDOMChromeWindow));
 
+XPCOMUtils.defineLazyModuleGetter(this, "Snackbars", "resource://gre/modules/Snackbars.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Prompt",
                                   "resource://gre/modules/Prompt.jsm");
 
@@ -26,24 +27,19 @@ var debug = Cu.import("resource://gre/modules/AndroidLog.jsm", {}).AndroidLog.d.
 
 var gStringBundle = Services.strings.createBundle("chrome://browser/locale/aboutLogins.properties");
 
-function copyStringAndToast(string, notifyString) {
+function copyStringShowSnackbar(string, notifyString) {
   try {
     let clipboard = Cc["@mozilla.org/widget/clipboardhelper;1"].getService(Ci.nsIClipboardHelper);
     clipboard.copyString(string);
-    gChromeWin.NativeWindow.toast.show(notifyString, "long");
+    Snackbars.show(notifyString, Snackbars.LENGTH_LONG);
   } catch (e) {
     debug("Error copying from about:logins");
-    gChromeWin.NativeWindow.toast.show(gStringBundle.GetStringFromName("loginsDetails.copyFailed"), "long");
+    Snackbars.show(gStringBundle.GetStringFromName("loginsDetails.copyFailed"), Snackbars.LENGTH_LONG);
   }
 }
 
 // Delay filtering while typing in MS
 const FILTER_DELAY = 500;
-/* Constants for usage telemetry */
-const LOGINS_LIST_VIEWED = 0;
-const LOGIN_VIEWED = 1;
-const LOGIN_EDITED = 2;
-const LOGIN_PW_TOGGLED = 3;
 
 var Logins = {
   _logins: [],
@@ -70,9 +66,7 @@ var Logins = {
     let getAllLogins = () => {
       let logins = [];
       try {
-        TelemetryStopwatch.start("PWMGR_ABOUT_LOGINS_GET_ALL_LOGINS_MS");
         logins = Services.logins.getAllLogins();
-        TelemetryStopwatch.finish("PWMGR_ABOUT_LOGINS_GET_ALL_LOGINS_MS");
       } catch(e) {
         // It's likely that the Master Password was not entered; give
         // a hint to the next person.
@@ -225,7 +219,6 @@ var Logins = {
   },
 
   _showList: function () {
-    Services.telemetry.getHistogramById("PWMGR_ABOUT_LOGINS_USAGE").add(LOGINS_LIST_VIEWED);
     let loginsListPage = document.getElementById("logins-list-page");
     loginsListPage.classList.remove("hidden");
 
@@ -248,7 +241,6 @@ var Logins = {
     }
   },
   _showEditLoginDialog: function (login) {
-    Services.telemetry.getHistogramById("PWMGR_ABOUT_LOGINS_USAGE").add(LOGIN_VIEWED);
     let listPage = document.getElementById("logins-list-page");
     listPage.classList.add("hidden");
 
@@ -288,7 +280,6 @@ var Logins = {
   },
 
   _onSaveEditLogin: function() {
-    Services.telemetry.getHistogramById("PWMGR_ABOUT_LOGINS_USAGE").add(LOGIN_EDITED);
     let newUsername = document.getElementById("username").value;
     let newPassword = document.getElementById("password").value;
     let newDomain  = document.getElementById("hostname").value;
@@ -300,7 +291,7 @@ var Logins = {
       if ((newUsername === origUsername) &&
           (newPassword === origPassword) &&
           (newDomain === origDomain) ) {
-        gChromeWin.NativeWindow.toast.show(gStringBundle.GetStringFromName("editLogin.saved1"), "long");
+        Snackbars.show(gStringBundle.GetStringFromName("editLogin.saved1"), Snackbars.LENGTH_LONG);
         this._showList();
         return;
       }
@@ -319,15 +310,14 @@ var Logins = {
         }
       }
     } catch (e) {
-      gChromeWin.NativeWindow.toast.show(gStringBundle.GetStringFromName("editLogin.couldNotSave"), "long");
+      Snackbars.show(gStringBundle.GetStringFromName("editLogin.couldNotSave"), Snackbars.LENGTH_LONG);
       return;
     }
-    gChromeWin.NativeWindow.toast.show(gStringBundle.GetStringFromName("editLogin.saved1"), "long");
+    Snackbars.show(gStringBundle.GetStringFromName("editLogin.saved1"), Snackbars.LENGTH_LONG);
     this._showList();
   },
 
   _onPasswordBtn: function () {
-    Services.telemetry.getHistogramById("PWMGR_ABOUT_LOGINS_USAGE").add(LOGIN_PW_TOGGLED);
     this._updatePasswordBtn(this._isPasswordBtnInHideMode());
   },
 
@@ -363,7 +353,7 @@ var Logins = {
         switch (data.button) {
           case 0:
           // Corresponds to "Copy password" button.
-          copyStringAndToast(password, gStringBundle.GetStringFromName("loginsDetails.passwordCopied"));
+          copyStringShowSnackbar(password, gStringBundle.GetStringFromName("loginsDetails.passwordCopied"));
         }
      });
   },
@@ -395,10 +385,10 @@ var Logins = {
           this._showPassword(login.password);
           break;
         case 1:
-          copyStringAndToast(login.password, gStringBundle.GetStringFromName("loginsDetails.passwordCopied"));
+          copyStringShowSnackbar(login.password, gStringBundle.GetStringFromName("loginsDetails.passwordCopied"));
           break;
         case 2:
-          copyStringAndToast(login.username, gStringBundle.GetStringFromName("loginsDetails.usernameCopied"));
+          copyStringShowSnackbar(login.username, gStringBundle.GetStringFromName("loginsDetails.usernameCopied"));
           break;
         case 3:
           this._selectedLogin = login;

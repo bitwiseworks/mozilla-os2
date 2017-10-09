@@ -17,6 +17,7 @@
 #include "nsIIOService.h"
 #include "mozilla/Services.h"
 #include "nsNetCID.h"
+#include "nsServiceManagerUtils.h"
 
 class nsIURI;
 class nsIPrincipal;
@@ -117,53 +118,12 @@ nsresult NS_NewFileURI(nsIURI **result,
 * @param aURI
 *        nsIURI from which to make a channel
 * @param aLoadingNode
-*        The loadingDocument of the channel.
-*        The element or document where the result of this request will be
-*        used. This is the document/element that will get access to the
-*        result of this request. For example for an image load, it's the
-*        document in which the image will be loaded. And for a CSS
-*        stylesheet it's the document whose rendering will be affected by
-*        the stylesheet.
-*        If possible, pass in the element which is performing the load. But
-*        if the load is coming from a JS API (such as XMLHttpRequest) or if
-*        the load might be coalesced across multiple elements (such as
-*        for <img>) then pass in the Document node instead.
-*        For loads that are not related to any document, such as loads coming
-*        from addons or internal browser features, use null here.
 * @param aLoadingPrincipal
-*        The loadingPrincipal of the channel.
-*        The principal of the document where the result of this request will
-*        be used.
-*        This defaults to the principal of aLoadingNode, so when aLoadingNode
-*        is passed this can be left as null. However for loads where
-*        aLoadingNode is null this argument must be passed.
-*        For example for loads from a WebWorker, pass the principal
-*        of that worker. For loads from an addon or from internal browser
-*        features, pass the system principal.
-*        This principal should almost always be the system principal if
-*        aLoadingNode is null. The only exception to this is for loads
-*        from WebWorkers since they don't have any nodes to be passed as
-*        aLoadingNode.
-*        Please note, aLoadingPrincipal is *not* the principal of the
-*        resource being loaded. But rather the principal of the context
-*        where the resource will be used.
 * @param aTriggeringPrincipal
-*        The triggeringPrincipal of the load.
-*        The triggeringPrincipal is the principal of the resource that caused
-*        this particular URL to be loaded.
-*        Most likely the triggeringPrincipal and the loadingPrincipal are
-*        identical, in which case the triggeringPrincipal can be left out.
-*        In some cases the loadingPrincipal and the triggeringPrincipal are
-*        different however, e.g. a stylesheet may import a subresource. In
-*        that case the principal of the stylesheet which contains the
-*        import command is the triggeringPrincipal, and the principal of
-*        the document whose rendering is affected is the loadingPrincipal.
 * @param aSecurityFlags
-*        The securityFlags of the channel.
-*        Any of the securityflags defined in nsILoadInfo.idl
 * @param aContentPolicyType
-*        The contentPolicyType of the channel.
-*        Any of the content types defined in nsIContentPolicy.idl
+*        These will be used as values for the nsILoadInfo object on the
+*        created channel. For details, see nsILoadInfo in nsILoadInfo.idl
 *
 * Please note, if you provide both a loadingNode and a loadingPrincipal,
 * then loadingPrincipal must be equal to loadingNode->NodePrincipal().
@@ -315,6 +275,14 @@ nsresult NS_NewInputStreamChannelInternal(nsIChannel        **outChannel,
                                           nsSecurityFlags     aSecurityFlags,
                                           nsContentPolicyType aContentPolicyType,
                                           bool                aIsSrcdocChannel = false);
+
+nsresult
+NS_NewInputStreamChannelInternal(nsIChannel        **outChannel,
+                                 nsIURI             *aUri,
+                                 const nsAString    &aData,
+                                 const nsACString   &aContentType,
+                                 nsILoadInfo        *aLoadInfo,
+                                 bool                aIsSrcdocChannel = false);
 
 nsresult NS_NewInputStreamChannel(nsIChannel        **outChannel,
                                   nsIURI             *aUri,
@@ -560,7 +528,7 @@ nsresult NS_BackgroundOutputStream(nsIOutputStream **result,
                                    uint32_t          segmentSize  = 0,
                                    uint32_t          segmentCount = 0);
 
-MOZ_WARN_UNUSED_RESULT nsresult
+MOZ_MUST_USE nsresult
 NS_NewBufferedInputStream(nsIInputStream **result,
                           nsIInputStream  *str,
                           uint32_t         bufferSize);
@@ -572,8 +540,8 @@ nsresult NS_NewBufferedOutputStream(nsIOutputStream **result,
                                     uint32_t          bufferSize);
 
 /**
- * Attempts to buffer a given output stream.  If this fails, it returns the
- * passed-in output stream.
+ * Attempts to buffer a given stream.  If this fails, it returns the
+ * passed-in stream.
  *
  * @param aOutputStream
  *        The output stream we want to buffer.  This cannot be null.
@@ -584,6 +552,9 @@ nsresult NS_NewBufferedOutputStream(nsIOutputStream **result,
  */
 already_AddRefed<nsIOutputStream>
 NS_BufferOutputStream(nsIOutputStream *aOutputStream,
+                      uint32_t aBufferSize);
+already_AddRefed<nsIInputStream>
+NS_BufferInputStream(nsIInputStream *aInputStream,
                       uint32_t aBufferSize);
 
 // returns an input stream compatible with nsIUploadChannel::SetUploadStream()
@@ -705,12 +676,12 @@ bool NS_HasBeenCrossOrigin(nsIChannel* aChannel, bool aReport = false);
 #define NECKO_SAFEBROWSING_APP_ID UINT32_MAX - 1
 
 /**
- * Gets AppId and isInBrowserElement from channel's nsILoadContext.
+ * Gets AppId and isInIsolatedMozBrowserElement from channel's nsILoadContext.
  * Returns false if error or channel's callbacks don't implement nsILoadContext.
  */
 bool NS_GetAppInfo(nsIChannel *aChannel,
                    uint32_t *aAppID,
-                   bool *aIsInBrowserElement);
+                   bool *aIsInIsolatedMozBrowserElement);
 
 /**
  *  Gets appId and browserOnly parameters from the TOPIC_WEB_APP_CLEAR_DATA
@@ -799,10 +770,6 @@ NS_NewNotificationCallbacksAggregation(nsIInterfaceRequestor  *callbacks,
  * Helper function for testing online/offline state of the browser.
  */
 bool NS_IsOffline();
-
-bool NS_IsAppOffline(uint32_t appId);
-
-bool NS_IsAppOffline(nsIPrincipal *principal);
 
 /**
  * Helper functions for implementing nsINestedURI::innermostURI.
@@ -898,6 +865,22 @@ nsresult NS_LinkRedirectChannels(uint32_t channelId,
 nsresult NS_MakeRandomInvalidURLString(nsCString &result);
 
 /**
+ * Helper function which checks whether the channel can be
+ * openend using Open2() or has to fall back to opening
+ * the channel using Open().
+ */
+nsresult NS_MaybeOpenChannelUsingOpen2(nsIChannel* aChannel,
+                                       nsIInputStream **aStream);
+
+/**
+ * Helper function which checks whether the channel can be
+ * openend using AsyncOpen2() or has to fall back to opening
+ * the channel using AsyncOpen().
+ */
+nsresult NS_MaybeOpenChannelUsingAsyncOpen2(nsIChannel* aChannel,
+                                            nsIStreamListener *aListener);
+
+/**
  * Helper function to determine whether urlString is Java-compatible --
  * whether it can be passed to the Java URL(String) constructor without the
  * latter throwing a MalformedURLException, or without Java otherwise
@@ -976,6 +959,23 @@ bool NS_IsReasonableHTTPHeaderValue(const nsACString &aValue);
  */
 bool NS_IsValidHTTPToken(const nsACString &aToken);
 
+/**
+ * Return true if the given request must be upgraded to HTTPS.
+ */
+nsresult NS_ShouldSecureUpgrade(nsIURI* aURI,
+                                nsILoadInfo* aLoadInfo,
+                                nsIPrincipal* aChannelResultPrincipal,
+                                bool aPrivateBrowsing,
+                                bool aAllowSTS,
+                                bool& aShouldUpgrade);
+
+/**
+ * Returns an https URI for channels that need to go through secure upgrades.
+ */
+nsresult NS_GetSecureUpgradedURI(nsIURI* aURI, nsIURI** aUpgradedURI);
+
+nsresult NS_CompareLoadInfoAndLoadContext(nsIChannel *aChannel);
+
 namespace mozilla {
 namespace net {
 
@@ -994,7 +994,7 @@ bool InScriptableRange(uint64_t val);
 
 // Include some function bodies for callers with external linkage
 #ifndef MOZILLA_INTERNAL_API
-#include "nsNetUtil.inl"
+#include "nsNetUtilInlines.h"
 #endif
 
 #endif // !nsNetUtil_h__

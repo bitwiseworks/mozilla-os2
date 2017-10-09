@@ -18,10 +18,7 @@ struct Optional
           mValue(T())
     {}
 
-    explicit Optional(const T &valueIn)
-        : mValid(true),
-          mValue(valueIn)
-    {}
+    Optional(const T &valueIn) : mValid(true), mValue(valueIn) {}
 
     Optional(const Optional &other)
         : mValid(other.mValid),
@@ -38,6 +35,13 @@ struct Optional
     Optional &operator=(const T &value)
     {
         mValue = value;
+        mValid = true;
+        return *this;
+    }
+
+    Optional &operator=(T &&value)
+    {
+        mValue = std::move(value);
         mValid = true;
         return *this;
     }

@@ -116,24 +116,13 @@ GetISizeInfo(nsRenderingContext *aRenderingContext,
         // for bsize).
         // For this reason, we also do not use box-sizing for just one of
         // them, as this may be confusing.
-        if (isQuirks) {
+        if (isQuirks || stylePos->mBoxSizing == StyleBoxSizing::Content) {
             boxSizingToBorderEdge = offsets.hPadding + offsets.hBorder;
         }
         else {
-            switch (stylePos->mBoxSizing) {
-                case StyleBoxSizing::Content:
-                    boxSizingToBorderEdge = offsets.hPadding + offsets.hBorder;
-                    break;
-                case StyleBoxSizing::Padding:
-                    minCoord += offsets.hPadding;
-                    prefCoord += offsets.hPadding;
-                    boxSizingToBorderEdge = offsets.hBorder;
-                    break;
-                case StyleBoxSizing::Border:
-                    minCoord += offsets.hPadding + offsets.hBorder;
-                    prefCoord += offsets.hPadding + offsets.hBorder;
-                    break;
-            }
+            // StyleBoxSizing::Border and standards-mode
+            minCoord += offsets.hPadding + offsets.hBorder;
+            prefCoord += offsets.hPadding + offsets.hBorder;
         }
     } else {
         minCoord = 0;
@@ -154,8 +143,7 @@ GetISizeInfo(nsRenderingContext *aRenderingContext,
         // isize, it will (in some cases) subtract the box-sizing edges.
         // We prevent this unwanted behavior by calling it with
         // aContentEdgeToBoxSizing and aBoxSizingToMarginEdge set to 0.
-        nscoord c = nsLayoutUtils::ComputeISizeValue(aRenderingContext,
-                                                     aFrame, 0, 0, 0, iSize);
+        nscoord c = aFrame->ComputeISizeValue(aRenderingContext, 0, 0, 0, iSize);
         // Quirk: A cell with "nowrap" set and a coord value for the
         // isize which is bigger than the intrinsic minimum isize uses
         // that coord value as the minimum isize.
@@ -202,9 +190,8 @@ GetISizeInfo(nsRenderingContext *aRenderingContext,
     // XXX To really implement 'max-inline-size' well, we'd need to store
     // it separately on the columns.
     if (maxISize.ConvertsToLength() || unit == eStyleUnit_Enumerated) {
-        nscoord c =
-            nsLayoutUtils::ComputeISizeValue(aRenderingContext, aFrame,
-                                             0, 0, 0, maxISize);
+        nscoord c = aFrame->ComputeISizeValue(aRenderingContext,
+                                              0, 0, 0, maxISize);
         minCoord = std::min(c, minCoord);
         prefCoord = std::min(c, prefCoord);
     } else if (unit == eStyleUnit_Percent) {
@@ -228,9 +215,8 @@ GetISizeInfo(nsRenderingContext *aRenderingContext,
     }
     unit = minISize.GetUnit();
     if (minISize.ConvertsToLength() || unit == eStyleUnit_Enumerated) {
-        nscoord c =
-            nsLayoutUtils::ComputeISizeValue(aRenderingContext, aFrame,
-                                             0, 0, 0, minISize);
+        nscoord c = aFrame->ComputeISizeValue(aRenderingContext,
+                                              0, 0, 0, minISize);
         minCoord = std::max(c, minCoord);
         prefCoord = std::max(c, prefCoord);
     } else if (unit == eStyleUnit_Percent) {
@@ -531,9 +517,9 @@ BasicTableLayoutStrategy::MarkIntrinsicISizesDirty()
 }
 
 /* virtual */ void
-BasicTableLayoutStrategy::ComputeColumnISizes(const nsHTMLReflowState& aReflowState)
+BasicTableLayoutStrategy::ComputeColumnISizes(const ReflowInput& aReflowInput)
 {
-    nscoord iSize = aReflowState.ComputedISize();
+    nscoord iSize = aReflowInput.ComputedISize();
 
     if (mLastCalcISize == iSize) {
         return;
@@ -548,7 +534,7 @@ BasicTableLayoutStrategy::ComputeColumnISizes(const nsHTMLReflowState& aReflowSt
                  "dirtyness out of sync");
     // XXX Is this needed?
     if (mMinISize == NS_INTRINSIC_WIDTH_UNKNOWN) {
-        ComputeIntrinsicISizes(aReflowState.rendContext);
+        ComputeIntrinsicISizes(aReflowInput.mRenderingContext);
     }
 
     nsTableCellMap *cellMap = mTableFrame->GetCellMap();

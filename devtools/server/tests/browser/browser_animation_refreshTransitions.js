@@ -8,7 +8,7 @@
 // be used, but when it restarts again (transitions back), then a new
 // AnimationPlayerFront should be sent, and the old one should be removed.
 
-add_task(function*() {
+add_task(function* () {
   let {client, walker, animations} =
     yield initAnimationsFrontForUrl(MAIN_DOMAIN + "animation.html");
 
@@ -44,7 +44,7 @@ add_task(function*() {
   is(reportedMutations.filter(m => m.type === "added").length, 2,
     "2 'added' events were sent (for the new transitions)");
 
-  yield closeDebuggerClient(client);
+  yield client.close();
   gBrowser.removeCurrentTab();
 });
 

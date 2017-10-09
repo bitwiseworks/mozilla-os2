@@ -8,6 +8,7 @@
 #include "nsRenderingContext.h"
 #include "nsMathMLmmultiscriptsFrame.h"
 #include <algorithm>
+#include "gfxMathTable.h"
 
 //
 // <munderover> -- attach an underscript-overscript pair to a base - implementation
@@ -301,9 +302,9 @@ i.e.,:
 */
 
 /* virtual */ nsresult
-nsMathMLmunderoverFrame::Place(nsRenderingContext& aRenderingContext,
+nsMathMLmunderoverFrame::Place(DrawTarget*          aDrawTarget,
                                bool                 aPlaceOrigin,
-                               nsHTMLReflowMetrics& aDesiredSize)
+                               ReflowOutput& aDesiredSize)
 {
   float fontSizeInflation = nsLayoutUtils::FontSizeInflationFor(this);
   if (NS_MATHML_EMBELLISH_IS_MOVABLELIMITS(mEmbellishData.flags) &&
@@ -311,14 +312,14 @@ nsMathMLmunderoverFrame::Place(nsRenderingContext& aRenderingContext,
     //place like sub sup or subsup
     if (mContent->IsMathMLElement(nsGkAtoms::munderover_)) {
       return nsMathMLmmultiscriptsFrame::PlaceMultiScript(PresContext(),
-                                                          aRenderingContext,
+                                                          aDrawTarget,
                                                           aPlaceOrigin,
                                                           aDesiredSize,
                                                           this, 0, 0,
                                                           fontSizeInflation);
     } else if (mContent->IsMathMLElement( nsGkAtoms::munder_)) {
       return nsMathMLmmultiscriptsFrame::PlaceMultiScript(PresContext(),
-                                                          aRenderingContext,
+                                                          aDrawTarget,
                                                           aPlaceOrigin,
                                                           aDesiredSize,
                                                           this, 0, 0,
@@ -327,7 +328,7 @@ nsMathMLmunderoverFrame::Place(nsRenderingContext& aRenderingContext,
       NS_ASSERTION(mContent->IsMathMLElement(nsGkAtoms::mover_),
                    "mContent->NodeInfo()->NameAtom() not recognized");
       return nsMathMLmmultiscriptsFrame::PlaceMultiScript(PresContext(),
-                                                          aRenderingContext,
+                                                          aDrawTarget,
                                                           aPlaceOrigin,
                                                           aDesiredSize,
                                                           this, 0, 0,
@@ -340,9 +341,9 @@ nsMathMLmunderoverFrame::Place(nsRenderingContext& aRenderingContext,
   // Get the children's desired sizes
 
   nsBoundingMetrics bmBase, bmUnder, bmOver;
-  nsHTMLReflowMetrics baseSize(aDesiredSize.GetWritingMode());
-  nsHTMLReflowMetrics underSize(aDesiredSize.GetWritingMode());
-  nsHTMLReflowMetrics overSize(aDesiredSize.GetWritingMode());
+  ReflowOutput baseSize(aDesiredSize.GetWritingMode());
+  ReflowOutput underSize(aDesiredSize.GetWritingMode());
+  ReflowOutput overSize(aDesiredSize.GetWritingMode());
   nsIFrame* overFrame = nullptr;
   nsIFrame* underFrame = nullptr;
   nsIFrame* baseFrame = mFrames.FirstChild();
@@ -382,8 +383,8 @@ nsMathMLmunderoverFrame::Place(nsRenderingContext& aRenderingContext,
   if (haveError) {
     if (aPlaceOrigin) {
       ReportChildCountError();
-    } 
-    return ReflowError(aRenderingContext, aDesiredSize);
+    }
+    return ReflowError(aDrawTarget, aDesiredSize);
   }
   GetReflowAndBoundingMetricsFor(baseFrame, baseSize, bmBase);
   if (underFrame) {
@@ -398,16 +399,15 @@ nsMathMLmunderoverFrame::Place(nsRenderingContext& aRenderingContext,
   ////////////////////
   // Place Children
 
-  RefPtr<nsFontMetrics> fm;
-  nsLayoutUtils::GetFontMetricsForFrame(this, getter_AddRefs(fm),
-                                        fontSizeInflation);
+  RefPtr<nsFontMetrics> fm =
+    nsLayoutUtils::GetFontMetricsForFrame(this, fontSizeInflation);
 
   nscoord xHeight = fm->XHeight();
   nscoord oneDevPixel = fm->AppUnitsPerDevPixel();
   gfxFont* mathFont = fm->GetThebesFontGroup()->GetFirstMathFont();
 
   nscoord ruleThickness;
-  GetRuleThickness (aRenderingContext, fm, ruleThickness);
+  GetRuleThickness (aDrawTarget, fm, ruleThickness);
 
   nscoord correction = 0;
   GetItalicCorrection (bmBase, correction);
@@ -430,11 +430,11 @@ nsMathMLmunderoverFrame::Place(nsRenderingContext& aRenderingContext,
       // that we may use when the base is a stretchy horizontal operator. See
       // bug 963131.
       bigOpSpacing2 =
-        mathFont->GetMathConstant(gfxFontEntry::LowerLimitGapMin,
-                                  oneDevPixel);
+        mathFont->MathTable()->Constant(gfxMathTable::LowerLimitGapMin,
+                                        oneDevPixel);
       bigOpSpacing4 =
-        mathFont->GetMathConstant(gfxFontEntry::LowerLimitBaselineDropMin,
-                                  oneDevPixel);
+        mathFont->MathTable()->Constant(gfxMathTable::LowerLimitBaselineDropMin,
+                                        oneDevPixel);
       bigOpSpacing5 = 0;
     }
     underDelta1 = std::max(bigOpSpacing2, (bigOpSpacing4 - bmUnder.ascent));
@@ -473,11 +473,11 @@ nsMathMLmunderoverFrame::Place(nsRenderingContext& aRenderingContext,
       // that we may use when the base is a stretchy horizontal operator. See
       // bug 963131.
       bigOpSpacing1 =
-        mathFont->GetMathConstant(gfxFontEntry::UpperLimitGapMin,
-                                  oneDevPixel);
+        mathFont->MathTable()->Constant(gfxMathTable::UpperLimitGapMin,
+                                        oneDevPixel);
       bigOpSpacing3 =
-        mathFont->GetMathConstant(gfxFontEntry::UpperLimitBaselineRiseMin,
-                                  oneDevPixel);
+        mathFont->MathTable()->Constant(gfxMathTable::UpperLimitBaselineRiseMin,
+                                        oneDevPixel);
       bigOpSpacing5 = 0;
     }
     overDelta1 = std::max(bigOpSpacing1, (bigOpSpacing3 - bmOver.descent));
@@ -523,8 +523,8 @@ nsMathMLmunderoverFrame::Place(nsRenderingContext& aRenderingContext,
     nscoord accentBaseHeight = xHeight;
     if (mathFont) {
       accentBaseHeight =
-        mathFont->GetMathConstant(gfxFontEntry::AccentBaseHeight,
-                                  oneDevPixel);
+        mathFont->MathTable()->Constant(gfxMathTable::AccentBaseHeight,
+                                        oneDevPixel);
     }
     if (bmBase.ascent < accentBaseHeight) {
       // also ensure at least accentBaseHeight above the baseline of the base

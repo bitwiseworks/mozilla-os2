@@ -1,5 +1,7 @@
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
-   http://creativecommons.org/publicdomain/zero/1.0/ */
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 /**
  * Test that we can get a stack to a promise's rejection point.
@@ -8,7 +10,7 @@
 "use strict";
 
 const TAB_URL = EXAMPLE_URL + "doc_promise-get-rejection-stack.html";
-const { PromisesFront } = require("devtools/server/actors/promises");
+const { PromisesFront } = require("devtools/shared/fronts/promises");
 var events = require("sdk/event/core");
 
 const TEST_DATA = [
@@ -34,7 +36,11 @@ function test() {
     DebuggerServer.init();
     DebuggerServer.addBrowserActors();
 
-    const [ tab,, panel ] = yield initDebugger(TAB_URL);
+    let options = {
+      source: TAB_URL,
+      line: 1
+    };
+    const [ tab,, panel ] = yield initDebugger(TAB_URL, options);
 
     let client = new DebuggerClient(DebuggerServer.connectPipe());
     yield connect(client);

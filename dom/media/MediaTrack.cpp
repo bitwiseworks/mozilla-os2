@@ -5,7 +5,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "MediaTrack.h"
+#include "AudioTrack.h"
 #include "MediaTrackList.h"
+#include "VideoTrack.h"
 
 namespace mozilla {
 namespace dom {
@@ -40,7 +42,7 @@ MediaTrack::SetTrackList(MediaTrackList* aList)
 }
 
 void
-MediaTrack::Init(nsPIDOMWindow* aOwnerWindow)
+MediaTrack::Init(nsPIDOMWindowInner* aOwnerWindow)
 {
   BindToOwner(aOwnerWindow);
 }

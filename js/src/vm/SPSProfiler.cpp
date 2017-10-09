@@ -25,12 +25,12 @@ using mozilla::DebugOnly;
 
 SPSProfiler::SPSProfiler(JSRuntime* rt)
   : rt(rt),
+    strings(mutexid::SPSProfilerStrings),
     stack_(nullptr),
     size_(nullptr),
     max_(0),
     slowAssertions(false),
     enabled_(false),
-    lock_(nullptr),
     eventMarker_(nullptr)
 {
     MOZ_ASSERT(rt != nullptr);
@@ -39,30 +39,19 @@ SPSProfiler::SPSProfiler(JSRuntime* rt)
 bool
 SPSProfiler::init()
 {
-    lock_ = PR_NewLock();
-    if (lock_ == nullptr)
+    auto locked = strings.lock();
+    if (!locked->init())
         return false;
 
     return true;
 }
 
-SPSProfiler::~SPSProfiler()
-{
-    if (strings.initialized()) {
-        for (ProfileStringMap::Enum e(strings); !e.empty(); e.popFront())
-            js_free(const_cast<char*>(e.front().value()));
-    }
-    if (lock_)
-        PR_DestroyLock(lock_);
-}
-
 void
 SPSProfiler::setProfilingStack(ProfileEntry* stack, uint32_t* size, uint32_t max)
 {
-    AutoSPSLock lock(lock_);
     MOZ_ASSERT_IF(size_ && *size_ != 0, !enabled());
-    if (!strings.initialized())
-        strings.init();
+    MOZ_ASSERT(strings.lock()->initialized());
+
     stack_ = stack;
     size_  = size;
     max_   = max;
@@ -142,19 +131,18 @@ SPSProfiler::enable(bool enabled)
 const char*
 SPSProfiler::profileString(JSScript* script, JSFunction* maybeFun)
 {
-    AutoSPSLock lock(lock_);
-    MOZ_ASSERT(strings.initialized());
-    ProfileStringMap::AddPtr s = strings.lookupForAdd(script);
-    if (s)
-        return s->value();
-    const char* str = allocProfileString(script, maybeFun);
-    if (str == nullptr)
-        return nullptr;
-    if (!strings.add(s, script, str)) {
-        js_free(const_cast<char*>(str));
-        return nullptr;
+    auto locked = strings.lock();
+    MOZ_ASSERT(locked->initialized());
+
+    ProfileStringMap::AddPtr s = locked->lookupForAdd(script);
+
+    if (!s) {
+        auto str = allocProfileString(script, maybeFun);
+        if (!str || !locked->add(s, script, mozilla::Move(str)))
+            return nullptr;
     }
-    return str;
+
+    return s->value().get();
 }
 
 void
@@ -167,14 +155,11 @@ SPSProfiler::onScriptFinalized(JSScript* script)
      * off, we still want to remove the string, so no check of enabled() is
      * done.
      */
-    AutoSPSLock lock(lock_);
-    if (!strings.initialized())
+    auto locked = strings.lock();
+    if (!locked->initialized())
         return;
-    if (ProfileStringMap::Ptr entry = strings.lookup(script)) {
-        const char* tofree = entry->value();
-        strings.remove(entry);
-        js_free(const_cast<char*>(tofree));
-    }
+    if (ProfileStringMap::Ptr entry = locked->lookup(script))
+        locked->remove(entry);
 }
 
 void
@@ -302,8 +287,8 @@ void
 SPSProfiler::pop()
 {
     MOZ_ASSERT(installed());
+    MOZ_ASSERT(*size_ > 0);
     (*size_)--;
-    MOZ_ASSERT(*(int*)size_ >= 0);
 }
 
 /*
@@ -312,7 +297,7 @@ SPSProfiler::pop()
  * some scripts, resize the hash table of profile strings, and invalidate the
  * AddPtr held while invoking allocProfileString.
  */
-const char*
+UniqueChars
 SPSProfiler::allocProfileString(JSScript* script, JSFunction* maybeFun)
 {
     // Note: this profiler string is regexp-matched by
@@ -339,28 +324,78 @@ SPSProfiler::allocProfileString(JSScript* script, JSFunction* maybeFun)
     }
 
     // Allocate the buffer.
-    char* cstr = js_pod_malloc<char>(len + 1);
-    if (cstr == nullptr)
+    UniqueChars cstr(js_pod_malloc<char>(len + 1));
+    if (!cstr)
         return nullptr;
 
     // Construct the descriptive string.
     DebugOnly<size_t> ret;
     if (atom) {
-        JS::AutoCheckCannotGC nogc;
-        auto atomStr = mozilla::UniquePtr<char, JS::FreePolicy>(
-            atom->hasLatin1Chars()
-            ? JS::CharsToNewUTF8CharsZ(nullptr, atom->latin1Range(nogc)).c_str()
-            : JS::CharsToNewUTF8CharsZ(nullptr, atom->twoByteRange(nogc)).c_str());
+        UniqueChars atomStr = StringToNewUTF8CharsZ(nullptr, *atom);
         if (!atomStr)
             return nullptr;
-        ret = JS_snprintf(cstr, len + 1, "%s (%s:%llu)", atomStr.get(), filename, lineno);
+
+        ret = snprintf(cstr.get(), len + 1, "%s (%s:%" PRIu64 ")", atomStr.get(), filename, lineno);
     } else {
-        ret = JS_snprintf(cstr, len + 1, "%s:%llu", filename, lineno);
+        ret = snprintf(cstr.get(), len + 1, "%s:%" PRIu64, filename, lineno);
     }
 
     MOZ_ASSERT(ret == len, "Computed length should match actual length!");
 
     return cstr;
+}
+
+void
+SPSProfiler::trace(JSTracer* trc)
+{
+    if (stack_) {
+        size_t limit = Min(*size_, max_);
+        for (size_t i = 0; i < limit; i++)
+            stack_[i].trace(trc);
+    }
+}
+
+void
+SPSProfiler::fixupStringsMapAfterMovingGC()
+{
+    auto locked = strings.lock();
+    if (!locked->initialized())
+        return;
+
+    for (ProfileStringMap::Enum e(locked.get()); !e.empty(); e.popFront()) {
+        JSScript* script = e.front().key();
+        if (IsForwarded(script)) {
+            script = Forwarded(script);
+            e.rekeyFront(script);
+        }
+    }
+}
+
+#ifdef JSGC_HASH_TABLE_CHECKS
+void
+SPSProfiler::checkStringsMapAfterMovingGC()
+{
+    auto locked = strings.lock();
+    if (!locked->initialized())
+        return;
+
+    for (auto r = locked->all(); !r.empty(); r.popFront()) {
+        JSScript* script = r.front().key();
+        CheckGCThingAfterMovingGC(script);
+        auto ptr = locked->lookup(script);
+        MOZ_RELEASE_ASSERT(ptr.found() && &*ptr == &r.front());
+    }
+}
+#endif
+
+void
+ProfileEntry::trace(JSTracer* trc)
+{
+    if (isJs()) {
+        JSScript* s = rawScript();
+        TraceNullableRoot(trc, &s, "ProfileEntry script");
+        spOrScript = s;
+    }
 }
 
 SPSEntryMarker::SPSEntryMarker(JSRuntime* rt,
@@ -448,43 +483,68 @@ SPSBaselineOSRMarker::~SPSBaselineOSRMarker()
     entry.unsetOSR();
 }
 
+JS_PUBLIC_API(JSScript*)
+ProfileEntry::script() const volatile
+{
+    MOZ_ASSERT(isJs());
+    auto script = reinterpret_cast<JSScript*>(spOrScript);
+    if (!script)
+        return nullptr;
+
+    // If profiling is supressed then we can't trust the script pointers to be
+    // valid as they could be in the process of being moved by a compacting GC
+    // (although it's still OK to get the runtime from them).
+    JSRuntime* rt = script->zoneFromAnyThread()->runtimeFromAnyThread();
+    if (!rt->isProfilerSamplingEnabled())
+        return nullptr;
+
+    MOZ_ASSERT(!IsForwarded(script));
+    return script;
+}
+
 JS_FRIEND_API(jsbytecode*)
 ProfileEntry::pc() const volatile
 {
     MOZ_ASSERT(isJs());
-    return lineOrPc == NullPCOffset ? nullptr : script()->offsetToPC(lineOrPc);
+    if (lineOrPcOffset == NullPCOffset)
+        return nullptr;
+
+    JSScript* script = this->script();
+    return script ? script->offsetToPC(lineOrPcOffset) : nullptr;
 }
 
 JS_FRIEND_API(void)
 ProfileEntry::setPC(jsbytecode* pc) volatile
 {
     MOZ_ASSERT(isJs());
-    lineOrPc = pc == nullptr ? NullPCOffset : script()->pcToOffset(pc);
+    JSScript* script = this->script();
+    MOZ_ASSERT(script); // This should not be called while profiling is suppressed.
+    lineOrPcOffset = pc == nullptr ? NullPCOffset : script->pcToOffset(pc);
 }
 
 JS_FRIEND_API(void)
-js::SetRuntimeProfilingStack(JSRuntime* rt, ProfileEntry* stack, uint32_t* size, uint32_t max)
+js::SetContextProfilingStack(JSContext* cx, ProfileEntry* stack, uint32_t* size, uint32_t max)
 {
-    rt->spsProfiler.setProfilingStack(stack, size, max);
+    cx->spsProfiler.setProfilingStack(stack, size, max);
 }
 
 JS_FRIEND_API(void)
-js::EnableRuntimeProfilingStack(JSRuntime* rt, bool enabled)
+js::EnableContextProfilingStack(JSContext* cx, bool enabled)
 {
-    rt->spsProfiler.enable(enabled);
+    cx->spsProfiler.enable(enabled);
 }
 
 JS_FRIEND_API(void)
-js::RegisterRuntimeProfilingEventMarker(JSRuntime* rt, void (*fn)(const char*))
+js::RegisterContextProfilingEventMarker(JSContext* cx, void (*fn)(const char*))
 {
-    MOZ_ASSERT(rt->spsProfiler.enabled());
-    rt->spsProfiler.setEventMarker(fn);
+    MOZ_ASSERT(cx->spsProfiler.enabled());
+    cx->spsProfiler.setEventMarker(fn);
 }
 
 JS_FRIEND_API(jsbytecode*)
-js::ProfilingGetPC(JSRuntime* rt, JSScript* script, void* ip)
+js::ProfilingGetPC(JSContext* cx, JSScript* script, void* ip)
 {
-    return rt->spsProfiler.ipToPC(script, size_t(ip));
+    return cx->spsProfiler.ipToPC(script, size_t(ip));
 }
 
 AutoSuppressProfilerSampling::AutoSuppressProfilerSampling(JSContext* cx

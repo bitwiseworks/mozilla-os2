@@ -56,7 +56,7 @@ struct nsRect :
   // overflowing nscoord values in the 'width' and 'height' fields by
   // clamping the width and height values to nscoord_MAX if necessary.
 
-  MOZ_WARN_UNUSED_RESULT nsRect SaturatingUnion(const nsRect& aRect) const
+  MOZ_MUST_USE nsRect SaturatingUnion(const nsRect& aRect) const
   {
     if (IsEmpty()) {
       return aRect;
@@ -67,7 +67,7 @@ struct nsRect :
     }
   }
 
-  MOZ_WARN_UNUSED_RESULT nsRect SaturatingUnionEdges(const nsRect& aRect) const
+  MOZ_MUST_USE nsRect SaturatingUnionEdges(const nsRect& aRect) const
   {
 #ifdef NS_COORD_IS_FLOAT
     return UnionEdges(aRect);
@@ -102,7 +102,7 @@ struct nsRect :
 
 #ifndef NS_COORD_IS_FLOAT
   // Make all nsRect Union methods be saturating.
-  MOZ_WARN_UNUSED_RESULT nsRect UnionEdges(const nsRect& aRect) const
+  MOZ_MUST_USE nsRect UnionEdges(const nsRect& aRect) const
   {
     return SaturatingUnionEdges(aRect);
   }
@@ -110,7 +110,7 @@ struct nsRect :
   {
     *this = aRect1.UnionEdges(aRect2);
   }
-  MOZ_WARN_UNUSED_RESULT nsRect Union(const nsRect& aRect) const
+  MOZ_MUST_USE nsRect Union(const nsRect& aRect) const
   {
     return SaturatingUnion(aRect);
   }
@@ -129,6 +129,9 @@ struct nsRect :
     *this = aRect1.SaturatingUnionEdges(aRect2);
   }
 
+  // Return whether this rect's right or bottom edge overflow int32.
+  bool Overflows() const;
+
   /**
    * Return this rect scaled to a different appunits per pixel (APP) ratio.
    * In the RoundOut version we make the rect the smallest rect containing the
@@ -138,32 +141,32 @@ struct nsRect :
    * @param aToAPP the APP to scale to
    * @note this can turn an empty rectangle into a non-empty rectangle
    */
-  MOZ_WARN_UNUSED_RESULT inline nsRect
+  MOZ_MUST_USE inline nsRect
     ScaleToOtherAppUnitsRoundOut(int32_t aFromAPP, int32_t aToAPP) const;
-  MOZ_WARN_UNUSED_RESULT inline nsRect
+  MOZ_MUST_USE inline nsRect
     ScaleToOtherAppUnitsRoundIn(int32_t aFromAPP, int32_t aToAPP) const;
 
-  MOZ_WARN_UNUSED_RESULT inline mozilla::gfx::IntRect
+  MOZ_MUST_USE inline mozilla::gfx::IntRect
   ScaleToNearestPixels(float aXScale, float aYScale,
                        nscoord aAppUnitsPerPixel) const;
 
-  MOZ_WARN_UNUSED_RESULT inline mozilla::gfx::IntRect
+  MOZ_MUST_USE inline mozilla::gfx::IntRect
   ToNearestPixels(nscoord aAppUnitsPerPixel) const;
 
   // Note: this can turn an empty rectangle into a non-empty rectangle
-  MOZ_WARN_UNUSED_RESULT inline mozilla::gfx::IntRect
+  MOZ_MUST_USE inline mozilla::gfx::IntRect
   ScaleToOutsidePixels(float aXScale, float aYScale,
                        nscoord aAppUnitsPerPixel) const;
 
   // Note: this can turn an empty rectangle into a non-empty rectangle
-  MOZ_WARN_UNUSED_RESULT inline mozilla::gfx::IntRect
+  MOZ_MUST_USE inline mozilla::gfx::IntRect
   ToOutsidePixels(nscoord aAppUnitsPerPixel) const;
 
-  MOZ_WARN_UNUSED_RESULT inline mozilla::gfx::IntRect
+  MOZ_MUST_USE inline mozilla::gfx::IntRect
   ScaleToInsidePixels(float aXScale, float aYScale,
                       nscoord aAppUnitsPerPixel) const;
 
-  MOZ_WARN_UNUSED_RESULT inline mozilla::gfx::IntRect
+  MOZ_MUST_USE inline mozilla::gfx::IntRect
   ToInsidePixels(nscoord aAppUnitsPerPixel) const;
 
   // This is here only to keep IPDL-generated code happy. DO NOT USE.
@@ -172,7 +175,7 @@ struct nsRect :
     return IsEqualEdges(aRect);
   }
 
-  MOZ_WARN_UNUSED_RESULT inline nsRect RemoveResolution(const float aResolution) const;
+  MOZ_MUST_USE inline nsRect RemoveResolution(const float aResolution) const;
 };
 
 /*

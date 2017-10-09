@@ -284,13 +284,29 @@ var tests = [
     function callback(result) {
       let props = ["defaultUpdateChannel", "version"];
       for (let property of props) {
-        ok(typeof(result[property]) !== undefined, "Check " + property + " isn't undefined.");
+        ok(typeof(result[property]) !== "undefined", "Check " + property + " isn't undefined.");
         is(result[property], Services.appinfo[property], "Should have the same " + property + " property.");
       }
       done();
     }
 
     gContentAPI.getConfiguration("appinfo", callback);
+  },
+  function test_getConfigurationDistribution(done) {
+    gContentAPI.getConfiguration("appinfo", (result) => {
+      ok(typeof(result.distribution) !== "undefined", "Check distribution isn't undefined.");
+      is(result.distribution, "default", "Should be \"default\" without preference set.");
+
+      let defaults = Services.prefs.getDefaultBranch("distribution.");
+      let testDistributionID = "TestDistribution";
+      defaults.setCharPref("id", testDistributionID);
+      gContentAPI.getConfiguration("appinfo", (result) => {
+        ok(typeof(result.distribution) !== "undefined", "Check distribution isn't undefined.");
+        is(result.distribution, testDistributionID, "Should have the distribution as set in preference.");
+
+        done();
+      });
+    });
   },
   function test_addToolbarButton(done) {
     let placement = CustomizableUI.getPlacementOfWidget("panic-button");
@@ -327,9 +343,8 @@ var tests = [
       let defaultEngine = Services.search.defaultEngine;
       gContentAPI.getConfiguration("search", data => {
         let visibleEngines = Services.search.getVisibleEngines();
-        let expectedEngines = ["searchEngine-" + engine.identifier
-                               for (engine of visibleEngines)
-                                 if (engine.identifier)];
+        let expectedEngines = visibleEngines.filter((engine) => engine.identifier)
+                                            .map((engine) => "searchEngine-" + engine.identifier);
 
         let engines = data.engines;
         ok(Array.isArray(engines), "data.engines should be an array");
@@ -360,21 +375,26 @@ var tests = [
       });
     });
   },
-  taskify(function* test_treatment_tag(done) {
+  taskify(function* test_treatment_tag() {
     let ac = new TelemetryArchiveTesting.Checker();
     yield ac.promiseInit();
-    gContentAPI.setTreatmentTag("foobar", "baz");
-    gContentAPI.getTreatmentTag("foobar", (data) => {
-      is(data.value, "baz", "set and retrieved treatmentTag");
-      ac.promiseFindPing("uitour-tag", [
-        [["payload", "tagName"], "foobar"],
-        [["payload", "tagValue"], "baz"],
-      ]).then((found) => {
-        ok(found, "Telemetry ping submitted for setTreatmentTag");
-        done();
-      }, (err) => {
-        ok(false, "Exeption finding uitour telemetry ping: " + err);
-        done();
+    yield gContentAPI.setTreatmentTag("foobar", "baz");
+    // Wait until the treatment telemetry is sent before looking in the archive.
+    yield BrowserTestUtils.waitForContentEvent(gTestTab.linkedBrowser, "mozUITourNotification", false,
+                                               event => event.detail.event === "TreatmentTag:TelemetrySent");
+    yield new Promise((resolve) => {
+      gContentAPI.getTreatmentTag("foobar", (data) => {
+        is(data.value, "baz", "set and retrieved treatmentTag");
+        ac.promiseFindPing("uitour-tag", [
+          [["payload", "tagName"], "foobar"],
+          [["payload", "tagValue"], "baz"],
+        ]).then((found) => {
+          ok(found, "Telemetry ping submitted for setTreatmentTag");
+          resolve();
+        }, (err) => {
+          ok(false, "Exception finding uitour telemetry ping: " + err);
+          resolve();
+        });
       });
     });
   }),

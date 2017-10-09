@@ -11,18 +11,66 @@ const Cc = Components.classes;
 const Cu = Components.utils;
 const Cr = Components.results;
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
+const INTEGER = /^[1-9]\d*$/;
 
+Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "AddonManager",
+                                  "resource://gre/modules/AddonManager.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "AppConstants",
+                                  "resource://gre/modules/AppConstants.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "ConsoleAPI",
+                                  "resource://gre/modules/Console.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "LanguageDetector",
+                                  "resource:///modules/translation/LanguageDetector.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Locale",
                                   "resource://gre/modules/Locale.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "MessageChannel",
+                                  "resource://gre/modules/MessageChannel.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
+                                  "resource://gre/modules/NetUtil.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Preferences",
+                                  "resource://gre/modules/Preferences.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Schemas",
+                                  "resource://gre/modules/Schemas.jsm");
+
+XPCOMUtils.defineLazyServiceGetter(this, "styleSheetService",
+                                   "@mozilla.org/content/style-sheet-service;1",
+                                   "nsIStyleSheetService");
+
+function getConsole() {
+  return new ConsoleAPI({
+    maxLogLevelPref: "extensions.webextensions.log.level",
+    prefix: "WebExtensions",
+  });
+}
+
+XPCOMUtils.defineLazyGetter(this, "console", getConsole);
+
+let nextId = 0;
+const {uniqueProcessID} = Services.appinfo;
+
+function getUniqueId() {
+  return `${nextId++}-${uniqueProcessID}`;
+}
+
+/**
+ * An Error subclass for which complete error messages are always passed
+ * to extensions, rather than being interpreted as an unknown error.
+ */
+class ExtensionError extends Error {}
+
+function filterStack(error) {
+  return String(error.stack).replace(/(^.*(Task\.jsm|Promise-backend\.js).*\n)+/gm, "<Promise Chain>\n");
+}
 
 // Run a function and report exceptions.
 function runSafeSyncWithoutClone(f, ...args) {
   try {
     return f(...args);
   } catch (e) {
-    dump(`Extension error: ${e} ${e.fileName} ${e.lineNumber}\n[[Exception stack\n${e.stack}Current stack\n${Error().stack}]]\n`);
+    dump(`Extension error: ${e} ${e.fileName} ${e.lineNumber}\n[[Exception stack\n${filterStack(e)}Current stack\n${filterStack(Error())}]]\n`);
     Cu.reportError(e);
   }
 }
@@ -30,23 +78,28 @@ function runSafeSyncWithoutClone(f, ...args) {
 // Run a function and report exceptions.
 function runSafeWithoutClone(f, ...args) {
   if (typeof(f) != "function") {
-    dump(`Extension error: expected function\n${Error().stack}`);
+    dump(`Extension error: expected function\n${filterStack(Error())}`);
     return;
   }
 
-  Services.tm.currentThread.dispatch(function() {
+  Promise.resolve().then(() => {
     runSafeSyncWithoutClone(f, ...args);
-  }, Ci.nsIEventTarget.DISPATCH_NORMAL);
+  });
 }
 
 // Run a function, cloning arguments into context.cloneScope, and
 // report exceptions. |f| is expected to be in context.cloneScope.
 function runSafeSync(context, f, ...args) {
+  if (context.unloaded) {
+    Cu.reportError("runSafeSync called after context unloaded");
+    return;
+  }
+
   try {
     args = Cu.cloneInto(args, context.cloneScope);
   } catch (e) {
     Cu.reportError(e);
-    dump(`runSafe failure: cloning into ${context.cloneScope}: ${e}\n\n${Error().stack}`);
+    dump(`runSafe failure: cloning into ${context.cloneScope}: ${e}\n\n${filterStack(Error())}`);
   }
   return runSafeSyncWithoutClone(f, ...args);
 }
@@ -58,9 +111,19 @@ function runSafe(context, f, ...args) {
     args = Cu.cloneInto(args, context.cloneScope);
   } catch (e) {
     Cu.reportError(e);
-    dump(`runSafe failure: cloning into ${context.cloneScope}: ${e}\n\n${Error().stack}`);
+    dump(`runSafe failure: cloning into ${context.cloneScope}: ${e}\n\n${filterStack(Error())}`);
+  }
+  if (context.unloaded) {
+    dump(`runSafe failure: context is already unloaded ${filterStack(new Error())}\n`);
+    return undefined;
   }
   return runSafeWithoutClone(f, ...args);
+}
+
+function getInnerWindowID(window) {
+  return window.QueryInterface(Ci.nsIInterfaceRequestor)
+    .getInterface(Ci.nsIDOMWindowUtils)
+    .currentInnerWindowID;
 }
 
 // Return true if the given value is an instance of the given
@@ -84,41 +147,264 @@ function extend(obj, ...args) {
   return obj;
 }
 
-// Similar to a WeakMap, but returns a particular default value for
-// |get| if a key is not present.
-function DefaultWeakMap(defaultValue) {
-  this.defaultValue = defaultValue;
-  this.weakmap = new WeakMap();
+/**
+ * Similar to a WeakMap, but creates a new key with the given
+ * constructor if one is not present.
+ */
+class DefaultWeakMap extends WeakMap {
+  constructor(defaultConstructor, init) {
+    super(init);
+    this.defaultConstructor = defaultConstructor;
+  }
+
+  get(key) {
+    if (!this.has(key)) {
+      this.set(key, this.defaultConstructor(key));
+    }
+    return super.get(key);
+  }
 }
 
-DefaultWeakMap.prototype = {
+class DefaultMap extends Map {
+  constructor(defaultConstructor, init) {
+    super(init);
+    this.defaultConstructor = defaultConstructor;
+  }
+
   get(key) {
-    if (this.weakmap.has(key)) {
-      return this.weakmap.get(key);
+    if (!this.has(key)) {
+      this.set(key, this.defaultConstructor(key));
     }
-    return this.defaultValue;
+    return super.get(key);
+  }
+}
+
+class SpreadArgs extends Array {
+  constructor(args) {
+    super();
+    this.push(...args);
+  }
+}
+
+// Manages icon details for toolbar buttons in the |pageAction| and
+// |browserAction| APIs.
+let IconDetails = {
+  // Normalizes the various acceptable input formats into an object
+  // with icon size as key and icon URL as value.
+  //
+  // If a context is specified (function is called from an extension):
+  // Throws an error if an invalid icon size was provided or the
+  // extension is not allowed to load the specified resources.
+  //
+  // If no context is specified, instead of throwing an error, this
+  // function simply logs a warning message.
+  normalize(details, extension, context = null) {
+    let result = {};
+
+    try {
+      if (details.imageData) {
+        let imageData = details.imageData;
+
+        if (typeof imageData == "string") {
+          imageData = {"19": imageData};
+        }
+
+        for (let size of Object.keys(imageData)) {
+          if (!INTEGER.test(size)) {
+            throw new ExtensionError(`Invalid icon size ${size}, must be an integer`);
+          }
+          result[size] = imageData[size];
+        }
+      }
+
+      if (details.path) {
+        let path = details.path;
+        if (typeof path != "object") {
+          path = {"19": path};
+        }
+
+        let baseURI = context ? context.uri : extension.baseURI;
+
+        for (let size of Object.keys(path)) {
+          if (!INTEGER.test(size)) {
+            throw new ExtensionError(`Invalid icon size ${size}, must be an integer`);
+          }
+
+          let url = baseURI.resolve(path[size]);
+
+          // The Chrome documentation specifies these parameters as
+          // relative paths. We currently accept absolute URLs as well,
+          // which means we need to check that the extension is allowed
+          // to load them. This will throw an error if it's not allowed.
+          try {
+            Services.scriptSecurityManager.checkLoadURIStrWithPrincipal(
+              extension.principal, url,
+              Services.scriptSecurityManager.DISALLOW_SCRIPT);
+          } catch (e) {
+            throw new ExtensionError(`Illegal URL ${url}`);
+          }
+
+          result[size] = url;
+        }
+      }
+    } catch (e) {
+      // Function is called from extension code, delegate error.
+      if (context) {
+        throw e;
+      }
+      // If there's no context, it's because we're handling this
+      // as a manifest directive. Log a warning rather than
+      // raising an error.
+      extension.manifestError(`Invalid icon data: ${e}`);
+    }
+
+    return result;
   },
 
-  set(key, value) {
-    if (key) {
-      this.weakmap.set(key, value);
+  // Returns the appropriate icon URL for the given icons object and the
+  // screen resolution of the given window.
+  getPreferredIcon(icons, extension = null, size = 16) {
+    const DEFAULT = "chrome://browser/content/extension.svg";
+
+    let bestSize = null;
+    if (icons[size]) {
+      bestSize = size;
+    } else if (icons[2 * size]) {
+      bestSize = 2 * size;
     } else {
-      this.defaultValue = value;
+      let sizes = Object.keys(icons)
+                        .map(key => parseInt(key, 10))
+                        .sort((a, b) => a - b);
+
+      bestSize = sizes.find(candidate => candidate > size) || sizes.pop();
     }
+
+    if (bestSize) {
+      return {size: bestSize, icon: icons[bestSize]};
+    }
+
+    return {size, icon: DEFAULT};
+  },
+
+  convertImageURLToDataURL(imageURL, contentWindow, browserWindow, size = 18) {
+    return new Promise((resolve, reject) => {
+      let image = new contentWindow.Image();
+      image.onload = function() {
+        let canvas = contentWindow.document.createElement("canvas");
+        let ctx = canvas.getContext("2d");
+        let dSize = size * browserWindow.devicePixelRatio;
+
+        // Scales the image while maintaing width to height ratio.
+        // If the width and height differ, the image is centered using the
+        // smaller of the two dimensions.
+        let dWidth, dHeight, dx, dy;
+        if (this.width > this.height) {
+          dWidth = dSize;
+          dHeight = image.height * (dSize / image.width);
+          dx = 0;
+          dy = (dSize - dHeight) / 2;
+        } else {
+          dWidth = image.width * (dSize / image.height);
+          dHeight = dSize;
+          dx = (dSize - dWidth) / 2;
+          dy = 0;
+        }
+
+        ctx.drawImage(this, 0, 0, this.width, this.height, dx, dy, dWidth, dHeight);
+        resolve(canvas.toDataURL("image/png"));
+      };
+      image.onerror = reject;
+      image.src = imageURL;
+    });
   },
 };
+
+const LISTENERS = Symbol("listeners");
+
+class EventEmitter {
+  constructor() {
+    this[LISTENERS] = new Map();
+  }
+
+  /**
+   * Adds the given function as a listener for the given event.
+   *
+   * The listener function may optionally return a Promise which
+   * resolves when it has completed all operations which event
+   * dispatchers may need to block on.
+   *
+   * @param {string} event
+   *       The name of the event to listen for.
+   * @param {function(string, ...any)} listener
+   *        The listener to call when events are emitted.
+   */
+  on(event, listener) {
+    if (!this[LISTENERS].has(event)) {
+      this[LISTENERS].set(event, new Set());
+    }
+
+    this[LISTENERS].get(event).add(listener);
+  }
+
+  /**
+   * Removes the given function as a listener for the given event.
+   *
+   * @param {string} event
+   *       The name of the event to stop listening for.
+   * @param {function(string, ...any)} listener
+   *        The listener function to remove.
+   */
+  off(event, listener) {
+    if (this[LISTENERS].has(event)) {
+      let set = this[LISTENERS].get(event);
+
+      set.delete(listener);
+      if (!set.size) {
+        this[LISTENERS].delete(event);
+      }
+    }
+  }
+
+  /**
+   * Triggers all listeners for the given event, and returns a promise
+   * which resolves when all listeners have been called, and any
+   * promises they have returned have likewise resolved.
+   *
+   * @param {string} event
+   *       The name of the event to emit.
+   * @param {any} args
+   *        Arbitrary arguments to pass to the listener functions, after
+   *        the event name.
+   * @returns {Promise}
+   */
+  emit(event, ...args) {
+    let listeners = this[LISTENERS].get(event) || new Set();
+
+    let promises = Array.from(listeners, listener => {
+      return runSafeSyncWithoutClone(listener, event, ...args);
+    });
+
+    return Promise.all(promises);
+  }
+}
 
 function LocaleData(data) {
   this.defaultLocale = data.defaultLocale;
   this.selectedLocale = data.selectedLocale;
   this.locales = data.locales || new Map();
+  this.warnedMissingKeys = new Set();
 
-  // Map(locale-name -> Map(message-key -> localized-strings))
+  // Map(locale-name -> Map(message-key -> localized-string))
   //
   // Contains a key for each loaded locale, each of which is a
   // Map of message keys to their localized strings.
   this.messages = data.messages || new Map();
+
+  if (data.builtinMessages) {
+    this.messages.set(this.BUILTIN, data.builtinMessages);
+  }
 }
+
 
 LocaleData.prototype = {
   // Representation of the object to send to content processes. This
@@ -132,13 +418,23 @@ LocaleData.prototype = {
     };
   },
 
+  BUILTIN: "@@BUILTIN_MESSAGES",
+
   has(locale) {
     return this.messages.has(locale);
   },
 
   // https://developer.chrome.com/extensions/i18n
-  localizeMessage(message, substitutions = [], locale = this.selectedLocale, defaultValue = "??") {
-    let locales = new Set([locale, this.defaultLocale]
+  localizeMessage(message, substitutions = [], options = {}) {
+    let defaultOptions = {
+      locale: this.selectedLocale,
+      defaultValue: "",
+      cloneScope: null,
+    };
+
+    options = Object.assign(defaultOptions, options);
+
+    let locales = new Set([this.BUILTIN, options.locale, this.defaultLocale]
                           .filter(locale => this.messages.has(locale)));
 
     // Message names are case-insensitive, so normalize them to lower-case.
@@ -159,29 +455,18 @@ LocaleData.prototype = {
             // accept any number of substitutions.
             index = parseInt(index, 10) - 1;
             return index in substitutions ? substitutions[index] : "";
-          } else {
-            // For any series of contiguous `$`s, the first is dropped, and
-            // the rest remain in the output string.
-            return dollarSigns;
           }
+          // For any series of contiguous `$`s, the first is dropped, and
+          // the rest remain in the output string.
+          return dollarSigns;
         };
         return str.replace(/\$(?:([1-9]\d*)|(\$+))/g, replacer);
       }
     }
 
     // Check for certain pre-defined messages.
-    if (message == "@@extension_id") {
-      if ("uuid" in this) {
-        // Per Chrome, this isn't available before an ID is guaranteed
-        // to have been assigned, namely, in manifest files.
-        // This should only be present in instances of the |Extension|
-        // subclass.
-        return this.uuid;
-      }
-    } else if (message == "@@ui_locale") {
-      // Return the browser locale, but convert it to a Chrome-style
-      // locale code.
-      return Locale.getLocale().replace(/-/g, "_");
+    if (message == "@@ui_locale") {
+      return this.uiLocale;
     } else if (message.startsWith("@@bidi_")) {
       let registry = Cc["@mozilla.org/chrome/chrome-registry;1"].getService(Ci.nsIXULChromeRegistry);
       let rtl = registry.isLocaleRTL("global");
@@ -197,8 +482,15 @@ LocaleData.prototype = {
       }
     }
 
-    Cu.reportError(`Unknown localization message ${message}`);
-    return defaultValue;
+    if (!this.warnedMissingKeys.has(message)) {
+      let error = `Unknown localization message ${message}`;
+      if (options.cloneScope) {
+        error = new options.cloneScope.Error(error);
+      }
+      Cu.reportError(error);
+      this.warnedMissingKeys.add(message);
+    }
+    return options.defaultValue;
   },
 
   // Localize a string, replacing all |__MSG_(.*)__| tokens with the
@@ -213,7 +505,7 @@ LocaleData.prototype = {
     }
 
     return str.replace(/__MSG_([A-Za-z0-9@_]+?)__/g, (matched, message) => {
-      return this.localizeMessage(message, [], locale, matched);
+      return this.localizeMessage(message, [], {locale, defaultValue: matched});
     });
   },
 
@@ -272,6 +564,18 @@ LocaleData.prototype = {
     this.messages.set(locale, result);
     return result;
   },
+
+  get acceptLanguages() {
+    let result = Preferences.get("intl.accept_languages", "", Ci.nsIPrefLocalizedString);
+    return result.split(/\s*,\s*/g);
+  },
+
+
+  get uiLocale() {
+    // Return the browser locale, but convert it to a Chrome-style
+    // locale code.
+    return Locale.getLocale().replace(/-/g, "_");
+  },
 };
 
 // This is a generic class for managing event listeners. Example usage:
@@ -291,9 +595,9 @@ LocaleData.prototype = {
 //
 // The result is an object with addListener, removeListener, and
 // hasListener methods. |context| is an add-on scope (either an
-// ExtensionPage in the chrome process or ExtensionContext in a
+// ExtensionContext in the chrome process or ExtensionContext in a
 // content process). |name| is for debugging. |register| is a function
-// to register the listener. |register| is only called once, event if
+// to register the listener. |register| is only called once, even if
 // multiple listeners are registered. |register| should return an
 // unregister function that will unregister the listener.
 function EventManager(context, name, register) {
@@ -302,7 +606,6 @@ function EventManager(context, name, register) {
   this.register = register;
   this.unregister = null;
   this.callbacks = new Set();
-  this.registered = false;
 }
 
 EventManager.prototype = {
@@ -311,27 +614,31 @@ EventManager.prototype = {
       dump(`Expected function\n${Error().stack}`);
       return;
     }
+    if (this.context.unloaded) {
+      dump(`Cannot add listener to ${this.name} after context unloaded`);
+      return;
+    }
 
-    if (!this.registered) {
+    if (!this.callbacks.size) {
       this.context.callOnClose(this);
 
       let fireFunc = this.fire.bind(this);
       let fireWithoutClone = this.fireWithoutClone.bind(this);
       fireFunc.withoutClone = fireWithoutClone;
       this.unregister = this.register(fireFunc);
-      this.registered = true;
     }
     this.callbacks.add(callback);
   },
 
   removeListener(callback) {
-    if (!this.registered) {
+    if (!this.callbacks.size) {
       return;
     }
 
     this.callbacks.delete(callback);
-    if (this.callbacks.length == 0) {
+    if (this.callbacks.size == 0) {
       this.unregister();
+      this.unregister = null;
 
       this.context.forgetOnClose(this);
     }
@@ -342,19 +649,34 @@ EventManager.prototype = {
   },
 
   fire(...args) {
-    for (let callback of this.callbacks) {
-      runSafe(this.context, callback, ...args);
-    }
+    this._fireCommon("runSafe", args);
   },
 
   fireWithoutClone(...args) {
+    this._fireCommon("runSafeWithoutClone", args);
+  },
+
+  _fireCommon(runSafeMethod, args) {
     for (let callback of this.callbacks) {
-      runSafeSyncWithoutClone(callback, ...args);
+      Promise.resolve(callback).then(callback => {
+        if (this.context.unloaded) {
+          dump(`${this.name} event fired after context unloaded.\n`);
+        } else if (!this.context.active) {
+          dump(`${this.name} event fired while context is inactive.\n`);
+        } else if (this.callbacks.has(callback)) {
+          this.context[runSafeMethod](callback, ...args);
+        }
+      });
     }
   },
 
   close() {
-    this.unregister();
+    if (this.callbacks.size) {
+      this.unregister();
+    }
+    this.callbacks.clear();
+    this.register = null;
+    this.unregister = null;
   },
 
   api() {
@@ -374,13 +696,21 @@ function SingletonEventManager(context, name, register) {
   this.name = name;
   this.register = register;
   this.unregister = new Map();
-  context.callOnClose(this);
 }
 
 SingletonEventManager.prototype = {
   addListener(callback, ...args) {
-    let unregister = this.register(callback, ...args);
+    let wrappedCallback = (...args) => {
+      if (this.context.unloaded) {
+        dump(`${this.name} event fired after context unloaded.\n`);
+      } else if (this.unregister.has(callback)) {
+        return callback(...args);
+      }
+    };
+
+    let unregister = this.register(wrappedCallback, ...args);
     this.unregister.set(callback, unregister);
+    this.context.callOnClose(this);
   },
 
   removeListener(callback) {
@@ -419,14 +749,11 @@ function ignoreEvent(context, name) {
       let id = context.extension.id;
       let frame = Components.stack.caller;
       let msg = `In add-on ${id}, attempting to use listener "${name}", which is unimplemented.`;
-      let winID = context.contentWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-        .getInterface(Ci.nsIDOMWindowUtils).currentInnerWindowID;
       let scriptError = Cc["@mozilla.org/scripterror;1"]
         .createInstance(Ci.nsIScriptError);
-      scriptError.initWithWindowID(msg, frame.filename, null,
-                                   frame.lineNumber, frame.columnNumber,
-                                   Ci.nsIScriptError.warningFlag,
-                                   "content javascript", winID);
+      scriptError.init(msg, frame.filename, null, frame.lineNumber,
+                       frame.columnNumber, Ci.nsIScriptError.warningFlag,
+                       "content javascript");
       let consoleService = Cc["@mozilla.org/consoleservice;1"]
         .getService(Ci.nsIConsoleService);
       consoleService.logMessage(scriptError);
@@ -444,356 +771,445 @@ function injectAPI(source, dest) {
       continue;
     }
 
-    let value = source[prop];
-    if (typeof(value) == "function") {
-      Cu.exportFunction(value, dest, {defineAs: prop});
-    } else if (typeof(value) == "object") {
+    let desc = Object.getOwnPropertyDescriptor(source, prop);
+    if (typeof(desc.value) == "function") {
+      Cu.exportFunction(desc.value, dest, {defineAs: prop});
+    } else if (typeof(desc.value) == "object") {
       let obj = Cu.createObjectIn(dest, {defineAs: prop});
-      injectAPI(value, obj);
+      injectAPI(desc.value, obj);
     } else {
-      dest[prop] = value;
+      Object.defineProperty(dest, prop, desc);
     }
   }
 }
 
-/*
- * Messaging primitives.
+/**
+ * Returns a Promise which resolves when the given document's DOM has
+ * fully loaded.
+ *
+ * @param {Document} doc The document to await the load of.
+ * @returns {Promise<Document>}
  */
-
-var nextBrokerId = 1;
-
-var MESSAGES = [
-  "Extension:Message",
-  "Extension:Connect",
-];
-
-// Receives messages from multiple message managers and directs them
-// to a set of listeners. On the child side: one broker per frame
-// script.  On the parent side: one broker total, covering both the
-// global MM and the ppmm. Message must be tagged with a recipient,
-// which is an object with properties. Listeners can filter for
-// messages that have a certain value for a particular property in the
-// recipient. (If a message doesn't specify the given property, it's
-// considered a match.)
-function MessageBroker(messageManagers) {
-  this.messageManagers = messageManagers;
-  for (let mm of this.messageManagers) {
-    for (let message of MESSAGES) {
-      mm.addMessageListener(message, this);
-    }
+function promiseDocumentReady(doc) {
+  if (doc.readyState == "interactive" || doc.readyState == "complete") {
+    return Promise.resolve(doc);
   }
 
-  this.listeners = {message: [], connect: []};
+  return new Promise(resolve => {
+    doc.addEventListener("DOMContentLoaded", function onReady(event) {
+      if (event.target === event.currentTarget) {
+        doc.removeEventListener("DOMContentLoaded", onReady, true);
+        resolve(doc);
+      }
+    }, true);
+  });
 }
 
-MessageBroker.prototype = {
-  uninit() {
-    for (let mm of this.messageManagers) {
-      for (let message of MESSAGES) {
-        mm.removeMessageListener(message, this);
-      }
-    }
+/**
+ * Returns a Promise which resolves when the given document is fully
+ * loaded.
+ *
+ * @param {Document} doc The document to await the load of.
+ * @returns {Promise<Document>}
+ */
+function promiseDocumentLoaded(doc) {
+  if (doc.readyState == "complete") {
+    return Promise.resolve(doc);
+  }
 
-    this.listeners = null;
-  },
-
-  makeId() {
-    return nextBrokerId++;
-  },
-
-  addListener(type, listener, filter) {
-    this.listeners[type].push({filter, listener});
-  },
-
-  removeListener(type, listener) {
-    for (let i = 0; i < this.listeners[type].length; i++) {
-      if (this.listeners[type][i].listener == listener) {
-        this.listeners[type].splice(i, 1);
-        return;
-      }
-    }
-  },
-
-  runListeners(type, target, data) {
-    let listeners = [];
-    for (let {listener, filter} of this.listeners[type]) {
-      let pass = true;
-      for (let prop in filter) {
-        if (prop in data.recipient && filter[prop] != data.recipient[prop]) {
-          pass = false;
-          break;
-        }
-      }
-
-      // Save up the list of listeners to call in case they modify the
-      // set of listeners.
-      if (pass) {
-        listeners.push(listener);
-      }
-    }
-
-    for (let listener of listeners) {
-      listener(type, target, data.message, data.sender, data.recipient);
-    }
-  },
-
-  receiveMessage({name, data, target}) {
-    switch (name) {
-      case "Extension:Message":
-        this.runListeners("message", target, data);
-        break;
-
-      case "Extension:Connect":
-        this.runListeners("connect", target, data);
-        break;
-    }
-  },
-
-  sendMessage(messageManager, type, message, sender, recipient) {
-    let data = {message, sender, recipient};
-    let names = {message: "Extension:Message", connect: "Extension:Connect"};
-    messageManager.sendAsyncMessage(names[type], data);
-  },
-};
-
-// Abstraction for a Port object in the extension API. Each port has a unique ID.
-function Port(context, messageManager, name, id, sender) {
-  this.context = context;
-  this.messageManager = messageManager;
-  this.name = name;
-  this.id = id;
-  this.listenerName = `Extension:Port-${this.id}`;
-  this.disconnectName = `Extension:Disconnect-${this.id}`;
-  this.sender = sender;
-  this.disconnected = false;
-
-  this.messageManager.addMessageListener(this.disconnectName, this, true);
-  this.disconnectListeners = new Set();
+  return new Promise(resolve => {
+    doc.defaultView.addEventListener("load", function onReady(event) {
+      doc.defaultView.removeEventListener("load", onReady);
+      resolve(doc);
+    });
+  });
 }
 
-Port.prototype = {
-  api() {
-    let portObj = Cu.createObjectIn(this.context.cloneScope);
+/**
+ * Returns a Promise which resolves when the given event is dispatched to the
+ * given element.
+ *
+ * @param {Element} element
+ *        The element on which to listen.
+ * @param {string} eventName
+ *        The event to listen for.
+ * @param {boolean} [useCapture = true]
+ *        If true, listen for the even in the capturing rather than
+ *        bubbling phase.
+ * @param {Event} [test]
+ *        An optional test function which, when called with the
+ *        observer's subject and data, should return true if this is the
+ *        expected event, false otherwise.
+ * @returns {Promise<Event>}
+ */
+function promiseEvent(element, eventName, useCapture = true, test = event => true) {
+  return new Promise(resolve => {
+    function listener(event) {
+      if (test(event)) {
+        element.removeEventListener(eventName, listener, useCapture);
+        resolve(event);
+      }
+    }
+    element.addEventListener(eventName, listener, useCapture);
+  });
+}
 
-    // We want a close() notification when the window is destroyed.
-    this.context.callOnClose(this);
-
-    let publicAPI = {
-      name: this.name,
-      disconnect: () => {
-        this.disconnect();
-      },
-      postMessage: json => {
-        if (this.disconnected) {
-          throw new this.context.contentWindow.Error("Attempt to postMessage on disconnected port");
-        }
-        this.messageManager.sendAsyncMessage(this.listenerName, json);
-      },
-      onDisconnect: new EventManager(this.context, "Port.onDisconnect", fire => {
-        let listener = () => {
-          if (!this.disconnected) {
-            fire();
-          }
-        };
-
-        this.disconnectListeners.add(listener);
-        return () => {
-          this.disconnectListeners.delete(listener);
-        };
-      }).api(),
-      onMessage: new EventManager(this.context, "Port.onMessage", fire => {
-        let listener = ({data}) => {
-          if (!this.disconnected) {
-            fire(data);
-          }
-        };
-
-        this.messageManager.addMessageListener(this.listenerName, listener);
-        return () => {
-          this.messageManager.removeMessageListener(this.listenerName, listener);
-        };
-      }).api(),
+/**
+ * Returns a Promise which resolves the given observer topic has been
+ * observed.
+ *
+ * @param {string} topic
+ *        The topic to observe.
+ * @param {function(nsISupports, string)} [test]
+ *        An optional test function which, when called with the
+ *        observer's subject and data, should return true if this is the
+ *        expected notification, false otherwise.
+ * @returns {Promise<object>}
+ */
+function promiseObserved(topic, test = () => true) {
+  return new Promise(resolve => {
+    let observer = (subject, topic, data) => {
+      if (test(subject, data)) {
+        Services.obs.removeObserver(observer, topic);
+        resolve({subject, data});
+      }
     };
-
-    if (this.sender) {
-      publicAPI.sender = this.sender;
-    }
-
-    injectAPI(publicAPI, portObj);
-    return portObj;
-  },
-
-  handleDisconnection() {
-    this.messageManager.removeMessageListener(this.disconnectName, this);
-    this.context.forgetOnClose(this);
-    this.disconnected = true;
-  },
-
-  receiveMessage(msg) {
-    if (msg.name == this.disconnectName) {
-      if (this.disconnected) {
-        return;
-      }
-
-      for (let listener of this.disconnectListeners) {
-        listener();
-      }
-
-      this.handleDisconnection();
-    }
-  },
-
-  disconnect() {
-    if (this.disconnected) {
-      throw new this.context.contentWindow.Error("Attempt to disconnect() a disconnected port");
-    }
-    this.handleDisconnection();
-    this.messageManager.sendAsyncMessage(this.disconnectName);
-  },
-
-  close() {
-    this.disconnect();
-  },
-};
+    Services.obs.addObserver(observer, topic, false);
+  });
+}
 
 function getMessageManager(target) {
-  if (target instanceof Ci.nsIDOMXULElement) {
-    return target.messageManager;
-  } else {
-    return target;
+  if (target instanceof Ci.nsIFrameLoaderOwner) {
+    return target.QueryInterface(Ci.nsIFrameLoaderOwner).frameLoader.messageManager;
   }
+  return target.QueryInterface(Ci.nsIMessageSender);
 }
-
-// Each extension scope gets its own Messenger object. It handles the
-// basics of sendMessage, onMessage, connect, and onConnect.
-//
-// |context| is the extension scope.
-// |broker| is a MessageBroker used to receive and send messages.
-// |sender| is an object describing the sender (usually giving its extensionId, tabId, etc.)
-// |filter| is a recipient filter to apply to incoming messages from the broker.
-// |delegate| is an object that must implement a few methods:
-//    getSender(context, messageManagerTarget, sender): returns a MessageSender
-//      See https://developer.chrome.com/extensions/runtime#type-MessageSender.
-function Messenger(context, broker, sender, filter, delegate) {
-  this.context = context;
-  this.broker = broker;
-  this.sender = sender;
-  this.filter = filter;
-  this.delegate = delegate;
-}
-
-Messenger.prototype = {
-  sendMessage(messageManager, msg, recipient, responseCallback) {
-    let id = this.broker.makeId();
-    let replyName = `Extension:Reply-${id}`;
-    recipient.messageId = id;
-    this.broker.sendMessage(messageManager, "message", msg, this.sender, recipient);
-
-    let onClose;
-    let listener = ({data: response}) => {
-      messageManager.removeMessageListener(replyName, listener);
-      this.context.forgetOnClose(onClose);
-
-      if (response.gotData) {
-        // TODO: Handle failure to connect to the extension?
-        runSafe(this.context, responseCallback, response.data);
-      }
-    };
-    onClose = {
-      close() {
-        messageManager.removeMessageListener(replyName, listener);
-      },
-    };
-    if (responseCallback) {
-      messageManager.addMessageListener(replyName, listener);
-      this.context.callOnClose(onClose);
-    }
-  },
-
-  onMessage(name) {
-    return new SingletonEventManager(this.context, name, callback => {
-      let listener = (type, target, message, sender, recipient) => {
-        message = Cu.cloneInto(message, this.context.cloneScope);
-        if (this.delegate) {
-          this.delegate.getSender(this.context, target, sender);
-        }
-        sender = Cu.cloneInto(sender, this.context.cloneScope);
-
-        let mm = getMessageManager(target);
-        let replyName = `Extension:Reply-${recipient.messageId}`;
-
-        let valid = true, sent = false;
-        let sendResponse = data => {
-          if (!valid) {
-            return;
-          }
-          sent = true;
-          mm.sendAsyncMessage(replyName, {data, gotData: true});
-        };
-        sendResponse = Cu.exportFunction(sendResponse, this.context.cloneScope);
-
-        let result = runSafeSyncWithoutClone(callback, message, sender, sendResponse);
-        if (result !== true) {
-          valid = false;
-          if (!sent) {
-            mm.sendAsyncMessage(replyName, {gotData: false});
-          }
-        }
-      };
-
-      this.broker.addListener("message", listener, this.filter);
-      return () => {
-        this.broker.removeListener("message", listener);
-      };
-    }).api();
-  },
-
-  connect(messageManager, name, recipient) {
-    let portId = this.broker.makeId();
-    let port = new Port(this.context, messageManager, name, portId, null);
-    let msg = {name, portId};
-    this.broker.sendMessage(messageManager, "connect", msg, this.sender, recipient);
-    return port.api();
-  },
-
-  onConnect(name) {
-    return new EventManager(this.context, name, fire => {
-      let listener = (type, target, message, sender, recipient) => {
-        let {name, portId} = message;
-        let mm = getMessageManager(target);
-        if (this.delegate) {
-          this.delegate.getSender(this.context, target, sender);
-        }
-        let port = new Port(this.context, mm, name, portId, sender);
-        fire.withoutClone(port.api());
-      };
-
-      this.broker.addListener("connect", listener, this.filter);
-      return () => {
-        this.broker.removeListener("connect", listener);
-      };
-    }).api();
-  },
-};
 
 function flushJarCache(jarFile) {
   Services.obs.notifyObservers(jarFile, "flush-cache-entry", null);
 }
 
+const PlatformInfo = Object.freeze({
+  os: (function() {
+    let os = AppConstants.platform;
+    if (os == "macosx") {
+      os = "mac";
+    }
+    return os;
+  })(),
+  arch: (function() {
+    let abi = Services.appinfo.XPCOMABI;
+    let [arch] = abi.split("-");
+    if (arch == "x86") {
+      arch = "x86-32";
+    } else if (arch == "x86_64") {
+      arch = "x86-64";
+    }
+    return arch;
+  })(),
+});
+
+function detectLanguage(text) {
+  return LanguageDetector.detectLanguage(text).then(result => ({
+    isReliable: result.confident,
+    languages: result.languages.map(lang => {
+      return {
+        language: lang.languageCode,
+        percentage: lang.percent,
+      };
+    }),
+  }));
+}
+
+/**
+ * Convert any of several different representations of a date/time to a Date object.
+ * Accepts several formats:
+ * a Date object, an ISO8601 string, or a number of milliseconds since the epoch as
+ * either a number or a string.
+ *
+ * @param {Date|string|number} date
+ *      The date to convert.
+ * @returns {Date}
+ *      A Date object
+ */
+function normalizeTime(date) {
+  // Of all the formats we accept the "number of milliseconds since the epoch as a string"
+  // is an outlier, everything else can just be passed directly to the Date constructor.
+  return new Date((typeof date == "string" && /^\d+$/.test(date))
+                        ? parseInt(date, 10) : date);
+}
+
+const stylesheetMap = new DefaultMap(url => {
+  let uri = NetUtil.newURI(url);
+  return styleSheetService.preloadSheet(uri, styleSheetService.AGENT_SHEET);
+});
+
+/**
+ * Defines a lazy getter for the given property on the given object. The
+ * first time the property is accessed, the return value of the getter
+ * is defined on the current `this` object with the given property name.
+ * Importantly, this means that a lazy getter defined on an object
+ * prototype will be invoked separately for each object instance that
+ * it's accessed on.
+ *
+ * @param {object} object
+ *        The prototype object on which to define the getter.
+ * @param {string|Symbol} prop
+ *        The property name for which to define the getter.
+ * @param {function} getter
+ *        The function to call in order to generate the final property
+ *        value.
+ */
+function defineLazyGetter(object, prop, getter) {
+  let redefine = (obj, value) => {
+    Object.defineProperty(obj, prop, {
+      enumerable: true,
+      configurable: true,
+      writable: true,
+      value,
+    });
+    return value;
+  };
+
+  Object.defineProperty(object, prop, {
+    enumerable: true,
+    configurable: true,
+
+    get() {
+      return redefine(this, getter.call(this));
+    },
+
+    set(value) {
+      redefine(this, value);
+    },
+  });
+}
+
+function findPathInObject(obj, path, printErrors = true) {
+  let parent;
+  for (let elt of path.split(".")) {
+    if (!obj || !(elt in obj)) {
+      if (printErrors) {
+        Cu.reportError(`WebExtension API ${path} not found (it may be unimplemented by Firefox).`);
+      }
+      return null;
+    }
+
+    parent = obj;
+    obj = obj[elt];
+  }
+
+  if (typeof obj === "function") {
+    return obj.bind(parent);
+  }
+  return obj;
+}
+
+/**
+ * Acts as a proxy for a message manager or message manager owner, and
+ * tracks docShell swaps so that messages are always sent to the same
+ * receiver, even if it is moved to a different <browser>.
+ *
+ * @param {nsIMessageSender|Element} target
+ *        The target message manager on which to send messages, or the
+ *        <browser> element which owns it.
+ */
+class MessageManagerProxy {
+  constructor(target) {
+    this.listeners = new DefaultMap(() => new Map());
+
+    if (target instanceof Ci.nsIMessageSender) {
+      Object.defineProperty(this, "messageManager", {
+        value: target,
+        configurable: true,
+        writable: true,
+      });
+    } else {
+      this.addListeners(target);
+    }
+  }
+
+  /**
+   * Disposes of the proxy object, removes event listeners, and drops
+   * all references to the underlying message manager.
+   *
+   * Must be called before the last reference to the proxy is dropped,
+   * unless the underlying message manager or <browser> is also being
+   * destroyed.
+   */
+  dispose() {
+    if (this.eventTarget) {
+      this.removeListeners(this.eventTarget);
+      this.eventTarget = null;
+    } else {
+      this.messageManager = null;
+    }
+  }
+
+  /**
+   * Returns true if the given target is the same as, or owns, the given
+   * message manager.
+   *
+   * @param {nsIMessageSender|MessageManagerProxy|Element} target
+   *        The message manager, MessageManagerProxy, or <browser>
+   *        element agaisnt which to match.
+   * @param {nsIMessageSender} messageManager
+   *        The message manager against which to match `target`.
+   *
+   * @returns {boolean}
+   *        True if `messageManager` is the same object as `target`, or
+   *        `target` is a MessageManagerProxy or <browser> element that
+   *        is tied to it.
+   */
+  static matches(target, messageManager) {
+    return target === messageManager || target.messageManager === messageManager;
+  }
+
+  /**
+   * @property {nsIMessageSender|null} messageManager
+   *        The message manager that is currently being proxied. This
+   *        may change during the life of the proxy object, so should
+   *        not be stored elsewhere.
+   */
+  get messageManager() {
+    return this.eventTarget && this.eventTarget.messageManager;
+  }
+
+  /**
+   * Sends a message on the proxied message manager.
+   *
+   * @param {array} args
+   *        Arguments to be passed verbatim to the underlying
+   *        sendAsyncMessage method.
+   * @returns {undefined}
+   */
+  sendAsyncMessage(...args) {
+    if (this.messageManager) {
+      return this.messageManager.sendAsyncMessage(...args);
+    }
+    /* globals uneval */
+    Cu.reportError(`Cannot send message: Other side disconnected: ${uneval(args)}`);
+  }
+
+  /**
+   * Adds a message listener to the current message manager, and
+   * transfers it to the new message manager after a docShell swap.
+   *
+   * @param {string} message
+   *        The name of the message to listen for.
+   * @param {nsIMessageListener} listener
+   *        The listener to add.
+   * @param {boolean} [listenWhenClosed = false]
+   *        If true, the listener will receive messages which were sent
+   *        after the remote side of the listener began closing.
+   */
+  addMessageListener(message, listener, listenWhenClosed = false) {
+    this.messageManager.addMessageListener(message, listener, listenWhenClosed);
+    this.listeners.get(message).set(listener, listenWhenClosed);
+  }
+
+  /**
+   * Adds a message listener from the current message manager.
+   *
+   * @param {string} message
+   *        The name of the message to stop listening for.
+   * @param {nsIMessageListener} listener
+   *        The listener to remove.
+   */
+  removeMessageListener(message, listener) {
+    this.messageManager.removeMessageListener(message, listener);
+
+    let listeners = this.listeners.get(message);
+    listeners.delete(listener);
+    if (!listeners.size) {
+      this.listeners.delete(message);
+    }
+  }
+
+  /**
+   * @private
+   * Iterates over all of the currently registered message listeners.
+   */
+  * iterListeners() {
+    for (let [message, listeners] of this.listeners) {
+      for (let [listener, listenWhenClosed] of listeners) {
+        yield {message, listener, listenWhenClosed};
+      }
+    }
+  }
+
+  /**
+   * @private
+   * Adds docShell swap listeners to the message manager owner.
+   *
+   * @param {Element} target
+   *        The target element.
+   */
+  addListeners(target) {
+    target.addEventListener("SwapDocShells", this);
+
+    for (let {message, listener, listenWhenClosed} of this.iterListeners()) {
+      target.addMessageListener(message, listener, listenWhenClosed);
+    }
+
+    this.eventTarget = target;
+  }
+
+  /**
+   * @private
+   * Removes docShell swap listeners to the message manager owner.
+   *
+   * @param {Element} target
+   *        The target element.
+   */
+  removeListeners(target) {
+    target.removeEventListener("SwapDocShells", this);
+
+    for (let {message, listener} of this.iterListeners()) {
+      target.removeMessageListener(message, listener);
+    }
+  }
+
+  handleEvent(event) {
+    if (event.type == "SwapDocShells") {
+      this.removeListeners(this.eventTarget);
+      this.addListeners(event.detail);
+    }
+  }
+}
+
 this.ExtensionUtils = {
-  runSafeWithoutClone,
-  runSafeSyncWithoutClone,
-  runSafe,
-  runSafeSync,
-  DefaultWeakMap,
-  EventManager,
-  LocaleData,
-  SingletonEventManager,
+  defineLazyGetter,
+  detectLanguage,
+  extend,
+  findPathInObject,
+  flushJarCache,
+  getConsole,
+  getInnerWindowID,
+  getMessageManager,
+  getUniqueId,
   ignoreEvent,
   injectAPI,
-  MessageBroker,
-  Messenger,
-  extend,
-  flushJarCache,
   instanceOf,
+  normalizeTime,
+  promiseDocumentLoaded,
+  promiseDocumentReady,
+  promiseEvent,
+  promiseObserved,
+  runSafe,
+  runSafeSync,
+  runSafeSyncWithoutClone,
+  runSafeWithoutClone,
+  stylesheetMap,
+  DefaultMap,
+  DefaultWeakMap,
+  EventEmitter,
+  EventManager,
+  ExtensionError,
+  IconDetails,
+  LocaleData,
+  MessageManagerProxy,
+  PlatformInfo,
+  SingletonEventManager,
+  SpreadArgs,
 };

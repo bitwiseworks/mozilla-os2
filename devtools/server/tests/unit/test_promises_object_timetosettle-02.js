@@ -7,17 +7,17 @@
 
 "use strict";
 
-const { PromisesFront } = require("devtools/server/actors/promises");
+const { PromisesFront } = require("devtools/shared/fronts/promises");
 const { setTimeout } = require("sdk/timers");
 
 var events = require("sdk/event/core");
 
-add_task(function*() {
+add_task(function* () {
   let client = yield startTestDebuggerServer("test-promises-timetosettle");
   let chromeActors = yield getChromeActors(client);
   yield attachTab(client, chromeActors);
 
-  ok(Promise.toString().contains("native code"), "Expect native DOM Promise.");
+  ok(Promise.toString().includes("native code"), "Expect native DOM Promise.");
 
   // We have to attach the chrome TabActor before playing with the PromiseActor
   yield attachTab(client, chromeActors);

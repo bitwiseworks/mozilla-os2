@@ -9,14 +9,19 @@
 
 #include "Workers.h"
 
+#include "js/CharacterEncoding.h"
 #include "nsIContentPolicy.h"
 #include "nsIContentSecurityPolicy.h"
 #include "nsILoadGroup.h"
 #include "nsIWorkerDebugger.h"
 #include "nsPIDOMWindow.h"
 
+#include "mozilla/Assertions.h"
+#include "mozilla/Attributes.h"
 #include "mozilla/CondVar.h"
+#include "mozilla/ConsoleReportCollector.h"
 #include "mozilla/DOMEventTargetHelper.h"
+#include "mozilla/Move.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "nsAutoPtr.h"
@@ -30,29 +35,40 @@
 #include "nsTObserverArray.h"
 
 #include "Queue.h"
-#include "WorkerFeature.h"
+#include "WorkerHolder.h"
+
+#ifdef XP_WIN
+#undef PostMessage
+#endif
 
 class nsIChannel;
+class nsIConsoleReportCollector;
 class nsIDocument;
 class nsIEventTarget;
 class nsIPrincipal;
 class nsIScriptContext;
+class nsIScriptTimeoutHandler;
 class nsISerializable;
 class nsIThread;
 class nsIThreadInternal;
 class nsITimer;
 class nsIURI;
+template<class T> class nsMainThreadPtrHandle;
 
 namespace JS {
 struct RuntimeStats;
 } // namespace JS
 
 namespace mozilla {
+class ThrottledEventQueue;
 namespace dom {
 class Function;
 class MessagePort;
 class MessagePortIdentifier;
+class PromiseNativeHandler;
 class StructuredCloneHolder;
+class WorkerDebuggerGlobalScope;
+class WorkerGlobalScope;
 } // namespace dom
 namespace ipc {
 class PrincipalInfo;
@@ -62,6 +78,7 @@ class PrincipalInfo;
 struct PRThread;
 
 class ReportDebuggerErrorRunnable;
+class PostDebuggerMessageRunnable;
 
 BEGIN_WORKERS_NAMESPACE
 
@@ -70,8 +87,6 @@ class SharedWorker;
 class ServiceWorkerClientInfo;
 class WorkerControlRunnable;
 class WorkerDebugger;
-class WorkerDebuggerGlobalScope;
-class WorkerGlobalScope;
 class WorkerPrivate;
 class WorkerRunnable;
 class WorkerThread;
@@ -153,7 +168,6 @@ protected:
 
   SharedMutex mMutex;
   mozilla::CondVar mCondVar;
-  mozilla::CondVar mMemoryReportCondVar;
 
   // Protected by mMutex.
   RefPtr<EventTarget> mEventTarget;
@@ -183,11 +197,22 @@ private:
   nsTArray<RefPtr<SharedWorker>> mSharedWorkers;
 
   uint64_t mBusyCount;
+  // SharedWorkers may have multiple windows paused, so this must be
+  // a count instead of just a boolean.
+  uint32_t mParentWindowPausedDepth;
   Status mParentStatus;
   bool mParentFrozen;
-  bool mParentSuspended;
   bool mIsChromeWorker;
   bool mMainThreadObjectsForgotten;
+  // mIsSecureContext is set once in our constructor; after that it can be read
+  // from various threads.  We could make this const if we were OK with setting
+  // it in the initializer list via calling some function that takes all sorts
+  // of state (loadinfo, worker type, parent).
+  //
+  // It's a bit unfortunate that we have to have an out-of-band boolean for
+  // this, but we need access to this state from the parent thread, and we can't
+  // use our global object's secure state there.
+  bool mIsSecureContext;
   WorkerType mWorkerType;
   TimeStamp mCreationTimeStamp;
   DOMHighResTimeStamp mCreationTimeHighRes;
@@ -200,7 +225,7 @@ protected:
   // traversed by the cycle collector if the busy count is zero.
   RefPtr<WorkerPrivate> mSelfRef;
 
-  WorkerPrivateParent(JSContext* aCx, WorkerPrivate* aParent,
+  WorkerPrivateParent(WorkerPrivate* aParent,
                       const nsAString& aScriptURL, bool aIsChromeWorker,
                       WorkerType aWorkerType,
                       const nsACString& aSharedWorkerName,
@@ -215,25 +240,24 @@ private:
     return static_cast<Derived*>(const_cast<WorkerPrivateParent*>(this));
   }
 
-  // aCx is null when called from the finalizer
   bool
-  NotifyPrivate(JSContext* aCx, Status aStatus);
+  NotifyPrivate(Status aStatus);
 
-  // aCx is null when called from the finalizer
   bool
-  TerminatePrivate(JSContext* aCx)
+  TerminatePrivate()
   {
-    return NotifyPrivate(aCx, Terminating);
+    return NotifyPrivate(Terminating);
   }
 
   void
   PostMessageInternal(JSContext* aCx, JS::Handle<JS::Value> aMessage,
                       const Optional<Sequence<JS::Value>>& aTransferable,
                       UniquePtr<ServiceWorkerClientInfo>&& aClientInfo,
+                      PromiseNativeHandler* aHandler,
                       ErrorResult& aRv);
 
   nsresult
-  DispatchPrivate(already_AddRefed<WorkerRunnable>&& aRunnable, nsIEventTarget* aSyncLoopTarget);
+  DispatchPrivate(already_AddRefed<WorkerRunnable> aRunnable, nsIEventTarget* aSyncLoopTarget);
 
 public:
   virtual JSObject*
@@ -258,19 +282,19 @@ public:
   }
 
   nsresult
-  Dispatch(already_AddRefed<WorkerRunnable>&& aRunnable)
+  Dispatch(already_AddRefed<WorkerRunnable> aRunnable)
   {
     return DispatchPrivate(Move(aRunnable), nullptr);
   }
 
   nsresult
-  DispatchControlRunnable(already_AddRefed<WorkerControlRunnable>&& aWorkerControlRunnable);
+  DispatchControlRunnable(already_AddRefed<WorkerControlRunnable> aWorkerControlRunnable);
 
   nsresult
-  DispatchDebuggerRunnable(already_AddRefed<WorkerRunnable>&& aDebuggerRunnable);
+  DispatchDebuggerRunnable(already_AddRefed<WorkerRunnable> aDebuggerRunnable);
 
   already_AddRefed<WorkerRunnable>
-  MaybeWrapAsWorkerRunnable(already_AddRefed<nsIRunnable>&& aRunnable);
+  MaybeWrapAsWorkerRunnable(already_AddRefed<nsIRunnable> aRunnable);
 
   already_AddRefed<nsIEventTarget>
   GetEventTarget();
@@ -281,49 +305,56 @@ public:
 
   // Called on the parent thread.
   bool
-  Notify(JSContext* aCx, Status aStatus)
+  Notify(Status aStatus)
   {
-    return NotifyPrivate(aCx, aStatus);
+    return NotifyPrivate(aStatus);
   }
 
   bool
-  Cancel(JSContext* aCx)
+  Cancel()
   {
-    return Notify(aCx, Canceling);
+    return Notify(Canceling);
   }
 
   bool
-  Kill(JSContext* aCx)
+  Kill()
   {
-    return Notify(aCx, Killing);
+    return Notify(Killing);
   }
 
   // We can assume that an nsPIDOMWindow will be available for Freeze, Thaw
   // as these are only used for globals going in and out of the bfcache.
+  //
+  // XXXbz: This is a bald-faced lie given the uses in RegisterSharedWorker and
+  // CloseSharedWorkersForWindow, which pass null for aWindow to Thaw and Freeze
+  // respectively.  See bug 1251722.
   bool
-  Freeze(JSContext* aCx, nsPIDOMWindow* aWindow);
+  Freeze(nsPIDOMWindowInner* aWindow);
 
   bool
-  Thaw(JSContext* aCx, nsPIDOMWindow* aWindow);
+  Thaw(nsPIDOMWindowInner* aWindow);
+
+  // When we debug a worker, we want to disconnect the window and the worker
+  // communication. This happens calling this method.
+  // Note: this method doesn't suspend the worker! Use Freeze/Thaw instead.
+  void
+  ParentWindowPaused();
 
   void
-  Suspend();
-
-  void
-  Resume();
+  ParentWindowResumed();
 
   bool
-  Terminate(JSContext* aCx)
+  Terminate()
   {
     AssertIsOnParentThread();
-    return TerminatePrivate(aCx);
+    return TerminatePrivate();
   }
 
   bool
   Close();
 
   bool
-  ModifyBusyCount(JSContext* aCx, bool aIncrease);
+  ModifyBusyCount(bool aIncrease);
 
   void
   ForgetOverridenLoadGroup(nsCOMPtr<nsILoadGroup>& aLoadGroupOut);
@@ -340,39 +371,40 @@ public:
   PostMessageToServiceWorker(JSContext* aCx, JS::Handle<JS::Value> aMessage,
                              const Optional<Sequence<JS::Value>>& aTransferable,
                              UniquePtr<ServiceWorkerClientInfo>&& aClientInfo,
+                             PromiseNativeHandler* aHandler,
                              ErrorResult& aRv);
 
   void
-  UpdateRuntimeOptions(JSContext* aCx,
-                       const JS::RuntimeOptions& aRuntimeOptions);
+  UpdateContextOptions(const JS::ContextOptions& aContextOptions);
 
   void
-  UpdateLanguages(JSContext* aCx, const nsTArray<nsString>& aLanguages);
+  UpdateLanguages(const nsTArray<nsString>& aLanguages);
 
   void
-  UpdatePreference(JSContext* aCx, WorkerPreference aPref, bool aValue);
+  UpdatePreference(WorkerPreference aPref, bool aValue);
 
   void
-  UpdateJSWorkerMemoryParameter(JSContext* aCx, JSGCParamKey key,
-                                uint32_t value);
+  UpdateJSWorkerMemoryParameter(JSGCParamKey key, uint32_t value);
 
 #ifdef JS_GC_ZEAL
   void
-  UpdateGCZeal(JSContext* aCx, uint8_t aGCZeal, uint32_t aFrequency);
+  UpdateGCZeal(uint8_t aGCZeal, uint32_t aFrequency);
 #endif
 
   void
-  GarbageCollect(JSContext* aCx, bool aShrinking);
+  GarbageCollect(bool aShrinking);
 
   void
-  CycleCollect(JSContext* aCx, bool aDummy);
+  CycleCollect(bool aDummy);
 
   void
-  OfflineStatusChangeEvent(JSContext* aCx, bool aIsOffline);
+  OfflineStatusChangeEvent(bool aIsOffline);
+
+  void
+  MemoryPressure(bool aDummy);
 
   bool
-  RegisterSharedWorker(JSContext* aCx, SharedWorker* aSharedWorker,
-                       MessagePort* aPort);
+  RegisterSharedWorker(SharedWorker* aSharedWorker, MessagePort* aPort);
 
   void
   BroadcastErrorToSharedWorkers(JSContext* aCx,
@@ -389,7 +421,7 @@ public:
   void
   QueueRunnable(nsIRunnable* aRunnable)
   {
-    AssertIsOnMainThread();
+    AssertIsOnParentThread();
     mQueuedRunnables.AppendElement(aRunnable);
   }
 
@@ -407,10 +439,10 @@ public:
   }
 
   bool
-  IsSuspended() const
+  IsParentWindowPaused() const
   {
     AssertIsOnParentThread();
-    return mParentSuspended;
+    return mParentWindowPausedDepth > 0;
   }
 
   bool
@@ -428,9 +460,6 @@ public:
     mMutex.AssertCurrentThreadOwns();
     return mParentStatus;
   }
-
-  JSContext*
-  ParentJSContext() const;
 
   nsIScriptContext*
   GetScriptContext() const
@@ -596,18 +625,6 @@ public:
     return mLoadInfo.mPrincipalIsSystem;
   }
 
-  bool
-  IsInPrivilegedApp() const
-  {
-    return mLoadInfo.mIsInPrivilegedApp;
-  }
-
-  bool
-  IsInCertifiedApp() const
-  {
-    return mLoadInfo.mIsInCertifiedApp;
-  }
-
   const PrincipalInfo&
   GetPrincipalInfo() const
   {
@@ -623,7 +640,7 @@ public:
 
   nsIDocument* GetDocument() const;
 
-  nsPIDOMWindow*
+  nsPIDOMWindowInner*
   GetWindow()
   {
     AssertIsOnMainThread();
@@ -644,6 +661,18 @@ public:
     mLoadInfo.mCSP = aCSP;
   }
 
+  net::ReferrerPolicy
+  GetReferrerPolicy() const
+  {
+    return mLoadInfo.mReferrerPolicy;
+  }
+
+  void
+  SetReferrerPolicy(net::ReferrerPolicy aReferrerPolicy)
+  {
+    mLoadInfo.mReferrerPolicy = aReferrerPolicy;
+  }
+
   bool
   IsEvalAllowed() const
   {
@@ -660,6 +689,12 @@ public:
   GetReportCSPViolations() const
   {
     return mLoadInfo.mReportCSPViolations;
+  }
+
+  void
+  SetReportCSPViolations(bool aReport)
+  {
+    mLoadInfo.mReportCSPViolations = aReport;
   }
 
   bool
@@ -762,10 +797,10 @@ public:
     return mLoadInfo.mStorageAllowed;
   }
 
-  bool
-  IsInPrivateBrowsing() const
+  const PrincipalOriginAttributes&
+  GetOriginAttributes() const
   {
-    return mLoadInfo.mPrivateBrowsing;
+    return mLoadInfo.mOriginAttributes;
   }
 
   // Determine if the SW testing per-window flag is set by devtools
@@ -779,7 +814,7 @@ public:
   GetAllSharedWorkers(nsTArray<RefPtr<SharedWorker>>& aSharedWorkers);
 
   void
-  CloseSharedWorkersForWindow(nsPIDOMWindow* aWindow);
+  CloseSharedWorkersForWindow(nsPIDOMWindowInner* aWindow);
 
   void
   CloseAllSharedWorkers();
@@ -793,8 +828,21 @@ public:
     return mLoadInfo.mLoadFailedAsyncRunnable.forget();
   }
 
+  void
+  FlushReportsToSharedWorkers(nsIConsoleReportCollector* aReporter);
+
   IMPL_EVENT_HANDLER(message)
   IMPL_EVENT_HANDLER(error)
+
+  // Check whether this worker is a secure context.  For use from the parent
+  // thread only; the canonical "is secure context" boolean is stored on the
+  // compartment of the worker global.  The only reason we don't
+  // AssertIsOnParentThread() here is so we can assert that this value matches
+  // the one on the compartment, which has to be done from the worker thread.
+  bool IsSecureContext() const
+  {
+    return mIsSecureContext;
+  }
 
 #ifdef DEBUG
   void
@@ -815,35 +863,23 @@ public:
 
 class WorkerDebugger : public nsIWorkerDebugger {
   friend class ::ReportDebuggerErrorRunnable;
+  friend class ::PostDebuggerMessageRunnable;
 
-  mozilla::Mutex mMutex;
-  mozilla::CondVar mCondVar;
-
-  // Protected by mMutex
   WorkerPrivate* mWorkerPrivate;
-  bool mIsEnabled;
-
-  // Only touched on the main thread.
   bool mIsInitialized;
   nsTArray<nsCOMPtr<nsIWorkerDebuggerListener>> mListeners;
 
 public:
   explicit WorkerDebugger(WorkerPrivate* aWorkerPrivate);
 
-  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_ISUPPORTS
   NS_DECL_NSIWORKERDEBUGGER
 
   void
   AssertIsOnParentThread();
 
   void
-  WaitIsEnabled(bool aIsEnabled);
-
-  void
-  Enable();
-
-  void
-  Disable();
+  Close();
 
   void
   PostMessageToDebugger(const nsAString& aMessage);
@@ -857,9 +893,6 @@ private:
   ~WorkerDebugger();
 
   void
-  NotifyIsEnabled(bool aIsEnabled);
-
-  void
   PostMessageToDebuggerOnMainThread(const nsAString& aMessage);
 
   void
@@ -870,6 +903,7 @@ private:
 
 class WorkerPrivate : public WorkerPrivateParent<WorkerPrivate>
 {
+  friend class WorkerHolder;
   friend class WorkerPrivateParent<WorkerPrivate>;
   typedef WorkerPrivateParent<WorkerPrivate> ParentType;
   friend class AutoSyncLoopHolder;
@@ -888,7 +922,8 @@ class WorkerPrivate : public WorkerPrivateParent<WorkerPrivate>
     NoTimer
   };
 
-  RefPtr<WorkerDebugger> mDebugger;
+  bool mDebuggerRegistered;
+  WorkerDebugger* mDebugger;
 
   Queue<WorkerControlRunnable*, 4> mControlQueue;
   Queue<WorkerRunnable*, 4> mDebuggerQueue;
@@ -904,9 +939,11 @@ class WorkerPrivate : public WorkerPrivateParent<WorkerPrivate>
   RefPtr<WorkerGlobalScope> mScope;
   RefPtr<WorkerDebuggerGlobalScope> mDebuggerScope;
   nsTArray<ParentType*> mChildWorkers;
-  nsTObserverArray<WorkerFeature*> mFeatures;
+  nsTObserverArray<WorkerHolder*> mHolders;
   nsTArray<nsAutoPtr<TimeoutInfo>> mTimeouts;
   uint32_t mDebuggerEventLoopLevel;
+  RefPtr<ThrottledEventQueue> mMainThreadThrottledEventQueue;
+  nsCOMPtr<nsIEventTarget> mMainThreadEventTarget;
 
   struct SyncLoopInfo
   {
@@ -937,6 +974,7 @@ class WorkerPrivate : public WorkerPrivateParent<WorkerPrivate>
   // fired on the main thread if the worker script fails to load
   nsCOMPtr<nsIRunnable> mLoadFailedRunnable;
 
+  JS::UniqueChars mDefaultLocale; // nulled during worker JSContext init
   TimeStamp mKillTime;
   uint32_t mErrorHandlerRecursionCount;
   uint32_t mNextTimeoutId;
@@ -944,11 +982,7 @@ class WorkerPrivate : public WorkerPrivateParent<WorkerPrivate>
   bool mFrozen;
   bool mTimerRunning;
   bool mRunningExpiredTimeouts;
-  bool mCloseHandlerStarted;
-  bool mCloseHandlerFinished;
   bool mPendingEventQueueClearing;
-  bool mMemoryReporterRunning;
-  bool mBlockedForMemoryReporter;
   bool mCancelAllPendingRunnables;
   bool mPeriodicGCTimerRunning;
   bool mIdleGCTimerRunning;
@@ -985,7 +1019,8 @@ public:
   };
 
   static nsresult
-  GetLoadInfo(JSContext* aCx, nsPIDOMWindow* aWindow, WorkerPrivate* aParent,
+  GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
+              WorkerPrivate* aParent,
               const nsAString& aScriptURL, bool aIsChromeWorker,
               LoadGroupBehavior aLoadGroupBehavior, WorkerType aWorkerType,
               WorkerLoadInfo* aLoadInfo);
@@ -993,12 +1028,67 @@ public:
   static void
   OverrideLoadInfoLoadGroup(WorkerLoadInfo& aLoadInfo);
 
+  bool
+  IsDebuggerRegistered()
+  {
+    AssertIsOnMainThread();
+
+    // No need to lock here since this is only ever modified by the same thread.
+    return mDebuggerRegistered;
+  }
+
+  void
+  SetIsDebuggerRegistered(bool aDebuggerRegistered)
+  {
+    AssertIsOnMainThread();
+
+    MutexAutoLock lock(mMutex);
+
+    MOZ_ASSERT(mDebuggerRegistered != aDebuggerRegistered);
+    mDebuggerRegistered = aDebuggerRegistered;
+
+    mCondVar.Notify();
+  }
+
+  void
+  WaitForIsDebuggerRegistered(bool aDebuggerRegistered)
+  {
+    AssertIsOnParentThread();
+
+    MOZ_ASSERT(!NS_IsMainThread());
+
+    MutexAutoLock lock(mMutex);
+
+    while (mDebuggerRegistered != aDebuggerRegistered) {
+      mCondVar.Wait();
+    }
+  }
+
   WorkerDebugger*
   Debugger() const
   {
     AssertIsOnMainThread();
+
     MOZ_ASSERT(mDebugger);
     return mDebugger;
+  }
+
+  void
+  SetDebugger(WorkerDebugger* aDebugger)
+  {
+    AssertIsOnMainThread();
+
+    MOZ_ASSERT(mDebugger != aDebugger);
+    mDebugger = aDebugger;
+  }
+
+  JS::UniqueChars
+  AdoptDefaultLocale()
+  {
+    MOZ_ASSERT(mDefaultLocale,
+               "the default locale must have been successfully set for anyone "
+               "to be trying to adopt it");
+    return Move(mDefaultLocale);
   }
 
   void
@@ -1018,38 +1108,25 @@ public:
   }
 
   bool
-  FreezeInternal(JSContext* aCx);
+  FreezeInternal();
 
   bool
-  ThawInternal(JSContext* aCx);
+  ThawInternal();
 
   void
-  TraceTimeouts(const TraceCallbacks& aCallbacks, void* aClosure) const;
-
-  bool
-  ModifyBusyCountFromWorker(JSContext* aCx, bool aIncrease);
-
-  bool
-  AddChildWorker(JSContext* aCx, ParentType* aChildWorker);
+  TraverseTimeouts(nsCycleCollectionTraversalCallback& aCallback);
 
   void
-  RemoveChildWorker(JSContext* aCx, ParentType* aChildWorker);
+  UnlinkTimeouts();
 
   bool
-  AddFeature(JSContext* aCx, WorkerFeature* aFeature);
-
-  void
-  RemoveFeature(JSContext* aCx, WorkerFeature* aFeature);
-
-  void
-  NotifyFeatures(JSContext* aCx, Status aStatus);
+  ModifyBusyCountFromWorker(bool aIncrease);
 
   bool
-  HasActiveFeatures()
-  {
-    return !(mChildWorkers.IsEmpty() && mTimeouts.IsEmpty() &&
-             mFeatures.IsEmpty());
-  }
+  AddChildWorker(ParentType* aChildWorker);
+
+  void
+  RemoveChildWorker(ParentType* aChildWorker);
 
   void
   PostMessageToParent(JSContext* aCx,
@@ -1077,7 +1154,7 @@ public:
   PostMessageToDebugger(const nsAString& aMessage);
 
   void
-  SetDebuggerImmediate(JSContext* aCx, Function& aHandler, ErrorResult& aRv);
+  SetDebuggerImmediate(Function& aHandler, ErrorResult& aRv);
 
   void
   ReportErrorToDebugger(const nsAString& aFilename, uint32_t aLineno,
@@ -1087,15 +1164,15 @@ public:
   NotifyInternal(JSContext* aCx, Status aStatus);
 
   void
-  ReportError(JSContext* aCx, const char* aMessage, JSErrorReport* aReport);
+  ReportError(JSContext* aCx, JS::ConstUTF8CharsZ aToStringResult,
+              JSErrorReport* aReport);
+
+  static void
+  ReportErrorToConsole(const char* aMessage);
 
   int32_t
-  SetTimeout(JSContext* aCx,
-             Function* aHandler,
-             const nsAString& aStringHandler,
-             int32_t aTimeout,
-             const Sequence<JS::Value>& aArguments,
-             bool aIsInterval,
+  SetTimeout(JSContext* aCx, nsIScriptTimeoutHandler* aHandler,
+             int32_t aTimeout, bool aIsInterval,
              ErrorResult& aRv);
 
   void
@@ -1108,27 +1185,13 @@ public:
   RescheduleTimeoutTimer(JSContext* aCx);
 
   void
-  CloseHandlerStarted()
-  {
-    AssertIsOnWorkerThread();
-    mCloseHandlerStarted = true;
-  }
+  UpdateContextOptionsInternal(JSContext* aCx, const JS::ContextOptions& aContextOptions);
 
   void
-  CloseHandlerFinished()
-  {
-    AssertIsOnWorkerThread();
-    mCloseHandlerFinished = true;
-  }
+  UpdateLanguagesInternal(const nsTArray<nsString>& aLanguages);
 
   void
-  UpdateRuntimeOptionsInternal(JSContext* aCx, const JS::RuntimeOptions& aRuntimeOptions);
-
-  void
-  UpdateLanguagesInternal(JSContext* aCx, const nsTArray<nsString>& aLanguages);
-
-  void
-  UpdatePreferenceInternal(JSContext* aCx, WorkerPreference aPref, bool aValue);
+  UpdatePreferenceInternal(WorkerPreference aPref, bool aValue);
 
   void
   UpdateJSWorkerMemoryParameterInternal(JSContext* aCx, JSGCParamKey key, uint32_t aValue);
@@ -1142,7 +1205,7 @@ public:
   ScheduleDeletion(WorkerRanOrNot aRanOrNot);
 
   bool
-  BlockAndCollectRuntimeStats(JS::RuntimeStats* aRtStats, bool aAnonymize);
+  CollectRuntimeStats(JS::RuntimeStats* aRtStats, bool aAnonymize);
 
 #ifdef JS_GC_ZEAL
   void
@@ -1154,10 +1217,13 @@ public:
                          bool aCollectChildren);
 
   void
-  CycleCollectInternal(JSContext* aCx, bool aCollectChildren);
+  CycleCollectInternal(bool aCollectChildren);
 
   void
-  OfflineStatusChangeEventInternal(JSContext* aCx, bool aIsOffline);
+  OfflineStatusChangeEventInternal(bool aIsOffline);
+
+  void
+  MemoryPressureInternal();
 
   JSContext*
   GetJSContext() const
@@ -1230,6 +1296,9 @@ public:
   bool
   RegisterBindings(JSContext* aCx, JS::Handle<JSObject*> aGlobal);
 
+  bool
+  RegisterDebuggerBindings(JSContext* aCx, JS::Handle<JSObject*> aGlobal);
+
 #define WORKER_SIMPLE_PREF(name, getter, NAME)                                \
   bool                                                                        \
   getter() const                                                              \
@@ -1298,8 +1367,22 @@ public:
   void
   MaybeDispatchLoadFailedRunnable();
 
+  // Get the event target to use when dispatching to the main thread
+  // from this Worker thread.  This may be the main thread itself or
+  // a ThrottledEventQueue to the main thread.
+  nsIEventTarget*
+  MainThreadEventTarget();
+
+  nsresult
+  DispatchToMainThread(nsIRunnable* aRunnable,
+                       uint32_t aFlags = NS_DISPATCH_NORMAL);
+
+  nsresult
+  DispatchToMainThread(already_AddRefed<nsIRunnable> aRunnable,
+                       uint32_t aFlags = NS_DISPATCH_NORMAL);
+
 private:
-  WorkerPrivate(JSContext* aCx, WorkerPrivate* aParent,
+  WorkerPrivate(WorkerPrivate* aParent,
                 const nsAString& aScriptURL, bool aIsChromeWorker,
                 WorkerType aWorkerType, const nsACString& aSharedWorkerName,
                 WorkerLoadInfo& aLoadInfo);
@@ -1315,32 +1398,35 @@ private:
       status = mStatus;
     }
 
-    if (status >= Killing) {
-      return false;
+    if (status < Terminating) {
+      return true;
     }
-    if (status >= Running) {
-      return mKillTime.IsNull() || RemainingRunTimeMS() > 0;
-    }
-    return true;
+
+    return false;
   }
 
-  uint32_t
-  RemainingRunTimeMS() const;
-
   void
-  CancelAllTimeouts(JSContext* aCx);
+  CancelAllTimeouts();
 
-  bool
-  ScheduleKillCloseEventRunnable(JSContext* aCx);
+  enum class ProcessAllControlRunnablesResult
+  {
+    // We did not process anything.
+    Nothing,
+    // We did process something, states may have changed, but we can keep
+    // executing script.
+    MayContinue,
+    // We did process something, and should not continue executing script.
+    Abort
+  };
 
-  bool
+  ProcessAllControlRunnablesResult
   ProcessAllControlRunnables()
   {
     MutexAutoLock lock(mMutex);
     return ProcessAllControlRunnablesLocked();
   }
 
-  bool
+  ProcessAllControlRunnablesResult
   ProcessAllControlRunnablesLocked();
 
   void
@@ -1382,6 +1468,22 @@ private:
 
   void
   ShutdownGCTimers();
+
+  bool
+  AddHolder(WorkerHolder* aHolder, Status aFailStatus);
+
+  void
+  RemoveHolder(WorkerHolder* aHolder);
+
+  void
+  NotifyHolders(JSContext* aCx, Status aStatus);
+
+  bool
+  HasActiveHolders()
+  {
+    return !(mChildWorkers.IsEmpty() && mTimeouts.IsEmpty() &&
+             mHolders.IsEmpty());
+  }
 };
 
 // This class is only used to trick the DOM bindings.  We never create
@@ -1414,6 +1516,9 @@ IsCurrentThreadRunningChromeWorker();
 
 JSContext*
 GetCurrentThreadJSContext();
+
+JSObject*
+GetCurrentThreadWorkerGlobal();
 
 class AutoSyncLoopHolder
 {
@@ -1475,7 +1580,10 @@ protected:
 
 
   NS_IMETHOD
-  Dispatch(already_AddRefed<nsIRunnable>&& aRunnable, uint32_t aFlags) override;
+  Dispatch(already_AddRefed<nsIRunnable> aRunnable, uint32_t aFlags) override;
+
+  NS_IMETHOD
+  DelayedDispatch(already_AddRefed<nsIRunnable>, uint32_t) override;
 
   NS_IMETHOD
   IsOnCurrentThread(bool* aIsOnCurrentThread) override;

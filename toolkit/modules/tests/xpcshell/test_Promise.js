@@ -5,13 +5,12 @@
 Components.utils.import("resource://gre/modules/Promise.jsm");
 Components.utils.import("resource://gre/modules/Services.jsm");
 Components.utils.import("resource://gre/modules/Task.jsm");
+Components.utils.import("resource://testing-common/PromiseTestUtils.jsm");
 
-// Deactivate the standard xpcshell observer, as it turns uncaught
-// rejections into failures, which we don't want here.
-Promise.Debugging.clearUncaughtErrorObservers();
+// Prevent test failures due to the unhandled rejections in this test file.
+PromiseTestUtils.disableUncaughtRejectionObserverForSelfTest();
 
-////////////////////////////////////////////////////////////////////////////////
-//// Test runner
+// Test runner
 
 var run_promise_tests = function run_promise_tests(tests, cb) {
   let loop = function loop(index) {
@@ -79,8 +78,7 @@ var make_promise_test = function(test) {
   };
 };
 
-////////////////////////////////////////////////////////////////////////////////
-//// Tests
+// Tests
 
 var tests = [];
 
@@ -132,7 +130,7 @@ tests.push(make_promise_test(
     source.resolve(RESULT);
 
     // Install remaining observers
-    for(;i < SIZE; ++i) {
+    for (;i < SIZE; ++i) {
       install_observer(i);
     }
 
@@ -260,7 +258,7 @@ tests.push(make_promise_test(
     observed.resolve(RESULT);
 
     // Install remaining observers
-    for(;i < SIZE; ++i) {
+    for (;i < SIZE; ++i) {
       install_observer(i);
     }
 
@@ -909,7 +907,7 @@ tests.push(
 //   do some work that will asynchronously signal done
 //   start an event loop waiting for the done signal
 // }
-// where the async work uses resolution of a second promise to 
+// where the async work uses resolution of a second promise to
 // trigger the "done" signal. While this would likely work in a
 // naive implementation, our constant-stack implementation needs
 // a special case to avoid deadlock. Note that this test is
@@ -925,7 +923,7 @@ tests.push(
 
     function event_loop() {
       let thr = Services.tm.mainThread;
-      while(!shouldExitNestedEventLoop) {
+      while (!shouldExitNestedEventLoop) {
         thr.processNextEvent(true);
       }
     }
@@ -948,7 +946,7 @@ tests.push(
     }, null);
 
     do_print("Setting wait for second promise");
-    return promise2.catch(error => {return 3;})
+    return promise2.catch(error => { return 3; })
     .then(
       count => {
         shouldExitNestedEventLoop = true;
@@ -1074,7 +1072,7 @@ make_promise_test(function test_caught_is_not_reported() {
   let promise = wait_for_uncaught([salt], 500);
   (function() {
     let uncaught = Promise.reject("This error, on the other hand, is caught " + salt);
-    uncaught.catch(function() { /* ignore rejection */});
+    uncaught.catch(function() { /* ignore rejection */ });
     uncaught = null;
   })();
   // Isolate this in a function to increase likelihood that the gc will

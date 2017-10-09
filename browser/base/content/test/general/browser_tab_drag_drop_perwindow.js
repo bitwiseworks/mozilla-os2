@@ -4,10 +4,10 @@
 
 requestLongerTimeout(2);
 
-const CHROMEUTILS_URL = "chrome://mochikit/content/tests/SimpleTest/ChromeUtils.js";
-var ChromeUtils = {};
+const EVENTUTILS_URL = "chrome://mochikit/content/tests/SimpleTest/EventUtils.js";
+var EventUtils = {};
 
-Services.scriptloader.loadSubScript(CHROMEUTILS_URL, ChromeUtils);
+Services.scriptloader.loadSubScript(EVENTUTILS_URL, EventUtils);
 
 /**
  * Tests that tabs from Private Browsing windows cannot be dragged
@@ -23,12 +23,12 @@ add_task(function* test_dragging_private_windows() {
   let privateTab =
     yield BrowserTestUtils.openNewForegroundTab(privateWin.gBrowser);
 
-  let effect = ChromeUtils.synthesizeDrop(normalTab, privateTab,
+  let effect = EventUtils.synthesizeDrop(normalTab, privateTab,
     [[{type: TAB_DROP_TYPE, data: normalTab}]],
     null, normalWin, privateWin);
   is(effect, "none", "Should not be able to drag a normal tab to a private window");
 
-  effect = ChromeUtils.synthesizeDrop(privateTab, normalTab,
+  effect = EventUtils.synthesizeDrop(privateTab, normalTab,
     [[{type: TAB_DROP_TYPE, data: privateTab}]],
     null, privateWin, normalWin);
   is(effect, "none", "Should not be able to drag a private tab to a normal window");
@@ -66,12 +66,12 @@ add_task(function* test_dragging_e10s_windows() {
   let nonRemoteTab =
     yield BrowserTestUtils.openNewForegroundTab(nonRemoteWin.gBrowser);
 
-  let effect = ChromeUtils.synthesizeDrop(remoteTab, nonRemoteTab,
+  let effect = EventUtils.synthesizeDrop(remoteTab, nonRemoteTab,
     [[{type: TAB_DROP_TYPE, data: remoteTab}]],
     null, remoteWin, nonRemoteWin);
   is(effect, "none", "Should not be able to drag a remote tab to a non-e10s window");
 
-  effect = ChromeUtils.synthesizeDrop(nonRemoteTab, remoteTab,
+  effect = EventUtils.synthesizeDrop(nonRemoteTab, remoteTab,
     [[{type: TAB_DROP_TYPE, data: nonRemoteTab}]],
     null, nonRemoteWin, remoteWin);
   is(effect, "none", "Should not be able to drag a non-remote tab to an e10s window");
@@ -122,7 +122,7 @@ add_task(function* test_dragging_blacklisted() {
   let otherTab =
     yield BrowserTestUtils.openNewForegroundTab(remoteWin2.gBrowser);
 
-  let effect = ChromeUtils.synthesizeDrop(blacklistedTab, otherTab,
+  let effect = EventUtils.synthesizeDrop(blacklistedTab, otherTab,
     [[{type: TAB_DROP_TYPE, data: blacklistedTab}]],
     null, remoteWin1, remoteWin2);
   is(effect, "move", "Should be able to drag the blacklisted tab.");
@@ -146,4 +146,71 @@ add_task(function* test_dragging_blacklisted() {
 
   yield BrowserTestUtils.closeWindow(remoteWin1);
   yield BrowserTestUtils.closeWindow(remoteWin2);
+});
+
+
+/**
+ * Tests that tabs dragged between windows dispatch TabOpen and TabClose
+ * events with the appropriate adoption details.
+ */
+add_task(function* test_dragging_adoption_events() {
+  let win1 = yield BrowserTestUtils.openNewBrowserWindow();
+  let win2 = yield BrowserTestUtils.openNewBrowserWindow();
+
+  let tab1 = yield BrowserTestUtils.openNewForegroundTab(win1.gBrowser);
+  let tab2 = yield BrowserTestUtils.openNewForegroundTab(win2.gBrowser);
+
+  let awaitCloseEvent = BrowserTestUtils.waitForEvent(tab1, "TabClose");
+  let awaitOpenEvent = BrowserTestUtils.waitForEvent(win2, "TabOpen");
+
+  let effect = EventUtils.synthesizeDrop(tab1, tab2,
+    [[{type: TAB_DROP_TYPE, data: tab1}]],
+    null, win1, win2);
+  is(effect, "move", "Tab should be moved from win1 to win2.");
+
+  let closeEvent = yield awaitCloseEvent;
+  let openEvent = yield awaitOpenEvent;
+
+  is(openEvent.detail.adoptedTab, tab1, "New tab adopted old tab");
+  is(closeEvent.detail.adoptedBy, openEvent.target, "Old tab adopted by new tab");
+
+  yield BrowserTestUtils.closeWindow(win1);
+  yield BrowserTestUtils.closeWindow(win2);
+});
+
+
+/**
+ * Tests that per-site zoom settings remain active after a tab is
+ * dragged between windows.
+ */
+add_task(function* test_dragging_zoom_handling() {
+  const ZOOM_FACTOR = 1.62;
+
+  let win1 = yield BrowserTestUtils.openNewBrowserWindow();
+  let win2 = yield BrowserTestUtils.openNewBrowserWindow();
+
+  let tab1 = yield BrowserTestUtils.openNewForegroundTab(win1.gBrowser);
+  let tab2 = yield BrowserTestUtils.openNewForegroundTab(win2.gBrowser,
+                                                         "http://example.com/");
+
+  win2.FullZoom.setZoom(ZOOM_FACTOR);
+  FullZoomHelper.zoomTest(tab2, ZOOM_FACTOR,
+                          "Original tab should have correct zoom factor");
+
+  let effect = EventUtils.synthesizeDrop(tab2, tab1,
+    [[{type: TAB_DROP_TYPE, data: tab2}]],
+    null, win2, win1);
+  is(effect, "move", "Tab should be moved from win2 to win1.");
+
+  // Delay slightly to make sure we've finished executing any promise
+  // chains in the zoom code.
+  yield new Promise(resolve => setTimeout(resolve, 0));
+
+  FullZoomHelper.zoomTest(win1.gBrowser.selectedTab, ZOOM_FACTOR,
+                          "Dragged tab should have correct zoom factor");
+
+  win1.FullZoom.reset();
+
+  yield BrowserTestUtils.closeWindow(win1);
+  yield BrowserTestUtils.closeWindow(win2);
 });

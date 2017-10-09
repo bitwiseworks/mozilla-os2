@@ -7,6 +7,8 @@
 #ifndef jit_IonOptimizationLevels_h
 #define jit_IonOptimizationLevels_h
 
+#include "mozilla/EnumeratedArray.h"
+
 #include "jsbytecode.h"
 #include "jstypes.h"
 
@@ -16,12 +18,12 @@
 namespace js {
 namespace jit {
 
-enum OptimizationLevel
+enum class OptimizationLevel : uint8_t
 {
-    Optimization_DontCompile,
-    Optimization_Normal,
-    Optimization_AsmJS,
-    Optimization_Count
+    Normal,
+    Wasm,
+    Count,
+    DontCompile
 };
 
 #ifdef JS_JITSPEW
@@ -29,15 +31,15 @@ inline const char*
 OptimizationLevelString(OptimizationLevel level)
 {
     switch (level) {
-      case Optimization_DontCompile:
+      case OptimizationLevel::DontCompile:
         return "Optimization_DontCompile";
-      case Optimization_Normal:
+      case OptimizationLevel::Normal:
         return "Optimization_Normal";
-      case Optimization_AsmJS:
-        return "Optimization_AsmJS";
-      default:
-        MOZ_CRASH("Invalid OptimizationLevel");
+      case OptimizationLevel::Wasm:
+        return "Optimization_Wasm";
+      case OptimizationLevel::Count:;
     }
+    MOZ_CRASH("Invalid OptimizationLevel");
 }
 #endif
 
@@ -132,6 +134,13 @@ class OptimizationInfo
     // Default compiler warmup threshold, unless it is overridden.
     static const uint32_t CompilerWarmupThreshold = 1000;
 
+    // How many invocations or loop iterations are needed before small functions
+    // are compiled.
+    uint32_t compilerSmallFunctionWarmUpThreshold_;
+
+    // Default small function compiler warmup threshold, unless it is overridden.
+    static const uint32_t CompilerSmallFunctionWarmupThreshold = 100;
+
     // How many invocations or loop iterations are needed before calls
     // are inlined, as a fraction of compilerWarmUpThreshold.
     double inliningWarmUpThresholdFactor_;
@@ -145,7 +154,7 @@ class OptimizationInfo
     { }
 
     void initNormalOptimizationInfo();
-    void initAsmjsOptimizationInfo();
+    void initWasmOptimizationInfo();
 
     OptimizationLevel level() const {
         return level_;
@@ -213,6 +222,10 @@ class OptimizationInfo
         return eliminateRedundantChecks_;
     }
 
+    bool flowAliasAnalysisEnabled() const {
+        return !JitOptions.disableFlowAA;
+    }
+
     IonRegisterAllocator registerAllocator() const {
         if (JitOptions.forcedRegisterAllocator.isSome())
             return JitOptions.forcedRegisterAllocator.ref();
@@ -263,19 +276,16 @@ class OptimizationInfo
     }
 };
 
-class OptimizationInfos
+class OptimizationLevelInfo
 {
   private:
-    OptimizationInfo infos_[Optimization_Count - 1];
+    mozilla::EnumeratedArray<OptimizationLevel, OptimizationLevel::Count, OptimizationInfo> infos_;
 
   public:
-    OptimizationInfos();
+    OptimizationLevelInfo();
 
     const OptimizationInfo* get(OptimizationLevel level) const {
-        MOZ_ASSERT(level < Optimization_Count);
-        MOZ_ASSERT(level != Optimization_DontCompile);
-
-        return &infos_[level - 1];
+        return &infos_[level];
     }
 
     OptimizationLevel nextLevel(OptimizationLevel level) const;
@@ -284,7 +294,7 @@ class OptimizationInfos
     OptimizationLevel levelForScript(JSScript* script, jsbytecode* pc = nullptr) const;
 };
 
-extern OptimizationInfos IonOptimizations;
+extern OptimizationLevelInfo IonOptimizations;
 
 } // namespace jit
 } // namespace js

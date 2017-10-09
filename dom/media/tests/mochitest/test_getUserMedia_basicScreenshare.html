@@ -10,6 +10,9 @@
     title: "getUserMedia Basic Screenshare Test",
     bug: "1211656"
   });
+
+  var pushPrefs = (...p) => new Promise(r => SpecialPowers.pushPrefEnv({set: p}, r));
+
   /**
    * Run a test to verify that we can complete a start and stop media playback
    * cycle for a screenshare LocalMediaStream on a video HTMLMediaElement.
@@ -55,10 +58,14 @@
         }
       }
     ];
-    return getUserMedia(constraints).then(stream => {
-      var playback = new LocalMediaStreamPlayback(testVideo, stream);
+    return Promise.resolve()
+      // Screensharing must work even without "mochi.test," in allowed_domains
+      .then(() => pushPrefs(["media.getusermedia.screensharing.allowed_domains",
+                             "mozilla.github.io,*.bugzilla.mozilla.org"]))
+      .then(() => getUserMedia(constraints).then(stream => {
+        var playback = new LocalMediaStreamPlayback(testVideo, stream);
         return playback.playMediaWithDeprecatedStreamStop(false);
-      })
+      }))
       .then(() => getUserMedia({video: videoConstraints[0], fake: false}))
       .then(stream => {
         var playback = new LocalMediaStreamPlayback(testVideo, stream);
@@ -70,7 +77,7 @@
           ]))
           .then(() => playback.verifyPlaying()) // still playing
           .then(() => playback.deprecatedStopStreamInMediaPlayback())
-          .then(() => playback.stopMediaElement());
+          .then(() => playback.detachFromMediaElement());
       });
   });
 

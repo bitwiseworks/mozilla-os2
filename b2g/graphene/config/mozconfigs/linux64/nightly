@@ -2,7 +2,6 @@
 . "$topsrcdir/build/unix/mozconfig.linux"
 
 ac_add_options --enable-update-channel=${MOZ_UPDATE_CHANNEL}
-ac_add_options --enable-update-packaging
 ac_add_options --enable-signmar
 
 # Nightlies only since this has a cost in performance
@@ -15,9 +14,6 @@ STRIP_FLAGS="--strip-debug"
 
 # Needed to enable breakpad in application.ini
 export MOZILLA_OFFICIAL=1
-
-# Treat warnings as errors in directories with FAIL_ON_WARNINGS.
-ac_add_options --enable-warnings-as-errors
 
 # Use sccache
 no_sccache=

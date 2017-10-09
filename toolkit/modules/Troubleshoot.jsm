@@ -178,8 +178,13 @@ this.Troubleshoot = {
 var dataProviders = {
 
   application: function application(done) {
+
+    let sysInfo = Cc["@mozilla.org/system-info;1"].
+                  getService(Ci.nsIPropertyBag2);
+
     let data = {
       name: Services.appinfo.name,
+      osVersion: sysInfo.getProperty("name") + " " + sysInfo.getProperty("version"),
       version: AppConstants.MOZ_APP_VERSION_DISPLAY,
       buildID: Services.appinfo.appBuildID,
       userAgent: Cc["@mozilla.org/network/protocol;1?name=http"].
@@ -204,7 +209,7 @@ var dataProviders = {
 
     data.numTotalWindows = 0;
     data.numRemoteWindows = 0;
-    let winEnumer = Services.ww.getWindowEnumerator("navigator:browser");
+    let winEnumer = Services.wm.getEnumerator("navigator:browser");
     while (winEnumer.hasMoreElements()) {
       data.numTotalWindows++;
       let remote = winEnumer.getNext().
@@ -219,6 +224,16 @@ var dataProviders = {
 
     data.remoteAutoStart = Services.appinfo.browserTabsRemoteAutostart;
 
+    try {
+      let e10sStatus = Cc["@mozilla.org/supports-PRUint64;1"]
+                         .createInstance(Ci.nsISupportsPRUint64);
+      let appinfo = Services.appinfo.QueryInterface(Ci.nsIObserver);
+      appinfo.observe(e10sStatus, "getE10SBlocked", "");
+      data.autoStartStatus = e10sStatus.data;
+    } catch (e) {
+      data.autoStartStatus = -1;
+    }
+
     done(data);
   },
 
@@ -227,7 +242,11 @@ var dataProviders = {
       extensions.sort(function (a, b) {
         if (a.isActive != b.isActive)
           return b.isActive ? 1 : -1;
-        let lc = a.name.localeCompare(b.name);
+
+        // In some unfortunate cases addon names can be null.
+        let aname = a.name || null;
+        let bname = b.name || null;
+        let lc = aname.localeCompare(bname);
         if (lc != 0)
           return lc;
         if (a.version != b.version)
@@ -308,6 +327,13 @@ var dataProviders = {
     }
     catch (e) {}
 
+    let promises = [];
+    // done will be called upon all pending promises being resolved.
+    // add your pending promise to promises when adding new ones.
+    function completed() {
+      Promise.all(promises).then(() => done(data));
+    }
+
     data.numTotalWindows = 0;
     data.numAcceleratedWindows = 0;
     let winEnumer = Services.ww.getWindowEnumerator();
@@ -323,7 +349,6 @@ var dataProviders = {
         data.numTotalWindows++;
         data.windowLayerManagerType = winUtils.layerManagerType;
         data.windowLayerManagerRemote = winUtils.layerManagerRemote;
-        data.supportsHardwareH264 = winUtils.supportsHardwareH264Decoding;
       }
       catch (e) {
         continue;
@@ -331,6 +356,18 @@ var dataProviders = {
       if (data.windowLayerManagerType != "Basic")
         data.numAcceleratedWindows++;
     }
+
+    let winUtils = Services.wm.getMostRecentWindow("").
+                   QueryInterface(Ci.nsIInterfaceRequestor).
+                   getInterface(Ci.nsIDOMWindowUtils)
+    data.supportsHardwareH264 = "Unknown";
+    let promise = winUtils.supportsHardwareH264Decoding;
+    promise.then(function(v) {
+      data.supportsHardwareH264 = v;
+    });
+    promises.push(promise);
+
+    data.currentAudioBackend = winUtils.currentAudioBackend;
 
     if (!data.numAcceleratedWindows && gfxInfo) {
       let win = AppConstants.platform == "win";
@@ -340,7 +377,7 @@ var dataProviders = {
     }
 
     if (!gfxInfo) {
-      done(data);
+      completed();
       return;
     }
 
@@ -385,43 +422,63 @@ var dataProviders = {
       data.direct2DEnabledMessage =
         statusMsgForFeature(Ci.nsIGfxInfo.FEATURE_DIRECT2D);
 
+
     let doc =
       Cc["@mozilla.org/xmlextras/domparser;1"]
       .createInstance(Ci.nsIDOMParser)
       .parseFromString("<html/>", "text/html");
 
-    let canvas = doc.createElement("canvas");
-    canvas.width = 1;
-    canvas.height = 1;
+    function GetWebGLInfo(contextType) {
+        let canvas = doc.createElement("canvas");
+        canvas.width = 1;
+        canvas.height = 1;
 
-    let gl;
-    try {
-      gl = canvas.getContext("experimental-webgl");
-    } catch(e) {}
 
-    if (gl) {
-      let ext = gl.getExtension("WEBGL_debug_renderer_info");
-      // this extension is unconditionally available to chrome. No need to check.
-      data.webglRenderer = gl.getParameter(ext.UNMASKED_VENDOR_WEBGL)
-                           + " -- "
-                           + gl.getParameter(ext.UNMASKED_RENDERER_WEBGL);
-    } else {
-      let feature;
-      if (AppConstants.platform == "win") {
-        // If ANGLE is not available but OpenGL is, we want to report on the
-        // OpenGL feature, because that's what's going to get used.  In all
-        // other cases we want to report on the ANGLE feature.
-        let angle = gfxInfo.getFeatureStatus(gfxInfo.FEATURE_WEBGL_ANGLE) ==
-                    gfxInfo.FEATURE_STATUS_OK;
-        let opengl = gfxInfo.getFeatureStatus(gfxInfo.FEATURE_WEBGL_OPENGL) ==
-                     gfxInfo.FEATURE_STATUS_OK;
-        feature = !angle && opengl ? gfxInfo.FEATURE_WEBGL_OPENGL :
-                                     gfxInfo.FEATURE_WEBGL_ANGLE;
-      } else {
-        feature = gfxInfo.FEATURE_WEBGL_OPENGL;
-      }
-      data.webglRendererMessage = statusMsgForFeature(feature);
+        let creationError = null;
+
+        canvas.addEventListener(
+            "webglcontextcreationerror",
+
+            function(e) {
+                creationError = e.statusMessage;
+            },
+
+            false
+        );
+
+        let gl = null;
+        try {
+          gl = canvas.getContext(contextType);
+        }
+        catch (e) {
+          if (!creationError) {
+            creationError = e.toString();
+          }
+        }
+        if (!gl)
+            return creationError || "(no info)";
+
+
+        let infoExt = gl.getExtension("WEBGL_debug_renderer_info");
+        // This extension is unconditionally available to chrome. No need to check.
+        let vendor = gl.getParameter(infoExt.UNMASKED_VENDOR_WEBGL);
+        let renderer = gl.getParameter(infoExt.UNMASKED_RENDERER_WEBGL);
+
+        let contextInfo = vendor + " -- " + renderer;
+
+
+        // Eagerly free resources.
+        let loseExt = gl.getExtension("WEBGL_lose_context");
+        loseExt.loseContext();
+
+
+        return contextInfo;
     }
+
+
+    data.webglRenderer = GetWebGLInfo("webgl");
+    data.webgl2Renderer = GetWebGLInfo("webgl2");
+
 
     let infoInfo = gfxInfo.getInfo();
     if (infoInfo)
@@ -438,7 +495,10 @@ var dataProviders = {
       }
     }
 
-    done(data);
+    data.featureLog = gfxInfo.getFeatureLog();
+    data.crashGuards = gfxInfo.getActiveCrashGuards();
+
+    completed();
   },
 
   javaScript: function javaScript(done) {
@@ -454,15 +514,9 @@ var dataProviders = {
 
   accessibility: function accessibility(done) {
     let data = {};
-    try {
-      data.isActive = Components.manager.QueryInterface(Ci.nsIServiceManager).
-                      isServiceInstantiatedByContractID(
-                        "@mozilla.org/accessibilityService;1",
-                        Ci.nsISupports);
-    }
-    catch (e) {
-      data.isActive = false;
-    }
+    data.isActive = Cc["@mozilla.org/xre/app-info;1"].
+                    getService(Ci.nsIXULRuntime).
+                    accessibilityEnabled;
     try {
       data.forceDisabled =
         Services.prefs.getIntPref("accessibility.force_disabled");
@@ -508,20 +562,28 @@ if (AppConstants.MOZ_CRASHREPORTER) {
   }
 }
 
-if (AppConstants.platform == "linux" && AppConstants.MOZ_SANDBOX) {
+if (AppConstants.MOZ_SANDBOX) {
   dataProviders.sandbox = function sandbox(done) {
-    const keys = ["hasSeccompBPF", "hasSeccompTSync",
-                  "hasPrivilegedUserNamespaces", "hasUserNamespaces",
-                  "canSandboxContent", "canSandboxMedia"];
-
-    let sysInfo = Cc["@mozilla.org/system-info;1"].
-                  getService(Ci.nsIPropertyBag2);
     let data = {};
-    for (let key of keys) {
-      if (sysInfo.hasKey(key)) {
-        data[key] = sysInfo.getPropertyAsBool(key);
+    if (AppConstants.platform == "linux") {
+      const keys = ["hasSeccompBPF", "hasSeccompTSync",
+                    "hasPrivilegedUserNamespaces", "hasUserNamespaces",
+                    "canSandboxContent", "canSandboxMedia"];
+
+      let sysInfo = Cc["@mozilla.org/system-info;1"].
+                    getService(Ci.nsIPropertyBag2);
+      for (let key of keys) {
+        if (sysInfo.hasKey(key)) {
+          data[key] = sysInfo.getPropertyAsBool(key);
+        }
       }
     }
+
+    if (AppConstants.MOZ_CONTENT_SANDBOX) {
+      data.contentSandboxLevel =
+        Services.prefs.getIntPref("security.sandbox.content.level");
+    }
+
     done(data);
   }
 }

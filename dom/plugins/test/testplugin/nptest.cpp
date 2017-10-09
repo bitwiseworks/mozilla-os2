@@ -151,6 +151,7 @@ static bool getClipboardText(NPObject* npobj, const NPVariant* args, uint32_t ar
 static bool callOnDestroy(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result);
 static bool reinitWidget(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result);
 static bool crashPluginInNestedLoop(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result);
+static bool triggerXError(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result);
 static bool destroySharedGfxStuff(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result);
 static bool propertyAndMethod(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result);
 static bool getTopLevelWindowActivationState(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result);
@@ -168,11 +169,14 @@ static bool getLastKeyText(NPObject* npobj, const NPVariant* args, uint32_t argC
 static bool getNPNVdocumentOrigin(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result);
 static bool getMouseUpEventCount(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result);
 static bool queryContentsScaleFactor(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result);
+static bool queryCSSZoomFactorGetValue(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result);
+static bool queryCSSZoomFactorSetValue(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result);
 static bool echoString(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result);
 static bool startAudioPlayback(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result);
 static bool stopAudioPlayback(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result);
 static bool getAudioMuted(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result);
 static bool nativeWidgetIsVisible(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result);
+static bool getLastCompositionText(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result);
 
 static const NPUTF8* sPluginMethodIdentifierNames[] = {
   "npnEvaluateTest",
@@ -222,6 +226,7 @@ static const NPUTF8* sPluginMethodIdentifierNames[] = {
   "callOnDestroy",
   "reinitWidget",
   "crashInNestedLoop",
+  "triggerXError",
   "destroySharedGfxStuff",
   "propertyAndMethod",
   "getTopLevelWindowActivationState",
@@ -239,11 +244,14 @@ static const NPUTF8* sPluginMethodIdentifierNames[] = {
   "getNPNVdocumentOrigin",
   "getMouseUpEventCount",
   "queryContentsScaleFactor",
+  "queryCSSZoomFactorSetValue",
+  "queryCSSZoomFactorGetValue",
   "echoString",
   "startAudioPlayback",
   "stopAudioPlayback",
   "audioMuted",
   "nativeWidgetIsVisible",
+  "getLastCompositionText",
 };
 static NPIdentifier sPluginMethodIdentifiers[MOZ_ARRAY_LENGTH(sPluginMethodIdentifierNames)];
 static const ScriptableFunction sPluginMethodFunctions[] = {
@@ -294,6 +302,7 @@ static const ScriptableFunction sPluginMethodFunctions[] = {
   callOnDestroy,
   reinitWidget,
   crashPluginInNestedLoop,
+  triggerXError,
   destroySharedGfxStuff,
   propertyAndMethod,
   getTopLevelWindowActivationState,
@@ -311,11 +320,14 @@ static const ScriptableFunction sPluginMethodFunctions[] = {
   getNPNVdocumentOrigin,
   getMouseUpEventCount,
   queryContentsScaleFactor,
+  queryCSSZoomFactorGetValue,
+  queryCSSZoomFactorSetValue,
   echoString,
   startAudioPlayback,
   stopAudioPlayback,
   getAudioMuted,
   nativeWidgetIsVisible,
+  getLastCompositionText,
 };
 
 static_assert(MOZ_ARRAY_LENGTH(sPluginMethodIdentifierNames) ==
@@ -691,7 +703,6 @@ NP_GetValue(void* future, NPPVariable aVariable, void* aValue) {
       break;
     default:
       return NPERR_INVALID_PARAM;
-      break;
   }
   return NPERR_NO_ERROR;
 }
@@ -852,6 +863,8 @@ NPP_New(NPMIMEType pluginType, NPP instance, uint16_t mode, int16_t argc, char* 
   instanceData->asyncDrawing = AD_NONE;
   instanceData->frontBuffer = nullptr;
   instanceData->backBuffer = nullptr;
+  instanceData->placeholderWnd = nullptr;
+  instanceData->cssZoomFactor = 1.0;
   instance->pdata = instanceData;
 
   TestNPObject* scriptableObject = (TestNPObject*)NPN_CreateObject(instance, &sNPClass);
@@ -876,6 +889,7 @@ NPP_New(NPMIMEType pluginType, NPP instance, uint16_t mode, int16_t argc, char* 
   AsyncDrawing requestAsyncDrawing = AD_NONE;
 
   bool requestWindow = false;
+  bool alreadyHasSalign = false;
   // handle extra params
   for (int i = 0; i < argc; i++) {
     if (strcmp(argn[i], "drawmode") == 0) {
@@ -991,7 +1005,21 @@ NPP_New(NPMIMEType pluginType, NPP instance, uint16_t mode, int16_t argc, char* 
     if (strcasecmp(argn[i], "codebase") == 0) {
       instanceData->javaCodebase = argv[i];
     }
-  }
+
+    // Bug 1307694 - There are two flash parameters that are order dependent for
+    // scaling/sizing the plugin. If they ever change from what is expected, it
+    // breaks flash on the web. In a test, if the scale tag ever happens
+    // with an salign before it, fail the plugin creation.
+    if (strcmp(argn[i], "scale") == 0) {
+      if (alreadyHasSalign) {
+        // If salign came before this parameter, error out now.
+        return NPERR_GENERIC_ERROR;
+      }
+    }
+    if (strcmp(argn[i], "salign") == 0) {
+      alreadyHasSalign = true;
+    }
+}
 
   if (!browserSupportsWindowless || !pluginSupportsWindowlessMode()) {
     requestWindow = true;
@@ -1591,6 +1619,11 @@ NPP_SetValue(NPP instance, NPNVariable variable, void* value)
   if (variable == NPNVmuteAudioBool) {
     InstanceData* instanceData = (InstanceData*)(instance->pdata);
     instanceData->audioMuted = bool(*static_cast<NPBool*>(value));
+    return NPERR_NO_ERROR;
+  }
+  if (variable == NPNVCSSZoomFactor) {
+    InstanceData* instanceData = (InstanceData*)(instance->pdata);
+    instanceData->cssZoomFactor = *static_cast<double*>(value);
     return NPERR_NO_ERROR;
   }
   return NPERR_GENERIC_ERROR;
@@ -2202,7 +2235,9 @@ compareVariants(NPP instance, const NPVariant* var1, const NPVariant* var2)
     return false;
   }
 
-  switch (var1->type) {
+  // Cast var1->type from NPVariantType to int to avoid compiler warnings about
+  // not needing a default case when we have cases for every enum value.
+  switch (static_cast<int>(var1->type)) {
     case NPVariantType_Int32: {
         int32_t result = NPVARIANT_TO_INT32(*var1);
         int32_t expected = NPVARIANT_TO_INT32(*var2);
@@ -2295,6 +2330,7 @@ compareVariants(NPP instance, const NPVariant* var1, const NPVariant* var2)
     default:
       id->err << "Unknown variant type";
       success = false;
+      MOZ_ASSERT_UNREACHABLE("Unknown variant type?!");
   }
 
   return success;
@@ -3459,6 +3495,15 @@ crashPluginInNestedLoop(NPObject* npobj, const NPVariant* args,
 }
 
 bool
+triggerXError(NPObject* npobj, const NPVariant* args,
+              uint32_t argCount, NPVariant* result)
+{
+  NPP npp = static_cast<TestNPObject*>(npobj)->npp;
+  InstanceData* id = static_cast<InstanceData*>(npp->pdata);
+  return pluginTriggerXError(id);
+}
+
+bool
 destroySharedGfxStuff(NPObject* npobj, const NPVariant* args,
                         uint32_t argCount, NPVariant* result)
 {
@@ -3479,6 +3524,14 @@ getClipboardText(NPObject* npobj, const NPVariant* args, uint32_t argCount,
 bool
 crashPluginInNestedLoop(NPObject* npobj, const NPVariant* args,
                         uint32_t argCount, NPVariant* result)
+{
+  // XXX Not implemented!
+  return false;
+}
+
+bool
+triggerXError(NPObject* npobj, const NPVariant* args,
+              uint32_t argCount, NPVariant* result)
 {
   // XXX Not implemented!
   return false;
@@ -3513,6 +3566,26 @@ nativeWidgetIsVisible(NPObject* npobj, const NPVariant* args,
   return false;
 }
 #endif
+
+bool
+getLastCompositionText(NPObject* npobj, const NPVariant* args,
+                       uint32_t argCount, NPVariant* result)
+{
+#ifdef XP_WIN
+  if (argCount != 0) {
+    return false;
+  }
+
+  NPP npp = static_cast<TestNPObject*>(npobj)->npp;
+  InstanceData* id = static_cast<InstanceData*>(npp->pdata);
+  char *outval = NPN_StrDup(id->lastComposition.c_str());
+  STRINGZ_TO_NPVARIANT(outval, *result);
+  return true;
+#else
+  // XXX not implemented
+  return false;
+#endif
+}
 
 bool
 callOnDestroy(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result)
@@ -3883,7 +3956,7 @@ bool queryContentsScaleFactor(NPObject* npobj, const NPVariant* args, uint32_t a
     return false;
 
   double scaleFactor = 1.0;
-#if defined(XP_MACOSX)
+#if defined(XP_MACOSX) || defined(XP_WIN)
   NPError err = NPN_GetValue(static_cast<TestNPObject*>(npobj)->npp,
                              NPNVcontentsScaleFactor, &scaleFactor);
   if (err != NPERR_NO_ERROR) {
@@ -3891,6 +3964,38 @@ bool queryContentsScaleFactor(NPObject* npobj, const NPVariant* args, uint32_t a
   }
 #endif
   DOUBLE_TO_NPVARIANT(scaleFactor, *result);
+  return true;
+}
+
+bool queryCSSZoomFactorSetValue(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result)
+{
+  if (argCount != 0)
+    return false;
+
+  NPP npp = static_cast<TestNPObject*>(npobj)->npp;
+  if (!npp) {
+    return false;
+  }
+  InstanceData* id = static_cast<InstanceData*>(npp->pdata);
+  if (!id) {
+    return false;
+  }
+  DOUBLE_TO_NPVARIANT(id->cssZoomFactor, *result);
+  return true;
+}
+
+bool queryCSSZoomFactorGetValue(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result)
+{
+  if (argCount != 0)
+    return false;
+
+  double zoomFactor = 1.0;
+  NPError err = NPN_GetValue(static_cast<TestNPObject*>(npobj)->npp,
+                             NPNVCSSZoomFactor, &zoomFactor);
+  if (err != NPERR_NO_ERROR) {
+    return false;
+  }
+  DOUBLE_TO_NPVARIANT(zoomFactor, *result);
   return true;
 }
 
@@ -3957,4 +4062,3 @@ getAudioMuted(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVaria
   BOOLEAN_TO_NPVARIANT(id->audioMuted, *result);
   return true;
 }
-

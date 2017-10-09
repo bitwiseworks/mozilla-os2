@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-// Equivalent to 0600 permissions; used for saved Sync Recovery Key.
+// Equivalent to 0o600 permissions; used for saved Sync Recovery Key.
 // This constant can be replaced when the equivalent values are available to
 // chrome JS; see Bug 433295 and Bug 757351.
 const PERMISSIONS_RWUSR = 0x180;
@@ -77,14 +77,22 @@ var gSyncUtils = {
     this._openLink(Weave.Service.pwResetURL);
   },
 
-  openToS: function () {
+  get tosURL() {
     let root = this.fxAccountsEnabled ? "fxa." : "";
-    this._openLink(Weave.Svc.Prefs.get(root + "termsURL"));
+    return  Weave.Svc.Prefs.get(root + "termsURL");
+  },
+
+  openToS: function () {
+    this._openLink(this.tosURL);
+  },
+
+  get privacyPolicyURL() {
+    let root = this.fxAccountsEnabled ? "fxa." : "";
+    return  Weave.Svc.Prefs.get(root + "privacyURL");
   },
 
   openPrivacyPolicy: function () {
-    let root = this.fxAccountsEnabled ? "fxa." : "";
-    this._openLink(Weave.Svc.Prefs.get(root + "privacyURL"));
+    this._openLink(this.privacyPolicyURL);
   },
 
   /**

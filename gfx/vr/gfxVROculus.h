@@ -7,88 +7,102 @@
 #define GFX_VR_OCULUS_H
 
 #include "nsTArray.h"
-#include "nsIScreen.h"
-#include "nsCOMPtr.h"
 #include "mozilla/RefPtr.h"
 
 #include "mozilla/gfx/2D.h"
 #include "mozilla/EnumeratedArray.h"
 
 #include "gfxVR.h"
-//#include <OVR_CAPI.h>
-//#include <OVR_CAPI_D3D.h>
+#include "VRDisplayHost.h"
 #include "ovr_capi_dynamic.h"
 
+struct ID3D11Device;
+
 namespace mozilla {
+namespace layers {
+class CompositingRenderTargetD3D11;
+struct VertexShaderConstants;
+struct PixelShaderConstants;
+}
 namespace gfx {
 namespace impl {
 
-class HMDInfoOculus : public VRHMDInfo, public VRHMDRenderingSupport {
+class VRDisplayOculus : public VRDisplayHost
+{
 public:
-  explicit HMDInfoOculus(ovrHmd aHMD);
-
-  bool SetFOV(const VRFieldOfView& aFOVLeft, const VRFieldOfView& aFOVRight,
-              double zNear, double zFar) override;
-
-  bool StartSensorTracking() override;
-  VRHMDSensorState GetSensorState(double timeOffset) override;
-  void StopSensorTracking() override;
+  virtual void NotifyVSync() override;
+  virtual VRHMDSensorState GetSensorState() override;
+  virtual VRHMDSensorState GetImmediateSensorState() override;
   void ZeroSensor() override;
 
-  void FillDistortionConstants(uint32_t whichEye,
-                               const IntSize& textureSize, const IntRect& eyeViewport,
-                               const Size& destViewport, const Rect& destRect,
-                               VRDistortionConstants& values) override;
+protected:
+  virtual void StartPresentation() override;
+  virtual void StopPresentation() override;
+  virtual void SubmitFrame(mozilla::layers::TextureSourceD3D11* aSource,
+                           const IntSize& aSize,
+                           const VRHMDSensorState& aSensorState,
+                           const gfx::Rect& aLeftEyeRect,
+                           const gfx::Rect& aRightEyeRect) override;
 
-  VRHMDRenderingSupport* GetRenderingSupport() override { return this; }
-  
-  void Destroy();
-
-  /* VRHMDRenderingSupport */
-  already_AddRefed<RenderTargetSet> CreateRenderTargetSet(layers::Compositor *aCompositor, const IntSize& aSize) override;
-  void DestroyRenderTargetSet(RenderTargetSet *aRTSet) override;
-  void SubmitFrame(RenderTargetSet *aRTSet) override;
-
-  ovrHmd GetOculusHMD() const { return mHMD; }
+public:
+  explicit VRDisplayOculus(ovrSession aSession);
 
 protected:
-  // must match the size of VRDistortionVertex
-  struct DistortionVertex {
-    float pos[2];
-    float texR[2];
-    float texG[2];
-    float texB[2];
-    float genericAttribs[4];
-  };
+  virtual ~VRDisplayOculus();
+  void Destroy();
 
-  virtual ~HMDInfoOculus() {
-      Destroy();
-      MOZ_COUNT_DTOR_INHERITED(HMDInfoOculus, VRHMDInfo);
-  }
+  bool RequireSession();
+  const ovrHmdDesc& GetHmdDesc();
 
-  ovrHmd mHMD;
+  already_AddRefed<layers::CompositingRenderTargetD3D11> GetNextRenderTarget();
+
+  VRHMDSensorState GetSensorState(double timeOffset);
+
+  ovrHmdDesc mDesc;
+  ovrSession mSession;
   ovrFovPort mFOVPort[2];
-  uint32_t mStartCount;
-  ovrTrackingState mLastTrackingState;
+  ovrTextureSwapChain mTextureSet;
+  nsTArray<RefPtr<layers::CompositingRenderTargetD3D11>> mRenderTargets;
+
+  RefPtr<ID3D11Device> mDevice;
+  RefPtr<ID3D11DeviceContext> mContext;
+  ID3D11VertexShader* mQuadVS;
+  ID3D11PixelShader* mQuadPS;
+  RefPtr<ID3D11SamplerState> mLinearSamplerState;
+  layers::VertexShaderConstants mVSConstants;
+  layers::PixelShaderConstants mPSConstants;
+  RefPtr<ID3D11Buffer> mVSConstantBuffer;
+  RefPtr<ID3D11Buffer> mPSConstantBuffer;
+  RefPtr<ID3D11Buffer> mVertexBuffer;
+  RefPtr<ID3D11InputLayout> mInputLayout;
+
+  bool mIsPresenting;
+  
+  bool UpdateConstantBuffers();
+
+  struct Vertex
+  {
+    float position[2];
+  };
 };
 
 } // namespace impl
 
-class VRHMDManagerOculus : public VRHMDManager
+class VRDisplayManagerOculus : public VRDisplayManager
 {
 public:
-  VRHMDManagerOculus()
-    : mOculusInitialized(false), mOculusPlatformInitialized(false)
-  { }
-
-  virtual bool PlatformInit() override;
+  static already_AddRefed<VRDisplayManagerOculus> Create();
   virtual bool Init() override;
   virtual void Destroy() override;
-  virtual void GetHMDs(nsTArray<RefPtr<VRHMDInfo> >& aHMDResult) override;
+  virtual void GetHMDs(nsTArray<RefPtr<VRDisplayHost> >& aHMDResult) override;
 protected:
-  nsTArray<RefPtr<impl::HMDInfoOculus>> mOculusHMDs;
+  VRDisplayManagerOculus()
+    : mOculusInitialized(false)
+  { }
+
+  RefPtr<impl::VRDisplayOculus> mHMDInfo;
   bool mOculusInitialized;
-  bool mOculusPlatformInitialized;
+  RefPtr<nsIThread> mOculusThread;
 };
 
 } // namespace gfx

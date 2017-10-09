@@ -29,7 +29,8 @@ public:
     friend class gfxMacPlatformFontList;
 
     MacOSFontEntry(const nsAString& aPostscriptName, int32_t aWeight,
-                   bool aIsStandardFace = false);
+                   bool aIsStandardFace = false,
+                   double aSizeHint = 0.0);
 
     // for use with data fonts
     MacOSFontEntry(const nsAString& aPostscriptName, CGFontRef aFontRef,
@@ -64,6 +65,8 @@ protected:
 
     CGFontRef mFontRef; // owning reference to the CGFont, released on destruction
 
+    double mSizeHint;
+
     bool mFontRefInitialized;
     bool mRequiresAAT;
     bool mIsCFF;
@@ -79,8 +82,6 @@ public:
 
     static int32_t AppleWeightToCSSWeight(int32_t aAppleWeight);
 
-    gfxFontFamily* GetDefaultFont(const gfxFontStyle* aStyle) override;
-
     bool GetStandardFamilyName(const nsAString& aFontName, nsAString& aFamilyName) override;
 
     gfxFontEntry* LookupLocalFont(const nsAString& aFontName,
@@ -95,9 +96,10 @@ public:
                                    const uint8_t* aFontData,
                                    uint32_t aLength) override;
 
-    gfxFontFamily* FindFamily(const nsAString& aFamily,
-                              gfxFontStyle* aStyle = nullptr,
-                              gfxFloat aDevToCssSize = 1.0) override;
+    bool FindAndAddFamilies(const nsAString& aFamily,
+                            nsTArray<gfxFontFamily*>* aOutput,
+                            gfxFontStyle* aStyle = nullptr,
+                            gfxFloat aDevToCssSize = 1.0) override;
 
     // lookup the system font for a particular system font type and set
     // the name and style characteristics
@@ -106,6 +108,10 @@ public:
                           gfxFontStyle &aFontStyle,
                           float aDevPixPerCSSPixel);
 
+protected:
+    virtual gfxFontFamily*
+    GetDefaultFontForPlatform(const gfxFontStyle* aStyle) override;
+
 private:
     friend class gfxPlatformMac;
 
@@ -113,13 +119,13 @@ private:
     virtual ~gfxMacPlatformFontList();
 
     // initialize font lists
-    nsresult InitFontList() override;
+    virtual nsresult InitFontListForPlatform() override;
 
     // special case font faces treated as font families (set via prefs)
     void InitSingleFaceList();
 
     // initialize system fonts
-    void InitSystemFonts();
+    void InitSystemFontNames();
 
     // helper function to lookup in both hidden system fonts and normal fonts
     gfxFontFamily* FindSystemFontFamily(const nsAString& aFamily);
@@ -130,12 +136,13 @@ private:
                                                            const void *object,
                                                            CFDictionaryRef userInfo);
 
-    // search fonts system-wide for a given character, null otherwise
-    gfxFontEntry* GlobalFontFallback(const uint32_t aCh,
-                                     int32_t aRunScript,
-                                     const gfxFontStyle* aMatchStyle,
-                                     uint32_t& aCmapCount,
-                                     gfxFontFamily** aMatchedFamily) override;
+    // attempt to use platform-specific fallback for the given character
+    // return null if no usable result found
+    gfxFontEntry*
+    PlatformGlobalFontFallback(const uint32_t aCh,
+                               Script aRunScript,
+                               const gfxFontStyle* aMatchStyle,
+                               gfxFontFamily** aMatchedFamily) override;
 
     bool UsesSystemFallback() override { return true; }
 
@@ -168,8 +175,8 @@ private:
     // or Helvetica Neue. For OSX 10.11, Apple uses pair of families
     // for the UI, one for text sizes and another for display sizes
     bool mUseSizeSensitiveSystemFont;
-    RefPtr<gfxFontFamily> mSystemTextFontFamily;
-    RefPtr<gfxFontFamily> mSystemDisplayFontFamily; // only used on OSX 10.11
+    nsString mSystemTextFontFamilyName;
+    nsString mSystemDisplayFontFamilyName; // only used on OSX 10.11
 };
 
 #endif /* gfxMacPlatformFontList_H_ */

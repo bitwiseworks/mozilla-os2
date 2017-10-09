@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2006 The Android Open Source Project
  *
@@ -6,9 +5,9 @@
  * found in the LICENSE file.
  */
 
-
 #include "SkColor.h"
 #include "SkColorPriv.h"
+#include "SkFixed.h"
 
 SkPMColor SkPreMultiplyARGB(U8CPU a, U8CPU r, U8CPU g, U8CPU b) {
     return SkPremultiplyARGBInline(a, r, g, b);
@@ -71,21 +70,11 @@ void SkRGBToHSV(U8CPU r, U8CPU g, U8CPU b, SkScalar hsv[3]) {
     hsv[2] = v;
 }
 
-static inline U8CPU UnitScalarToByte(SkScalar x) {
-    if (x < 0) {
-        return 0;
-    }
-    if (x >= SK_Scalar1) {
-        return 255;
-    }
-    return SkScalarToFixed(x) >> 8;
-}
-
 SkColor SkHSVToColor(U8CPU a, const SkScalar hsv[3]) {
     SkASSERT(hsv);
 
-    U8CPU s = UnitScalarToByte(hsv[1]);
-    U8CPU v = UnitScalarToByte(hsv[2]);
+    U8CPU s = SkUnitScalarClampToByte(hsv[1]);
+    U8CPU v = SkUnitScalarClampToByte(hsv[2]);
 
     if (0 == s) { // shade of gray
         return SkColorSetARGB(a, v, v, v);
@@ -110,4 +99,85 @@ SkColor SkHSVToColor(U8CPU a, const SkScalar hsv[3]) {
         default: r = v; g = p; b = q; break;
     }
     return SkColorSetARGB(a, r, g, b);
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+#include "SkPM4fPriv.h"
+#include "SkHalf.h"
+
+SkPM4f SkPM4f::FromPMColor(SkPMColor c) {
+    return From4f(swizzle_rb_if_bgra(Sk4f_fromL32(c)));
+}
+
+SkColor4f SkPM4f::unpremul() const {
+    float alpha = fVec[A];
+    if (0 == alpha) {
+        return { 0, 0, 0, 0 };
+    } else {
+        float invAlpha = 1 / alpha;
+        return { fVec[R] * invAlpha, fVec[G] * invAlpha, fVec[B] * invAlpha, alpha };
+    }
+}
+
+void SkPM4f::toF16(uint16_t half[4]) const {
+    for (int i = 0; i < 4; ++i) {
+        half[i] = SkFloatToHalf(fVec[i]);
+    }
+}
+
+uint64_t SkPM4f::toF16() const {
+    uint64_t value;
+    this->toF16(reinterpret_cast<uint16_t*>(&value));
+    return value;
+}
+
+SkPM4f SkPM4f::FromF16(const uint16_t half[4]) {
+    return {{
+        SkHalfToFloat(half[0]),
+        SkHalfToFloat(half[1]),
+        SkHalfToFloat(half[2]),
+        SkHalfToFloat(half[3])
+    }};
+}
+
+#ifdef SK_DEBUG
+void SkPM4f::assertIsUnit() const {
+    auto c4 = Sk4f::Load(fVec);
+    SkASSERT((c4 >= Sk4f(0)).allTrue() && (c4 <= Sk4f(1)).allTrue());
+}
+#endif
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+SkColor4f SkColor4f::FromColor(SkColor bgra) {
+    SkColor4f rgba;
+    swizzle_rb(Sk4f_fromS32(bgra)).store(rgba.vec());
+    return rgba;
+}
+
+SkColor4f SkColor4f::FromColor3f(SkColor3f color3f, float a) {
+    SkColor4f rgba;
+    rgba.fR = color3f.fX;
+    rgba.fG = color3f.fY;
+    rgba.fB = color3f.fZ;
+    rgba.fA = a;
+    return rgba;
+}
+
+SkColor SkColor4f::toSkColor() const {
+    return Sk4f_toS32(swizzle_rb(Sk4f::Load(this->vec())));
+}
+
+SkColor4f SkColor4f::Pin(float r, float g, float b, float a) {
+    SkColor4f c4;
+    Sk4f::Min(Sk4f::Max(Sk4f(r, g, b, a), Sk4f(0)), Sk4f(1)).store(c4.vec());
+    return c4;
+}
+
+SkPM4f SkColor4f::premul() const {
+    auto src = Sk4f::Load(this->pin().vec());
+    float srcAlpha = src[3];  // need the pinned version of our alpha
+    src = src * Sk4f(srcAlpha, srcAlpha, srcAlpha, 1);
+
+    return SkPM4f::From4f(src);
 }

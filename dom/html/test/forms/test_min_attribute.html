@@ -27,12 +27,12 @@ var data = [
   { type: 'url', apply: false },
   { type: 'email', apply: false },
   { type: 'password', apply: false },
-  { type: 'datetime', apply: true, todo: true },
   { type: 'date', apply: true },
-  { type: 'month', apply: true, todo: true },
-  { type: 'week', apply: true, todo: true },
+  { type: 'month', apply: true },
+  { type: 'week', apply: true },
   { type: 'time', apply: true },
-  { type: 'datetime-local', apply: true, todo: true },
+  // TODO: temporary set to false until bug 888331 is fixed.
+  { type: 'datetime-local', apply: false },
   { type: 'number', apply: true },
   { type: 'range', apply: true },
   { type: 'color', apply: false },
@@ -70,7 +70,8 @@ function checkValidity(aElement, aValidity, aApply, aRangeApply)
   is(aElement.validity.rangeUnderflow, !aValidity,
      "element underflow status should be " + !aValidity);
   var underflowMsg =
-        (aElement.type == "date" || aElement.type == "time") ?
+        (aElement.type == "date" || aElement.type == "time" ||
+         aElement.type == "month" || aElement.type == "week") ?
         ("Please select a value that is no earlier than " + aElement.min + ".") :
         ("Please select a value that is no less than " + aElement.min + ".");
   is(aElement.validationMessage,
@@ -140,6 +141,15 @@ for (var test of data) {
       // range is special, since setting min to 999 will make it invalid since
       // it's default maximum is 100, its value would be 999, and it would
       // suffer from overflow.
+      break;
+    case 'month':
+      input.min = '2016-06';
+      break;
+    case 'week':
+      input.min = "2016-W39";
+      break;
+    case 'datetime-local':
+      // TODO: this is temporary until bug 888331 is fixed.
       break;
     default:
       ok(false, 'please, add a case for this new type (' + input.type + ')');
@@ -334,6 +344,83 @@ for (var test of data) {
 
       input.min = 'foo';
       checkValidity(input, true, apply, false);
+      break;
+    case 'month':
+      input.value = '2016-07';
+      checkValidity(input, true, apply, apply);
+
+      input.value = '2016-06';
+      checkValidity(input, true, apply, apply);
+
+      input.value = 'foo';
+      checkValidity(input, true, apply, apply);
+
+      input.value = '2016-05';
+      checkValidity(input, false, apply, apply);
+
+      input.min = '2016-01';
+      checkValidity(input, true, apply, apply);
+
+      input.value = '2015-12';
+      checkValidity(input, false, apply, apply);
+
+      input.value = '1000-01';
+      checkValidity(input, false, apply, apply);
+
+      input.value = '10000-01';
+      checkValidity(input, true, apply, apply);
+
+      input.min = '0010-01';
+      checkValidity(input, true, apply, apply);
+
+      input.value = '0001-01';
+      checkValidity(input, false, apply, apply);
+
+      input.min = '';
+      checkValidity(input, true, apply, false);
+
+      input.min = 'foo';
+      checkValidity(input, true, apply, false);
+      break;
+    case 'week':
+      input.value = '2016-W40';
+      checkValidity(input, true, apply, apply);
+
+      input.value = '2016-W39';
+      checkValidity(input, true, apply, apply);
+
+      input.value = 'foo';
+      checkValidity(input, true, apply, apply);
+
+      input.value = '2016-W38';
+      checkValidity(input, false, apply, apply);
+
+      input.min = '2016-W01';
+      checkValidity(input, true, apply, apply);
+
+      input.value = '2015-W53';
+      checkValidity(input, false, apply, apply);
+
+      input.value = '1000-W01';
+      checkValidity(input, false, apply, apply);
+
+      input.value = '10000-01';
+      checkValidity(input, true, apply, apply);
+
+      input.min = '0010-W01';
+      checkValidity(input, true, apply, apply);
+
+      input.value = '0001-W01';
+      checkValidity(input, false, apply, apply);
+
+      input.min = '';
+      checkValidity(input, true, apply, false);
+
+      input.min = 'foo';
+      checkValidity(input, true, apply, false);
+      break;
+    case 'datetime-local':
+      // TODO: this is temporary until bug 888331 is fixed.
       break;
     default:
       ok(false, 'write tests for ' + input.type);

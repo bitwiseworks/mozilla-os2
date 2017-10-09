@@ -1,13 +1,13 @@
-/*
- * Any copyright is dedicated to the Public Domain.
- * http://creativecommons.org/publicdomain/zero/1.0/
- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
+/* Any copyright is dedicated to the Public Domain.
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 // Check that basic keyboard shortcuts work in the web console.
 
 "use strict";
 
-var test = asyncTest(function*() {
+add_task(function* () {
   const TEST_URI = "http://example.com/browser/devtools/client/webconsole/" +
                    "test/test-console.html";
 
@@ -30,31 +30,36 @@ var test = asyncTest(function*() {
     }],
   });
 
-  let currentPosition = hud.outputNode.parentNode.scrollTop;
+  let currentPosition = hud.ui.outputWrapper.scrollTop;
   let bottom = currentPosition;
 
   EventUtils.synthesizeKey("VK_PAGE_UP", {});
-  isnot(hud.outputNode.parentNode.scrollTop, currentPosition,
+  isnot(hud.ui.outputWrapper.scrollTop, currentPosition,
         "scroll position changed after page up");
 
-  currentPosition = hud.outputNode.parentNode.scrollTop;
+  currentPosition = hud.ui.outputWrapper.scrollTop;
   EventUtils.synthesizeKey("VK_PAGE_DOWN", {});
-  ok(hud.outputNode.parentNode.scrollTop > currentPosition,
+  ok(hud.ui.outputWrapper.scrollTop > currentPosition,
      "scroll position now at bottom");
 
   EventUtils.synthesizeKey("VK_HOME", {});
-  is(hud.outputNode.parentNode.scrollTop, 0, "scroll position now at top");
+  is(hud.ui.outputWrapper.scrollTop, 0, "scroll position now at top");
 
   EventUtils.synthesizeKey("VK_END", {});
 
-  let scrollTop = hud.outputNode.parentNode.scrollTop;
+  let scrollTop = hud.ui.outputWrapper.scrollTop;
   ok(scrollTop > 0 && Math.abs(scrollTop - bottom) <= 5,
      "scroll position now at bottom");
 
   info("try ctrl-l to clear output");
   executeSoon(() => {
-    let clearKey = hud.ui.window.document.querySelector("key[command=consoleCmd_clearOutput]:not([disabled])");
-    synthesizeKeyFromKeyTag(clearKey);
+    let clearShortcut;
+    if (Services.appinfo.OS === "Darwin") {
+      clearShortcut = WCUL10n.getStr("webconsole.clear.keyOSX");
+    } else {
+      clearShortcut = WCUL10n.getStr("webconsole.clear.key");
+    }
+    synthesizeKeyShortcut(clearShortcut);
   });
   yield hud.jsterm.once("messages-cleared");
 
@@ -63,7 +68,7 @@ var test = asyncTest(function*() {
      "jsterm input is focused");
 
   info("try ctrl-f to focus filter");
-  EventUtils.synthesizeKey("F", { accelKey: true });
+  synthesizeKeyShortcut(WCUL10n.getStr("webconsole.find.key"));
   ok(!hud.jsterm.inputNode.getAttribute("focused"),
      "jsterm input is not focused");
   is(hud.ui.filterBox.getAttribute("focused"), "true",

@@ -1,4 +1,6 @@
-const EDGE_AVAILABLE_MIGRATIONS = 
+"use strict";
+
+const EDGE_AVAILABLE_MIGRATIONS =
   MigrationUtils.resourceTypes.COOKIES |
   MigrationUtils.resourceTypes.BOOKMARKS |
   MigrationUtils.resourceTypes.HISTORY |

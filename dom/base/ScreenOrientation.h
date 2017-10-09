@@ -43,7 +43,7 @@ public:
 
   IMPL_EVENT_HANDLER(change)
 
-  ScreenOrientation(nsPIDOMWindow* aWindow, nsScreen* aScreen);
+  ScreenOrientation(nsPIDOMWindowInner* aWindow, nsScreen* aScreen);
 
   already_AddRefed<Promise> Lock(OrientationLockType aOrientation,
                                  ErrorResult& aRv);
@@ -101,6 +101,8 @@ private:
                                          ErrorResult& aRv);
 
   void DispatchChangeEvent();
+
+  bool ShouldResistFingerprinting() const;
 
   LockPermission GetLockOrientationPermission(bool aCheckSandbox) const;
 

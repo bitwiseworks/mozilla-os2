@@ -221,12 +221,12 @@ protected:
         RDFContentSinkParseMode  mParseMode;
     };
 
-    nsAutoTArray<RDFContextStackElement, 8>* mContextStack;
+    AutoTArray<RDFContextStackElement, 8>* mContextStack;
 
     nsCOMPtr<nsIURI> mDocumentURL;
 
 private:
-    static PRLogModuleInfo* gLog;
+    static mozilla::LazyLogModule gLog;
 };
 
 int32_t         RDFContentSinkImpl::gRefCnt = 0;
@@ -239,7 +239,7 @@ nsIRDFResource* RDFContentSinkImpl::kRDF_Bag;
 nsIRDFResource* RDFContentSinkImpl::kRDF_Seq;
 nsIRDFResource* RDFContentSinkImpl::kRDF_nextVal;
 
-PRLogModuleInfo* RDFContentSinkImpl::gLog;
+mozilla::LazyLogModule RDFContentSinkImpl::gLog("nsRDFContentSink");
 
 ////////////////////////////////////////////////////////////////////////
 
@@ -256,6 +256,13 @@ static const nsStaticAtom rdf_atoms[] = {
 #include "nsRDFContentSinkAtomList.h"
 #undef RDF_ATOM
 };
+
+// static
+void
+nsRDFAtoms::RegisterAtoms()
+{
+    NS_RegisterStaticAtoms(rdf_atoms);
+}
 
 RDFContentSinkImpl::RDFContentSinkImpl()
     : mText(nullptr),
@@ -287,12 +294,7 @@ RDFContentSinkImpl::RDFContentSinkImpl()
 
         NS_DEFINE_CID(kRDFContainerUtilsCID, NS_RDFCONTAINERUTILS_CID);
         rv = CallGetService(kRDFContainerUtilsCID, &gRDFContainerUtils);
-
-        NS_RegisterStaticAtoms(rdf_atoms);
     }
-
-    if (! gLog)
-        gLog = PR_NewLogModule("nsRDFContentSink");
 }
 
 
@@ -1285,7 +1287,7 @@ RDFContentSinkImpl::RegisterNamespaces(const char16_t **aAttributes)
             ++endLocal;
         }
         nsDependentSubstring lname(attr, endLocal);
-        nsCOMPtr<nsIAtom> preferred = do_GetAtom(lname);
+        nsCOMPtr<nsIAtom> preferred = NS_Atomize(lname);
         if (preferred == kXMLNSAtom) {
             preferred = nullptr;
         }
@@ -1325,7 +1327,7 @@ RDFContentSinkImpl::SplitExpatName(const char16_t *aExpatName,
     }
 
     const nsDependentSubstring& nameSpaceURI = Substring(aExpatName, uriEnd);
-    *aLocalName = NS_NewAtom(Substring(nameStart, pos)).take();
+    *aLocalName = NS_Atomize(Substring(nameStart, pos)).take();
     return nameSpaceURI;
 }
 
@@ -1376,7 +1378,7 @@ RDFContentSinkImpl::ReinitContainer(nsIRDFResource* aContainerType, nsIRDFResour
     nsresult rv;
 
     nsCOMPtr<nsIRDFLiteral> one;
-    rv = gRDFService->GetLiteral(MOZ_UTF16("1"), getter_AddRefs(one));
+    rv = gRDFService->GetLiteral(u"1", getter_AddRefs(one));
     if (NS_FAILED(rv)) return rv;
 
     // Re-initialize the 'nextval' property
@@ -1416,7 +1418,7 @@ RDFContentSinkImpl::PushContext(nsIRDFResource         *aResource,
                                 RDFContentSinkParseMode aParseMode)
 {
     if (! mContextStack) {
-        mContextStack = new nsAutoTArray<RDFContextStackElement, 8>();
+        mContextStack = new AutoTArray<RDFContextStackElement, 8>();
         if (! mContextStack)
             return 0;
     }

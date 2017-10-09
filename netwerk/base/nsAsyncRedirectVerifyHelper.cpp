@@ -14,22 +14,25 @@
 #include "nsIAsyncVerifyRedirectCallback.h"
 #include "nsILoadInfo.h"
 
-static mozilla::LazyLogModule gRedirectLog("nsRedirect");
+namespace mozilla {
+namespace net {
+
+static LazyLogModule gRedirectLog("nsRedirect");
 #undef LOG
-#define LOG(args) MOZ_LOG(gRedirectLog, mozilla::LogLevel::Debug, args)
+#define LOG(args) MOZ_LOG(gRedirectLog, LogLevel::Debug, args)
 
 NS_IMPL_ISUPPORTS(nsAsyncRedirectVerifyHelper,
                   nsIAsyncVerifyRedirectCallback,
                   nsIRunnable)
 
-class nsAsyncVerifyRedirectCallbackEvent : public nsRunnable {
+class nsAsyncVerifyRedirectCallbackEvent : public Runnable {
 public:
     nsAsyncVerifyRedirectCallbackEvent(nsIAsyncVerifyRedirectCallback *cb,
                                        nsresult result)
         : mCallback(cb), mResult(result) {
     }
 
-    NS_IMETHOD Run()
+    NS_IMETHOD Run() override
     {
         LOG(("nsAsyncVerifyRedirectCallbackEvent::Run() "
              "callback to %p with result %x",
@@ -43,7 +46,9 @@ private:
 };
 
 nsAsyncRedirectVerifyHelper::nsAsyncRedirectVerifyHelper()
-    : mCallbackInitiated(false),
+    : mFlags(0),
+      mWaitingForRedirectCallback(false),
+      mCallbackInitiated(false),
       mExpectedCallbacks(0),
       mResult(NS_OK)
 {
@@ -100,6 +105,12 @@ nsAsyncRedirectVerifyHelper::OnRedirectVerifyCallback(nsresult result)
     LOG(("nsAsyncRedirectVerifyHelper::OnRedirectVerifyCallback() "
          "result=%x expectedCBs=%u mResult=%x",
          result, mExpectedCallbacks, mResult));
+
+    MOZ_DIAGNOSTIC_ASSERT(mExpectedCallbacks > 0,
+                          "OnRedirectVerifyCallback called more times than expected");
+    if (mExpectedCallbacks <= 0) {
+      return NS_ERROR_UNEXPECTED;
+    }
 
     --mExpectedCallbacks;
 
@@ -272,3 +283,6 @@ nsAsyncRedirectVerifyHelper::IsOldChannelCanceled()
 
     return false;
 }
+
+} // namespace net
+} // namespace mozilla

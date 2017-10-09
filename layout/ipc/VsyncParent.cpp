@@ -8,7 +8,7 @@
 #include "BackgroundParent.h"
 #include "BackgroundParentImpl.h"
 #include "gfxPlatform.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsIThread.h"
 #include "nsThreadUtils.h"
 #include "VsyncSource.h"
@@ -50,10 +50,10 @@ VsyncParent::NotifyVsync(TimeStamp aTimeStamp)
   // Called on hardware vsync thread. We should post to current ipc thread.
   MOZ_ASSERT(!IsOnBackgroundThread());
   nsCOMPtr<nsIRunnable> vsyncEvent =
-    NS_NewRunnableMethodWithArg<TimeStamp>(this,
-                                           &VsyncParent::DispatchVsyncEvent,
-                                           aTimeStamp);
-  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(mBackgroundThread->Dispatch(vsyncEvent, NS_DISPATCH_NORMAL)));
+    NewRunnableMethod<TimeStamp>(this,
+                                 &VsyncParent::DispatchVsyncEvent,
+                                 aTimeStamp);
+  MOZ_ALWAYS_SUCCEEDS(mBackgroundThread->Dispatch(vsyncEvent, NS_DISPATCH_NORMAL));
   return true;
 }
 

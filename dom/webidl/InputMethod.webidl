@@ -16,7 +16,7 @@
 [JSImplementation="@mozilla.org/b2g-inputmethod;1",
  NavigatorProperty="mozInputMethod",
  Pref="dom.mozInputMethod.enabled",
- CheckAnyPermissions="input input-manage"]
+ ChromeOnly]
 interface MozInputMethod : EventTarget {
   /**
    * Activate or decactive current API instance.
@@ -39,7 +39,6 @@ interface MozInputMethod : EventTarget {
    * Note that if the app saves the original context, it might get
    * void; implementation decides when to void the input context.
    */
-  [CheckAnyPermissions="input"]
   attribute EventHandler oninputcontextchange;
 
   /**
@@ -47,7 +46,6 @@ interface MozInputMethod : EventTarget {
    * allow to mutate. This attribute should be null when there is no
    * text field currently focused.
    */
-  [CheckAnyPermissions="input"]
   readonly attribute MozInputContext? inputcontext;
 
   /**
@@ -57,7 +55,6 @@ interface MozInputMethod : EventTarget {
    * manifest. If an input of the same id is already declared, the info of that
    * input will be updated.
    */
-  [CheckAnyPermissions="input"]
   Promise<void> addInput(DOMString inputId,
                          MozInputMethodInputManifest inputManifest);
 
@@ -68,14 +65,12 @@ interface MozInputMethod : EventTarget {
    * manifest. Silently resolves if the input is not previously declared;
    * rejects if attempt to remove a statically declared input.
    */
-  [CheckAnyPermissions="input"]
   Promise<void> removeInput(DOMString id);
 
   /**
    * Remove focus from the current input, usable by Gaia System app, globally,
    * regardless of the current focus state.
    */
-  [CheckAnyPermissions="input-manage"]
   void removeFocus();
 
   /**
@@ -90,7 +85,6 @@ interface MozInputMethod : EventTarget {
    * If the value passed in parameter isn't valid (in the term of HTML5
    * Forms Validation), the value will simply be ignored by the element.
    */
-  [CheckAnyPermissions="input-manage"]
   void setValue(DOMString value);
 
   /**
@@ -101,7 +95,6 @@ interface MozInputMethod : EventTarget {
    * If this method is called for a select that does not support multiple
    * selection the previous element will be unselected.
    */
-  [CheckAnyPermissions="input-manage"]
   void setSelectedOption(long index);
 
   /**
@@ -110,7 +103,6 @@ interface MozInputMethod : EventTarget {
    * If this method is called for a <select> that does not support multiple
    * selection, then the last index specified in indexes will be selected.
    */
-  [CheckAnyPermissions="input-manage"]
   void setSelectedOptions(sequence<long> indexes);
 };
 
@@ -119,14 +111,13 @@ interface MozInputMethod : EventTarget {
  */
 [JSImplementation="@mozilla.org/b2g-imm;1",
  Pref="dom.mozInputMethod.enabled",
- CheckAnyPermissions="input input-manage"]
+ ChromeOnly]
 interface MozInputMethodManager : EventTarget {
   /**
    * Ask the OS to show a list of available inputs for users to switch from.
    * OS should sliently ignore this request if the app is currently not the
    * active one.
    */
-  [CheckAllPermissions="input"]
   void showAll();
 
   /**
@@ -134,7 +125,6 @@ interface MozInputMethodManager : EventTarget {
    * OS should sliently ignore this request if the app is currently not the
    * active one.
    */
-  [CheckAllPermissions="input"]
   void next();
 
   /**
@@ -145,7 +135,6 @@ interface MozInputMethodManager : EventTarget {
    *
    * The returning value is depend on the inputType of the current input context.
    */
-  [CheckAllPermissions="input"]
   boolean supportsSwitching();
 
   /**
@@ -153,7 +142,6 @@ interface MozInputMethodManager : EventTarget {
    * OS should sliently ignore this request if the app is currently not the
    * active one.
    */
-  [CheckAllPermissions="input"]
   void hide();
 
   /**
@@ -163,7 +151,6 @@ interface MozInputMethodManager : EventTarget {
    * @param types Array of input types in which supportsSwitching() should
    *              return true.
    */
-  [CheckAllPermissions="input-manage"]
   void setSupportsSwitchingTypes(sequence<MozInputMethodInputContextInputTypes> types);
 
   /**
@@ -173,7 +160,6 @@ interface MozInputMethodManager : EventTarget {
    *
    * evt.detail is defined by MozInputContextFocusEventDetail.
    */
-  [CheckAnyPermissions="input-manage"]
   attribute EventHandler oninputcontextfocus;
 
   /**
@@ -181,7 +167,6 @@ interface MozInputMethodManager : EventTarget {
    * If the API consumer failed to handle and call preventDefault(),
    * there will be a message printed on the console.
    */
-  [CheckAnyPermissions="input-manage"]
   attribute EventHandler oninputcontextblur;
 
   /**
@@ -189,7 +174,6 @@ interface MozInputMethodManager : EventTarget {
    * If the API consumer failed to handle and call preventDefault(),
    * there will be a message printed on the console.
    */
-  [CheckAnyPermissions="input-manage"]
   attribute EventHandler onshowallrequest;
 
   /**
@@ -197,7 +181,6 @@ interface MozInputMethodManager : EventTarget {
    * If the API consumer failed to handle and call preventDefault(),
    * there will be a message printed on the console.
    */
-  [CheckAnyPermissions="input-manage"]
   attribute EventHandler onnextrequest;
 
   /**
@@ -208,7 +191,6 @@ interface MozInputMethodManager : EventTarget {
    *
    * evt.detail is defined by MozInputRegistryEventDetail.
    */
-  [CheckAnyPermissions="input-manage"]
   attribute EventHandler onaddinputrequest;
 
   /**
@@ -219,7 +201,6 @@ interface MozInputMethodManager : EventTarget {
    *
    * evt.detail is defined by MozInputRegistryEventDetail.
    */
-  [CheckAnyPermissions="input-manage"]
   attribute EventHandler onremoveinputrequest;
 };
 
@@ -228,7 +209,7 @@ interface MozInputMethodManager : EventTarget {
  */
 [JSImplementation="@mozilla.org/b2g-imm-focus;1",
  Pref="dom.mozInputMethod.enabled",
- CheckAnyPermissions="input-manage"]
+ ChromeOnly]
 interface MozInputContextFocusEventDetail {
   /**
    * The type of the focused input.
@@ -245,7 +226,7 @@ interface MozInputContextFocusEventDetail {
    */
 
   /**
-   * Current value of the input/select element.
+   * Current value of the input.
    */
   readonly attribute DOMString? value;
   /**
@@ -270,7 +251,7 @@ dictionary MozInputContextChoicesInfo {
 };
 
 /**
- * Content the header (<optgroup>) or an option (<option>).
+ * Content of the option header (<optgroup>) or an option (<option>).
  */
 dictionary MozInputMethodChoiceDict {
   boolean group;
@@ -286,7 +267,7 @@ dictionary MozInputMethodChoiceDict {
  */
 [JSImplementation="@mozilla.org/b2g-imm-input-registry;1",
  Pref="dom.mozInputMethod.enabled",
- CheckAnyPermissions="input-manage"]
+ ChromeOnly]
 interface MozInputRegistryEventDetail {
   /**
    * Manifest URL of the requesting app.
@@ -320,7 +301,7 @@ interface MozInputRegistryEventDetail {
  */
 [JSImplementation="@mozilla.org/b2g-inputcontext;1",
  Pref="dom.mozInputMethod.enabled",
- CheckAnyPermissions="input"]
+ ChromeOnly]
 interface MozInputContext: EventTarget {
   /**
    * Type of the InputContext. See MozInputMethodInputContextTypes
@@ -358,7 +339,15 @@ interface MozInputContext: EventTarget {
   readonly attribute long selectionEnd;
 
   /**
+   * The text in the current input.
+   */
+  readonly attribute DOMString? text;
+
+  /**
    * The text before and after the begining of the selected text.
+   *
+   * You should use the text property instead because these properties are
+   * truncated at 100 characters.
    */
   readonly attribute DOMString? textBeforeCursor;
   readonly attribute DOMString? textAfterCursor;
@@ -380,9 +369,7 @@ interface MozInputContext: EventTarget {
   /* User moves the cursor, or changes the selection with other means. If the text around
    * cursor has changed, but the cursor has not been moved, the IME won't get notification.
    *
-   * A dict is provided in the detail property of the event containing the new values, and
-   * an "ownAction" property to denote the event is the result of our own mutation to
-   * the input field.
+   * evt.detail is defined by MozInputContextSelectionChangeEventDetail.
    */
   attribute EventHandler onselectionchange;
 
@@ -411,9 +398,7 @@ interface MozInputContext: EventTarget {
    * editing or cursor movement. If the cursor has been moved, but the text around has not
    * changed, the IME won't get notification.
    *
-   * A dict is provided in the detail property of the event containing the new values, and
-   * an "ownAction" property to denote the event is the result of our own mutation to
-   * the input field.
+   * evt.detail is defined by MozInputContextSurroundingTextChangeEventDetail.
    */
   attribute EventHandler onsurroundingtextchange;
 
@@ -521,6 +506,80 @@ interface MozInputContext: EventTarget {
    */
   Promise<boolean> endComposition(optional DOMString text,
                                   optional MozInputMethodKeyboardEventDict dict);
+
+  /**
+   * The interface used to receive the native events from hardware keyboard
+   */
+  readonly attribute MozHardwareInput? hardwareinput;
+};
+
+/*
+ * This interface will be added into inputcontext and used to receive the
+ * events from the hardware keyboard.
+ * Example:
+ *   mozInputMethod.inputcontext.hardwareinput.addEventListener('keyup', this);
+ *   mozInputMethod.inputcontext.hardwareinput.removeEventListener('keyup', this);
+ */
+[JSImplementation="@mozilla.org/b2g-hardwareinput;1",
+ Pref="dom.mozInputMethod.enabled",
+ ChromeOnly]
+interface MozHardwareInput: EventTarget {
+};
+
+/**
+ * Detail of the selectionchange event.
+ */
+[JSImplementation="@mozilla.org/b2g-imm-selectionchange;1",
+ Pref="dom.mozInputMethod.enabled",
+ ChromeOnly]
+interface MozInputContextSelectionChangeEventDetail {
+  /**
+   * Indicate whether or not the change is due to our own action from,
+   * for example, sendKey() call.
+   *
+   * Note: this property is untrustworthy because it would still be true even
+   * if script in the page changed the text synchronously upon responding to
+   * events trigger by the call.
+   */
+  readonly attribute boolean ownAction;
+
+  /**
+   * The start and stop position of the current selection.
+   */
+  readonly attribute long selectionStart;
+  readonly attribute long selectionEnd;
+};
+
+/**
+ * Detail of the surroundingtextchange event.
+ */
+[JSImplementation="@mozilla.org/b2g-imm-surroundingtextchange;1",
+ Pref="dom.mozInputMethod.enabled",
+ ChromeOnly]
+interface MozInputContextSurroundingTextChangeEventDetail {
+  /**
+   * Indicate whether or not the change is due to our own action from,
+   * for example, sendKey() call.
+   *
+   * Note: this property is untrustworthy because it would still be true even
+   * if script in the page changed the text synchronously upon responding to
+   * events trigger by the call.
+   */
+  readonly attribute boolean ownAction;
+
+  /**
+   * The text in the current input.
+   */
+  readonly attribute DOMString? text;
+
+  /**
+   * The text before and after the begining of the selected text.
+   *
+   * You should use the text property instead because these properties are
+   * truncated at 100 characters.
+   */
+  readonly attribute DOMString? textBeforeCursor;
+  readonly attribute DOMString? textAfterCursor;
 };
 
 enum CompositionClauseSelectionType {

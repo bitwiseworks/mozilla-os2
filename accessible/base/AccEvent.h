@@ -10,6 +10,7 @@
 
 #include "mozilla/a11y/Accessible.h"
 
+class nsEventShell;
 namespace mozilla {
 
 namespace dom {
@@ -50,10 +51,6 @@ public:
      //    node, only the umbrella event on the ancestor will be emitted.
     eCoalesceReorder,
 
-     // eCoalesceMutationTextChange : coalesce text change events caused by
-     // tree mutations of the same tree level.
-    eCoalesceMutationTextChange,
-
     // eCoalesceOfSameType : For events of the same type, only the newest event
     // will be processed.
     eCoalesceOfSameType,
@@ -88,7 +85,7 @@ public:
     { return static_cast<EIsFromUserInput>(mIsFromUserInput); }
 
   Accessible* GetAccessible() const { return mAccessible; }
-  DocAccessible* GetDocAccessible() const { return mAccessible->Document(); }
+  DocAccessible* Document() const { return mAccessible->Document(); }
 
   /**
    * Down casting.
@@ -97,6 +94,7 @@ public:
     eGenericEvent,
     eStateChangeEvent,
     eTextChangeEvent,
+    eTreeMutationEvent,
     eMutationEvent,
     eReorderEvent,
     eHideEvent,
@@ -130,7 +128,9 @@ protected:
   RefPtr<Accessible> mAccessible;
 
   friend class EventQueue;
-  friend class AccReorderEvent;
+  friend class EventTree;
+  friend class ::nsEventShell;
+  friend class NotificationController;
 };
 
 
@@ -201,20 +201,52 @@ private:
   bool mIsInserted;
   nsString mModifiedText;
 
-  friend class EventQueue;
-  friend class AccReorderEvent;
+  friend class EventTree;
+  friend class NotificationController;
 };
 
+/**
+ * A base class for events related to tree mutation, either an AccMutation
+ * event, or an AccReorderEvent.
+ */
+class AccTreeMutationEvent : public AccEvent
+{
+public:
+  AccTreeMutationEvent(uint32_t aEventType, Accessible* aTarget) :
+    AccEvent(aEventType, aTarget, eAutoDetect, eCoalesceReorder), mGeneration(0) {}
+
+  // Event
+  static const EventGroup kEventGroup = eTreeMutationEvent;
+  virtual unsigned int GetEventGroups() const override
+  {
+    return AccEvent::GetEventGroups() | (1U << eTreeMutationEvent);
+  }
+
+  void SetNextEvent(AccTreeMutationEvent* aNext) { mNextEvent = aNext; }
+  void SetPrevEvent(AccTreeMutationEvent* aPrev) { mPrevEvent = aPrev; }
+  AccTreeMutationEvent* NextEvent() const { return mNextEvent; }
+  AccTreeMutationEvent* PrevEvent() const { return mPrevEvent; }
+
+  /**
+   * A sequence number to know when this event was fired.
+   */
+  uint32_t EventGeneration() const { return mGeneration; }
+  void SetEventGeneration(uint32_t aGeneration) { mGeneration = aGeneration; }
+
+private:
+  RefPtr<AccTreeMutationEvent> mNextEvent;
+  RefPtr<AccTreeMutationEvent> mPrevEvent;
+  uint32_t mGeneration;
+};
 
 /**
  * Base class for show and hide accessible events.
  */
-class AccMutationEvent: public AccEvent
+class AccMutationEvent: public AccTreeMutationEvent
 {
 public:
-  AccMutationEvent(uint32_t aEventType, Accessible* aTarget,
-                   nsINode* aTargetNode) :
-    AccEvent(aEventType, aTarget, eAutoDetect, eCoalesceMutationTextChange)
+  AccMutationEvent(uint32_t aEventType, Accessible* aTarget) :
+    AccTreeMutationEvent(aEventType, aTarget)
   {
     // Don't coalesce these since they are coalesced by reorder event. Coalesce
     // contained text change events.
@@ -226,7 +258,7 @@ public:
   static const EventGroup kEventGroup = eMutationEvent;
   virtual unsigned int GetEventGroups() const override
   {
-    return AccEvent::GetEventGroups() | (1U << eMutationEvent);
+    return AccTreeMutationEvent::GetEventGroups() | (1U << eMutationEvent);
   }
 
   // MutationEvent
@@ -240,7 +272,8 @@ protected:
   RefPtr<Accessible> mParent;
   RefPtr<AccTextChangeEvent> mTextChangeEvent;
 
-  friend class EventQueue;
+  friend class EventTree;
+  friend class NotificationController;
 };
 
 
@@ -250,8 +283,7 @@ protected:
 class AccHideEvent: public AccMutationEvent
 {
 public:
-  AccHideEvent(Accessible* aTarget, nsINode* aTargetNode,
-               bool aNeedsShutdown = true);
+  explicit AccHideEvent(Accessible* aTarget, bool aNeedsShutdown = true);
 
   // Event
   static const EventGroup kEventGroup = eHideEvent;
@@ -271,7 +303,8 @@ protected:
   RefPtr<Accessible> mNextSibling;
   RefPtr<Accessible> mPrevSibling;
 
-  friend class EventQueue;
+  friend class EventTree;
+  friend class NotificationController;
 };
 
 
@@ -281,7 +314,7 @@ protected:
 class AccShowEvent: public AccMutationEvent
 {
 public:
-  AccShowEvent(Accessible* aTarget, nsINode* aTargetNode);
+  explicit AccShowEvent(Accessible* aTarget);
 
   // Event
   static const EventGroup kEventGroup = eShowEvent;
@@ -289,57 +322,33 @@ public:
   {
     return AccMutationEvent::GetEventGroups() | (1U << eShowEvent);
   }
+
+  uint32_t InsertionIndex() const { return mInsertionIndex; }
+
+private:
+  nsTArray<RefPtr<AccHideEvent>> mPrecedingEvents;
+  uint32_t mInsertionIndex;
+
+  friend class EventTree;
 };
 
 
 /**
  * Class for reorder accessible event. Takes care about
  */
-class AccReorderEvent : public AccEvent
+class AccReorderEvent : public AccTreeMutationEvent
 {
 public:
   explicit AccReorderEvent(Accessible* aTarget) :
-    AccEvent(::nsIAccessibleEvent::EVENT_REORDER, aTarget,
-             eAutoDetect, eCoalesceReorder) { }
+    AccTreeMutationEvent(::nsIAccessibleEvent::EVENT_REORDER, aTarget) { }
   virtual ~AccReorderEvent() { }
 
   // Event
   static const EventGroup kEventGroup = eReorderEvent;
   virtual unsigned int GetEventGroups() const override
   {
-    return AccEvent::GetEventGroups() | (1U << eReorderEvent);
+    return AccTreeMutationEvent::GetEventGroups() | (1U << eReorderEvent);
   }
-
-  /**
-   * Get connected with mutation event.
-   */
-  void AddSubMutationEvent(AccMutationEvent* aEvent)
-    { mDependentEvents.AppendElement(aEvent); }
-
-  /**
-   * Do not emit the reorder event and its connected mutation events.
-   */
-  void DoNotEmitAll()
-  {
-    mEventRule = AccEvent::eDoNotEmit;
-    uint32_t eventsCount = mDependentEvents.Length();
-    for (uint32_t idx = 0; idx < eventsCount; idx++)
-      mDependentEvents[idx]->mEventRule = AccEvent::eDoNotEmit;
-  }
-
-  /**
-   * Return true if the given accessible is a target of connected mutation
-   * event.
-   */
-  uint32_t IsShowHideEventTarget(const Accessible* aTarget) const;
-
-protected:
-  /**
-   * Show and hide events causing this reorder event.
-   */
-  nsTArray<AccMutationEvent*> mDependentEvents;
-
-  friend class EventQueue;
 };
 
 

@@ -13,7 +13,6 @@
 #include "GfxDriverInfo.h"
 #include "nsCOMPtr.h"
 #include "nsCOMArray.h"
-#include "nsAutoPtr.h"
 #include "nsString.h"
 #include "nsUnicharUtils.h"
 #include "nsVersionComparator.h"
@@ -32,8 +31,11 @@
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/Logging.h"
+#include "MediaPrefs.h"
 #include "gfxPrefs.h"
 #include "gfxPlatform.h"
+#include "gfxConfig.h"
+#include "DriverCrashGuard.h"
 
 #if defined(MOZ_CRASHREPORTER)
 #include "nsExceptionHandler.h"
@@ -153,9 +155,18 @@ GetPrefNameForFeature(int32_t aFeature)
     case nsIGfxInfo::FEATURE_WEBRTC_HW_ACCELERATION_DECODE:
       name = BLACKLIST_PREF_BRANCH "webrtc.hw.acceleration.decode";
       break;
-    default:
+    case nsIGfxInfo::FEATURE_CANVAS2D_ACCELERATION:
+      name = BLACKLIST_PREF_BRANCH "canvas2d.acceleration";
       break;
-  };
+    case nsIGfxInfo::FEATURE_VP8_HW_DECODE:
+    case nsIGfxInfo::FEATURE_VP9_HW_DECODE:
+    case nsIGfxInfo::FEATURE_DX_INTEROP2:
+      // We don't provide prefs for these features.
+      break;
+    default:
+      MOZ_ASSERT_UNREACHABLE("Unexpected nsIGfxInfo feature?!");
+      break;
+  }
 
   return name;
 }
@@ -163,24 +174,42 @@ GetPrefNameForFeature(int32_t aFeature)
 // Returns the value of the pref for the relevant feature in aValue.
 // If the pref doesn't exist, aValue is not touched, and returns false.
 static bool
-GetPrefValueForFeature(int32_t aFeature, int32_t& aValue)
+GetPrefValueForFeature(int32_t aFeature, int32_t& aValue, nsACString& aFailureId)
 {
   const char *prefname = GetPrefNameForFeature(aFeature);
   if (!prefname)
     return false;
 
   aValue = nsIGfxInfo::FEATURE_STATUS_UNKNOWN;
-  return NS_SUCCEEDED(Preferences::GetInt(prefname, &aValue));
+  if (!NS_SUCCEEDED(Preferences::GetInt(prefname, &aValue))) {
+    return false;
+  }
+
+  nsCString failureprefname(prefname);
+  failureprefname += ".failureid";
+  nsAdoptingCString failureValue = Preferences::GetCString(failureprefname.get());
+  if (failureValue) {
+    aFailureId = failureValue.get();
+  } else {
+    aFailureId = "FEATURE_FAILURE_BLACKLIST_PREF";
+  }
+
+  return true;
 }
 
 static void
-SetPrefValueForFeature(int32_t aFeature, int32_t aValue)
+SetPrefValueForFeature(int32_t aFeature, int32_t aValue, const nsACString& aFailureId)
 {
   const char *prefname = GetPrefNameForFeature(aFeature);
   if (!prefname)
     return;
 
   Preferences::SetInt(prefname, aValue);
+  if (!aFailureId.IsEmpty()) {
+    nsCString failureprefname(prefname);
+    failureprefname += ".failureid";
+    Preferences::SetCString(failureprefname.get(), aFailureId);
+  }
 }
 
 static void
@@ -212,103 +241,65 @@ RemovePrefForDriverVersion()
   Preferences::ClearUser(SUGGESTED_VERSION_PREF);
 }
 
-// <foo>Hello</foo> - "Hello" is stored as a child text node of the foo node.
-static bool
-BlacklistNodeToTextValue(nsIDOMNode *aBlacklistNode, nsAString& aValue)
-{
-  nsAutoString value;
-  if (NS_FAILED(aBlacklistNode->GetTextContent(value)))
-    return false;
-
-  value.Trim(" \t\r\n");
-  aValue = value;
-
-  return true;
-}
-
-// <foo attr=Hello/> finds "Hello" if the aAttrName is "attr".
-static bool
-BlacklistAttrToTextValue(nsIDOMNode *aBlacklistNode,
-                         const nsAString& aAttrName,
-                         nsAString& aValue)
-{
-  nsCOMPtr<nsIDOMElement> element = do_QueryInterface(aBlacklistNode);
-  if (!element) {
-    return false;
-  }
-
-  nsAutoString value;
-  if (NS_FAILED(element->GetAttribute(aAttrName, value))) {
-    return false;
-  }
-
-  value.Trim(" \t\r\n");
-  aValue = value;
-
-  return true;
-}
-
 
 static OperatingSystem
 BlacklistOSToOperatingSystem(const nsAString& os)
 {
   if (os.EqualsLiteral("WINNT 5.1"))
-    return DRIVER_OS_WINDOWS_XP;
+    return OperatingSystem::WindowsXP;
   else if (os.EqualsLiteral("WINNT 5.2"))
-    return DRIVER_OS_WINDOWS_SERVER_2003;
+    return OperatingSystem::WindowsServer2003;
   else if (os.EqualsLiteral("WINNT 6.0"))
-    return DRIVER_OS_WINDOWS_VISTA;
+    return OperatingSystem::WindowsVista;
   else if (os.EqualsLiteral("WINNT 6.1"))
-    return DRIVER_OS_WINDOWS_7;
+    return OperatingSystem::Windows7;
   else if (os.EqualsLiteral("WINNT 6.2"))
-    return DRIVER_OS_WINDOWS_8;
+    return OperatingSystem::Windows8;
   else if (os.EqualsLiteral("WINNT 6.3"))
-    return DRIVER_OS_WINDOWS_8_1;
+    return OperatingSystem::Windows8_1;
   else if (os.EqualsLiteral("WINNT 10.0"))
-    return DRIVER_OS_WINDOWS_10;
+    return OperatingSystem::Windows10;
   else if (os.EqualsLiteral("Linux"))
-    return DRIVER_OS_LINUX;
+    return OperatingSystem::Linux;
   else if (os.EqualsLiteral("Darwin 9"))
-    return DRIVER_OS_OS_X_10_5;
+    return OperatingSystem::OSX10_5;
   else if (os.EqualsLiteral("Darwin 10"))
-    return DRIVER_OS_OS_X_10_6;
+    return OperatingSystem::OSX10_6;
   else if (os.EqualsLiteral("Darwin 11"))
-    return DRIVER_OS_OS_X_10_7;
+    return OperatingSystem::OSX10_7;
   else if (os.EqualsLiteral("Darwin 12"))
-    return DRIVER_OS_OS_X_10_8;
+    return OperatingSystem::OSX10_8;
   else if (os.EqualsLiteral("Darwin 13"))
-    return DRIVER_OS_OS_X_10_9;
+    return OperatingSystem::OSX10_9;
   else if (os.EqualsLiteral("Darwin 14"))
-    return DRIVER_OS_OS_X_10_10;
+    return OperatingSystem::OSX10_10;
+  else if (os.EqualsLiteral("Darwin 15"))
+    return OperatingSystem::OSX10_11;
+  else if (os.EqualsLiteral("Darwin 16"))
+    return OperatingSystem::OSX10_12;
   else if (os.EqualsLiteral("Android"))
-    return DRIVER_OS_ANDROID;
+    return OperatingSystem::Android;
+  // For historical reasons, "All" in blocklist means "All Windows"
   else if (os.EqualsLiteral("All"))
-    return DRIVER_OS_ALL;
+    return OperatingSystem::Windows;
 
-  return DRIVER_OS_UNKNOWN;
+  return OperatingSystem::Unknown;
 }
 
 static GfxDeviceFamily*
-BlacklistDevicesToDeviceFamily(nsIDOMHTMLCollection* aDevices)
+BlacklistDevicesToDeviceFamily(nsTArray<nsCString>& devices)
 {
-  uint32_t length;
-  if (NS_FAILED(aDevices->GetLength(&length)))
+  if (devices.Length() == 0)
     return nullptr;
 
-  // For each <device>, get its device ID, and return a freshly-allocated
+  // For each device, get its device ID, and return a freshly-allocated
   // GfxDeviceFamily with the contents of that array.
   GfxDeviceFamily* deviceIds = new GfxDeviceFamily;
 
-  for (uint32_t i = 0; i < length; ++i) {
-    nsCOMPtr<nsIDOMNode> node;
-    if (NS_FAILED(aDevices->Item(i, getter_AddRefs(node))) || !node)
-      continue;
-
-    nsAutoString deviceValue;
-    if (!BlacklistNodeToTextValue(node, deviceValue))
-      continue;
-
-    deviceIds->AppendElement(deviceValue);
+  for (uint32_t i = 0; i < devices.Length(); ++i) {
+    // We make sure we don't add any "empty" device entries to the array, so
+    // we don't need to check if devices[i] is empty.
+    deviceIds->AppendElement(NS_ConvertUTF8toUTF16(devices[i]));
   }
 
   return deviceIds;
@@ -348,6 +339,8 @@ BlacklistFeatureToGfxFeature(const nsAString& aFeature)
     return nsIGfxInfo::FEATURE_WEBRTC_HW_ACCELERATION_DECODE;
   else if (aFeature.EqualsLiteral("WEBRTC_HW_ACCELERATION"))
     return nsIGfxInfo::FEATURE_WEBRTC_HW_ACCELERATION;
+  else if (aFeature.EqualsLiteral("CANVAS2D_ACCELERATION"))
+      return nsIGfxInfo::FEATURE_CANVAS2D_ACCELERATION;
 
   // If we don't recognize the feature, it may be new, and something
   // this version doesn't understand.  So, nothing to do.  This is
@@ -382,8 +375,12 @@ BlacklistComparatorToComparisonOp(const nsAString& op)
 {
   if (op.EqualsLiteral("LESS_THAN"))
     return DRIVER_LESS_THAN;
+  else if (op.EqualsLiteral("BUILD_ID_LESS_THAN"))
+    return DRIVER_BUILD_ID_LESS_THAN;
   else if (op.EqualsLiteral("LESS_THAN_OR_EQUAL"))
     return DRIVER_LESS_THAN_OR_EQUAL;
+  else if (op.EqualsLiteral("BUILD_ID_LESS_THAN_OR_EQUAL"))
+    return DRIVER_BUILD_ID_LESS_THAN_OR_EQUAL;
   else if (op.EqualsLiteral("GREATER_THAN"))
     return DRIVER_GREATER_THAN;
   else if (op.EqualsLiteral("GREATER_THAN_OR_EQUAL"))
@@ -402,60 +399,16 @@ BlacklistComparatorToComparisonOp(const nsAString& op)
   return DRIVER_COMPARISON_IGNORED;
 }
 
-// Arbitrarily returns the first |tagname| child of |element|.
-static bool
-BlacklistNodeGetChildByName(nsIDOMElement *element,
-                            const nsAString& tagname,
-                            nsIDOMNode** firstchild)
-{
-  nsCOMPtr<nsIDOMHTMLCollection> nodelist;
-  if (NS_FAILED(element->GetElementsByTagName(tagname,
-                                              getter_AddRefs(nodelist))) ||
-      !nodelist) {
-    return false;
-  }
-
-  nsCOMPtr<nsIDOMNode> node;
-  if (NS_FAILED(nodelist->Item(0, getter_AddRefs(node))) || !node)
-    return false;
-
-  node.forget(firstchild);
-  return true;
-}
 
 /*
-
-<gfxBlacklistEntry>
-  <os>WINNT 6.0</os>
-  <vendor>0x8086</vendor>
-  <devices>
-    <device>0x2582</device>
-    <device>0x2782</device>
-  </devices>
-  <feature> DIRECT3D_10_LAYERS </feature>
-  <featureStatus> BLOCKED_DRIVER_VERSION </featureStatus>
-  <driverVersion> 8.52.322.2202 </driverVersion>
-  <driverVersionComparator> LESS_THAN_OR_EQUAL </driverVersionComparator>
-</gfxBlacklistEntry>
-
+  Deserialize Blacklist entries from string.
+  e.g:
+  os:WINNT 6.0\tvendor:0x8086\tdevices:0x2582,0x2782\tfeature:DIRECT3D_10_LAYERS\tfeatureStatus:BLOCKED_DRIVER_VERSION\tdriverVersion:8.52.322.2202\tdriverVersionComparator:LESS_THAN_OR_EQUAL
 */
 static bool
-BlacklistEntryToDriverInfo(nsIDOMNode* aBlacklistEntry,
+BlacklistEntryToDriverInfo(nsCString& aBlacklistEntry,
                            GfxDriverInfo& aDriverInfo)
 {
-  nsAutoString nodename;
-  if (NS_FAILED(aBlacklistEntry->GetNodeName(nodename)) ||
-      nodename != NS_LITERAL_STRING(BLACKLIST_ENTRY_TAG_NAME)) {
-    return false;
-  }
-
-  nsCOMPtr<nsIDOMElement> element = do_QueryInterface(aBlacklistEntry);
-  if (!element)
-    return false;
-
-  nsCOMPtr<nsIDOMNode> dataNode;
-  nsAutoString dataValue;
-
   // If we get an application version to be zero, something is not working
   // and we are not going to bother checking the blocklist versions.
   // See TestGfxWidgets.cpp for how version comparison works.
@@ -464,175 +417,123 @@ BlacklistEntryToDriverInfo(nsIDOMNode* aBlacklistEntry,
   static mozilla::Version appV(GfxInfoBase::GetApplicationVersion().get());
   if (appV <= zeroV) {
       gfxCriticalErrorOnce(gfxCriticalError::DefaultOptions(false)) << "Invalid application version " << GfxInfoBase::GetApplicationVersion().get();
-  } else if (BlacklistNodeGetChildByName(element,
-                                         NS_LITERAL_STRING("versionRange"),
-                                         getter_AddRefs(dataNode))) {
-    if (BlacklistAttrToTextValue(dataNode,
-                                 NS_LITERAL_STRING("minVersion"),
-                                 dataValue)) {
-      mozilla::Version minV(NS_ConvertUTF16toUTF8(dataValue).get());
-      if (minV > zeroV && appV < minV) {
+  }
+
+  nsTArray<nsCString> keyValues;
+  ParseString(aBlacklistEntry, '\t', keyValues);
+
+  aDriverInfo.mRuleId = NS_LITERAL_CSTRING("FEATURE_FAILURE_DL_BLACKLIST_NO_ID");
+
+  for (uint32_t i = 0; i < keyValues.Length(); ++i) {
+    nsCString keyValue = keyValues[i];
+    nsTArray<nsCString> splitted;
+    ParseString(keyValue, ':', splitted);
+    if (splitted.Length() != 2) {
+      // If we don't recognize the input data, we do not want to proceed.
+      gfxCriticalErrorOnce(CriticalLog::DefaultOptions(false)) << "Unrecognized data " << keyValue.get();
+      return false;
+    }
+    nsCString key = splitted[0];
+    nsCString value = splitted[1];
+    NS_ConvertUTF8toUTF16 dataValue(value);
+
+    if (value.Length() == 0) {
+      // Safety check for empty values.
+      gfxCriticalErrorOnce(CriticalLog::DefaultOptions(false)) << "Empty value for " << key.get();
+      return false;
+    }
+
+    if (key.EqualsLiteral("blockID")) {
+       nsCString blockIdStr = NS_LITERAL_CSTRING("FEATURE_FAILURE_DL_BLACKLIST_") + value;
+       aDriverInfo.mRuleId = blockIdStr.get();
+    } else if (key.EqualsLiteral("os")) {
+      aDriverInfo.mOperatingSystem = BlacklistOSToOperatingSystem(dataValue);
+    } else if (key.EqualsLiteral("osversion")) {
+      aDriverInfo.mOperatingSystemVersion = strtoul(value.get(), nullptr, 10);
+    } else if (key.EqualsLiteral("vendor")) {
+      aDriverInfo.mAdapterVendor = dataValue;
+    } else if (key.EqualsLiteral("feature")) {
+      aDriverInfo.mFeature = BlacklistFeatureToGfxFeature(dataValue);
+      if (aDriverInfo.mFeature < 0) {
+        // If we don't recognize the feature, we do not want to proceed.
+        gfxCriticalErrorOnce(CriticalLog::DefaultOptions(false)) << "Unrecognized feature " << value.get();
+        return false;
+      }
+    } else if (key.EqualsLiteral("featureStatus")) {
+      aDriverInfo.mFeatureStatus = BlacklistFeatureStatusToGfxFeatureStatus(dataValue);
+    } else if (key.EqualsLiteral("driverVersion")) {
+      uint64_t version;
+      if (ParseDriverVersion(dataValue, &version))
+        aDriverInfo.mDriverVersion = version;
+    } else if (key.EqualsLiteral("driverVersionMax")) {
+      uint64_t version;
+      if (ParseDriverVersion(dataValue, &version))
+        aDriverInfo.mDriverVersionMax = version;
+    } else if (key.EqualsLiteral("driverVersionComparator")) {
+      aDriverInfo.mComparisonOp = BlacklistComparatorToComparisonOp(dataValue);
+    } else if (key.EqualsLiteral("model")) {
+      aDriverInfo.mModel = dataValue;
+    } else if (key.EqualsLiteral("product")) {
+      aDriverInfo.mProduct = dataValue;
+    } else if (key.EqualsLiteral("manufacturer")) {
+      aDriverInfo.mManufacturer = dataValue;
+    } else if (key.EqualsLiteral("hardware")) {
+      aDriverInfo.mHardware = dataValue;
+    } else if (key.EqualsLiteral("versionRange")) {
+      nsTArray<nsCString> versionRange;
+      ParseString(value, ',', versionRange);
+      if (versionRange.Length() != 2) {
+        gfxCriticalErrorOnce(CriticalLog::DefaultOptions(false)) << "Unrecognized versionRange " << value.get();
+        return false;
+      }
+      nsCString minValue = versionRange[0];
+      nsCString maxValue = versionRange[1];
+
+      mozilla::Version minV(minValue.get());
+      mozilla::Version maxV(maxValue.get());
+
+      if (minV > zeroV && !(appV >= minV)) {
         // The version of the application is less than the minimal version
         // this blocklist entry applies to, so we can just ignore it by
         // returning false and letting the caller deal with it.
         return false;
       }
-    }
-
-    if (BlacklistAttrToTextValue(dataNode,
-                                 NS_LITERAL_STRING("maxVersion"),
-                                 dataValue)) {
-      mozilla::Version maxV(NS_ConvertUTF16toUTF8(dataValue).get());
-      if (maxV > zeroV && appV > maxV) {
+      if (maxV > zeroV && !(appV <= maxV)) {
         // The version of the application is more than the maximal version
         // this blocklist entry applies to, so we can just ignore it by
         // returning false and letting the caller deal with it.
         return false;
       }
-    }
-  }
-
-  // <os>WINNT 6.0</os>
-  if (BlacklistNodeGetChildByName(element, NS_LITERAL_STRING("os"),
-                                  getter_AddRefs(dataNode))) {
-    BlacklistNodeToTextValue(dataNode, dataValue);
-    aDriverInfo.mOperatingSystem = BlacklistOSToOperatingSystem(dataValue);
-  }
-
-  // <osversion>14</osversion> currently only used for Android
-  if (BlacklistNodeGetChildByName(element, NS_LITERAL_STRING("osversion"),
-                                  getter_AddRefs(dataNode))) {
-    BlacklistNodeToTextValue(dataNode, dataValue);
-    aDriverInfo.mOperatingSystemVersion = strtoul(NS_LossyConvertUTF16toASCII(dataValue).get(),
-                                                  nullptr, 10);
-  }
-
-  // <vendor>0x8086</vendor>
-  if (BlacklistNodeGetChildByName(element, NS_LITERAL_STRING("vendor"),
-                                  getter_AddRefs(dataNode))) {
-    BlacklistNodeToTextValue(dataNode, dataValue);
-    aDriverInfo.mAdapterVendor = dataValue;
-  }
-
-  // <devices>
-  //   <device>0x2582</device>
-  //   <device>0x2782</device>
-  // </devices>
-  if (BlacklistNodeGetChildByName(element, NS_LITERAL_STRING("devices"),
-                                  getter_AddRefs(dataNode))) {
-    nsCOMPtr<nsIDOMElement> devicesElement = do_QueryInterface(dataNode);
-    if (devicesElement) {
-
-      // Get only the <device> nodes, because BlacklistDevicesToDeviceFamily
-      // assumes it is passed no other nodes.
-      nsCOMPtr<nsIDOMHTMLCollection> devices;
-      if (NS_SUCCEEDED(devicesElement->GetElementsByTagName(NS_LITERAL_STRING("device"),
-                                                            getter_AddRefs(devices)))) {
-        GfxDeviceFamily* deviceIds = BlacklistDevicesToDeviceFamily(devices);
-        if (deviceIds) {
-          // Get GfxDriverInfo to adopt the devices array we created.
-          aDriverInfo.mDeleteDevices = true;
-          aDriverInfo.mDevices = deviceIds;
-        }
+    } else if (key.EqualsLiteral("devices")) {
+      nsTArray<nsCString> devices;
+      ParseString(value, ',', devices);
+      GfxDeviceFamily* deviceIds = BlacklistDevicesToDeviceFamily(devices);
+      if (deviceIds) {
+        // Get GfxDriverInfo to adopt the devices array we created.
+        aDriverInfo.mDeleteDevices = true;
+        aDriverInfo.mDevices = deviceIds;
       }
     }
+    // We explicitly ignore unknown elements.
   }
-
-  // <feature> DIRECT3D_10_LAYERS </feature>
-  if (BlacklistNodeGetChildByName(element, NS_LITERAL_STRING("feature"),
-                                  getter_AddRefs(dataNode))) {
-    BlacklistNodeToTextValue(dataNode, dataValue);
-    aDriverInfo.mFeature = BlacklistFeatureToGfxFeature(dataValue);
-    if (aDriverInfo.mFeature < 0) {
-      // If we don't recognize the feature, we do not want to proceed.
-      gfxWarning() << "Unrecognized feature " << NS_ConvertUTF16toUTF8(dataValue).get();
-      return false;
-    }
-  }
-
-  // <featureStatus> BLOCKED_DRIVER_VERSION </featureStatus>
-  if (BlacklistNodeGetChildByName(element, NS_LITERAL_STRING("featureStatus"),
-                                  getter_AddRefs(dataNode))) {
-    BlacklistNodeToTextValue(dataNode, dataValue);
-    aDriverInfo.mFeatureStatus = BlacklistFeatureStatusToGfxFeatureStatus(dataValue);
-  }
-
-  // <driverVersion> 8.52.322.2202 </driverVersion>
-  if (BlacklistNodeGetChildByName(element, NS_LITERAL_STRING("driverVersion"),
-                                  getter_AddRefs(dataNode))) {
-    BlacklistNodeToTextValue(dataNode, dataValue);
-    uint64_t version;
-    if (ParseDriverVersion(dataValue, &version))
-      aDriverInfo.mDriverVersion = version;
-  }
-
-  // <driverVersionMax> 8.52.322.2202 </driverVersionMax>
-  if (BlacklistNodeGetChildByName(element, NS_LITERAL_STRING("driverVersionMax"),
-                                  getter_AddRefs(dataNode))) {
-    BlacklistNodeToTextValue(dataNode, dataValue);
-    uint64_t version;
-    if (ParseDriverVersion(dataValue, &version))
-      aDriverInfo.mDriverVersionMax = version;
-  }
-
-  // <driverVersionComparator> LESS_THAN_OR_EQUAL </driverVersionComparator>
-  if (BlacklistNodeGetChildByName(element, NS_LITERAL_STRING("driverVersionComparator"),
-                                  getter_AddRefs(dataNode))) {
-    BlacklistNodeToTextValue(dataNode, dataValue);
-    aDriverInfo.mComparisonOp = BlacklistComparatorToComparisonOp(dataValue);
-  }
-
-  // <model>foo</model>
-  if (BlacklistNodeGetChildByName(element, NS_LITERAL_STRING("model"),
-                                  getter_AddRefs(dataNode))) {
-    BlacklistNodeToTextValue(dataNode, dataValue);
-    aDriverInfo.mModel = dataValue;
-  }
-  // <product>foo</product>
-  if (BlacklistNodeGetChildByName(element, NS_LITERAL_STRING("product"),
-                                  getter_AddRefs(dataNode))) {
-    BlacklistNodeToTextValue(dataNode, dataValue);
-    aDriverInfo.mProduct = dataValue;
-  }
-  // <manufacturer>foo</manufacturer>
-  if (BlacklistNodeGetChildByName(element, NS_LITERAL_STRING("manufacturer"),
-                                  getter_AddRefs(dataNode))) {
-    BlacklistNodeToTextValue(dataNode, dataValue);
-    aDriverInfo.mManufacturer = dataValue;
-  }
-  // <hardware>foo</hardware>
-  if (BlacklistNodeGetChildByName(element, NS_LITERAL_STRING("hardware"),
-                                  getter_AddRefs(dataNode))) {
-    BlacklistNodeToTextValue(dataNode, dataValue);
-    aDriverInfo.mHardware = dataValue;
-  }
-
-  // We explicitly ignore unknown elements.
 
   return true;
 }
 
 static void
-BlacklistEntriesToDriverInfo(nsIDOMHTMLCollection* aBlacklistEntries,
+BlacklistEntriesToDriverInfo(nsTArray<nsCString>& aBlacklistEntries,
                              nsTArray<GfxDriverInfo>& aDriverInfo)
 {
-  uint32_t length;
-  if (NS_FAILED(aBlacklistEntries->GetLength(&length)))
-    return;
-
   aDriverInfo.Clear();
-  aDriverInfo.SetLength(length);
-  for (uint32_t i = 0; i < length; ++i) {
-    nsCOMPtr<nsIDOMNode> blacklistEntry;
-    if (NS_SUCCEEDED(aBlacklistEntries->Item(i,
-                                             getter_AddRefs(blacklistEntry))) &&
-        blacklistEntry) {
-      GfxDriverInfo di;
-      if (BlacklistEntryToDriverInfo(blacklistEntry, di)) {
-        aDriverInfo[i] = di;
-        // Prevent di falling out of scope from destroying the devices.
-        di.mDeleteDevices = false;
-      }
+  aDriverInfo.SetLength(aBlacklistEntries.Length());
+
+  for (uint32_t i = 0; i < aBlacklistEntries.Length(); ++i) {
+    nsCString blacklistEntry = aBlacklistEntries[i];
+    GfxDriverInfo di;
+    if (BlacklistEntryToDriverInfo(blacklistEntry, di)) {
+      aDriverInfo[i] = di;
+      // Prevent di falling out of scope from destroying the devices.
+      di.mDeleteDevices = false;
     }
   }
 }
@@ -642,19 +543,14 @@ GfxInfoBase::Observe(nsISupports* aSubject, const char* aTopic,
                      const char16_t* aData)
 {
   if (strcmp(aTopic, "blocklist-data-gfxItems") == 0) {
-    nsCOMPtr<nsIDOMElement> gfxItems = do_QueryInterface(aSubject);
-    if (gfxItems) {
-      nsCOMPtr<nsIDOMHTMLCollection> blacklistEntries;
-      if (NS_SUCCEEDED(gfxItems->
-            GetElementsByTagName(NS_LITERAL_STRING(BLACKLIST_ENTRY_TAG_NAME),
-                                 getter_AddRefs(blacklistEntries))) &&
-          blacklistEntries)
-      {
-        nsTArray<GfxDriverInfo> driverInfo;
-        BlacklistEntriesToDriverInfo(blacklistEntries, driverInfo);
-        EvaluateDownloadedBlacklist(driverInfo);
-      }
+    nsTArray<GfxDriverInfo> driverInfo;
+    nsTArray<nsCString> blacklistEntries;
+    nsCString utf8Data = NS_ConvertUTF16toUTF8(aData);
+    if (utf8Data.Length() > 0) {
+      ParseString(utf8Data, '\n', blacklistEntries);
     }
+    BlacklistEntriesToDriverInfo(blacklistEntries, driverInfo);
+    EvaluateDownloadedBlacklist(driverInfo);
   }
 
   return NS_OK;
@@ -674,6 +570,7 @@ GfxInfoBase::Init()
 {
   InitGfxDriverInfoShutdownObserver();
   gfxPrefs::GetSingleton();
+  MediaPrefs::GetSingleton();
 
   nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
   if (os) {
@@ -684,12 +581,13 @@ GfxInfoBase::Init()
 }
 
 NS_IMETHODIMP
-GfxInfoBase::GetFeatureStatus(int32_t aFeature, int32_t* aStatus)
+GfxInfoBase::GetFeatureStatus(int32_t aFeature, nsACString& aFailureId, int32_t* aStatus)
 {
   int32_t blocklistAll = gfxPrefs::BlocklistAll();
   if (blocklistAll > 0) {
     gfxCriticalErrorOnce(gfxCriticalError::DefaultOptions(false)) << "Forcing blocklisting all features";
     *aStatus = FEATURE_BLOCKED_DEVICE;
+    aFailureId = "FEATURE_FAILURE_BLOCK_ALL";
     return NS_OK;
   } else if (blocklistAll < 0) {
     gfxCriticalErrorOnce(gfxCriticalError::DefaultOptions(false)) << "Ignoring any feature blocklisting.";
@@ -697,26 +595,69 @@ GfxInfoBase::GetFeatureStatus(int32_t aFeature, int32_t* aStatus)
     return NS_OK;
   }
 
-  if (GetPrefValueForFeature(aFeature, *aStatus))
+  if (GetPrefValueForFeature(aFeature, *aStatus, aFailureId)) {
     return NS_OK;
+  }
 
   if (XRE_IsContentProcess()) {
       // Delegate to the parent process.
       mozilla::dom::ContentChild* cc = mozilla::dom::ContentChild::GetSingleton();
       bool success;
-      cc->SendGetGraphicsFeatureStatus(aFeature, aStatus, &success);
+      nsCString remoteFailureId;
+      cc->SendGetGraphicsFeatureStatus(aFeature, aStatus, &remoteFailureId, &success);
+      aFailureId = remoteFailureId;
       return success ? NS_OK : NS_ERROR_FAILURE;
   }
 
   nsString version;
   nsTArray<GfxDriverInfo> driverInfo;
-  return GetFeatureStatusImpl(aFeature, aStatus, version, driverInfo);
+  nsresult rv = GetFeatureStatusImpl(aFeature, aStatus, version, driverInfo, aFailureId);
+  return rv;
+}
+
+// Matching OS go somewhat beyond the simple equality check because of the
+// "All Windows" and "All OS X" variations.
+//
+// aBlockedOS is describing the system(s) we are trying to block.
+// aSystemOS is describing the system we are running on.
+//
+// aSystemOS should not be "Windows" or "OSX" - it should be set to
+// a particular version instead.
+// However, it is valid for aBlockedOS to be one of those generic values,
+// as we could be blocking all of the versions.
+inline bool
+MatchingOperatingSystems(OperatingSystem aBlockedOS, OperatingSystem aSystemOS)
+{
+  MOZ_ASSERT(aSystemOS != OperatingSystem::Windows &&
+             aSystemOS != OperatingSystem::OSX);
+
+  // If the block entry OS is unknown, it doesn't match
+  if (aBlockedOS == OperatingSystem::Unknown) {
+    return false;
+  }
+
+#if defined (XP_WIN)
+  if (aBlockedOS == OperatingSystem::Windows) {
+    // We do want even "unknown" aSystemOS to fall under "all windows"
+    return true;
+  }
+#endif
+
+#if defined (XP_MACOSX)
+  if (aBlockedOS == OperatingSystem::OSX) {
+    // We do want even "unknown" aSystemOS to fall under "all OS X"
+    return true;
+  }
+#endif
+
+  return aSystemOS == aBlockedOS;
 }
 
 int32_t
 GfxInfoBase::FindBlocklistedDeviceInList(const nsTArray<GfxDriverInfo>& info,
                                          nsAString& aSuggestedVersion,
                                          int32_t aFeature,
+                                         nsACString& aFailureId,
                                          OperatingSystem os)
 {
   int32_t status = nsIGfxInfo::FEATURE_STATUS_UNKNOWN;
@@ -724,14 +665,8 @@ GfxInfoBase::FindBlocklistedDeviceInList(const nsTArray<GfxDriverInfo>& info,
   uint32_t i = 0;
   for (; i < info.Length(); i++) {
     // Do the operating system check first, no point in getting the driver
-    // info if we won't need to use it.  If the OS of the system we are running
-    // on is unknown, we still let DRIVER_OS_ALL catch and disable it; 
-    // if the OS of the downloadable entry is unknown, we skip the entry
-    // as invalid.
-    if (info[i].mOperatingSystem == DRIVER_OS_UNKNOWN ||
-        (info[i].mOperatingSystem != DRIVER_OS_ALL &&
-         info[i].mOperatingSystem != os))
-    {
+    // info if we won't need to use it.
+    if (!MatchingOperatingSystems(info[i].mOperatingSystem, os)) {
       continue;
     }
 
@@ -803,8 +738,14 @@ GfxInfoBase::FindBlocklistedDeviceInList(const nsTArray<GfxDriverInfo>& info,
     case DRIVER_LESS_THAN:
       match = driverVersion < info[i].mDriverVersion;
       break;
+    case DRIVER_BUILD_ID_LESS_THAN:
+      match = (driverVersion & 0xFFFF) < info[i].mDriverVersion;
+      break;
     case DRIVER_LESS_THAN_OR_EQUAL:
       match = driverVersion <= info[i].mDriverVersion;
+      break;
+    case DRIVER_BUILD_ID_LESS_THAN_OR_EQUAL:
+      match = (driverVersion & 0xFFFF) <= info[i].mDriverVersion;
       break;
     case DRIVER_GREATER_THAN:
       match = driverVersion > info[i].mDriverVersion;
@@ -846,6 +787,11 @@ GfxInfoBase::FindBlocklistedDeviceInList(const nsTArray<GfxDriverInfo>& info,
           info[i].mFeature == aFeature)
       {
         status = info[i].mFeatureStatus;
+        if (!info[i].mRuleId.IsEmpty()) {
+          aFailureId = info[i].mRuleId.get();
+        } else {
+          aFailureId = "FEATURE_FAILURE_DL_BLACKLIST_NO_ID";
+        }
         break;
       }
     }
@@ -869,6 +815,7 @@ GfxInfoBase::FindBlocklistedDeviceInList(const nsTArray<GfxDriverInfo>& info,
       if (nvVendorID.Equals(adapterVendorID2, nsCaseInsensitiveStringComparator()) &&
         nv310mDeviceId.Equals(adapterDeviceID2, nsCaseInsensitiveStringComparator())) {
         status = nsIGfxInfo::FEATURE_BLOCKED_DEVICE;
+        aFailureId = "FEATURE_FAILURE_D2D_NV310M_BLOCK";
       }
     }
   }
@@ -898,6 +845,7 @@ GfxInfoBase::GetFeatureStatusImpl(int32_t aFeature,
                                   int32_t* aStatus,
                                   nsAString& aSuggestedVersion,
                                   const nsTArray<GfxDriverInfo>& aDriverInfo,
+                                  nsACString& aFailureId,
                                   OperatingSystem* aOS /* = nullptr */)
 {
   if (aFeature <= 0) {
@@ -913,9 +861,7 @@ GfxInfoBase::GetFeatureStatusImpl(int32_t aFeature,
 
   // If an operating system was provided by the derived GetFeatureStatusImpl,
   // grab it here. Otherwise, the OS is unknown.
-  OperatingSystem os = DRIVER_OS_UNKNOWN;
-  if (aOS)
-    os = *aOS;
+  OperatingSystem os = (aOS ? *aOS : OperatingSystem::Unknown);
 
   nsAutoString adapterVendorID;
   nsAutoString adapterDeviceID;
@@ -924,6 +870,8 @@ GfxInfoBase::GetFeatureStatusImpl(int32_t aFeature,
       NS_FAILED(GetAdapterDeviceID(adapterDeviceID)) ||
       NS_FAILED(GetAdapterDriverVersion(adapterDriverVersionString)))
   {
+    aFailureId = "FEATURE_FAILURE_CANT_RESOLVE_ADAPTER";
+    *aStatus = FEATURE_BLOCKED_DEVICE;
     return NS_OK;
   }
 
@@ -933,12 +881,12 @@ GfxInfoBase::GetFeatureStatusImpl(int32_t aFeature,
   // can back out our static block without doing a release).
   int32_t status;
   if (aDriverInfo.Length()) {
-    status = FindBlocklistedDeviceInList(aDriverInfo, aSuggestedVersion, aFeature, os);
+    status = FindBlocklistedDeviceInList(aDriverInfo, aSuggestedVersion, aFeature, aFailureId, os);
   } else {
     if (!mDriverInfo) {
       mDriverInfo = new nsTArray<GfxDriverInfo>();
     }
-    status = FindBlocklistedDeviceInList(GetGfxDriverInfo(), aSuggestedVersion, aFeature, os);
+    status = FindBlocklistedDeviceInList(GetGfxDriverInfo(), aSuggestedVersion, aFeature, aFailureId, os);
   }
 
   // It's now done being processed. It's safe to set the status to STATUS_OK.
@@ -962,8 +910,9 @@ GfxInfoBase::GetFeatureSuggestedDriverVersion(int32_t aFeature,
   }
 
   int32_t status;
+  nsCString discardFailureId;
   nsTArray<GfxDriverInfo> driverInfo;
-  return GetFeatureStatusImpl(aFeature, &status, aVersion, driverInfo);
+  return GetFeatureStatusImpl(aFeature, &status, aVersion, driverInfo, discardFailureId);
 }
 
 
@@ -993,6 +942,7 @@ GfxInfoBase::EvaluateDownloadedBlacklist(nsTArray<GfxDriverInfo>& aDriverInfo)
     nsIGfxInfo::FEATURE_WEBGL_MSAA,
     nsIGfxInfo::FEATURE_STAGEFRIGHT,
     nsIGfxInfo::FEATURE_WEBRTC_HW_ACCELERATION,
+    nsIGfxInfo::FEATURE_CANVAS2D_ACCELERATION,
     0
   };
 
@@ -1003,10 +953,12 @@ GfxInfoBase::EvaluateDownloadedBlacklist(nsTArray<GfxDriverInfo>& aDriverInfo)
   int i = 0;
   while (features[i]) {
     int32_t status;
+    nsCString failureId;
     nsAutoString suggestedVersion;
     if (NS_SUCCEEDED(GetFeatureStatusImpl(features[i], &status,
                                           suggestedVersion,
-                                          aDriverInfo))) {
+                                          aDriverInfo,
+                                          failureId))) {
       switch (status) {
         default:
         case nsIGfxInfo::FEATURE_STATUS_OK:
@@ -1025,7 +977,7 @@ GfxInfoBase::EvaluateDownloadedBlacklist(nsTArray<GfxDriverInfo>& aDriverInfo)
         case nsIGfxInfo::FEATURE_BLOCKED_DEVICE:
         case nsIGfxInfo::FEATURE_DISCOURAGED:
         case nsIGfxInfo::FEATURE_BLOCKED_OS_VERSION:
-          SetPrefValueForFeature(features[i], status);
+          SetPrefValueForFeature(features[i], status, failureId);
           break;
       }
     }
@@ -1075,7 +1027,7 @@ NS_IMETHODIMP GfxInfoBase::GetFailures(uint32_t* failureCount,
   // and the strings in it should be small as well (the error messages in the
   // code.)  The second copy happens with the Clone() calls.  Technically,
   // we don't need the mutex lock after the StringVectorCopy() call.
-  std::vector<std::pair<int32_t,std::string> > loggedStrings = logForwarder->StringsVectorCopy();
+  LoggingRecord loggedStrings = logForwarder->LoggingRecordCopy();
   *failureCount = loggedStrings.size();
 
   if (*failureCount != 0) {
@@ -1093,11 +1045,11 @@ NS_IMETHODIMP GfxInfoBase::GetFailures(uint32_t* failureCount,
     }
 
     /* copy over the failure messages into the array we just allocated */
-    std::vector<std::pair<int32_t, std::string> >::const_iterator it;
+    LoggingRecord::const_iterator it;
     uint32_t i=0;
     for(it = loggedStrings.begin() ; it != loggedStrings.end(); ++it, i++) {
-      (*failures)[i] = (char*)nsMemory::Clone((*it).second.c_str(), (*it).second.size() + 1);
-      if (indices) (*indices)[i] = (*it).first;
+      (*failures)[i] = (char*)nsMemory::Clone(Get<1>(*it).c_str(), Get<1>(*it).size() + 1);
+      if (indices) (*indices)[i] = Get<0>(*it);
 
       if (!(*failures)[i]) {
         /* <sarcasm> I'm too afraid to use an inline function... </sarcasm> */
@@ -1142,10 +1094,11 @@ nsresult GfxInfoBase::GetInfo(JSContext* aCx, JS::MutableHandle<JS::Value> aResu
   return NS_OK;
 }
 
+nsAutoCString gBaseAppVersion;
+
 const nsCString&
 GfxInfoBase::GetApplicationVersion()
 {
-  static nsCString version;
   static bool versionInitialized = false;
   if (!versionInitialized) {
     // If we fail to get the version, we will not try again.
@@ -1154,10 +1107,10 @@ GfxInfoBase::GetApplicationVersion()
     // Get the version from xpcom/system/nsIXULAppInfo.idl
     nsCOMPtr<nsIXULAppInfo> app = do_GetService("@mozilla.org/xre/app-info;1");
     if (app) {
-      app->GetVersion(version);
+      app->GetVersion(gBaseAppVersion);
     }
   }
-  return version;
+  return gBaseAppVersion;
 }
 
 void
@@ -1219,6 +1172,30 @@ GetLayersBackendName(layers::LayersBackend aBackend)
   }
 }
 
+static inline bool
+SetJSPropertyString(JSContext* aCx, JS::Handle<JSObject*> aObj,
+                    const char* aProp, const char* aString)
+{
+  JS::Rooted<JSString*> str(aCx, JS_NewStringCopyZ(aCx, aString));
+  if (!str) {
+    return false;
+  }
+
+  JS::Rooted<JS::Value> val(aCx, JS::StringValue(str));
+  return JS_SetProperty(aCx, aObj, aProp, val);
+}
+
+template <typename T>
+static inline bool
+AppendJSElement(JSContext* aCx, JS::Handle<JSObject*> aObj, const T& aValue)
+{
+  uint32_t index;
+  if (!JS_GetArrayLength(aCx, aObj, &index)) {
+    return false;
+  }
+  return JS_SetElement(aCx, aObj, index, aValue);
+}
+
 nsresult
 GfxInfoBase::GetFeatures(JSContext* aCx, JS::MutableHandle<JS::Value> aOut)
 {
@@ -1232,11 +1209,7 @@ GfxInfoBase::GetFeatures(JSContext* aCx, JS::MutableHandle<JS::Value> aOut)
                                   ? gfxPlatform::GetPlatform()->GetCompositorBackend()
                                   : layers::LayersBackend::LAYERS_NONE;
   const char* backendName = GetLayersBackendName(backend);
-  {
-    JS::Rooted<JSString*> str(aCx, JS_NewStringCopyZ(aCx, backendName));
-    JS::Rooted<JS::Value> val(aCx, StringValue(str));
-    JS_SetProperty(aCx, obj, "compositor", val);
-  }
+  SetJSPropertyString(aCx, obj, "compositor", backendName);
 
   // If graphics isn't initialized yet, just stop now.
   if (!gfxPlatform::Initialized()) {
@@ -1247,8 +1220,116 @@ GfxInfoBase::GetFeatures(JSContext* aCx, JS::MutableHandle<JS::Value> aOut)
   return NS_OK;
 }
 
+nsresult GfxInfoBase::GetFeatureLog(JSContext* aCx, JS::MutableHandle<JS::Value> aOut)
+{
+  JS::Rooted<JSObject*> containerObj(aCx, JS_NewPlainObject(aCx));
+  if (!containerObj) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+  aOut.setObject(*containerObj);
+
+  JS::Rooted<JSObject*> featureArray(aCx, JS_NewArrayObject(aCx, 0));
+  if (!featureArray) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+
+  // Collect features.
+  gfxConfig::ForEachFeature([&](const char* aName,
+                                const char* aDescription,
+                                FeatureState& aFeature) -> void {
+    JS::Rooted<JSObject*> obj(aCx, JS_NewPlainObject(aCx));
+    if (!obj) {
+      return;
+    }
+    if (!SetJSPropertyString(aCx, obj, "name", aName) ||
+        !SetJSPropertyString(aCx, obj, "description", aDescription) ||
+        !SetJSPropertyString(aCx, obj, "status", FeatureStatusToString(aFeature.GetValue())))
+    {
+      return;
+    }
+
+    JS::Rooted<JS::Value> log(aCx);
+    if (!BuildFeatureStateLog(aCx, aFeature, &log)) {
+      return;
+    }
+    if (!JS_SetProperty(aCx, obj, "log", log)) {
+      return;
+    }
+
+    if (!AppendJSElement(aCx, featureArray, obj)) {
+      return;
+    }
+  });
+
+  JS::Rooted<JSObject*> fallbackArray(aCx, JS_NewArrayObject(aCx, 0));
+  if (!fallbackArray) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+
+  // Collect fallbacks.
+  gfxConfig::ForEachFallback([&](const char* aName, const char* aMessage) -> void {
+    JS::Rooted<JSObject*> obj(aCx, JS_NewPlainObject(aCx));
+    if (!obj) {
+      return;
+    }
+
+    if (!SetJSPropertyString(aCx, obj, "name", aName) ||
+        !SetJSPropertyString(aCx, obj, "message", aMessage))
+    {
+      return;
+    }
+
+    if (!AppendJSElement(aCx, fallbackArray, obj)) {
+      return;
+    }
+  });
+
+  JS::Rooted<JS::Value> val(aCx);
+
+  val = JS::ObjectValue(*featureArray);
+  JS_SetProperty(aCx, containerObj, "features", val);
+
+  val = JS::ObjectValue(*fallbackArray);
+  JS_SetProperty(aCx, containerObj, "fallbacks", val);
+
+  return NS_OK;
+}
+
+bool
+GfxInfoBase::BuildFeatureStateLog(JSContext* aCx, const FeatureState& aFeature,
+                                  JS::MutableHandle<JS::Value> aOut)
+{
+  JS::Rooted<JSObject*> log(aCx, JS_NewArrayObject(aCx, 0));
+  if (!log) {
+    return false;
+  }
+  aOut.setObject(*log);
+
+  aFeature.ForEachStatusChange([&](const char* aType,
+                                   FeatureStatus aStatus,
+                                   const char* aMessage) -> void {
+    JS::Rooted<JSObject*> obj(aCx, JS_NewPlainObject(aCx));
+    if (!obj) {
+      return;
+    }
+
+    if (!SetJSPropertyString(aCx, obj, "type", aType) ||
+        !SetJSPropertyString(aCx, obj, "status", FeatureStatusToString(aStatus)) ||
+        (aMessage && !SetJSPropertyString(aCx, obj, "message", aMessage)))
+    {
+      return;
+    }
+
+    if (!AppendJSElement(aCx, log, obj)) {
+      return;
+    }
+  });
+
+  return true;
+}
+
 void
-GfxInfoBase::DescribeFeatures(JSContext* cx, JS::Handle<JSObject*> aOut)
+GfxInfoBase::DescribeFeatures(JSContext* aCx, JS::Handle<JSObject*> aObj)
 {
 }
 
@@ -1256,7 +1337,8 @@ bool
 GfxInfoBase::InitFeatureObject(JSContext* aCx,
                                JS::Handle<JSObject*> aContainer,
                                const char* aName,
-                               mozilla::gfx::FeatureStatus aFeatureStatus,
+                               int32_t aFeature,
+                               Maybe<mozilla::gfx::FeatureStatus> aFeatureStatus,
                                JS::MutableHandle<JSObject*> aOutObj)
 {
   JS::Rooted<JSObject*> obj(aCx, JS_NewPlainObject(aCx));
@@ -1264,10 +1346,16 @@ GfxInfoBase::InitFeatureObject(JSContext* aCx,
     return false;
   }
 
-  const char* status = FeatureStatusToString(aFeatureStatus);
+  nsCString failureId = NS_LITERAL_CSTRING("OK");
+  int32_t unused;
+  if (!NS_SUCCEEDED(GetFeatureStatus(aFeature, failureId, &unused))) {
+    return false;
+  }
 
   // Set "status".
-  {
+  if (aFeatureStatus) {
+    const char* status = FeatureStatusToString(aFeatureStatus.value());
+
     JS::Rooted<JSString*> str(aCx, JS_NewStringCopyZ(aCx, status));
     JS::Rooted<JS::Value> val(aCx, JS::StringValue(str));
     JS_SetProperty(aCx, obj, "status", val);
@@ -1281,6 +1369,62 @@ GfxInfoBase::InitFeatureObject(JSContext* aCx,
 
   aOutObj.set(obj);
   return true;
+}
+
+nsresult
+GfxInfoBase::GetActiveCrashGuards(JSContext* aCx, JS::MutableHandle<JS::Value> aOut)
+{
+  JS::Rooted<JSObject*> array(aCx, JS_NewArrayObject(aCx, 0));
+  if (!array) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+  aOut.setObject(*array);
+
+  DriverCrashGuard::ForEachActiveCrashGuard([&](const char* aName,
+                                                const char* aPrefName) -> void {
+    JS::Rooted<JSObject*> obj(aCx, JS_NewPlainObject(aCx));
+    if (!obj) {
+      return;
+    }
+    if (!SetJSPropertyString(aCx, obj, "type", aName)) {
+      return;
+    }
+    if (!SetJSPropertyString(aCx, obj, "prefName", aPrefName)) {
+      return;
+    }
+    if (!AppendJSElement(aCx, array, obj)) {
+      return;
+    }
+  });
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+GfxInfoBase::GetContentBackend(nsAString & aContentBackend)
+{
+  BackendType backend = gfxPlatform::GetPlatform()->GetDefaultContentBackend();
+  nsString outStr;
+
+  switch (backend) {
+  case BackendType::DIRECT2D1_1: {
+    outStr.AppendPrintf("Direct2D 1.1");
+    break;
+  }
+  case BackendType::SKIA: {
+    outStr.AppendPrintf("Skia");
+    break;
+  }
+  case BackendType::CAIRO: {
+    outStr.AppendPrintf("Cairo");
+    break;
+  }
+  default:
+    return NS_ERROR_FAILURE;
+  }
+
+  aContentBackend.Assign(outStr);
+  return NS_OK;
 }
 
 GfxInfoCollectorBase::GfxInfoCollectorBase()

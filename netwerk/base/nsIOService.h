@@ -31,10 +31,9 @@
 #define NS_IPC_IOSERVICE_SET_OFFLINE_TOPIC "ipc:network:set-offline"
 #define NS_IPC_IOSERVICE_SET_CONNECTIVITY_TOPIC "ipc:network:set-connectivity"
 
-static const char gScheme[][sizeof("resource")] =
-    {"chrome", "file", "http", "https", "jar", "data", "resource"};
+static const char gScheme[][sizeof("moz-safe-about")] =
+    {"chrome", "file", "http", "https", "jar", "data", "about", "moz-safe-about", "resource"};
 
-class nsAsyncRedirectVerifyHelper;
 class nsINetworkLinkService;
 class nsIPrefBranch;
 class nsIProtocolProxyService2;
@@ -44,9 +43,8 @@ class nsPISocketTransportService;
 
 namespace mozilla {
 namespace net {
-    class NeckoChild;
-} // namespace net
-} // namespace mozilla
+class NeckoChild;
+class nsAsyncRedirectVerifyHelper;
 
 class nsIOService final : public nsIIOService2
                         , public nsIObserver
@@ -84,12 +82,21 @@ public:
     PRIntervalTime LastOfflineStateChange() { return mLastOfflineStateChange; }
     PRIntervalTime LastConnectivityChange() { return mLastConnectivityChange; }
     PRIntervalTime LastNetworkLinkChange() { return mLastNetworkLinkChange; }
-    bool IsShutdown() { return mShutdown; }
+    bool IsNetTearingDown() { return mShutdown || mOfflineForProfileChange ||
+                                     mHttpHandlerAlreadyShutingDown; }
+    PRIntervalTime NetTearingDownStarted() { return mNetTearingDownStarted; }
+
+    // nsHttpHandler is going to call this function to inform nsIOService that network
+    // is in process of tearing down. Moving nsHttpConnectionMgr::Shutdown to nsIOService
+    // caused problems (bug 1242755) so we doing it in this way.
+    // As soon as nsIOService gets notification that it is shutdown it is going to
+    // reset mHttpHandlerAlreadyShutingDown.
+    void SetHttpHandlerAlreadyShutingDown();
+
     bool IsLinkUp();
 
-    // Should only be called from NeckoChild. Use SetAppOffline instead.
-    void SetAppOfflineInternal(uint32_t appId, int32_t status);
-
+    // Used to trigger a recheck of the captive portal status
+    nsresult RecheckCaptivePortal();
 private:
     // These shouldn't be called directly:
     // - construct using GetInstance
@@ -122,10 +129,6 @@ private:
     void LookupProxyInfo(nsIURI *aURI, nsIURI *aProxyURI, uint32_t aProxyFlags,
                          nsCString *aScheme, nsIProxyInfo **outPI);
 
-    // notify content processes of offline status
-    // 'status' must be a nsIAppOfflineInfo mode constant.
-    void NotifyAppOfflineStatus(uint32_t appId, int32_t status);
-
     nsresult NewChannelFromURIWithProxyFlagsInternal(nsIURI* aURI,
                                                      nsIURI* aProxyURI,
                                                      uint32_t aProxyFlags,
@@ -133,12 +136,13 @@ private:
                                                      nsIChannel** result);
 
     nsresult SpeculativeConnectInternal(nsIURI *aURI,
+                                        nsIPrincipal *aPrincipal,
                                         nsIInterfaceRequestor *aCallbacks,
                                         bool aAnonymous);
 
 private:
     bool                                 mOffline;
-    bool                                 mOfflineForProfileChange;
+    mozilla::Atomic<bool, mozilla::Relaxed>  mOfflineForProfileChange;
     bool                                 mManageLinkStatus;
     bool                                 mConnectivity;
     // If true, the connectivity state will be mirrored by IOService.offline
@@ -150,7 +154,8 @@ private:
     bool                                 mSettingOffline;
     bool                                 mSetOfflineValue;
 
-    bool                                 mShutdown;
+    mozilla::Atomic<bool, mozilla::Relaxed> mShutdown;
+    mozilla::Atomic<bool, mozilla::Relaxed> mHttpHandlerAlreadyShutingDown;
 
     nsCOMPtr<nsPISocketTransportService> mSocketTransportService;
     nsCOMPtr<nsPIDNSService>             mDNSService;
@@ -159,7 +164,7 @@ private:
     nsCOMPtr<nsINetworkLinkService>      mNetworkLinkService;
     bool                                 mNetworkLinkServiceInitialized;
 
-    // Cached protocol handlers
+    // Cached protocol handlers, only accessed on the main thread
     nsWeakPtr                            mWeakHandler[NS_N(gScheme)];
 
     // cached categories
@@ -167,12 +172,7 @@ private:
 
     nsTArray<int32_t>                    mRestrictedPortList;
 
-    bool                                 mAutoDialEnabled;
     bool                                 mNetworkNotifyChanged;
-    int32_t                              mPreviousWifiState;
-    // Hashtable of (appId, nsIAppOffineInfo::mode) pairs
-    // that is used especially in IsAppOffline
-    nsDataHashtable<nsUint32HashKey, int32_t> mAppsOfflineStatus;
 
     static bool                          sTelemetryEnabled;
 
@@ -180,9 +180,12 @@ private:
     // PR_ConnectContinue and PR_Close blocking time.  If we spend very long
     // time in any of these functions we want to know if and what network
     // change has happened shortly before.
-    mozilla::Atomic<PRIntervalTime>  mLastOfflineStateChange;
-    mozilla::Atomic<PRIntervalTime>  mLastConnectivityChange;
-    mozilla::Atomic<PRIntervalTime>  mLastNetworkLinkChange;
+    mozilla::Atomic<PRIntervalTime> mLastOfflineStateChange;
+    mozilla::Atomic<PRIntervalTime> mLastConnectivityChange;
+    mozilla::Atomic<PRIntervalTime> mLastNetworkLinkChange;
+
+    // Time a network tearing down started.
+    mozilla::Atomic<PRIntervalTime> mNetTearingDownStarted;
 public:
     // Used for all default buffer sizes that necko allocates.
     static uint32_t   gDefaultSegmentSize;
@@ -190,41 +193,11 @@ public:
 };
 
 /**
- * This class is passed as the subject to a NotifyObservers call for the
- * "network:app-offline-status-changed" topic.
- * Observers will use the appId and mode to get the offline status of an app.
- */
-class nsAppOfflineInfo : public nsIAppOfflineInfo
-{
-    NS_DECL_THREADSAFE_ISUPPORTS
-public:
-    nsAppOfflineInfo(uint32_t aAppId, int32_t aMode)
-        : mAppId(aAppId), mMode(aMode)
-    {
-    }
-
-    NS_IMETHODIMP GetMode(int32_t *aMode) override
-    {
-        *aMode = mMode;
-        return NS_OK;
-    }
-
-    NS_IMETHODIMP GetAppId(uint32_t *aAppId) override
-    {
-        *aAppId = mAppId;
-        return NS_OK;
-    }
-
-private:
-    virtual ~nsAppOfflineInfo() {}
-
-    uint32_t mAppId;
-    int32_t mMode;
-};
-
-/**
  * Reference to the IO service singleton. May be null.
  */
 extern nsIOService* gIOService;
+
+} // namespace net
+} // namespace mozilla
 
 #endif // nsIOService_h__

@@ -4,27 +4,34 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "MediaQueue.h"
 #include "VideoSink.h"
+#include "MediaPrefs.h"
 
 namespace mozilla {
 
 extern LazyLogModule gMediaDecoderLog;
-#define VSINK_LOG(msg, ...) \
-  MOZ_LOG(gMediaDecoderLog, LogLevel::Debug, \
-    ("VideoSink=%p " msg, this, ##__VA_ARGS__))
-#define VSINK_LOG_V(msg, ...) \
-  MOZ_LOG(gMediaDecoderLog, LogLevel::Verbose, \
-  ("VideoSink=%p " msg, this, ##__VA_ARGS__))
+
+#undef FMT
+#undef DUMP_LOG
+
+#define FMT(x, ...) "VideoSink=%p " x, this, ##__VA_ARGS__
+#define VSINK_LOG(x, ...)   MOZ_LOG(gMediaDecoderLog, LogLevel::Debug,   (FMT(x, ##__VA_ARGS__)))
+#define VSINK_LOG_V(x, ...) MOZ_LOG(gMediaDecoderLog, LogLevel::Verbose, (FMT(x, ##__VA_ARGS__)))
+#define DUMP_LOG(x, ...) NS_DebugBreak(NS_DEBUG_WARNING, nsPrintfCString(FMT(x, ##__VA_ARGS__)).get(), nullptr, nullptr, -1)
 
 using namespace mozilla::layers;
 
 namespace media {
 
+// Minimum update frequency is 1/120th of a second, i.e. half the
+// duration of a 60-fps frame.
+static const int64_t MIN_UPDATE_INTERVAL_US = 1000000 / (60 * 2);
+
 VideoSink::VideoSink(AbstractThread* aThread,
                      MediaSink* aAudioSink,
                      MediaQueue<MediaData>& aVideoQueue,
                      VideoFrameContainer* aContainer,
-                     bool aRealTime,
                      FrameStatistics& aFrameStats,
                      uint32_t aVQueueSentToCompositerSize)
   : mOwnerThread(aThread)
@@ -32,12 +39,12 @@ VideoSink::VideoSink(AbstractThread* aThread,
   , mVideoQueue(aVideoQueue)
   , mContainer(aContainer)
   , mProducerID(ImageContainer::AllocateProducerID())
-  , mRealTime(aRealTime)
   , mFrameStats(aFrameStats)
   , mVideoFrameEndTime(-1)
   , mHasVideo(false)
   , mUpdateScheduler(aThread)
   , mVideoQueueSendToCompositorSize(aVQueueSentToCompositerSize)
+  , mMinVideoQueueSize(MediaPrefs::RuinAvSync() ? 1 : 0)
 {
   MOZ_ASSERT(mAudioSink, "AudioSink should exist.");
 }
@@ -142,6 +149,9 @@ VideoSink::SetPlaying(bool aPlaying)
     mUpdateScheduler.Reset();
     // Since playback is paused, tell compositor to render only current frame.
     RenderVideoFrames(1);
+    if (mContainer) {
+      mContainer->ClearCachedResources();
+    }
   }
 
   mAudioSink->SetPlaying(aPlaying);
@@ -166,8 +176,34 @@ VideoSink::Start(int64_t aStartTime, const MediaInfo& aInfo)
 
   if (mHasVideo) {
     mEndPromise = mEndPromiseHolder.Ensure(__func__);
+
+    // If the underlying MediaSink has an end promise for the video track (which
+    // happens when mAudioSink refers to a DecodedStream), we must wait for it
+    // to complete before resolving our own end promise. Otherwise, MDSM might
+    // stop playback before DecodedStream plays to the end and cause
+    // test_streams_element_capture.html to time out.
+    RefPtr<GenericPromise> p = mAudioSink->OnEnded(TrackInfo::kVideoTrack);
+    if (p) {
+      RefPtr<VideoSink> self = this;
+      mVideoSinkEndRequest.Begin(p->Then(mOwnerThread, __func__,
+        [self] () {
+          self->mVideoSinkEndRequest.Complete();
+          self->TryUpdateRenderedVideoFrames();
+          // It is possible the video queue size is 0 and we have no frames to
+          // render. However, we need to call MaybeResolveEndPromise() to ensure
+          // mEndPromiseHolder is resolved.
+          self->MaybeResolveEndPromise();
+        }, [self] () {
+          self->mVideoSinkEndRequest.Complete();
+          self->TryUpdateRenderedVideoFrames();
+          self->MaybeResolveEndPromise();
+        }));
+    }
+
     ConnectListener();
-    TryUpdateRenderedVideoFrames();
+    // Run the render loop at least once so we can resolve the end promise
+    // when video duration is 0.
+    UpdateRenderedVideoFrames();
   }
 }
 
@@ -183,7 +219,8 @@ VideoSink::Stop()
   mUpdateScheduler.Reset();
   if (mHasVideo) {
     DisconnectListener();
-    mEndPromiseHolder.Resolve(true, __func__);
+    mVideoSinkEndRequest.DisconnectIfExists();
+    mEndPromiseHolder.ResolveIfExists(true, __func__);
     mEndPromise = nullptr;
   }
   mVideoFrameEndTime = -1;
@@ -216,7 +253,7 @@ VideoSink::Shutdown()
 }
 
 void
-VideoSink::OnVideoQueueEvent(RefPtr<MediaData>&& aSample)
+VideoSink::OnVideoQueuePushed(RefPtr<MediaData>&& aSample)
 {
   AssertOwnerThread();
   // Listen to push event, VideoSink should try rendering ASAP if first frame
@@ -231,10 +268,38 @@ VideoSink::OnVideoQueueEvent(RefPtr<MediaData>&& aSample)
 }
 
 void
-VideoSink::Redraw()
+VideoSink::OnVideoQueueFinished()
 {
   AssertOwnerThread();
-  RenderVideoFrames(1);
+  // Run render loop if the end promise is not resolved yet.
+  if (!mUpdateScheduler.IsScheduled() &&
+      mAudioSink->IsPlaying() &&
+      !mEndPromiseHolder.IsEmpty()) {
+    UpdateRenderedVideoFrames();
+  }
+}
+
+void
+VideoSink::Redraw(const VideoInfo& aInfo)
+{
+  AssertOwnerThread();
+
+  // No video track, nothing to draw.
+  if (!aInfo.IsValid() || !mContainer) {
+    return;
+  }
+
+  if (VideoQueue().GetSize() > 0) {
+    RenderVideoFrames(1);
+    return;
+  }
+
+  // When we reach here, it means there are no frames in this video track.
+  // Draw a blank frame to ensure there is something in the image container
+  // to fire 'loadeddata'.
+  RefPtr<Image> blank =
+    mContainer->GetImageContainer()->CreatePlanarYCbCrImage();
+  mContainer->SetCurrentFrame(aInfo.mDisplay, blank, TimeStamp::Now());
 }
 
 void
@@ -260,7 +325,9 @@ VideoSink::ConnectListener()
 {
   AssertOwnerThread();
   mPushListener = VideoQueue().PushEvent().Connect(
-    mOwnerThread, this, &VideoSink::OnVideoQueueEvent);
+    mOwnerThread, this, &VideoSink::OnVideoQueuePushed);
+  mFinishListener = VideoQueue().FinishEvent().Connect(
+    mOwnerThread, this, &VideoSink::OnVideoQueueFinished);
 }
 
 void
@@ -268,6 +335,7 @@ VideoSink::DisconnectListener()
 {
   AssertOwnerThread();
   mPushListener.Disconnect();
+  mFinishListener.Disconnect();
 }
 
 void
@@ -277,13 +345,13 @@ VideoSink::RenderVideoFrames(int32_t aMaxFrames,
 {
   AssertOwnerThread();
 
-  nsAutoTArray<RefPtr<MediaData>,16> frames;
+  AutoTArray<RefPtr<MediaData>,16> frames;
   VideoQueue().GetFirstElements(aMaxFrames, &frames);
   if (frames.IsEmpty() || !mContainer) {
     return;
   }
 
-  nsAutoTArray<ImageContainer::NonOwningImage,16> images;
+  AutoTArray<ImageContainer::NonOwningImage,16> images;
   TimeStamp lastFrameTime;
   MediaSink::PlaybackParams params = mAudioSink->GetPlaybackParams();
   for (uint32_t i = 0; i < frames.Length(); ++i) {
@@ -291,7 +359,8 @@ VideoSink::RenderVideoFrames(int32_t aMaxFrames,
 
     frame->mSentToCompositor = true;
 
-    if (!frame->mImage || !frame->mImage->IsValid()) {
+    if (!frame->mImage || !frame->mImage->IsValid() ||
+        !frame->mImage->GetSize().width || !frame->mImage->GetSize().height) {
       continue;
     }
 
@@ -335,48 +404,50 @@ VideoSink::UpdateRenderedVideoFrames()
   AssertOwnerThread();
   MOZ_ASSERT(mAudioSink->IsPlaying(), "should be called while playing.");
 
+  // Get the current playback position.
   TimeStamp nowTime;
   const int64_t clockTime = mAudioSink->GetPosition(&nowTime);
-  // Skip frames up to the frame at the playback position, and figure out
-  // the time remaining until it's time to display the next frame and drop
-  // the current frame.
   NS_ASSERTION(clockTime >= 0, "Should have positive clock time.");
 
-  int64_t remainingTime = -1;
-  if (VideoQueue().GetSize() > 0) {
-    RefPtr<MediaData> currentFrame = VideoQueue().PopFront();
-    int32_t framesRemoved = 0;
-    while (VideoQueue().GetSize() > 0) {
-      MediaData* nextFrame = VideoQueue().PeekFront();
-      if (!mRealTime && nextFrame->mTime > clockTime) {
-        remainingTime = nextFrame->mTime - clockTime;
-        break;
-      }
-      ++framesRemoved;
-      if (!currentFrame->As<VideoData>()->mSentToCompositor) {
-        mFrameStats.NotifyDecodedFrames(0, 0, 1);
-        VSINK_LOG_V("discarding video frame mTime=%lld clock_time=%lld",
-                    currentFrame->mTime, clockTime);
-      }
-      currentFrame = VideoQueue().PopFront();
-    }
-    VideoQueue().PushFront(currentFrame);
-    if (framesRemoved > 0) {
-      mVideoFrameEndTime = currentFrame->GetEndTime();
+  // Skip frames up to the playback position.
+  int64_t lastFrameEndTime = 0;
+  while (VideoQueue().GetSize() > mMinVideoQueueSize &&
+         clockTime >= VideoQueue().PeekFront()->GetEndTime()) {
+    RefPtr<MediaData> frame = VideoQueue().PopFront();
+    lastFrameEndTime = frame->GetEndTime();
+    if (frame->As<VideoData>()->mSentToCompositor) {
       mFrameStats.NotifyPresentedFrame();
+    } else {
+      mFrameStats.NotifyDecodedFrames({ 0, 0, 1 });
+      VSINK_LOG_V("discarding video frame mTime=%lld clock_time=%lld",
+                  frame->mTime, clockTime);
     }
   }
+
+  // The presentation end time of the last video frame displayed is either
+  // the end time of the current frame, or if we dropped all frames in the
+  // queue, the end time of the last frame we removed from the queue.
+  RefPtr<MediaData> currentFrame = VideoQueue().PeekFront();
+  mVideoFrameEndTime = std::max(mVideoFrameEndTime,
+    currentFrame ? currentFrame->GetEndTime() : lastFrameEndTime);
+
+  MaybeResolveEndPromise();
 
   RenderVideoFrames(mVideoQueueSendToCompositorSize, clockTime, nowTime);
 
-  // No next fame to render. There is no need to schedule next render
-  // loop. We will run render loops again upon incoming frames.
-  if (remainingTime < 0) {
+  // Get the timestamp of the next frame. Schedule the next update at
+  // the start time of the next frame. If we don't have a next frame,
+  // we will run render loops again upon incoming frames.
+  nsTArray<RefPtr<MediaData>> frames;
+  VideoQueue().GetFirstElements(2, &frames);
+  if (frames.Length() < 2) {
     return;
   }
 
+  int64_t nextFrameTime = frames[1]->mTime;
+  int64_t delta = std::max<int64_t>((nextFrameTime - clockTime), MIN_UPDATE_INTERVAL_US);
   TimeStamp target = nowTime + TimeDuration::FromMicroseconds(
-    remainingTime / mAudioSink->GetPlaybackParams().mPlaybackRate);
+     delta / mAudioSink->GetPlaybackParams().mPlaybackRate);
 
   RefPtr<VideoSink> self = this;
   mUpdateScheduler.Ensure(target, [self] () {
@@ -384,6 +455,31 @@ VideoSink::UpdateRenderedVideoFrames()
   }, [self] () {
     self->UpdateRenderedVideoFramesByTimer();
   });
+}
+
+void
+VideoSink::MaybeResolveEndPromise()
+{
+  AssertOwnerThread();
+  // All frames are rendered, Let's resolve the promise.
+  if (VideoQueue().IsFinished() &&
+      VideoQueue().GetSize() <= 1 &&
+      !mVideoSinkEndRequest.Exists()) {
+    mEndPromiseHolder.ResolveIfExists(true, __func__);
+  }
+}
+
+void
+VideoSink::DumpDebugInfo()
+{
+  AssertOwnerThread();
+  DUMP_LOG(
+    "IsStarted=%d IsPlaying=%d, VideoQueue: finished=%d size=%d, "
+    "mVideoFrameEndTime=%lld mHasVideo=%d mVideoSinkEndRequest.Exists()=%d "
+    "mEndPromiseHolder.IsEmpty()=%d",
+    IsStarted(), IsPlaying(), VideoQueue().IsFinished(), VideoQueue().GetSize(),
+    mVideoFrameEndTime, mHasVideo, mVideoSinkEndRequest.Exists(), mEndPromiseHolder.IsEmpty());
+  mAudioSink->DumpDebugInfo();
 }
 
 } // namespace media

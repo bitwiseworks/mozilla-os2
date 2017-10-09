@@ -67,6 +67,7 @@ SdpHelper::CopyTransportParams(size_t numComponents,
 
 bool
 SdpHelper::AreOldTransportParamsValid(const Sdp& oldAnswer,
+                                      const Sdp& offerersPreviousSdp,
                                       const Sdp& newOffer,
                                       size_t level)
 {
@@ -90,10 +91,27 @@ SdpHelper::AreOldTransportParamsValid(const Sdp& oldAnswer,
     return false;
   }
 
-  // TODO(bug 906986): Check for ICE restart (will need to pass the offerer's
-  // old SDP to compare it against |newOffer|)
+  if (IceCredentialsDiffer(newOffer.GetMediaSection(level),
+                           offerersPreviousSdp.GetMediaSection(level))) {
+    return false;
+  }
 
   return true;
+}
+
+bool
+SdpHelper::IceCredentialsDiffer(const SdpMediaSection& msection1,
+                                const SdpMediaSection& msection2)
+{
+  const SdpAttributeList& attrs1(msection1.GetAttributeList());
+  const SdpAttributeList& attrs2(msection2.GetAttributeList());
+
+  if ((attrs1.GetIceUfrag() != attrs2.GetIceUfrag()) ||
+      (attrs1.GetIcePwd() != attrs2.GetIcePwd())) {
+    return true;
+  }
+
+  return false;
 }
 
 nsresult
@@ -728,8 +746,25 @@ SdpHelper::AddCommonExtmaps(
   auto& theirExtmap = remoteMsection.GetAttributeList().GetExtmap().mExtmaps;
   for (auto i = theirExtmap.begin(); i != theirExtmap.end(); ++i) {
     for (auto j = localExtensions.begin(); j != localExtensions.end(); ++j) {
-      if (i->extensionname == j->extensionname) {
-        localExtmap->mExtmaps.push_back(*i);
+      // verify we have a valid combination of directions.  For kInactive
+      // we'll just not add the response
+      if (i->extensionname == j->extensionname &&
+          (((i->direction == SdpDirectionAttribute::Direction::kSendrecv ||
+             i->direction == SdpDirectionAttribute::Direction::kSendonly) &&
+            (j->direction == SdpDirectionAttribute::Direction::kSendrecv ||
+             j->direction == SdpDirectionAttribute::Direction::kRecvonly)) ||
+
+           ((i->direction == SdpDirectionAttribute::Direction::kSendrecv ||
+             i->direction == SdpDirectionAttribute::Direction::kRecvonly) &&
+            (j->direction == SdpDirectionAttribute::Direction::kSendrecv ||
+             j->direction == SdpDirectionAttribute::Direction::kSendonly)))) {
+        auto k = *i; // we need to modify it
+        if (j->direction == SdpDirectionAttribute::Direction::kSendonly) {
+          k.direction = SdpDirectionAttribute::Direction::kRecvonly;
+        } else if (j->direction == SdpDirectionAttribute::Direction::kRecvonly) {
+          k.direction = SdpDirectionAttribute::Direction::kSendonly;
+        }
+        localExtmap->mExtmaps.push_back(k);
 
         // RFC 5285 says that ids >= 4096 can be used by the offerer to
         // force the answerer to pick, otherwise the value in the offer is

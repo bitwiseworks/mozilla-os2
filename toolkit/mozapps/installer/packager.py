@@ -38,6 +38,7 @@ SIGN_LIBS = [
     'softokn3',
     'nssdbm3',
     'freebl3',
+    'freeblpriv3',
     'freebl_32fpu_3',
     'freebl_32int_3',
     'freebl_32int64_3',
@@ -80,12 +81,16 @@ class ToolLauncher(object):
         for e in extra_env:
             env[e] = extra_env[e]
 
-        # For VC12, make sure we can find the right bitness of pgort120.dll
-        if 'VS120COMNTOOLS' in env and not buildconfig.substs['HAVE_64BIT_BUILD']:
-            vc12dir = os.path.abspath(os.path.join(env['VS120COMNTOOLS'],
-                                                   '../../VC/bin'))
-            if os.path.exists(vc12dir):
-                env['PATH'] = vc12dir + ';' + env['PATH']
+        # For VC12+, make sure we can find the right bitness of pgort1x0.dll
+        if not buildconfig.substs.get('HAVE_64BIT_BUILD'):
+            for e in ('VS140COMNTOOLS', 'VS120COMNTOOLS'):
+                if e not in env:
+                    continue
+
+                vcdir = os.path.abspath(os.path.join(env[e], '../../VC/bin'))
+                if os.path.exists(vcdir):
+                    env['PATH'] = '%s;%s' % (vcdir, env['PATH'])
+                    break
 
         # Work around a bug in Python 2.7.2 and lower where unicode types in
         # environment variables aren't handled by subprocess.
@@ -265,6 +270,9 @@ def main():
                         help='Enable jar optimizations')
     parser.add_argument('--unify', default='',
                         help='Base directory of another build to unify with')
+    parser.add_argument('--disable-compression', action='store_false',
+                        dest='compress', default=True,
+                        help='Disable jar compression')
     parser.add_argument('manifest', default=None, nargs='?',
                         help='Manifest file name')
     parser.add_argument('source', help='Source directory')
@@ -286,10 +294,11 @@ def main():
     if args.format == 'flat':
         formatter = FlatFormatter(copier)
     elif args.format == 'jar':
-        formatter = JarFormatter(copier, optimize=args.optimizejars)
+        formatter = JarFormatter(copier, compress=args.compress, optimize=args.optimizejars)
     elif args.format == 'omni':
         formatter = OmniJarFormatter(copier,
                                      buildconfig.substs['OMNIJAR_NAME'],
+                                     compress=args.compress,
                                      optimize=args.optimizejars,
                                      non_resources=args.non_resource)
     else:
@@ -316,7 +325,7 @@ def main():
         # native architecture.
         args.source, args.unify = sorted([args.source, args.unify],
                                          key=is_native, reverse=True)
-        if is_native(args.source):
+        if is_native(args.source) and not buildconfig.substs['CROSS_COMPILE']:
             launcher.tooldir = args.source
     elif not buildconfig.substs['CROSS_COMPILE']:
         launcher.tooldir = mozpath.join(buildconfig.topobjdir, 'dist')
@@ -359,7 +368,7 @@ def main():
 
     # shlibsign libraries
     if launcher.can_launch():
-        if not mozinfo.isMac:
+        if not mozinfo.isMac and buildconfig.substs.get('COMPILE_ENVIRONMENT'):
             for lib in SIGN_LIBS:
                 libbase = mozpath.join(respath, '%s%s') \
                     % (buildconfig.substs['DLL_PREFIX'], lib)

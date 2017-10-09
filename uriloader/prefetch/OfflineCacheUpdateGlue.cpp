@@ -15,15 +15,15 @@
 #include "mozilla/Logging.h"
 
 //
-// To enable logging (see prlog.h for full details):
+// To enable logging (see mozilla/Logging.h for full details):
 //
-//    set NSPR_LOG_MODULES=nsOfflineCacheUpdate:5
-//    set NSPR_LOG_FILE=offlineupdate.log
+//    set MOZ_LOG=nsOfflineCacheUpdate:5
+//    set MOZ_LOG_FILE=offlineupdate.log
 //
 // this enables LogLevel::Info level information and places all output in
 // the file offlineupdate.log
 //
-extern PRLogModuleInfo *gOfflineCacheUpdateLog;
+extern mozilla::LazyLogModule gOfflineCacheUpdateLog;
 
 #undef LOG
 #define LOG(args) MOZ_LOG(gOfflineCacheUpdateLog, mozilla::LogLevel::Debug, args)
@@ -99,14 +99,18 @@ OfflineCacheUpdateGlue::Init(nsIURI *aManifestURI,
                              nsIURI *aDocumentURI,
                              nsIPrincipal* aLoadingPrincipal,
                              nsIDOMDocument *aDocument,
-                             nsIFile *aCustomProfileDir,
-                             uint32_t aAppID,
-                             bool aInBrowser)
+                             nsIFile *aCustomProfileDir)
 {
+    nsresult rv;
+
+    nsAutoCString originSuffix;
+    rv = aLoadingPrincipal->GetOriginSuffix(originSuffix);
+    NS_ENSURE_SUCCESS(rv, rv);
+
     nsOfflineCacheUpdateService* service =
         nsOfflineCacheUpdateService::EnsureService();
     if (service) {
-        service->FindUpdate(aManifestURI, aAppID, aInBrowser, aCustomProfileDir,
+        service->FindUpdate(aManifestURI, originSuffix, aCustomProfileDir,
                             getter_AddRefs(mUpdate));
         mCoalesced = !!mUpdate;
     }
@@ -126,7 +130,7 @@ OfflineCacheUpdateGlue::Init(nsIURI *aManifestURI,
     }
 
     return mUpdate->Init(aManifestURI, aDocumentURI, aLoadingPrincipal, nullptr,
-                         aCustomProfileDir, aAppID, aInBrowser);
+                         aCustomProfileDir);
 }
 
 void

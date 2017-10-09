@@ -3,12 +3,13 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 var Cu = Components.utils;
+var Ci = Components.interfaces;
 
 const { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
-const { GetDevices, GetDeviceString } = require("devtools/client/shared/devices");
-const { Services } = Cu.import("resource://gre/modules/Services.jsm");
+const { getDevices, getDeviceString } = require("devtools/client/shared/devices");
 const { Simulators, Simulator } = require("devtools/client/webide/modules/simulators");
-const EventEmitter = require('devtools/shared/event-emitter');
+const Services = require("Services");
+const EventEmitter = require("devtools/shared/event-emitter");
 const promise = require("promise");
 const utils = require("devtools/client/webide/modules/utils");
 
@@ -41,7 +42,7 @@ var SimulatorEditor = {
       // This is the first time we run `init()`, bootstrap some things.
       form = this._form = document.querySelector("#simulator-editor");
       form.addEventListener("change", this.update.bind(this));
-      Simulators.on("configure", (e, simulator) => { this.edit(simulator) });
+      Simulators.on("configure", (e, simulator) => { this.edit(simulator); });
       // Extract the list of device simulation options we'll support.
       let deviceFields = form.querySelectorAll("*[data-device]");
       this._deviceOptions = Array.map(deviceFields, field => field.name);
@@ -79,14 +80,14 @@ var SimulatorEditor = {
     form.device.innerHTML = "";
     form.device.classList.remove("custom");
     opt(form.device, "custom", Strings.GetStringFromName("simulator_custom_device"));
-    promises.push(GetDevices().then(devices => {
+    promises.push(getDevices().then(devices => {
       devices.TYPES.forEach(type => {
         let b2gDevices = devices[type].filter(d => d.firefoxOS);
         if (b2gDevices.length < 1) {
           return;
         }
         let optgroup = document.createElement("optgroup");
-        optgroup.label = GetDeviceString(type);
+        optgroup.label = getDeviceString(type);
         b2gDevices.forEach(device => {
           this._devices[device.name] = device;
           opt(optgroup, device.name, device.name);
@@ -113,11 +114,37 @@ var SimulatorEditor = {
 
       // Update the form fields.
       this._form.name.value = simulator.name;
+
       this.updateVersionSelector();
       this.updateProfileSelector();
       this.updateDeviceSelector();
       this.updateDeviceFields();
+
+      // Change visibility of 'TV Simulator Menu'.
+      let tvSimMenu = document.querySelector("#tv_simulator_menu");
+      tvSimMenu.style.visibility = (this._simulator.type === "television") ?
+                                   "visible" : "hidden";
+
+      // Trigger any listener waiting for this update
+      let change = document.createEvent("HTMLEvents");
+      change.initEvent("change", true, true);
+      this._form.dispatchEvent(change);
     });
+  },
+
+  // Open the directory of TV Simulator config.
+  showTVConfigDirectory() {
+    let profD = Services.dirsvc.get("ProfD", Ci.nsIFile);
+    profD.append("extensions");
+    profD.append(this._simulator.addon.id);
+    profD.append("profile");
+    profD.append("dummy");
+    let profileDir = profD.path;
+
+    // Show the profile directory.
+    let nsLocalFile = Components.Constructor("@mozilla.org/file/local;1",
+                                           "nsILocalFile", "initWithPath");
+    new nsLocalFile(profileDir).reveal();
   },
 
   // Close the configuration panel.
@@ -145,7 +172,7 @@ var SimulatorEditor = {
   // Select an available option, or set the "custom" option.
   updateSelector(selector, value) {
     selector.value = value;
-    if (selector[selector.selectedIndex].value !== value) {
+    if (selector.selectedIndex == -1) {
       selector.value = "custom";
       selector.classList.add("custom");
       selector[selector.selectedIndex].textContent = value;
@@ -317,4 +344,9 @@ window.addEventListener("load", function onLoad() {
 
   // We just loaded, so we probably missed the first configure request.
   SimulatorEditor.edit(Simulators._lastConfiguredSimulator);
+
+  document.querySelector("#open-tv-dummy-directory").onclick = e => {
+    SimulatorEditor.showTVConfigDirectory();
+    e.preventDefault();
+  };
 });

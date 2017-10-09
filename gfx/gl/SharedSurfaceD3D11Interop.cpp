@@ -6,8 +6,11 @@
 #include "SharedSurfaceD3D11Interop.h"
 
 #include <d3d11.h>
+#include "gfxPrefs.h"
 #include "GLContext.h"
 #include "WGLLibrary.h"
+#include "nsPrintfCString.h"
+#include "mozilla/gfx/DeviceManagerDx.h"
 
 namespace mozilla {
 namespace gl {
@@ -109,106 +112,145 @@ while (!done) {
 */
 
 ////////////////////////////////////////////////////////////////////////////////
-// DXGL Device
+// DXInterop2Device
 
-class DXGLDevice : public RefCounted<DXGLDevice>
+class DXInterop2Device : public RefCounted<DXInterop2Device>
 {
 public:
-    MOZ_DECLARE_REFCOUNTED_TYPENAME(DXGLDevice)
+    MOZ_DECLARE_REFCOUNTED_TYPENAME(DXInterop2Device)
 
     WGLLibrary* const mWGL;
     const RefPtr<ID3D11Device> mD3D; // Only needed for lifetime guarantee.
-    const HANDLE mDXGLDeviceHandle;
+    const HANDLE mInteropDevice;
+    GLContext* const mGL;
 
-    static already_AddRefed<DXGLDevice> Open(WGLLibrary* wgl)
+    static already_AddRefed<DXInterop2Device> Open(WGLLibrary* wgl, GLContext* gl)
     {
         MOZ_ASSERT(wgl->HasDXInterop2());
-        gfxWindowsPlatform* plat = gfxWindowsPlatform::GetPlatform();
 
-        RefPtr<ID3D11Device> d3d = plat->GetD3D11ContentDevice();
+        const RefPtr<ID3D11Device> d3d = gfx::DeviceManagerDx::Get()->GetContentDevice();
         if (!d3d) {
-            NS_WARNING("Failed to create D3D11 device.");
+            gfxCriticalNote << "DXInterop2Device::Open: Failed to create D3D11 device.";
             return nullptr;
         }
 
-        HANDLE dxglDeviceHandle = wgl->fDXOpenDevice(d3d);
-        if (!dxglDeviceHandle) {
-            NS_WARNING("Failed to open D3D device for use by WGL.");
+        if (!gl->MakeCurrent())
+            return nullptr;
+
+        const auto interopDevice = wgl->fDXOpenDevice(d3d);
+        if (!interopDevice) {
+            gfxCriticalNote << "DXInterop2Device::Open: DXOpenDevice failed.";
             return nullptr;
         }
 
-        return MakeAndAddRef<DXGLDevice>(wgl, d3d, dxglDeviceHandle);
+        return MakeAndAddRef<DXInterop2Device>(wgl, d3d, interopDevice, gl);
     }
 
-    DXGLDevice(WGLLibrary* wgl, const RefPtr<ID3D11Device>& d3d, HANDLE dxglDeviceHandle)
+    DXInterop2Device(WGLLibrary* wgl, ID3D11Device* d3d, HANDLE interopDevice,
+                     GLContext* gl)
         : mWGL(wgl)
         , mD3D(d3d)
-        , mDXGLDeviceHandle(dxglDeviceHandle)
+        , mInteropDevice(interopDevice)
+        , mGL(gl)
     { }
 
-    ~DXGLDevice() {
-        if (!mWGL->fDXCloseDevice(mDXGLDeviceHandle)) {
-#ifdef DEBUG
-            uint32_t error = GetLastError();
-            printf_stderr("wglDXCloseDevice(0x%x) failed: GetLastError(): 0x%x\n",
-                          mDXGLDeviceHandle, error);
-#endif
-            MOZ_CRASH();
+    ~DXInterop2Device() {
+        const auto isCurrent = mGL->MakeCurrent();
+
+        if (mWGL->fDXCloseDevice(mInteropDevice))
+            return;
+
+        if (isCurrent) {
+            // That shouldn't have failed.
+            const uint32_t error = GetLastError();
+            const nsPrintfCString errorMessage("wglDXCloseDevice(0x%p) failed:"
+                                               " GetLastError(): %u\n",
+                                               mInteropDevice, error);
+            gfxCriticalError() << errorMessage.BeginReading();
         }
     }
 
-    HANDLE RegisterObject(void* dxObject, GLuint name, GLenum type, GLenum access) const {
-        HANDLE ret = mWGL->fDXRegisterObject(mDXGLDeviceHandle, dxObject, name, type,
-                                             access);
-        if (!ret) {
-#ifdef DEBUG
-            uint32_t error = GetLastError();
-            printf_stderr("wglDXRegisterObject(0x%x, 0x%x, %u, 0x%x, 0x%x) failed:"
-                          " GetLastError(): 0x%x\n", mDXGLDeviceHandle, dxObject, name,
-                          type, access, error);
-#endif
-            MOZ_CRASH();
-        }
-        return ret;
+    HANDLE RegisterObject(void* d3dObject, GLuint name, GLenum type,
+                          GLenum access) const
+    {
+        if (!mGL->MakeCurrent())
+            return nullptr;
+
+        const auto ret = mWGL->fDXRegisterObject(mInteropDevice, d3dObject, name, type,
+                                                 access);
+        if (ret)
+            return ret;
+
+        const uint32_t error = GetLastError();
+        const nsPrintfCString errorMessage("wglDXRegisterObject(0x%p, 0x%p, %u, 0x%04x,"
+                                           " 0x%04x) failed: GetLastError(): %u\n",
+                                           mInteropDevice, d3dObject, name, type, access,
+                                           error);
+        gfxCriticalNote << errorMessage.BeginReading();
+        return nullptr;
     }
 
-    bool UnregisterObject(HANDLE hObject) const {
-        bool ret = mWGL->fDXUnregisterObject(mDXGLDeviceHandle, hObject);
-        if (!ret) {
-#ifdef DEBUG
-            uint32_t error = GetLastError();
-            printf_stderr("wglDXUnregisterObject(0x%x, 0x%x) failed: GetLastError():"
-                          " 0x%x\n", mDXGLDeviceHandle, hObject, error);
-#endif
-            MOZ_CRASH();
+    bool UnregisterObject(HANDLE lockHandle) const {
+        const auto isCurrent = mGL->MakeCurrent();
+
+        if (mWGL->fDXUnregisterObject(mInteropDevice, lockHandle))
+            return true;
+
+        if (!isCurrent) {
+            // That shouldn't have failed.
+            const uint32_t error = GetLastError();
+            const nsPrintfCString errorMessage("wglDXUnregisterObject(0x%p, 0x%p) failed:"
+                                               " GetLastError(): %u\n",
+                                               mInteropDevice, lockHandle, error);
+            gfxCriticalError() << errorMessage.BeginReading();
         }
-        return ret;
+        return false;
     }
 
-    bool LockObject(HANDLE hObject) const {
-        bool ret = mWGL->fDXLockObjects(mDXGLDeviceHandle, 1, &hObject);
-        if (!ret) {
-#ifdef DEBUG
-            uint32_t error = GetLastError();
-            printf_stderr("wglDXLockObjects(0x%x, 1, {0x%x}) failed: GetLastError():"
-                          " 0x%x\n", mDXGLDeviceHandle, hObject, error);
-#endif
-            MOZ_CRASH();
-        }
-        return ret;
+    bool LockObject(HANDLE lockHandle) const {
+        MOZ_ASSERT(mGL->IsCurrent());
+
+        if (mWGL->fDXLockObjects(mInteropDevice, 1, &lockHandle))
+            return true;
+
+        if (!mGL->MakeCurrent())
+            return false;
+
+        gfxCriticalNote << "wglDXLockObjects called without mGL being current."
+                        << " Retrying after MakeCurrent.";
+
+        if (mWGL->fDXLockObjects(mInteropDevice, 1, &lockHandle))
+            return true;
+
+        const uint32_t error = GetLastError();
+        const nsPrintfCString errorMessage("wglDXLockObjects(0x%p, 1, {0x%p}) failed:"
+                                           " GetLastError(): %u\n",
+                                           mInteropDevice, lockHandle, error);
+        gfxCriticalError() << errorMessage.BeginReading();
+        return false;
     }
 
-    bool UnlockObject(HANDLE hObject) const {
-        bool ret = mWGL->fDXUnlockObjects(mDXGLDeviceHandle, 1, &hObject);
-        if (!ret) {
-#ifdef DEBUG
-            uint32_t error = GetLastError();
-            printf_stderr("wglDXUnlockObjects(0x%x, 1, {0x%x}) failed: GetLastError():"
-                          " 0x%x\n", mDXGLDeviceHandle, hObject, error);
-#endif
-            MOZ_CRASH();
-        }
-        return ret;
+    bool UnlockObject(HANDLE lockHandle) const {
+        MOZ_ASSERT(mGL->IsCurrent());
+
+        if (mWGL->fDXUnlockObjects(mInteropDevice, 1, &lockHandle))
+            return true;
+
+        if (!mGL->MakeCurrent())
+            return false;
+
+        gfxCriticalNote << "wglDXUnlockObjects called without mGL being current."
+                        << " Retrying after MakeCurrent.";
+
+        if (mWGL->fDXUnlockObjects(mInteropDevice, 1, &lockHandle))
+            return true;
+
+        const uint32_t error = GetLastError();
+        const nsPrintfCString errorMessage("wglDXUnlockObjects(0x%p, 1, {0x%p}) failed:"
+                                           " GetLastError(): %u\n",
+                                           mInteropDevice, lockHandle, error);
+        gfxCriticalError() << errorMessage.BeginReading();
+        return false;
     }
 };
 
@@ -216,12 +258,12 @@ public:
 // Shared Surface
 
 /*static*/ UniquePtr<SharedSurface_D3D11Interop>
-SharedSurface_D3D11Interop::Create(const RefPtr<DXGLDevice>& dxgl,
+SharedSurface_D3D11Interop::Create(DXInterop2Device* interop,
                                    GLContext* gl,
                                    const gfx::IntSize& size,
                                    bool hasAlpha)
 {
-    auto& d3d = *dxgl->mD3D;
+    const auto& d3d = interop->mD3D;
 
     // Create a texture in case we need to readback.
     DXGI_FORMAT format = hasAlpha ? DXGI_FORMAT_B8G8R8A8_UNORM
@@ -229,124 +271,82 @@ SharedSurface_D3D11Interop::Create(const RefPtr<DXGLDevice>& dxgl,
     CD3D11_TEXTURE2D_DESC desc(format, size.width, size.height, 1, 1);
     desc.MiscFlags = D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX;
 
-    RefPtr<ID3D11Texture2D> textureD3D;
-    HRESULT hr = d3d.CreateTexture2D(&desc, nullptr, getter_AddRefs(textureD3D));
+    RefPtr<ID3D11Texture2D> texD3D;
+    auto hr = d3d->CreateTexture2D(&desc, nullptr, getter_AddRefs(texD3D));
     if (FAILED(hr)) {
         NS_WARNING("Failed to create texture for CanvasLayer!");
         return nullptr;
     }
 
-    RefPtr<IDXGIResource> textureDXGI;
-    hr = textureD3D->QueryInterface(__uuidof(IDXGIResource), getter_AddRefs(textureDXGI));
+    RefPtr<IDXGIResource> texDXGI;
+    hr = texD3D->QueryInterface(__uuidof(IDXGIResource), getter_AddRefs(texDXGI));
     if (FAILED(hr)) {
         NS_WARNING("Failed to open texture for sharing!");
         return nullptr;
     }
 
-    RefPtr<IDXGIKeyedMutex> keyedMutex;
-    hr = textureD3D->QueryInterface((IDXGIKeyedMutex**)getter_AddRefs(keyedMutex));
-    if (FAILED(hr)) {
-        NS_WARNING("Failed to obtained keyed mutex from texture!");
+    HANDLE dxgiHandle;
+    texDXGI->GetSharedHandle(&dxgiHandle);
+
+    ////
+
+    if (!gl->MakeCurrent()) {
+        NS_WARNING("MakeCurrent failed.");
         return nullptr;
     }
 
-    HANDLE sharedHandle;
-    textureDXGI->GetSharedHandle(&sharedHandle);
-
-    GLuint renderbufferGL = 0;
-    gl->MakeCurrent();
-    gl->fGenRenderbuffers(1, &renderbufferGL);
-    HANDLE objectWGL = dxgl->RegisterObject(textureD3D, renderbufferGL,
-                                            LOCAL_GL_RENDERBUFFER,
-                                            LOCAL_WGL_ACCESS_WRITE_DISCARD_NV);
-    if (!objectWGL) {
+    GLuint rbGL = 0;
+    gl->fGenRenderbuffers(1, &rbGL);
+    const auto lockHandle = interop->RegisterObject(texD3D, rbGL, LOCAL_GL_RENDERBUFFER,
+                                                    LOCAL_WGL_ACCESS_WRITE_DISCARD_NV);
+    if (!lockHandle) {
         NS_WARNING("Failed to register D3D object with WGL.");
+        gl->fDeleteRenderbuffers(1, &rbGL);
         return nullptr;
     }
 
-    GLuint fence = 0;
-    if (gl->IsExtensionSupported(GLContext::NV_fence)) {
-        gl->MakeCurrent();
-        gl->fGenFences(1, &fence);
-    }
+    ////
 
     typedef SharedSurface_D3D11Interop ptrT;
-    UniquePtr<ptrT> ret ( new ptrT(gl, size, hasAlpha, renderbufferGL, dxgl, objectWGL,
-                                   textureD3D, sharedHandle, keyedMutex, fence) );
+    UniquePtr<ptrT> ret ( new ptrT(gl, size, hasAlpha, rbGL, interop, lockHandle,
+                                   texD3D, dxgiHandle) );
     return Move(ret);
 }
 
 SharedSurface_D3D11Interop::SharedSurface_D3D11Interop(GLContext* gl,
                                                        const gfx::IntSize& size,
-                                                       bool hasAlpha,
-                                                       GLuint renderbufferGL,
-                                                       const RefPtr<DXGLDevice>& dxgl,
-                                                       HANDLE objectWGL,
-                                                       const RefPtr<ID3D11Texture2D>& textureD3D,
-                                                       HANDLE sharedHandle,
-                                                       const RefPtr<IDXGIKeyedMutex>& keyedMutex,
-                                                       GLuint fence)
+                                                       bool hasAlpha, GLuint rbGL,
+                                                       DXInterop2Device* interop,
+                                                       HANDLE lockHandle,
+                                                       ID3D11Texture2D* texD3D,
+                                                       HANDLE dxgiHandle)
     : SharedSurface(SharedSurfaceType::DXGLInterop2,
                     AttachmentType::GLRenderbuffer,
                     gl,
                     size,
                     hasAlpha,
                     true)
-    , mProdRB(renderbufferGL)
-    , mDXGL(dxgl)
-    , mObjectWGL(objectWGL)
-    , mTextureD3D(textureD3D)
-    , mSharedHandle(sharedHandle)
-    , mKeyedMutex(keyedMutex)
-    , mFence(fence)
+    , mProdRB(rbGL)
+    , mInterop(interop)
+    , mLockHandle(lockHandle)
+    , mTexD3D(texD3D)
+    , mDXGIHandle(dxgiHandle)
+    , mNeedsFinish(gfxPrefs::WebGLDXGLNeedsFinish())
     , mLockedForGL(false)
 { }
 
 SharedSurface_D3D11Interop::~SharedSurface_D3D11Interop()
 {
-    MOZ_ASSERT(!mLockedForGL);
+    MOZ_ASSERT(!IsProducerAcquired());
 
-    if (!mDXGL->UnregisterObject(mObjectWGL)) {
-        NS_WARNING("Failed to release a DXGL object, possibly leaking it.");
-    }
-
-    if (!mGL->MakeCurrent())
+    if (!mGL || !mGL->MakeCurrent())
         return;
 
-    if (mFence) {
-        mGL->fDeleteFences(1, &mFence);
+    if (!mInterop->UnregisterObject(mLockHandle)) {
+        NS_WARNING("Failed to release mLockHandle, possibly leaking it.");
     }
 
     mGL->fDeleteRenderbuffers(1, &mProdRB);
-
-    // mDXGL is closed when it runs out of refs.
-}
-
-void
-SharedSurface_D3D11Interop::LockProdImpl()
-{ }
-
-void
-SharedSurface_D3D11Interop::UnlockProdImpl()
-{ }
-
-void
-SharedSurface_D3D11Interop::Fence()
-{
-    // TODO fence properly. This kills performance.
-    mGL->fFinish();
-}
-
-bool
-SharedSurface_D3D11Interop::WaitSync()
-{
-    return true;
-}
-
-bool
-SharedSurface_D3D11Interop::PollSync()
-{
-    return true;
 }
 
 void
@@ -354,18 +354,8 @@ SharedSurface_D3D11Interop::ProducerAcquireImpl()
 {
     MOZ_ASSERT(!mLockedForGL);
 
-    if (mKeyedMutex) {
-        const uint64_t keyValue = 0;
-        const DWORD timeoutMs = 10000;
-        HRESULT hr = mKeyedMutex->AcquireSync(keyValue, timeoutMs);
-        if (hr == WAIT_TIMEOUT) {
-            // Doubt we should do this? Maybe Wait for ever?
-            MOZ_CRASH("d3d11Interop timeout");
-        }
-    }
-
     // Now we have the mutex, we can lock for GL.
-    MOZ_ALWAYS_TRUE(mDXGL->LockObject(mObjectWGL));
+    MOZ_ALWAYS_TRUE( mInterop->LockObject(mLockHandle) );
 
     mLockedForGL = true;
 }
@@ -375,99 +365,24 @@ SharedSurface_D3D11Interop::ProducerReleaseImpl()
 {
     MOZ_ASSERT(mLockedForGL);
 
-    mGL->fFlush();
-    MOZ_ALWAYS_TRUE(mDXGL->UnlockObject(mObjectWGL));
+    if (mNeedsFinish) {
+        mGL->fFinish();
+    } else {
+        // We probably don't even need this.
+        mGL->fFlush();
+    }
+    MOZ_ALWAYS_TRUE( mInterop->UnlockObject(mLockHandle) );
 
     mLockedForGL = false;
-
-    // Now we have unlocked for GL, we can release to consumer.
-    if (mKeyedMutex) {
-        mKeyedMutex->ReleaseSync(0);
-    }
-    Fence();
-}
-
-void
-SharedSurface_D3D11Interop::ConsumerAcquireImpl()
-{
-    if (!mConsumerTexture) {
-        RefPtr<ID3D11Texture2D> tex;
-        RefPtr<ID3D11Device> device = gfxWindowsPlatform::GetPlatform()->GetD3D11Device();
-        HRESULT hr = device->OpenSharedResource(mSharedHandle,
-                                                __uuidof(ID3D11Texture2D),
-                                                (void**)(ID3D11Texture2D**) getter_AddRefs(tex));
-        if (SUCCEEDED(hr)) {
-            mConsumerTexture = tex;
-            RefPtr<IDXGIKeyedMutex> mutex;
-            hr = tex->QueryInterface((IDXGIKeyedMutex**) getter_AddRefs(mutex));
-
-            if (SUCCEEDED(hr)) {
-                mConsumerKeyedMutex = mutex;
-            }
-        }
-    }
-
-    if (mConsumerKeyedMutex) {
-        const uint64_t keyValue = 0;
-        const DWORD timeoutMs = 10000;
-        HRESULT hr = mConsumerKeyedMutex->AcquireSync(keyValue, timeoutMs);
-        if (hr == WAIT_TIMEOUT) {
-            MOZ_CRASH();
-        }
-    }
-}
-
-void
-SharedSurface_D3D11Interop::ConsumerReleaseImpl()
-{
-    if (mConsumerKeyedMutex) {
-        mConsumerKeyedMutex->ReleaseSync(0);
-    }
-}
-
-void
-SharedSurface_D3D11Interop::Fence_ContentThread_Impl()
-{
-    if (mFence) {
-        MOZ_ASSERT(mGL->IsExtensionSupported(GLContext::NV_fence));
-        mGL->fSetFence(mFence, LOCAL_GL_ALL_COMPLETED_NV);
-        mGL->fFlush();
-        return;
-    }
-
-    Fence();
-}
-
-bool
-SharedSurface_D3D11Interop::WaitSync_ContentThread_Impl()
-{
-    if (mFence) {
-        mGL->MakeCurrent();
-        mGL->fFinishFence(mFence);
-        return true;
-    }
-
-    return WaitSync();
-}
-
-bool
-SharedSurface_D3D11Interop::PollSync_ContentThread_Impl()
-{
-    if (mFence) {
-        mGL->MakeCurrent();
-        return mGL->fTestFence(mFence);
-    }
-
-    return PollSync();
 }
 
 bool
 SharedSurface_D3D11Interop::ToSurfaceDescriptor(layers::SurfaceDescriptor* const out_descriptor)
 {
-    gfx::SurfaceFormat format = mHasAlpha ? gfx::SurfaceFormat::B8G8R8A8
-                                          : gfx::SurfaceFormat::B8G8R8X8;
-    *out_descriptor = layers::SurfaceDescriptorD3D10((WindowsHandle)GetSharedHandle(),
-                                                     format, mSize);
+    const auto format = (mHasAlpha ? gfx::SurfaceFormat::B8G8R8A8
+                                   : gfx::SurfaceFormat::B8G8R8X8);
+    *out_descriptor = layers::SurfaceDescriptorD3D10(WindowsHandle(mDXGIHandle), format,
+                                                     mSize);
     return true;
 }
 
@@ -476,32 +391,31 @@ SharedSurface_D3D11Interop::ToSurfaceDescriptor(layers::SurfaceDescriptor* const
 
 /*static*/ UniquePtr<SurfaceFactory_D3D11Interop>
 SurfaceFactory_D3D11Interop::Create(GLContext* gl, const SurfaceCaps& caps,
-                                    const RefPtr<layers::ISurfaceAllocator>& allocator,
+                                    layers::LayersIPCChannel* allocator,
                                     const layers::TextureFlags& flags)
 {
     WGLLibrary* wgl = &sWGLLib;
     if (!wgl || !wgl->HasDXInterop2())
         return nullptr;
 
-    RefPtr<DXGLDevice> dxgl = DXGLDevice::Open(wgl);
-    if (!dxgl) {
+    const RefPtr<DXInterop2Device> interop = DXInterop2Device::Open(wgl, gl);
+    if (!interop) {
         NS_WARNING("Failed to open D3D device for use by WGL.");
         return nullptr;
     }
 
     typedef SurfaceFactory_D3D11Interop ptrT;
-    UniquePtr<ptrT> ret(new ptrT(gl, caps, allocator, flags, dxgl));
-
+    UniquePtr<ptrT> ret(new ptrT(gl, caps, allocator, flags, interop));
     return Move(ret);
 }
 
 SurfaceFactory_D3D11Interop::SurfaceFactory_D3D11Interop(GLContext* gl,
                                                          const SurfaceCaps& caps,
-                                                         const RefPtr<layers::ISurfaceAllocator>& allocator,
+                                                         layers::LayersIPCChannel* allocator,
                                                          const layers::TextureFlags& flags,
-                                                         const RefPtr<DXGLDevice>& dxgl)
+                                                         DXInterop2Device* interop)
     : SurfaceFactory(SharedSurfaceType::DXGLInterop2, gl, caps, allocator, flags)
-    , mDXGL(dxgl)
+    , mInterop(interop)
 { }
 
 SurfaceFactory_D3D11Interop::~SurfaceFactory_D3D11Interop()

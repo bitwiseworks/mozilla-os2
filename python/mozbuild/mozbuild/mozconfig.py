@@ -7,11 +7,12 @@ from __future__ import absolute_import, unicode_literals
 import filecmp
 import os
 import re
+import sys
 import subprocess
 import traceback
 
 from collections import defaultdict
-from mach.mixin.process import ProcessExecutionMixin
+from mozpack import path as mozpath
 
 
 MOZ_MYCONFIG_ERROR = '''
@@ -56,7 +57,7 @@ class MozconfigLoadException(Exception):
         Exception.__init__(self, message)
 
 
-class MozconfigLoader(ProcessExecutionMixin):
+class MozconfigLoader(object):
     """Handles loading and parsing of mozconfig files."""
 
     RE_MAKE_VARIABLE = re.compile('''
@@ -78,6 +79,8 @@ class MozconfigLoader(ProcessExecutionMixin):
     ENVIRONMENT_VARIABLES = {
         'CC', 'CXX', 'CFLAGS', 'CXXFLAGS', 'LDFLAGS', 'MOZ_OBJDIR',
     }
+
+    AUTODETECT = object()
 
     def __init__(self, topsrcdir):
         self.topsrcdir = topsrcdir
@@ -107,7 +110,7 @@ class MozconfigLoader(ProcessExecutionMixin):
         if 'MOZ_MYCONFIG' in env:
             raise MozconfigFindException(MOZ_MYCONFIG_ERROR)
 
-        env_path = env.get('MOZCONFIG', None)
+        env_path = env.get('MOZCONFIG', None) or None
         if env_path is not None:
             if not os.path.isabs(env_path):
                 potential_roots = [self.topsrcdir, os.getcwd()]
@@ -189,8 +192,8 @@ class MozconfigLoader(ProcessExecutionMixin):
     def read_mozconfig(self, path=None, moz_build_app=None):
         """Read the contents of a mozconfig into a data structure.
 
-        This takes the path to a mozconfig to load. If it is not defined, we
-        will try to find a mozconfig from the environment using
+        This takes the path to a mozconfig to load. If the given path is
+        AUTODETECT, will try to find a mozconfig from the environment using
         find_mozconfig().
 
         mozconfig files are shell scripts. So, we can't just parse them.
@@ -198,7 +201,7 @@ class MozconfigLoader(ProcessExecutionMixin):
         state from execution. Thus, the output from a mozconfig is a friendly
         static data structure.
         """
-        if path is None:
+        if path is self.AUTODETECT:
             path = self.find_mozconfig()
 
         result = {
@@ -214,7 +217,7 @@ class MozconfigLoader(ProcessExecutionMixin):
         if path is None:
             return result
 
-        path = path.replace(os.sep, '/')
+        path = mozpath.normsep(path)
 
         result['configure_args'] = []
         result['make_extra'] = []
@@ -222,13 +225,24 @@ class MozconfigLoader(ProcessExecutionMixin):
 
         env = dict(os.environ)
 
-        args = self._normalize_command([self._loader_script,
-            self.topsrcdir.replace(os.sep, '/'), path], True)
+        # Since mozconfig_loader is a shell script, running it "normally"
+        # actually leads to two shell executions on Windows. Avoid this by
+        # directly calling sh mozconfig_loader.
+        shell = 'sh'
+        if 'MOZILLABUILD' in os.environ:
+            shell = os.environ['MOZILLABUILD'] + '/msys/bin/sh'
+        if sys.platform == 'win32':
+            shell = shell + '.exe'
+
+        command = [shell, mozpath.normsep(self._loader_script),
+                   mozpath.normsep(self.topsrcdir), path, sys.executable,
+                   mozpath.join(mozpath.dirname(self._loader_script),
+                                'action', 'dump_env.py')]
 
         try:
             # We need to capture stderr because that's where the shell sends
             # errors if execution fails.
-            output = subprocess.check_output(args, stderr=subprocess.STDOUT,
+            output = subprocess.check_output(command, stderr=subprocess.STDOUT,
                 cwd=self.topsrcdir, env=env)
         except subprocess.CalledProcessError as e:
             lines = e.output.splitlines()
@@ -348,7 +362,8 @@ class MozconfigLoader(ProcessExecutionMixin):
             # XXX This is an ugly hack. Data may be lost from things
             # like environment variable values.
             # See https://bugzilla.mozilla.org/show_bug.cgi?id=831381
-            line = line.decode('utf-8', 'ignore')
+            line = line.decode('mbcs' if sys.platform == 'win32' else 'utf-8',
+                               'ignore')
 
             if not line:
                 continue

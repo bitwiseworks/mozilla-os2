@@ -1,7 +1,7 @@
-/* vim:set ts=2 sw=2 sts=2 et: */
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
+/* Any copyright is dedicated to the Public Domain.
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 // Tests the "Store as global variable" context menu item feature.
 // It should be work, and be enabled only for objects
@@ -14,7 +14,7 @@ const TEST_URI = `data:text/html,<script>
   console.log("foo", window.bar);
 </script>`;
 
-add_task(function*() {
+add_task(function* () {
   yield loadTab(TEST_URI);
   let hud = yield openConsole();
 
@@ -57,7 +57,7 @@ add_task(function*() {
   info("Waiting for input to be set");
   yield onceInputSet;
 
-  is(hud.jsterm.inputNode.value, "temp0", "Input was set");
+  is(hud.jsterm.getInputValue(), "temp0", "Input was set");
   let executedResult = yield hud.jsterm.execute();
 
   ok(executedResult.textContent.includes("{ baz: 1 }"),

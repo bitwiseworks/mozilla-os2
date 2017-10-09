@@ -9,27 +9,26 @@
 
 #include "jsfun.h"
 
-#include "vm/ScopeObject.h"
+#include "vm/EnvironmentObject.h"
 
 namespace js {
 
 inline const char*
 GetFunctionNameBytes(JSContext* cx, JSFunction* fun, JSAutoByteString* bytes)
 {
-    JSAtom* atom = fun->atom();
-    if (atom)
-        return bytes->encodeLatin1(cx, atom);
+    if (JSAtom* name = fun->name())
+        return bytes->encodeLatin1(cx, name);
     return js_anonymous_str;
 }
 
 static inline JSObject*
-SkipScopeParent(JSObject* parent)
+SkipEnvironmentObjects(JSObject* env)
 {
-    if (!parent)
+    if (!env)
         return nullptr;
-    while (parent->is<ScopeObject>())
-        parent = &parent->as<ScopeObject>().enclosingScope();
-    return parent;
+    while (env->is<EnvironmentObject>())
+        env = &env->as<EnvironmentObject>().enclosingEnvironment();
+    return env;
 }
 
 inline bool
@@ -69,7 +68,7 @@ CloneFunctionObjectIfNotSingleton(JSContext* cx, HandleFunction fun, HandleObjec
      * the function's script.
      */
     if (CanReuseFunctionForClone(cx, fun)) {
-        RootedObject obj(cx, SkipScopeParent(parent));
+        RootedObject obj(cx, SkipEnvironmentObjects(parent));
         ObjectOpResult succeeded;
         if (proto && !SetPrototype(cx, fun, proto, succeeded))
             return nullptr;
@@ -92,8 +91,8 @@ CloneFunctionObjectIfNotSingleton(JSContext* cx, HandleFunction fun, HandleObjec
     RootedScript script(cx, fun->getOrCreateScript(cx));
     if (!script)
         return nullptr;
-    RootedObject staticScope(cx, script->enclosingStaticScope());
-    return CloneFunctionAndScript(cx, fun, parent, staticScope, kind, proto);
+    RootedScope enclosingScope(cx, script->enclosingScope());
+    return CloneFunctionAndScript(cx, fun, parent, enclosingScope, kind, proto);
 }
 
 } /* namespace js */

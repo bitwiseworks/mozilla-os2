@@ -8,11 +8,24 @@ var Cu = Components.utils;
 var Cr = Components.results;
 var CC = Components.Constructor;
 
+// Populate AppInfo before anything (like the shared loader) accesses
+// System.appinfo, which is a lazy getter.
+const _appInfo = {};
+Cu.import("resource://testing-common/AppInfo.jsm", _appInfo);
+_appInfo.updateAppInfo({
+  ID: "devtools@tests.mozilla.org",
+  name: "devtools-tests",
+  version: "1",
+  platformVersion: "42",
+  crashReporter: true,
+});
+
 const { require, loader } = Cu.import("resource://devtools/shared/Loader.jsm", {});
-const { worker } = Cu.import("resource://devtools/shared/worker/loader.js", {})
+const { worker } = Cu.import("resource://devtools/shared/worker/loader.js", {});
 const promise = require("promise");
-const { Task } = Cu.import("resource://gre/modules/Task.jsm", {});
-const { promiseInvoke } = require("devtools/shared/async-utils");
+const { Task } = require("devtools/shared/task");
+const { console } = require("resource://gre/modules/Console.jsm");
+const { NetUtil } = require("resource://gre/modules/NetUtil.jsm");
 
 const Services = require("Services");
 // Always log packets when running tests. runxpcshelltests.py will throw
@@ -25,15 +38,30 @@ const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 const { DebuggerServer } = require("devtools/server/main");
 const { DebuggerServer: WorkerDebuggerServer } = worker.require("devtools/server/main");
 const { DebuggerClient, ObjectClient } = require("devtools/shared/client/main");
-const { MemoryFront } = require("devtools/server/actors/memory");
+const { MemoryFront } = require("devtools/shared/fronts/memory");
 
 const { addDebuggerToGlobal } = Cu.import("resource://gre/modules/jsdebugger.jsm", {});
 
 const systemPrincipal = Cc["@mozilla.org/systemprincipal;1"].createInstance(Ci.nsIPrincipal);
 
 var loadSubScript = Cc[
-  '@mozilla.org/moz/jssubscript-loader;1'
+  "@mozilla.org/moz/jssubscript-loader;1"
 ].getService(Ci.mozIJSSubScriptLoader).loadSubScript;
+
+/**
+ * Initializes any test that needs to work with add-ons.
+ */
+function startupAddonsManager() {
+  // Create a directory for extensions.
+  const profileDir = do_get_profile().clone();
+  profileDir.append("extensions");
+
+  const internalManager = Cc["@mozilla.org/addons/integration;1"]
+    .getService(Ci.nsIObserver)
+    .QueryInterface(Ci.nsITimerCallback);
+
+  internalManager.observe(null, "addons-startup", null);
+}
 
 /**
  * Create a `run_test` function that runs the given generator in a task after
@@ -70,7 +98,7 @@ function makeMemoryActorTest(testGeneratorFunction) {
             yield memoryFront.attach();
             yield* testGeneratorFunction(client, memoryFront);
             yield memoryFront.detach();
-          } catch(err) {
+          } catch (err) {
             DevToolsUtils.reportException("makeMemoryActorTest", err);
             ok(false, "Got an error: " + err);
           }
@@ -109,7 +137,7 @@ function makeFullRuntimeMemoryActorTest(testGeneratorFunction) {
             yield memoryFront.attach();
             yield* testGeneratorFunction(client, memoryFront);
             yield memoryFront.detach();
-          } catch(err) {
+          } catch (err) {
             DevToolsUtils.reportException("makeMemoryActorTest", err);
             ok(false, "Got an error: " + err);
           }
@@ -131,25 +159,17 @@ function createTestGlobal(name) {
 
 function connect(client) {
   dump("Connecting client.\n");
-  return new Promise(function (resolve) {
-    client.connect(function () {
-      resolve();
-    });
-  });
+  return client.connect();
 }
 
 function close(client) {
   dump("Closing client.\n");
-  return new Promise(function (resolve) {
-    client.close(function () {
-      resolve();
-    });
-  });
+  return client.close();
 }
 
 function listTabs(client) {
   dump("Listing tabs.\n");
-  return rdpRequest(client, client.listTabs);
+  return client.listTabs();
 }
 
 function findTab(tabs, title) {
@@ -164,7 +184,7 @@ function findTab(tabs, title) {
 
 function attachTab(client, tab) {
   dump("Attaching to tab with title '" + tab.title + "'.\n");
-  return rdpRequest(client, client.attachTab, tab.actor);
+  return client.attachTab(tab.actor);
 }
 
 function waitForNewSource(threadClient, url) {
@@ -176,17 +196,17 @@ function waitForNewSource(threadClient, url) {
 
 function attachThread(tabClient, options = {}) {
   dump("Attaching to thread.\n");
-  return rdpRequest(tabClient, tabClient.attachThread, options);
+  return tabClient.attachThread(options);
 }
 
 function resume(threadClient) {
   dump("Resuming thread.\n");
-  return rdpRequest(threadClient, threadClient.resume);
+  return threadClient.resume();
 }
 
 function getSources(threadClient) {
   dump("Getting sources.\n");
-  return rdpRequest(threadClient, threadClient.getSources);
+  return threadClient.getSources();
 }
 
 function findSource(sources, url) {
@@ -206,31 +226,18 @@ function waitForPause(threadClient) {
 
 function setBreakpoint(sourceClient, location) {
   dump("Setting breakpoint.\n");
-  return rdpRequest(sourceClient, sourceClient.setBreakpoint, location);
+  return sourceClient.setBreakpoint(location);
 }
 
 function dumpn(msg) {
   dump("DBG-TEST: " + msg + "\n");
 }
 
-function tryImport(url) {
-  try {
-    Cu.import(url);
-  } catch (e) {
-    dumpn("Error importing " + url);
-    dumpn(DevToolsUtils.safeErrorString(e));
-    throw e;
-  }
-}
-
-tryImport("resource://devtools/shared/Loader.jsm");
-tryImport("resource://gre/modules/Console.jsm");
-
 function testExceptionHook(ex) {
   try {
     do_report_unexpected_exception(ex);
-  } catch(ex) {
-    return {throw: ex}
+  } catch (ex) {
+    return {throw: ex};
   }
   return undefined;
 }
@@ -373,10 +380,13 @@ function attachTestThread(aClient, aTitle, aCallback) {
 // thread, and then resume it. Pass |aCallback| the thread's response to
 // the 'resume' packet, a TabClient for the tab, and a ThreadClient for the
 // thread.
-function attachTestTabAndResume(aClient, aTitle, aCallback) {
-  attachTestThread(aClient, aTitle, function(aResponse, aTabClient, aThreadClient) {
-    aThreadClient.resume(function (aResponse) {
-      aCallback(aResponse, aTabClient, aThreadClient);
+function attachTestTabAndResume(aClient, aTitle, aCallback = () => {}) {
+  return new Promise((resolve, reject) => {
+    attachTestThread(aClient, aTitle, function (aResponse, aTabClient, aThreadClient) {
+      aThreadClient.resume(function (aResponse) {
+        aCallback(aResponse, aTabClient, aThreadClient);
+        resolve([aResponse, aTabClient, aThreadClient]);
+      });
     });
   });
 }
@@ -407,7 +417,7 @@ function startTestDebuggerServer(title, server = DebuggerServer) {
 
 function finishClient(aClient)
 {
-  aClient.close(function() {
+  aClient.close(function () {
     DebuggerServer.destroy();
     do_test_finished();
   });
@@ -424,11 +434,11 @@ function get_chrome_actors(callback)
   DebuggerServer.allowChromeProcess = true;
 
   let client = new DebuggerClient(DebuggerServer.connectPipe());
-  client.connect(() => {
-    client.getProcess().then(response => {
+  client.connect()
+    .then(() => client.getProcess())
+    .then(response => {
       callback(client, response.form);
     });
-  });
 }
 
 function getChromeActors(client, server = DebuggerServer) {
@@ -439,7 +449,7 @@ function getChromeActors(client, server = DebuggerServer) {
 /**
  * Takes a relative file path and returns the absolute file url for it.
  */
-function getFileUrl(aName, aAllowMissing=false) {
+function getFileUrl(aName, aAllowMissing = false) {
   let file = do_get_file(aName, aAllowMissing);
   return Services.io.newFileURI(file).spec;
 }
@@ -448,7 +458,7 @@ function getFileUrl(aName, aAllowMissing=false) {
  * Returns the full path of the file with the specified name in a
  * platform-independent and URL-like form.
  */
-function getFilePath(aName, aAllowMissing=false, aUsePlatformPathSeparator=false)
+function getFilePath(aName, aAllowMissing = false, aUsePlatformPathSeparator = false)
 {
   let file = do_get_file(aName, aAllowMissing);
   let path = Services.io.newFileURI(file).spec;
@@ -466,8 +476,6 @@ function getFilePath(aName, aAllowMissing=false, aUsePlatformPathSeparator=false
 
   return path;
 }
-
-Cu.import("resource://gre/modules/NetUtil.jsm");
 
 /**
  * Returns the full text contents of the given file.
@@ -515,7 +523,7 @@ function TracingTransport(childTransport) {
 
 TracingTransport.prototype = {
   // Remove actor names
-  normalize: function(packet) {
+  normalize: function (packet) {
     return JSON.parse(JSON.stringify(packet, (key, value) => {
       if (key === "to" || key === "from" || key === "actor") {
         return "<actorid>";
@@ -523,37 +531,37 @@ TracingTransport.prototype = {
       return value;
     }));
   },
-  send: function(packet) {
+  send: function (packet) {
     this.packets.push({
       type: "sent",
       packet: this.normalize(packet)
     });
     return this.child.send(packet);
   },
-  close: function() {
+  close: function () {
     return this.child.close();
   },
-  ready: function() {
+  ready: function () {
     return this.child.ready();
   },
-  onPacket: function(packet) {
+  onPacket: function (packet) {
     this.packets.push({
       type: "received",
       packet: this.normalize(packet)
     });
     this.hooks.onPacket(packet);
   },
-  onClosed: function() {
+  onClosed: function () {
     this.hooks.onClosed();
   },
 
-  expectSend: function(expected) {
+  expectSend: function (expected) {
     let packet = this.packets[this.checkIndex++];
     do_check_eq(packet.type, "sent");
     deepEqual(packet.packet, this.normalize(expected));
   },
 
-  expectReceive: function(expected) {
+  expectReceive: function (expected) {
     let packet = this.packets[this.checkIndex++];
     do_check_eq(packet.type, "received");
     deepEqual(packet.packet, this.normalize(expected));
@@ -561,7 +569,7 @@ TracingTransport.prototype = {
 
   // Write your tests, call dumpLog at the end, inspect the output,
   // then sprinkle the calls through the right places in your test.
-  dumpLog: function() {
+  dumpLog: function () {
     for (let entry of this.packets) {
       if (entry.type === "sent") {
         dumpn("trace.expectSend(" + entry.packet + ");");
@@ -574,7 +582,7 @@ TracingTransport.prototype = {
 
 function StubTransport() { }
 StubTransport.prototype.ready = function () {};
-StubTransport.prototype.send  = function () {};
+StubTransport.prototype.send = function () {};
 StubTransport.prototype.close = function () {};
 
 function executeSoon(aFunc) {
@@ -621,7 +629,7 @@ var do_check_matches = function (pattern, value) {
 // destructuring objects with methods that take callbacks.
 const Async = target => new Proxy(target, Async);
 Async.get = (target, name) =>
-  typeof(target[name]) === "function" ? asyncall.bind(null, target[name], target) :
+  typeof (target[name]) === "function" ? asyncall.bind(null, target[name], target) :
   target[name];
 
 // Calls async function that takes callback and errorback and returns
@@ -687,30 +695,6 @@ function executeOnNextTickAndWaitForPause(action, client) {
 }
 
 /**
- * Create a promise that is resolved with the server's response to the client's
- * Remote Debugger Protocol request. If a response with the `error` property is
- * received, the promise is rejected. Any extra arguments passed in are
- * forwarded to the method invocation.
- *
- * See `setBreakpoint` below, for example usage.
- *
- * @param DebuggerClient/ThreadClient/SourceClient/etc client
- * @param Function method
- * @param any args
- * @returns Promise
- */
-function rdpRequest(client, method, ...args) {
-  return promiseInvoke(client, method, ...args)
-    .then(response => {
-      const { error, message } = response;
-      if (error) {
-        throw new Error(error + ": " + message);
-      }
-      return response;
-    });
-}
-
-/**
  * Interrupt JS execution for the specified thread.
  *
  * @param ThreadClient threadClient
@@ -718,7 +702,7 @@ function rdpRequest(client, method, ...args) {
  */
 function interrupt(threadClient) {
   dumpn("Interrupting.");
-  return rdpRequest(threadClient, threadClient.interrupt);
+  return threadClient.interrupt();
 }
 
 /**
@@ -745,8 +729,22 @@ function resumeAndWaitForPause(client, threadClient) {
 function stepIn(client, threadClient) {
   dumpn("Stepping in.");
   const paused = waitForPause(client);
-  return rdpRequest(threadClient, threadClient.stepIn)
+  return threadClient.stepIn()
     .then(() => paused);
+}
+
+/**
+ * Resume JS execution for a step over and wait for the pause after the step
+ * has been taken.
+ *
+ * @param DebuggerClient client
+ * @param ThreadClient threadClient
+ * @returns Promise
+ */
+function stepOver(client, threadClient) {
+  dumpn("Stepping over.");
+  return threadClient.stepOver()
+    .then(() => waitForPause(client));
 }
 
 /**
@@ -760,7 +758,7 @@ function stepIn(client, threadClient) {
  */
 function getFrames(threadClient, first, count) {
   dumpn("Getting frames.");
-  return rdpRequest(threadClient, threadClient.getFrames, first, count);
+  return threadClient.getFrames(first, count);
 }
 
 /**
@@ -771,7 +769,7 @@ function getFrames(threadClient, first, count) {
  */
 function blackBox(sourceClient) {
   dumpn("Black boxing source: " + sourceClient.actor);
-  return rdpRequest(sourceClient, sourceClient.blackBox);
+  return sourceClient.blackBox();
 }
 
 /**
@@ -782,7 +780,7 @@ function blackBox(sourceClient) {
  */
 function unBlackBox(sourceClient) {
   dumpn("Un-black boxing source: " + sourceClient.actor);
-  return rdpRequest(sourceClient, sourceClient.unblackBox);
+  return sourceClient.unblackBox();
 }
 
 /**
@@ -794,7 +792,7 @@ function unBlackBox(sourceClient) {
  */
 function getSourceContent(sourceClient) {
   dumpn("Getting source content for " + sourceClient.actor);
-  return rdpRequest(sourceClient, sourceClient.source);
+  return sourceClient.source();
 }
 
 /**
@@ -807,7 +805,7 @@ function getSourceContent(sourceClient) {
 function getSource(threadClient, url) {
   let deferred = promise.defer();
   threadClient.getSources((res) => {
-    let source = res.sources.filter(function(s) {
+    let source = res.sources.filter(function (s) {
       return s.url === url;
     });
     if (source.length) {

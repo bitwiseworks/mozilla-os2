@@ -37,7 +37,6 @@ function AutoRefreshHighlighter(highlighterEnv) {
   EventEmitter.decorate(this);
 
   this.highlighterEnv = highlighterEnv;
-  this.win = highlighterEnv.window;
 
   this.currentNode = null;
   this.currentQuads = {};
@@ -47,16 +46,26 @@ function AutoRefreshHighlighter(highlighterEnv) {
 
 AutoRefreshHighlighter.prototype = {
   /**
+   * Window corresponding to the current highlighterEnv
+   */
+  get win() {
+    if (!this.highlighterEnv) {
+      return null;
+    }
+    return this.highlighterEnv.window;
+  },
+
+  /**
    * Show the highlighter on a given node
    * @param {DOMNode} node
    * @param {Object} options
    *        Object used for passing options
    */
-  show: function(node, options = {}) {
+  show: function (node, options = {}) {
     let isSameNode = node === this.currentNode;
     let isSameOptions = this._isSameOptions(options);
 
-    if (!isNodeValid(node) || (isSameNode && isSameOptions)) {
+    if (!this._isNodeValid(node) || (isSameNode && isSameOptions)) {
       return false;
     }
 
@@ -77,8 +86,8 @@ AutoRefreshHighlighter.prototype = {
   /**
    * Hide the highlighter
    */
-  hide: function() {
-    if (!isNodeValid(this.currentNode)) {
+  hide: function () {
+    if (!this._isNodeValid(this.currentNode)) {
       return;
     }
 
@@ -92,10 +101,21 @@ AutoRefreshHighlighter.prototype = {
   },
 
   /**
+   * Whether the current node is valid for this highlighter type.
+   * This is implemented by default to check if the node is an element node. Highlighter
+   * sub-classes should override this method if they want to highlight other node types.
+   * @param {DOMNode} node
+   * @return {Boolean}
+   */
+  _isNodeValid: function (node) {
+    return isNodeValid(node);
+  },
+
+  /**
    * Are the provided options the same as the currently stored options?
    * Returns false if there are no options stored currently.
    */
-  _isSameOptions: function(options) {
+  _isSameOptions: function (options) {
     if (!this.options) {
       return false;
     }
@@ -118,7 +138,7 @@ AutoRefreshHighlighter.prototype = {
   /**
    * Update the stored box quads by reading the current node's box quads.
    */
-  _updateAdjustedQuads: function() {
+  _updateAdjustedQuads: function () {
     for (let region of BOX_MODEL_REGIONS) {
       this.currentQuads[region] = getAdjustedQuads(
         this.win,
@@ -131,7 +151,7 @@ AutoRefreshHighlighter.prototype = {
    * if any of the points x/y or bounds have change since.
    * @return {Boolean}
    */
-  _hasMoved: function() {
+  _hasMoved: function () {
     let oldQuads = JSON.stringify(this.currentQuads);
     this._updateAdjustedQuads();
     let newQuads = JSON.stringify(this.currentQuads);
@@ -141,8 +161,8 @@ AutoRefreshHighlighter.prototype = {
   /**
    * Update the highlighter if the node has moved since the last update.
    */
-  update: function() {
-    if (!isNodeValid(this.currentNode) || !this._hasMoved()) {
+  update: function () {
+    if (!this._isNodeValid(this.currentNode) || !this._hasMoved()) {
       return;
     }
 
@@ -150,14 +170,14 @@ AutoRefreshHighlighter.prototype = {
     this.emit("updated");
   },
 
-  _show: function() {
+  _show: function () {
     // To be implemented by sub classes
     // When called, sub classes should actually show the highlighter for
     // this.currentNode, potentially using options in this.options
     throw new Error("Custom highlighter class had to implement _show method");
   },
 
-  _update: function() {
+  _update: function () {
     // To be implemented by sub classes
     // When called, sub classes should update the highlighter shown for
     // this.currentNode
@@ -165,31 +185,30 @@ AutoRefreshHighlighter.prototype = {
     throw new Error("Custom highlighter class had to implement _update method");
   },
 
-  _hide: function() {
+  _hide: function () {
     // To be implemented by sub classes
     // When called, sub classes should actually hide the highlighter
     throw new Error("Custom highlighter class had to implement _hide method");
   },
 
-  _startRefreshLoop: function() {
+  _startRefreshLoop: function () {
     let win = this.currentNode.ownerDocument.defaultView;
     this.rafID = win.requestAnimationFrame(this._startRefreshLoop.bind(this));
     this.rafWin = win;
     this.update();
   },
 
-  _stopRefreshLoop: function() {
+  _stopRefreshLoop: function () {
     if (this.rafID && !Cu.isDeadWrapper(this.rafWin)) {
       this.rafWin.cancelAnimationFrame(this.rafID);
     }
     this.rafID = this.rafWin = null;
   },
 
-  destroy: function() {
+  destroy: function () {
     this.hide();
 
     this.highlighterEnv = null;
-    this.win = null;
     this.currentNode = null;
   }
 };

@@ -6,12 +6,14 @@
 #ifndef mozilla_dom_XULDocument_h
 #define mozilla_dom_XULDocument_h
 
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsXULPrototypeDocument.h"
 #include "nsXULPrototypeCache.h"
 #include "nsTArray.h"
 
 #include "mozilla/dom/XMLDocument.h"
+#include "mozilla/StyleSheet.h"
 #include "nsForwardReference.h"
 #include "nsIContent.h"
 #include "nsIDOMXULCommandDispatcher.h"
@@ -161,7 +163,7 @@ public:
     NS_DECL_NSIDOMXULDOCUMENT
 
     // nsICSSLoaderObserver
-    NS_IMETHOD StyleSheetLoaded(CSSStyleSheet* aSheet,
+    NS_IMETHOD StyleSheetLoaded(mozilla::StyleSheet* aSheet,
                                 bool aWasAlternate,
                                 nsresult aStatus) override;
 
@@ -342,7 +344,7 @@ protected:
      * An array of style sheets, that will be added (preserving order) to the
      * document after all of them are loaded (in DoneWalking).
      */
-    nsTArray<RefPtr<CSSStyleSheet>> mOverlaySheets;
+    nsTArray<RefPtr<StyleSheet>> mOverlaySheets;
 
     nsCOMPtr<nsIDOMXULCommandDispatcher>     mCommandDispatcher; // [OWNER] of the focus tracker
 

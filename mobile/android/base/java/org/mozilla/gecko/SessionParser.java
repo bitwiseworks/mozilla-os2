@@ -48,6 +48,14 @@ public abstract class SessionParser {
         public JSONObject getTabObject() {
             return mTabObject;
         }
+
+        /**
+         * Is this tab pointing to about:home and does not contain any other history?
+         */
+        public boolean isAboutHomeWithoutHistory() {
+            JSONArray entries = mTabObject.optJSONArray("entries");
+            return entries != null && entries.length() == 1 && AboutPages.isAboutHome(mUrl);
+        }
     };
 
     abstract public void onTabRead(SessionTab tab);
@@ -58,16 +66,29 @@ public abstract class SessionParser {
      * @param closedTabs, JSONArray of recently closed tab entries.
      * @throws JSONException
      */
-    public void onClosedTabsRead(final JSONArray closedTabs) throws JSONException{
+    public void onClosedTabsRead(final JSONArray closedTabs) throws JSONException {
     }
 
-    public void parse(String... sessionStrings) {
+    /**
+     * Parses the provided session store data and calls onTabRead for each tab that has been found.
+     *
+     * @param sessionStrings One or more strings containing session store data.
+     * @return False if any of the session strings provided didn't contain valid session store data.
+     */
+    public boolean parse(String... sessionStrings) {
         final LinkedList<SessionTab> sessionTabs = new LinkedList<SessionTab>();
         int totalCount = 0;
         int selectedIndex = -1;
         try {
             for (String sessionString : sessionStrings) {
-                final JSONObject window = new JSONObject(sessionString).getJSONArray("windows").getJSONObject(0);
+                final JSONArray windowsArray = new JSONObject(sessionString).getJSONArray("windows");
+                if (windowsArray.length() == 0) {
+                    // Session json can be empty if the user has opted out of session restore.
+                    Log.d(LOGTAG, "Session restore file is empty, no session entries found.");
+                    continue;
+                }
+
+                final JSONObject window = windowsArray.getJSONObject(0);
                 final JSONArray tabs = window.getJSONArray("tabs");
                 final int optSelected = window.optInt("selected", -1);
                 final JSONArray closedTabs = window.optJSONArray("closedTabs");
@@ -93,7 +114,7 @@ public abstract class SessionParser {
 
                     totalCount++;
                     boolean selected = false;
-                    if (optSelected == i+1) {
+                    if (optSelected == i + 1) {
                         selected = true;
                         selectedIndex = totalCount;
                     }
@@ -102,7 +123,7 @@ public abstract class SessionParser {
             }
         } catch (JSONException e) {
             Log.e(LOGTAG, "JSON error", e);
-            return;
+            return false;
         }
 
         // If no selected index was found, select the first tab.
@@ -113,5 +134,7 @@ public abstract class SessionParser {
         for (SessionTab tab : sessionTabs) {
             onTabRead(tab);
         }
+
+        return true;
     }
 }

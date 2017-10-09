@@ -2,18 +2,21 @@
  * vim: set ts=8 sts=4 et sw=4 tw=99:
  */
 
-#ifdef XP_UNIX
 #include <fcntl.h>
 #include <stdio.h>
-#include <string.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
 
 #include "jsfriendapi.h"
 #include "js/StructuredClone.h"
 #include "jsapi-tests/tests.h"
 #include "vm/ArrayBufferObject.h"
+
+#ifdef XP_WIN
+#  include <io.h>
+#  define GET_OS_FD(a) int(_get_osfhandle(a))
+#else
+#  include <unistd.h>
+#  define GET_OS_FD(a) (a)
+#endif
 
 const char test_data[] = "1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 const char test_filename[] = "temp-bug945152_MappedArrayBuffer";
@@ -40,8 +43,8 @@ BEGIN_TEST(testMappedArrayBuffer_bug945152)
     // Release the mapped content.
     CHECK(TestReleaseContents());
 
-    // Neuter mapped array buffer.
-    CHECK(TestNeuterObject());
+    // Detach mapped array buffer.
+    CHECK(TestDetachObject());
 
     // Clone mapped array buffer.
     CHECK(TestCloneObject());
@@ -52,6 +55,9 @@ BEGIN_TEST(testMappedArrayBuffer_bug945152)
     // Transfer mapped array buffer contents.
     CHECK(TestTransferObject());
 
+    // GC so we can remove the file we created.
+    GC(cx);
+
     test_file.remove();
 
     return true;
@@ -60,7 +66,7 @@ BEGIN_TEST(testMappedArrayBuffer_bug945152)
 JSObject* CreateNewObject(const int offset, const int length)
 {
     int fd = open(test_filename, O_RDONLY);
-    void* ptr = JS_CreateMappedArrayBufferContents(fd, offset, length);
+    void* ptr = JS_CreateMappedArrayBufferContents(GET_OS_FD(fd), offset, length);
     close(fd);
     if (!ptr)
         return nullptr;
@@ -103,7 +109,7 @@ bool TestCreateObject(uint32_t offset, uint32_t length)
 bool TestReleaseContents()
 {
     int fd = open(test_filename, O_RDONLY);
-    void* ptr = JS_CreateMappedArrayBufferContents(fd, 0, 12);
+    void* ptr = JS_CreateMappedArrayBufferContents(GET_OS_FD(fd), 0, 12);
     close(fd);
     if (!ptr)
         return false;
@@ -112,12 +118,12 @@ bool TestReleaseContents()
     return true;
 }
 
-bool TestNeuterObject()
+bool TestDetachObject()
 {
     JS::RootedObject obj(cx, CreateNewObject(8, 12));
     CHECK(obj);
-    JS_NeuterArrayBuffer(cx, obj, ChangeData);
-    CHECK(isNeutered(obj));
+    JS_DetachArrayBuffer(cx, obj);
+    CHECK(JS_IsDetachedArrayBufferObject(obj));
 
     return true;
 }
@@ -126,7 +132,7 @@ bool TestCloneObject()
 {
     JS::RootedObject obj1(cx, CreateNewObject(8, 12));
     CHECK(obj1);
-    JSAutoStructuredCloneBuffer cloned_buffer;
+    JSAutoStructuredCloneBuffer cloned_buffer(JS::StructuredCloneScope::SameProcessSameThread, nullptr, nullptr);
     JS::RootedValue v1(cx, JS::ObjectValue(*obj1));
     CHECK(cloned_buffer.write(cx, v1, nullptr, nullptr));
     JS::RootedValue v2(cx);
@@ -144,7 +150,7 @@ bool TestStealContents()
     void* contents = JS_StealArrayBufferContents(cx, obj);
     CHECK(contents);
     CHECK(memcmp(contents, test_data + 8, 12) == 0);
-    CHECK(isNeutered(obj));
+    CHECK(JS_IsDetachedArrayBufferObject(obj));
 
     return true;
 }
@@ -157,34 +163,31 @@ bool TestTransferObject()
 
     // Create an Array of transferable values.
     JS::AutoValueVector argv(cx);
-    argv.append(v1);
+    if (!argv.append(v1))
+        return false;
+
     JS::RootedObject obj(cx, JS_NewArrayObject(cx, JS::HandleValueArray::subarray(argv, 0, 1)));
     CHECK(obj);
     JS::RootedValue transferable(cx, JS::ObjectValue(*obj));
 
-    JSAutoStructuredCloneBuffer cloned_buffer;
-    CHECK(cloned_buffer.write(cx, v1, transferable, nullptr, nullptr));
+    JSAutoStructuredCloneBuffer cloned_buffer(JS::StructuredCloneScope::SameProcessSameThread, nullptr, nullptr);
+    CHECK(cloned_buffer.write(cx, v1, transferable, JS::CloneDataPolicy().denySharedArrayBuffer(), nullptr, nullptr));
     JS::RootedValue v2(cx);
     CHECK(cloned_buffer.read(cx, &v2, nullptr, nullptr));
     JS::RootedObject obj2(cx, v2.toObjectOrNull());
     CHECK(VerifyObject(obj2, 8, 12, true));
-    CHECK(isNeutered(obj1));
+    CHECK(JS_IsDetachedArrayBufferObject(obj1));
 
     return true;
 }
 
-bool isNeutered(JS::HandleObject obj)
-{
-    JS::RootedValue v(cx);
-    return JS_GetProperty(cx, obj, "byteLength", &v) && v.toInt32() == 0;
-}
-
 static void GC(JSContext* cx)
 {
-    JS_GC(JS_GetRuntime(cx));
+    JS_GC(cx);
     // Trigger another to wait for background finalization to end.
-    JS_GC(JS_GetRuntime(cx));
+    JS_GC(cx);
 }
 
 END_TEST(testMappedArrayBuffer_bug945152)
-#endif
+
+#undef GET_OS_FD

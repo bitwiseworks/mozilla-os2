@@ -1,18 +1,20 @@
-/* vim:set ts=2 sw=2 sts=2 et: */
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
+/* Any copyright is dedicated to the Public Domain.
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 // Test that console command input is persisted across toolbox loads.
 // See Bug 943306.
 
 "use strict";
 
+requestLongerTimeout(2);
+
 const TEST_URI = "data:text/html;charset=utf-8,Web Console test for " +
                  "persisting history - bug 943306";
 const INPUT_HISTORY_COUNT = 10;
 
-var test = asyncTest(function* () {
+add_task(function* () {
   info("Setting custom input history pref to " + INPUT_HISTORY_COUNT);
   Services.prefs.setIntPref("devtools.webconsole.inputHistoryCount",
                             INPUT_HISTORY_COUNT);
@@ -106,13 +108,12 @@ function* populateInputHistory(hud) {
  */
 function* testNaviatingHistoryInUI(hud) {
   let jsterm = hud.jsterm;
-  let {inputNode} = jsterm;
-  inputNode.focus();
+  jsterm.focus();
 
   // Count backwards from original input and make sure that pressing up
   // restores this.
   for (let i = INPUT_HISTORY_COUNT - 1; i >= 0; i--) {
     EventUtils.synthesizeKey("VK_UP", {});
-    is(inputNode.value, i, "Pressing up restores last input");
+    is(jsterm.getInputValue(), i, "Pressing up restores last input");
   }
 }

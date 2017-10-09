@@ -30,9 +30,9 @@ public:
                                 const nsDisplayListSet& aLists) override;
 
   virtual nsresult
-  Place(nsRenderingContext& aRenderingContext,
+  Place(DrawTarget*          aDrawTarget,
         bool                 aPlaceOrigin,
-        nsHTMLReflowMetrics& aDesiredSize) override;
+        ReflowOutput& aDesiredSize) override;
 
   virtual mozilla::LogicalSize
   ComputeSize(nsRenderingContext *aRenderingContext,
@@ -46,8 +46,8 @@ public:
 
   virtual void
   Reflow(nsPresContext*          aPresContext,
-         nsHTMLReflowMetrics&     aDesiredSize,
-         const nsHTMLReflowState& aReflowState,
+         ReflowOutput&     aDesiredSize,
+         const ReflowInput& aReflowInput,
          nsReflowStatus&          aStatus) override;
 
   virtual nsQueryFrame::FrameIID GetFrameId() override = 0;

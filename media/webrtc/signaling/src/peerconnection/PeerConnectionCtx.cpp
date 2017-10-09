@@ -4,7 +4,6 @@
 
 #include "CSFLog.h"
 
-#include "base/histogram.h"
 #include "PeerConnectionImpl.h"
 #include "PeerConnectionCtx.h"
 #include "runnable_utils.h"
@@ -55,13 +54,13 @@ public:
       rv = observerService->AddObserver(this,
                                         NS_XPCOM_SHUTDOWN_OBSERVER_ID,
                                         false);
-      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(rv));
+      MOZ_ALWAYS_SUCCEEDS(rv);
 #endif
       (void) rv;
     }
 
-  NS_IMETHODIMP Observe(nsISupports* aSubject, const char* aTopic,
-                        const char16_t* aData) override {
+  NS_IMETHOD Observe(nsISupports* aSubject, const char* aTopic,
+                     const char16_t* aData) override {
     if (strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID) == 0) {
       CSFLogDebug(logTag, "Shutting down PeerConnectionCtx");
       PeerConnectionCtx::Destroy();
@@ -73,7 +72,7 @@ public:
 
       nsresult rv = observerService->RemoveObserver(this,
                                                     NS_XPCOM_SHUTDOWN_OBSERVER_ID);
-      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(rv));
+      MOZ_ALWAYS_SUCCEEDS(rv);
 
       // Make sure we're not deleted while still inside ::Observe()
       RefPtr<PeerConnectionCtxShutdown> kungFuDeathGrip(this);
@@ -209,7 +208,6 @@ EverySecondTelemetryCallback_s(nsAutoPtr<RTCStatsQueries> aQueryList) {
   for (auto q = aQueryList->begin(); q != aQueryList->end(); ++q) {
     PeerConnectionImpl::ExecuteStatsQuery_s(*q);
     auto& r = *(*q)->report;
-    bool isHello = (*q)->isHello;
     if (r.mInboundRTPStreamStats.WasPassed()) {
       // First, get reports from a second ago, if any, for calculations below
       const Sequence<RTCInboundRTPStreamStats> *lastInboundStats = nullptr;
@@ -252,14 +250,8 @@ EverySecondTelemetryCallback_s(nsAutoPtr<RTCStatsQueries> aQueryList) {
         }
         if (s.mMozRtt.WasPassed()) {
           MOZ_ASSERT(s.mIsRemote);
-          ID id;
-          if (isAudio) {
-            id = isHello ? LOOP_AUDIO_QUALITY_OUTBOUND_RTT :
-                           WEBRTC_AUDIO_QUALITY_OUTBOUND_RTT;
-          } else {
-            id = isHello ? LOOP_VIDEO_QUALITY_OUTBOUND_RTT :
-                           WEBRTC_VIDEO_QUALITY_OUTBOUND_RTT;
-          }
+          ID id = isAudio ? WEBRTC_AUDIO_QUALITY_OUTBOUND_RTT :
+                            WEBRTC_VIDEO_QUALITY_OUTBOUND_RTT;
           Accumulate(id, s.mMozRtt.Value());
         }
         if (lastInboundStats && s.mBytesReceived.WasPassed()) {
@@ -275,21 +267,11 @@ EverySecondTelemetryCallback_s(nsAutoPtr<RTCStatsQueries> aQueryList) {
               if (delta_ms > 500 && delta_ms < 60000) {
                 ID id;
                 if (s.mIsRemote) {
-                  if (isAudio) {
-                    id = isHello ? LOOP_AUDIO_QUALITY_OUTBOUND_BANDWIDTH_KBITS :
-                                   WEBRTC_AUDIO_QUALITY_OUTBOUND_BANDWIDTH_KBITS;
-                  } else {
-                    id = isHello ? LOOP_VIDEO_QUALITY_OUTBOUND_BANDWIDTH_KBITS :
-                                   WEBRTC_VIDEO_QUALITY_OUTBOUND_BANDWIDTH_KBITS;
-                  }
+                  id = isAudio ? WEBRTC_AUDIO_QUALITY_OUTBOUND_BANDWIDTH_KBITS :
+                                 WEBRTC_VIDEO_QUALITY_OUTBOUND_BANDWIDTH_KBITS;
                 } else {
-                  if (isAudio) {
-                    id = isHello ? LOOP_AUDIO_QUALITY_INBOUND_BANDWIDTH_KBITS :
-                                   WEBRTC_AUDIO_QUALITY_INBOUND_BANDWIDTH_KBITS;
-                  } else {
-                    id = isHello ? LOOP_VIDEO_QUALITY_INBOUND_BANDWIDTH_KBITS :
-                                   WEBRTC_VIDEO_QUALITY_INBOUND_BANDWIDTH_KBITS;
-                  }
+                  id = isAudio ? WEBRTC_AUDIO_QUALITY_INBOUND_BANDWIDTH_KBITS :
+                                 WEBRTC_VIDEO_QUALITY_INBOUND_BANDWIDTH_KBITS;
                 }
                 Accumulate(id, ((s.mBytesReceived.Value() -
                                  lasts.mBytesReceived.Value()) * 8) / delta_ms);
@@ -332,7 +314,9 @@ PeerConnectionCtx::EverySecondTelemetryCallback_m(nsITimer* timer, void *closure
   for (auto p = ctx->mPeerConnections.begin();
         p != ctx->mPeerConnections.end(); ++p) {
     if (p->second->HasMedia()) {
-      queries->append(nsAutoPtr<RTCStatsQuery>(new RTCStatsQuery(true)));
+      if (!queries->append(nsAutoPtr<RTCStatsQuery>(new RTCStatsQuery(true)))) {
+	return;
+      }
       if (NS_WARN_IF(NS_FAILED(p->second->BuildStatsQuery_m(nullptr, // all tracks
                                                             queries->back())))) {
         queries->popBack();
@@ -354,9 +338,6 @@ nsresult PeerConnectionCtx::Initialize() {
   initGMP();
 
 #if !defined(MOZILLA_EXTERNAL_LINKAGE)
-  mConnectionCounter = 0;
-  Telemetry::GetHistogramById(Telemetry::WEBRTC_CALL_COUNT)->Add(0);
-
   mTelemetryTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
   MOZ_ASSERT(mTelemetryTimer);
   nsresult rv = mTelemetryTimer->SetTarget(gMainThread);

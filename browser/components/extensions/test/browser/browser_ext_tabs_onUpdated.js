@@ -23,14 +23,18 @@ add_task(function* () {
       let pageURL = "http://mochi.test:8888/browser/browser/components/extensions/test/browser/context_tabs_onUpdated_page.html";
 
       let expectedSequence = [
-        { status: "loading" },
-        { status: "loading", url: pageURL },
-        { status: "complete" },
+        {status: "loading"},
+        {status: "loading", url: pageURL},
+        {status: "complete"},
       ];
       let collectedSequence = [];
 
       browser.tabs.onUpdated.addListener(function(tabId, updatedInfo) {
-        collectedSequence.push(updatedInfo);
+        // onUpdated also fires with updatedInfo.faviconUrl, so explicitly
+        // check for updatedInfo.status before recording the event.
+        if ("status" in updatedInfo) {
+          collectedSequence.push(updatedInfo);
+        }
       });
 
       browser.runtime.onMessage.addListener(function() {
@@ -60,7 +64,7 @@ add_task(function* () {
         browser.test.notifyPass("tabs.onUpdated");
       });
 
-      browser.tabs.create({ url: pageURL });
+      browser.tabs.create({url: pageURL});
     },
     files: {
       "content-script.js": `
@@ -83,18 +87,16 @@ add_task(function* () {
   yield BrowserTestUtils.closeWindow(win1);
 });
 
-function* do_test_update(background) {
+function* do_test_update(background, withPermissions = true) {
   let win1 = yield BrowserTestUtils.openNewBrowserWindow();
 
   yield focusWindow(win1);
 
-  let extension = ExtensionTestUtils.loadExtension({
-    manifest: {
-      "permissions": ["tabs"],
-    },
-
-    background: background,
-  });
+  let manifest = {};
+  if (withPermissions) {
+    manifest.permissions = ["tabs"];
+  }
+  let extension = ExtensionTestUtils.loadExtension({manifest, background});
 
   yield Promise.all([
     yield extension.startup(),
@@ -159,7 +161,7 @@ add_task(function* test_url() {
         browser.test.assertEq(tabId, tab.id, "Check tab id");
         browser.test.log("onUpdate: " + JSON.stringify(changeInfo));
         if ("url" in changeInfo) {
-          browser.test.assertEq("about:preferences", changeInfo.url,
+          browser.test.assertEq("about:blank", changeInfo.url,
                                 "Check changeInfo.url");
           browser.tabs.onUpdated.removeListener(onUpdated);
           // Remove created tab.
@@ -168,7 +170,29 @@ add_task(function* test_url() {
           return;
         }
       });
-      browser.tabs.update(tab.id, {url: "about:preferences"});
+      browser.tabs.update(tab.id, {url: "about:blank"});
     });
   });
 });
+
+add_task(function* test_without_tabs_permission() {
+  yield do_test_update(function background() {
+    browser.tabs.create({url: "about:blank"}, function(tab) {
+      browser.tabs.onUpdated.addListener(function onUpdated(tabId, changeInfo) {
+        if (tabId == tab.id) {
+          browser.test.assertFalse("url" in changeInfo, "url should not be included without tabs permission");
+          browser.test.assertFalse("favIconUrl" in changeInfo, "favIconUrl should not be included without tabs permission");
+
+          if (changeInfo.status == "complete") {
+            browser.tabs.onUpdated.removeListener(onUpdated);
+            browser.tabs.remove(tabId);
+            browser.test.notifyPass("finish");
+          }
+        }
+      });
+      browser.tabs.reload(tab.id);
+    });
+  }, false /* withPermissions */);
+});
+
+add_task(forceGC);

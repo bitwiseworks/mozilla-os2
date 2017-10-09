@@ -37,7 +37,7 @@ var WindowWatcher = {
         aItem.disable = true;
     });
 
-    //run the code after the blocklist is closed
+    // run the code after the blocklist is closed
     Services.obs.notifyObservers(null, "addon-blocklist-closed", null);
 
   },
@@ -125,7 +125,7 @@ function run_test() {
   startupManager();
 
   AddonManager.getAddonsByIDs(addonIDs, function(addons) {
-    for (addon of addons) {
+    for (let addon of addons) {
       do_check_eq(addon.blocklistState, Ci.nsIBlocklistService.STATE_NOT_BLOCKED);
     }
     run_test_1();

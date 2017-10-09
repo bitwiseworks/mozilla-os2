@@ -8,14 +8,16 @@
 #define mozilla_a11y_DocAccessibleParent_h
 
 #include "nsAccessibilityService.h"
-#include "ProxyAccessible.h"
 #include "mozilla/a11y/PDocAccessibleParent.h"
+#include "mozilla/a11y/ProxyAccessible.h"
 #include "nsClassHashtable.h"
 #include "nsHashKeys.h"
 #include "nsISupportsImpl.h"
 
 namespace mozilla {
 namespace a11y {
+
+class xpcAccessibleGeneric;
 
 /*
  * These objects live in the main process and comunicate with and represent
@@ -39,6 +41,8 @@ public:
   void SetTopLevel() { mTopLevel = true; }
   bool IsTopLevel() const { return mTopLevel; }
 
+  bool IsShutdown() const { return mShutdown; }
+
   /*
    * Called when a message from a document in a child process notifies the main
    * process it is firing an event.
@@ -46,8 +50,10 @@ public:
   virtual bool RecvEvent(const uint64_t& aID, const uint32_t& aType)
     override;
 
-  virtual bool RecvShowEvent(const ShowEventData& aData) override;
-  virtual bool RecvHideEvent(const uint64_t& aRootID) override;
+  virtual bool RecvShowEvent(const ShowEventData& aData, const bool& aFromUser)
+    override;
+  virtual bool RecvHideEvent(const uint64_t& aRootID, const bool& aFromUser)
+    override;
   virtual bool RecvStateChangeEvent(const uint64_t& aID,
                                     const uint64_t& aState,
                                     const bool& aEnabled) override final;
@@ -60,15 +66,21 @@ public:
                                    const bool& aIsInsert,
                                    const bool& aFromUser) override;
 
+  virtual bool RecvSelectionEvent(const uint64_t& aID,
+                                  const uint64_t& aWidgetID,
+                                  const uint32_t& aType) override;
+
+  virtual bool RecvRoleChangedEvent(const uint32_t& aRole) override final;
+
   virtual bool RecvBindChildDoc(PDocAccessibleParent* aChildDoc, const uint64_t& aID) override;
+
   void Unbind()
   {
-    mParent = nullptr;
     if (DocAccessibleParent* parent = ParentDoc()) {
-      parent->mChildDocs.RemoveElement(this);
+      parent->RemoveChildDoc(this);
     }
 
-    mParentDoc = nullptr;
+    mParent = nullptr;
   }
 
   virtual bool RecvShutdown() override;
@@ -99,7 +111,7 @@ public:
    */
   void RemoveChildDoc(DocAccessibleParent* aChildDoc)
   {
-    aChildDoc->Parent()->SetChildDoc(nullptr);
+    aChildDoc->Parent()->ClearChildDoc(aChildDoc);
     mChildDocs.RemoveElement(aChildDoc);
     aChildDoc->mParentDoc = nullptr;
     MOZ_ASSERT(aChildDoc->mChildDocs.Length() == 0);
@@ -130,6 +142,13 @@ public:
   const DocAccessibleParent* ChildDocAt(size_t aIdx) const
     { return mChildDocs[aIdx]; }
 
+#if defined(XP_WIN)
+  void SetCOMProxy(const RefPtr<IAccessible>& aCOMProxy);
+
+  virtual bool RecvGetWindowedPluginIAccessible(
+      const WindowsHandle& aHwnd, IAccessibleHolder* aPluginCOMProxy) override;
+#endif
+
 private:
 
   class ProxyEntry : public PLDHashEntryHdr
@@ -158,7 +177,8 @@ private:
   uint32_t AddSubtree(ProxyAccessible* aParent,
                       const nsTArray<AccessibleData>& aNewTree, uint32_t aIdx,
                       uint32_t aIdxInParent);
-  MOZ_WARN_UNUSED_RESULT bool CheckDocTree() const;
+  MOZ_MUST_USE bool CheckDocTree() const;
+  xpcAccessibleGeneric* GetXPCAccessible(ProxyAccessible* aProxy);
 
   nsTArray<DocAccessibleParent*> mChildDocs;
   DocAccessibleParent* mParentDoc;

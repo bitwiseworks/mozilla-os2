@@ -22,6 +22,9 @@
 
 #include "nsIIPCSerializableURI.h"
 
+namespace mozilla {
+namespace net {
+
 class nsSimpleNestedURI : public nsSimpleURI,
                           public nsINestedURI
 {
@@ -48,7 +51,8 @@ public:
     virtual nsresult EqualsInternal(nsIURI* other,
                                     RefHandlingEnum refHandlingMode,
                                     bool* result) override;
-    virtual nsSimpleURI* StartClone(RefHandlingEnum refHandlingMode) override;
+    virtual nsSimpleURI* StartClone(RefHandlingEnum refHandlingMode,
+                                    const nsACString& newRef) override;
 
     // nsISerializable overrides
     NS_IMETHOD Read(nsIObjectInputStream* aStream) override;
@@ -64,5 +68,8 @@ public:
 protected:
     nsCOMPtr<nsIURI> mInnerURI;
 };
+
+} // namespace net
+} // namespace mozilla
 
 #endif /* nsSimpleNestedURI_h__ */

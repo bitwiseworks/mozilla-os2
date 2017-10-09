@@ -3,12 +3,13 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const constants = require('../constants');
-const promise = require('promise');
-const { rdpInvoke } = require('../utils');
+const constants = require("../constants");
+const promise = require("promise");
+const Services = require("Services");
 const { dumpn } = require("devtools/shared/DevToolsUtils");
-const { PROMISE, HISTOGRAM_ID } = require('devtools/client/shared/redux/middleware/promise');
-const { getSource, getSourceText } = require('../queries');
+const { PROMISE, HISTOGRAM_ID } = require("devtools/client/shared/redux/middleware/promise");
+const { getSource, getSourceText } = require("../queries");
+const { Task } = require("devtools/shared/task");
 
 const NEW_SOURCE_IGNORED_URLS = ["debugger eval code", "XStringBundle"];
 const FETCH_SOURCE_RESPONSE_DELAY = 200; // ms
@@ -61,8 +62,8 @@ function selectSource(source, opts) {
 function loadSources() {
   return {
     type: constants.LOAD_SOURCES,
-    [PROMISE]: Task.spawn(function*() {
-      const response = yield rdpInvoke(gThreadClient, gThreadClient.getSources);
+    [PROMISE]: Task.spawn(function* () {
+      const response = yield gThreadClient.getSources();
 
       // Top-level breakpoints may pause the entire loading process
       // because scripts are executed as they are loaded, so the
@@ -83,7 +84,7 @@ function loadSources() {
         return NEW_SOURCE_IGNORED_URLS.indexOf(source.url) === -1;
       });
     })
-  }
+  };
 }
 
 /**
@@ -103,12 +104,11 @@ function blackbox(source, shouldBlackBox) {
   return {
     type: constants.BLACKBOX,
     source: source,
-    [PROMISE]: Task.spawn(function*() {
-      yield rdpInvoke(client,
-                      shouldBlackBox ? client.blackBox : client.unblackBox);
+    [PROMISE]: Task.spawn(function* () {
+      yield shouldBlackBox ? client.blackBox() : client.unblackBox();
       return {
         isBlackBoxed: shouldBlackBox
-      }
+      };
     })
   };
 }
@@ -132,7 +132,7 @@ function togglePrettyPrint(source) {
     return dispatch({
       type: constants.TOGGLE_PRETTY_PRINT,
       source: source,
-      [PROMISE]: Task.spawn(function*() {
+      [PROMISE]: Task.spawn(function* () {
         let response;
 
         // Only attempt to pretty print JavaScript sources.
@@ -143,13 +143,10 @@ function togglePrettyPrint(source) {
         }
 
         if (wantPretty) {
-          response = yield rdpInvoke(sourceClient,
-                                     sourceClient.prettyPrint,
-                                     Prefs.editorTabSize);
+          response = yield sourceClient.prettyPrint(Prefs.editorTabSize);
         }
         else {
-          response = yield rdpInvoke(sourceClient,
-                                     sourceClient.disablePrettyPrint);
+          response = yield sourceClient.disablePrettyPrint();
         }
 
         // Remove the cached source AST from the Parser, to avoid getting
@@ -180,13 +177,13 @@ function loadSourceText(source) {
     return dispatch({
       type: constants.LOAD_SOURCE_TEXT,
       source: source,
-      [PROMISE]: Task.spawn(function*() {
+      [PROMISE]: Task.spawn(function* () {
         let transportType = gClient.localTransport ? "_LOCAL" : "_REMOTE";
         let histogramId = "DEVTOOLS_DEBUGGER_DISPLAY_SOURCE" + transportType + "_MS";
         let histogram = Services.telemetry.getHistogramById(histogramId);
         let startTime = Date.now();
 
-        const response = yield rdpInvoke(sourceClient, sourceClient.source);
+        const response = yield sourceClient.source();
 
         histogram.add(Date.now() - startTime);
 
@@ -202,7 +199,7 @@ function loadSourceText(source) {
                  contentType: response.contentType };
       })
     });
-  }
+  };
 }
 
 /**

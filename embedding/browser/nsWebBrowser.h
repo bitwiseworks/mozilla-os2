@@ -38,6 +38,7 @@
 #include "nsEmbedStream.h"
 #include "nsIWidgetListener.h"
 
+#include "mozilla/BasePrincipal.h"
 #include "nsTArray.h"
 #include "nsWeakPtr.h"
 
@@ -114,7 +115,6 @@ protected:
   // XXXbz why are these NS_IMETHOD?  They're not interface methods!
   NS_IMETHOD SetDocShell(nsIDocShell* aDocShell);
   NS_IMETHOD EnsureDocShellTreeOwner();
-  NS_IMETHOD GetPrimaryContentWindow(nsIDOMWindow** aDomWindow);
   NS_IMETHOD BindListener(nsISupports* aListener, const nsIID& aIID);
   NS_IMETHOD UnBindListener(nsISupports* aListener, const nsIID& aIID);
   NS_IMETHOD EnableGlobalHistory(bool aEnable);
@@ -133,6 +133,7 @@ protected:
   nsCOMPtr<nsIWebNavigation> mDocShellAsNav;
   nsCOMPtr<nsIScrollable> mDocShellAsScrollable;
   nsCOMPtr<nsITextScroll> mDocShellAsTextScroll;
+  mozilla::DocShellOriginAttributes mOriginAttributes;
 
   nsCOMPtr<nsIWidget> mInternalWidget;
   nsCOMPtr<nsIWindowWatcher> mWWatch;

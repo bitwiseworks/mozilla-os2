@@ -7,13 +7,12 @@
 #include "mozilla/dom/DesktopNotificationBinding.h"
 #include "mozilla/dom/AppNotificationServiceOptionsBinding.h"
 #include "mozilla/dom/ToJSValue.h"
+#include "nsComponentManagerUtils.h"
 #include "nsContentPermissionHelper.h"
 #include "nsXULAppAPI.h"
 #include "mozilla/dom/PBrowserChild.h"
-#include "nsIDOMDesktopNotification.h"
 #include "mozilla/Preferences.h"
 #include "nsGlobalWindow.h"
-#include "nsIAppsService.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsServiceManagerUtils.h"
 #include "PermissionMessageUtils.h"
@@ -26,7 +25,7 @@ namespace dom {
  * Simple Request
  */
 class DesktopNotificationRequest : public nsIContentPermissionRequest
-                                 , public nsRunnable
+                                 , public Runnable
 {
   virtual ~DesktopNotificationRequest()
   {
@@ -45,7 +44,7 @@ public:
 
   NS_IMETHOD Run() override
   {
-    nsCOMPtr<nsPIDOMWindow> window = mDesktopNotification->GetOwner();
+    nsCOMPtr<nsPIDOMWindowInner> window = mDesktopNotification->GetOwner();
     nsContentPermissionUtils::AskPermission(this, window);
     return NS_OK;
   }
@@ -72,33 +71,6 @@ DesktopNotification::PostDesktopNotification()
     mObserver = new AlertServiceObserver(this);
   }
 
-#ifdef MOZ_B2G
-  nsCOMPtr<nsIAppNotificationService> appNotifier =
-    do_GetService("@mozilla.org/system-alerts-service;1");
-  if (appNotifier) {
-    nsCOMPtr<nsPIDOMWindow> window = GetOwner();
-    uint32_t appId = (window.get())->GetDoc()->NodePrincipal()->GetAppId();
-
-    if (appId != nsIScriptSecurityManager::UNKNOWN_APP_ID) {
-      nsCOMPtr<nsIAppsService> appsService = do_GetService("@mozilla.org/AppsService;1");
-      nsString manifestUrl = EmptyString();
-      appsService->GetManifestURLByLocalId(appId, manifestUrl);
-      mozilla::AutoSafeJSContext cx;
-      JS::Rooted<JS::Value> val(cx);
-      AppNotificationServiceOptions ops;
-      ops.mTextClickable = true;
-      ops.mManifestURL = manifestUrl;
-
-      if (!ToJSValue(cx, ops, &val)) {
-        return NS_ERROR_FAILURE;
-      }
-
-      return appNotifier->ShowAppNotification(mIconURL, mTitle, mDescription,
-                                              mObserver, val);
-    }
-  }
-#endif
-
   nsCOMPtr<nsIAlertsService> alerts = do_GetService("@mozilla.org/alerts-service;1");
   if (!alerts) {
     return NS_ERROR_NOT_IMPLEMENTED;
@@ -110,26 +82,35 @@ DesktopNotification::PostDesktopNotification()
   // to nsIObservers, thus cookies must be unique to differentiate observers.
   nsString uniqueName = NS_LITERAL_STRING("desktop-notification:");
   uniqueName.AppendInt(sCount++);
-  nsCOMPtr<nsIDocument> doc = GetOwner()->GetDoc();
+  nsCOMPtr<nsPIDOMWindowInner> owner = GetOwner();
+  if (!owner) {
+    return NS_ERROR_FAILURE;
+  }
+  nsCOMPtr<nsIDocument> doc = owner->GetDoc();
   nsIPrincipal* principal = doc->NodePrincipal();
   nsCOMPtr<nsILoadContext> loadContext = doc->GetLoadContext();
   bool inPrivateBrowsing = loadContext && loadContext->UsePrivateBrowsing();
-  return alerts->ShowAlertNotification(mIconURL, mTitle, mDescription,
-                                       true,
-                                       uniqueName,
-                                       mObserver,
-                                       uniqueName,
-                                       NS_LITERAL_STRING("auto"),
-                                       EmptyString(),
-                                       EmptyString(),
-                                       principal,
-                                       inPrivateBrowsing);
+  nsCOMPtr<nsIAlertNotification> alert =
+    do_CreateInstance(ALERT_NOTIFICATION_CONTRACTID);
+  NS_ENSURE_TRUE(alert, NS_ERROR_FAILURE);
+  nsresult rv = alert->Init(uniqueName, mIconURL, mTitle,
+                            mDescription,
+                            true,
+                            uniqueName,
+                            NS_LITERAL_STRING("auto"),
+                            EmptyString(),
+                            EmptyString(),
+                            principal,
+                            inPrivateBrowsing,
+                            false /* requireInteraction */);
+  NS_ENSURE_SUCCESS(rv, rv);
+  return alerts->ShowAlert(alert, mObserver);
 }
 
 DesktopNotification::DesktopNotification(const nsAString & title,
                                          const nsAString & description,
                                          const nsAString & iconURL,
-                                         nsPIDOMWindow *aWindow,
+                                         nsPIDOMWindowInner* aWindow,
                                          nsIPrincipal* principal)
   : DOMEventTargetHelper(aWindow)
   , mTitle(title)
@@ -264,7 +245,7 @@ DesktopNotificationCenter::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGiv
 /* DesktopNotificationRequest                                               */
 /* ------------------------------------------------------------------------ */
 
-NS_IMPL_ISUPPORTS_INHERITED(DesktopNotificationRequest, nsRunnable,
+NS_IMPL_ISUPPORTS_INHERITED(DesktopNotificationRequest, Runnable,
                             nsIContentPermissionRequest)
 
 NS_IMETHODIMP
@@ -279,7 +260,7 @@ DesktopNotificationRequest::GetPrincipal(nsIPrincipal * *aRequestingPrincipal)
 }
 
 NS_IMETHODIMP
-DesktopNotificationRequest::GetWindow(nsIDOMWindow * *aRequestingWindow)
+DesktopNotificationRequest::GetWindow(mozIDOMWindow** aRequestingWindow)
 {
   if (!mDesktopNotification) {
     return NS_ERROR_NOT_INITIALIZED;

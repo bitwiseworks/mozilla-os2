@@ -48,8 +48,7 @@ WeakMapBase::markAll(JS::Zone* zone, JSTracer* tracer)
     MOZ_ASSERT(tracer->weakMapAction() != DoNotTraceWeakMaps);
     for (WeakMapBase* m : zone->gcWeakMapList) {
         m->trace(tracer);
-        if (m->memberOf)
-            TraceEdge(tracer, &m->memberOf, "memberOf");
+        TraceNullableEdge(tracer, &m->memberOf, "memberOf");
     }
 }
 
@@ -90,16 +89,15 @@ WeakMapBase::sweepZone(JS::Zone* zone)
     }
 
 #ifdef DEBUG
-    for (WeakMapBase* m : zone->gcWeakMapList) {
+    for (WeakMapBase* m : zone->gcWeakMapList)
         MOZ_ASSERT(m->isInList() && m->marked);
-    }
 #endif
 }
 
 void
 WeakMapBase::traceAllMappings(WeakMapTracer* tracer)
 {
-    JSRuntime* rt = tracer->runtime;
+    JSRuntime* rt = tracer->context;
     for (ZonesIter zone(rt, SkipAtoms); !zone.done(); zone.next()) {
         for (WeakMapBase* m : zone->gcWeakMapList) {
             // The WeakMapTracer callback is not allowed to GC.
@@ -143,10 +141,7 @@ ObjectValueMap::findZoneEdges()
         JSObject* key = r.front().key();
         if (key->asTenured().isMarked(BLACK) && !key->asTenured().isMarked(GRAY))
             continue;
-        JSWeakmapKeyDelegateOp op = key->getClass()->ext.weakmapKeyDelegateOp;
-        if (!op)
-            continue;
-        JSObject* delegate = op(key);
+        JSObject* delegate = getDelegate(key);
         if (!delegate)
             continue;
         Zone* delegateZone = delegate->zone();

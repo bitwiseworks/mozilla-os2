@@ -61,8 +61,8 @@ public:
                     nsIFrame*         aPrevInFlow) override;
 
   virtual void Reflow(nsPresContext*           aPresContext,
-                      nsHTMLReflowMetrics&     aDesiredSize,
-                      const nsHTMLReflowState& aReflowState,
+                      ReflowOutput&     aDesiredSize,
+                      const ReflowInput& aReflowInput,
                       nsReflowStatus&          aStatus) override;
 
   virtual nsIAtom* GetType() const override;  
@@ -81,7 +81,7 @@ public:
    */
   virtual bool DoesClipChildren() override { return true; }
 
-  virtual nsresult GetMargin(nsMargin& aMargin) override;
+  virtual nsresult GetXULMargin(nsMargin& aMargin) override;
 
   /**
    * The following three methods set the value of mIncrement when a

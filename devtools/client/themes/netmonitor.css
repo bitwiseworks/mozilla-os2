@@ -3,13 +3,98 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#toolbar-labels {
+  overflow: hidden;
+}
+
+#react-clear-button-hook,
+#react-details-pane-toggle-hook {
+  display: flex;
+}
+
+/**
+ * Collapsed details pane needs to be truly hidden to prevent both accessibility
+ * tools and keyboard from accessing its contents.
+ */
+#details-pane.pane-collapsed {
+  visibility: hidden;
+}
+
+#details-pane-toggle[disabled] {
+  display: none;
+}
+
+#custom-pane {
+  overflow: auto;
+}
+
+#response-content-image-box {
+  overflow: auto;
+}
+
+#network-statistics-charts {
+  overflow: auto;
+}
+
+.cropped-textbox .textbox-input {
+  /* workaround for textbox not supporting the @crop attribute */
+  text-overflow: ellipsis;
+}
+
+/* Responsive sidebar */
+@media (max-width: 700px) {
+  #toolbar-spacer,
+  #details-pane-toggle,
+  #details-pane.pane-collapsed,
+  .requests-menu-waterfall,
+  #requests-menu-network-summary-button > .toolbarbutton-text {
+    display: none;
+  }
+}
+
 :root.theme-dark {
   --table-splitter-color: rgba(255,255,255,0.15);
   --table-zebra-background: rgba(255,255,255,0.05);
+
+  --timing-blocked-color: rgba(235, 83, 104, 0.8);
+  --timing-dns-color: rgba(223, 128, 255, 0.8); /* pink */
+  --timing-connect-color: rgba(217, 102, 41, 0.8); /* orange */
+  --timing-send-color: rgba(70, 175, 227, 0.8); /* light blue */
+  --timing-wait-color: rgba(94, 136, 176, 0.8); /* blue grey */
+  --timing-receive-color: rgba(112, 191, 83, 0.8); /* green */
+
+  --sort-ascending-image: url(chrome://devtools/skin/images/sort-arrows.svg#ascending);
+  --sort-descending-image: url(chrome://devtools/skin/images/sort-arrows.svg#descending);
 }
+
 :root.theme-light {
   --table-splitter-color: rgba(0,0,0,0.15);
   --table-zebra-background: rgba(0,0,0,0.05);
+
+  --timing-blocked-color: rgba(235, 83, 104, 0.8);
+  --timing-dns-color: rgba(223, 128, 255, 0.8); /* pink */
+  --timing-connect-color: rgba(217, 102, 41, 0.8); /* orange */
+  --timing-send-color: rgba(0, 136, 204, 0.8); /* blue */
+  --timing-wait-color: rgba(95, 136, 176, 0.8); /* blue grey */
+  --timing-receive-color: rgba(44, 187, 15, 0.8); /* green */
+
+  --sort-ascending-image: url(chrome://devtools/skin/images/sort-arrows.svg#ascending);
+  --sort-descending-image: url(chrome://devtools/skin/images/sort-arrows.svg#descending);
+}
+
+:root.theme-firebug {
+  --table-splitter-color: rgba(0,0,0,0.15);
+  --table-zebra-background: rgba(0,0,0,0.05);
+
+  --timing-blocked-color:  rgba(235, 83, 104, 0.8); /* red */
+  --timing-dns-color: rgba(223, 128, 255, 0.8); /* pink */
+  --timing-connect-color: rgba(217, 102, 41, 0.8); /* orange */
+  --timing-send-color: rgba(70, 175, 227, 0.8); /* light blue */
+  --timing-wait-color: rgba(94, 136, 176, 0.8); /* blue grey */
+  --timing-receive-color: rgba(112, 191, 83, 0.8); /* green */
+
+  --sort-ascending-image: url(chrome://devtools/skin/images/firebug/arrow-up.svg);
+  --sort-descending-image: url(chrome://devtools/skin/images/firebug/arrow-down.svg);
 }
 
 #requests-menu-empty-notice {
@@ -29,6 +114,13 @@
   list-style-image: url(images/profiler-stopwatch.svg);
 }
 
+/* Make sure the icon is visible on Linux (to overwrite a rule
+  in xul.css that hides the icon if there is no label.
+  See also bug 1278050. */
+#requests-menu-perf-notice-button .button-icon {
+  display: block;
+}
+
 #requests-menu-perf-notice-button .button-text {
   display: none;
 }
@@ -36,12 +128,17 @@
 #requests-menu-reload-notice-button {
   min-height: 26px;
   margin: 0;
+  background-color: var(--theme-toolbar-background);
 }
 
 /* Network requests table */
 
 #requests-menu-toolbar {
   padding: 0;
+}
+
+.theme-firebug #requests-menu-toolbar {
+  height: 16px !important;
 }
 
 .requests-menu-subitem {
@@ -51,7 +148,10 @@
 .requests-menu-header-button {
   -moz-appearance: none;
   background-color: transparent;
-  border-image: linear-gradient(transparent 15%, var(--theme-splitter-color) 15%, var(--theme-splitter-color) 85%, transparent 85%) 1 1;
+  border-image: linear-gradient(transparent 15%,
+                                var(--theme-splitter-color) 15%,
+                                var(--theme-splitter-color) 85%,
+                                transparent 85%) 1 1;
   border-style: solid;
   border-width: 0;
   border-inline-start-width: 1px;
@@ -85,12 +185,12 @@
 
 .requests-menu-header-button[sorted=ascending] > .button-box > .button-icon,
 .requests-menu-header-button[sorted=ascending] #requests-menu-waterfall-image {
-  list-style-image: url("chrome://devtools/skin/images/sort-arrows.svg#ascending");
+  list-style-image: var(--sort-ascending-image);
 }
 
 .requests-menu-header-button[sorted=descending] > .button-box > .button-icon,
 .requests-menu-header-button[sorted=descending] #requests-menu-waterfall-image {
-  list-style-image: url("chrome://devtools/skin/images/sort-arrows.svg#descending");
+  list-style-image: var(--sort-descending-image);
 }
 
 .requests-menu-header-button > .button-box > .button-text,
@@ -109,16 +209,41 @@
   border-image: linear-gradient(var(--theme-splitter-color), var(--theme-splitter-color)) 1 1;
 }
 
+/* Firebug theme support for Network panel header */
+
+.theme-firebug .requests-menu-header {
+  padding: 0 !important;
+  font-weight: bold;
+  background: linear-gradient(rgba(255, 255, 255, 0.05),
+                              rgba(0, 0, 0, 0.05)),
+                              #C8D2DC;
+}
+
+.theme-firebug .requests-menu-header-button {
+  min-height: 17px;
+}
+
+.theme-firebug .requests-header-menu-button[sorted] {
+  background-color: #AAC3DC;
+}
+
+.theme-firebug .requests-header-menu:hover:active {
+  background-image: linear-gradient(rgba(0, 0, 0, 0.1),
+                                    transparent);
+}
+
+
 /* Network requests table: specific column dimensions */
 
 .requests-menu-status {
-  max-width: 4em;
-  width: 4vw;
+  max-width: 6em;
+  text-align: center;
+  width: 10vw;
 }
 
-.requests-menu-method-box,
-.requests-menu-method {
-  max-width: 6em;
+.requests-menu-method,
+.requests-menu-method-box {
+  max-width: 7em;
   text-align: center;
   width: 10vw;
 }
@@ -132,7 +257,7 @@
   width: calc(1em + 4px);
   height: calc(1em + 4px);
   margin: -4px 0px;
-  -moz-margin-end: 4px;
+  margin-inline-end: 4px;
 }
 
 .requests-menu-icon {
@@ -146,8 +271,11 @@
 .requests-security-state-icon {
   width: 16px;
   height: 16px;
-  -moz-margin-end: 4px;
-  cursor: pointer;
+  margin-inline-end: 4px;
+}
+
+.side-menu-widget-item.selected .requests-security-state-icon {
+  filter: brightness(1.3);
 }
 
 .security-state-insecure {
@@ -167,37 +295,64 @@
 }
 
 .security-state-local {
-  list-style-image: url(chrome://devtools/skin/images/security-state-local.svg);
+  list-style-image: url(chrome://devtools/skin/images/globe.svg);
 }
 
 .requests-menu-type,
-.requests-menu-transferred,
 .requests-menu-size {
+  max-width: 6em;
+  text-align: center;
+  width: 8vw;
+}
+
+.requests-menu-cause {
+  max-width: 8em;
+  width: 8vw;
+}
+
+.requests-menu-cause-stack {
+  background-color: var(--theme-body-color-alt);
+  color: var(--theme-body-background);
+  font-size: 8px;
+  font-weight: bold;
+  line-height: 10px;
+  border-radius: 3px;
+  padding: 0 2px;
+  margin: 0;
+  margin-inline-end: 3px;
+  -moz-user-select: none;
+}
+
+.requests-menu-transferred {
   max-width: 8em;
   text-align: center;
   width: 8vw;
 }
 
-.requests-menu-transferred {
-  width: 8vw;
+.side-menu-widget-item.selected .requests-menu-transferred.theme-comment {
+  color: var(--theme-selection-color);
 }
 
 /* Network requests table: status codes */
 
 .requests-menu-status-code {
-  -moz-margin-start: 3px !important;
+  margin-inline-start: 3px !important;
   width: 3em;
-  -moz-margin-end: -3em !important;
+  margin-inline-end: -3em !important;
 }
 
 .requests-menu-status-icon {
   background: #fff;
   height: 10px;
   width: 10px;
-  -moz-margin-start: 5px;
-  -moz-margin-end: 5px;
+  margin-inline-start: 5px;
+  margin-inline-end: 5px;
   border-radius: 10px;
   transition: box-shadow 0.5s ease-in-out;
+}
+
+.side-menu-widget-item.selected .requests-menu-status-icon {
+  filter: brightness(1.3);
 }
 
 .requests-menu-status-icon:not([code]) {
@@ -210,7 +365,7 @@
 }
 
 .requests-menu-status-icon[code^="1"] {
-  background-color: var(---theme-highlight-blue);
+  background-color: var(--theme-highlight-blue);
 }
 
 .requests-menu-status-icon[code^="2"] {
@@ -293,8 +448,8 @@
 /* Network requests table: waterfall items */
 
 .requests-menu-subitem.requests-menu-waterfall {
-  -moz-padding-start: 0px;
-  -moz-padding-end: 4px;
+  padding-inline-start: 0px;
+  padding-inline-end: 4px;
   /* Background created on a <canvas> in js. */
   /* @see devtools/client/netmonitor/netmonitor-view.js */
   background-image: -moz-element(#waterfall-background);
@@ -323,7 +478,7 @@
 }
 
 .requests-menu-timings-total {
-  -moz-padding-start: 4px;
+  padding-inline-start: 4px;
   font-size: 85%;
   font-weight: 600;
 }
@@ -332,41 +487,33 @@
   height: 9px;
 }
 
+.theme-firebug .requests-menu-timings-box {
+  background-image: linear-gradient(rgba(255, 255, 255, 0.3), rgba(0, 0, 0, 0.2));
+  height: 16px;
+}
+
 .requests-menu-timings-box.blocked {
-  background-color: rgba(235, 83, 104, 0.8); /* red */
+  background-color: var(--timing-blocked-color);
 }
 
 .requests-menu-timings-box.dns {
-  background-color: rgba(223, 128, 255, 0.8); /* pink */
+  background-color: var(--timing-dns-color);
 }
 
 .requests-menu-timings-box.connect {
-  background-color: rgba(217, 102, 41, 0.8); /* orange */
+  background-color: var(--timing-connect-color);
 }
 
-/* Use custom colors for dark and light theme on remaining timing types. */
-.theme-dark .requests-menu-timings-box.send {
-  background-color: rgba(70, 175, 227, 0.8); /* light blue */
+.requests-menu-timings-box.send {
+  background-color: var(--timing-send-color);
 }
 
-.theme-light .requests-menu-timings-box.send {
-  background-color: rgba(0, 136, 204, 0.8); /* blue */
+.requests-menu-timings-box.wait {
+  background-color: var(--timing-wait-color);
 }
 
-.theme-dark .requests-menu-timings-box.wait {
-  background-color: rgba(94, 136, 176, 0.8); /* blue grey */
-}
-
-.theme-light .requests-menu-timings-box.wait {
-  background-color: rgba(95, 136, 176, 0.8); /* blue grey */
-}
-
-.theme-dark .requests-menu-timings-box.receive {
-  background-color: rgba(112, 191, 83, 0.8); /* green */
-}
-
-.theme-light .requests-menu-timings-box.receive {
-  background-color: rgba(44, 187, 15, 0.8); /* green */
+.requests-menu-timings-box.receive {
+  background-color: var(--timing-receive-color);
 }
 
 /* SideMenuWidget */
@@ -392,24 +539,45 @@
   background-color: var(--theme-selection-background-semitransparent);
 }
 
+.theme-firebug .side-menu-widget-item:not(.selected):hover {
+  background: #EFEFEF;
+}
+
+.theme-firebug .requests-menu-subitem {
+  padding: 1px;
+}
+
+/* HTTP Status Column */
+.theme-firebug .requests-menu-subitem.requests-menu-status {
+  font-weight: bold;
+}
+
+/* Method Column */
+
+.theme-firebug .requests-menu-subitem.requests-menu-method-box {
+  color: rgb(128, 128, 128);
+}
+
+.side-menu-widget-item.selected .requests-menu-method {
+  color: var(--theme-selection-color);
+}
+
+/* Size Column */
+.theme-firebug .requests-menu-subitem.requests-menu-size {
+  text-align: end;
+  padding-inline-end: 4px;
+}
+
 /* Network request details */
 
-#details-pane-toggle {
-  list-style-image: url("chrome://devtools/skin/images/debugger-collapse.png");
+#details-pane-toggle:-moz-locale-dir(ltr)::before,
+#details-pane-toggle.pane-collapsed:-moz-locale-dir(rtl)::before {
+  background-image: var(--theme-pane-collapse-image);
 }
 
-#details-pane-toggle[pane-collapsed] {
-  list-style-image: url("chrome://devtools/skin/images/debugger-expand.png");
-}
-
-@media (min-resolution: 1.1dppx) {
-  #details-pane-toggle {
-    list-style-image: url("chrome://devtools/skin/images/debugger-collapse@2x.png");
-  }
-
-  #details-pane-toggle[pane-collapsed] {
-    list-style-image: url("chrome://devtools/skin/images/debugger-expand@2x.png");
-  }
+#details-pane-toggle.pane-collapsed:-moz-locale-dir(ltr)::before,
+#details-pane-toggle:-moz-locale-dir(rtl)::before {
+  background-image: var(--theme-pane-expand-image);
 }
 
 /* Network request details tabpanels */
@@ -426,6 +594,10 @@
   background-color: var(--theme-toolbar-background);
 }
 
+.theme-firebug .variables-view-scope:focus > .title {
+  color: var(--theme-body-color);
+}
+
 /* Summary tabpanel */
 
 .tabpanel-summary-container {
@@ -433,14 +605,14 @@
 }
 
 .tabpanel-summary-label {
-  -moz-padding-start: 4px;
-  -moz-padding-end: 3px;
+  padding-inline-start: 4px;
+  padding-inline-end: 3px;
   font-weight: 600;
 }
 
 .tabpanel-summary-value {
   color: inherit;
-  -moz-padding-start: 3px;
+  padding-inline-start: 3px;
 }
 
 .theme-dark .tabpanel-summary-value {
@@ -460,12 +632,12 @@
 
 #headers-summary-resend {
   margin-top: -10px;
-  -moz-margin-end: 6px;
+  margin-inline-end: 6px;
 }
 
 #toggle-raw-headers {
   margin-top: -10px;
-  -moz-margin-end: 6px;
+  margin-inline-end: 6px;
 }
 
 .raw-response-textarea {
@@ -519,9 +691,13 @@
   transition: transform 0.2s ease-out;
 }
 
+.theme-firebug #timings-tabpanel .requests-menu-timings-total {
+  color: var(--theme-body-color);
+}
+
 /* Security tabpanel */
 .security-info-section {
-  -moz-padding-start: 1em;
+  padding-inline-start: 1em;
 }
 
 .theme-dark #security-error-message {
@@ -535,7 +711,7 @@
 .security-warning-icon {
   background-image: url(images/alerticon-warning.png);
   background-size: 13px 12px;
-  -moz-margin-start: 5px;
+  margin-inline-start: 5px;
   vertical-align: top;
   width: 13px;
   height: 12px;
@@ -565,90 +741,6 @@
   width: 4.5em;
 }
 
-/* Footer */
-
-#requests-menu-footer {
-  background-color: var(--theme-toolbar-background);
-  border-top: 1px solid var(--table-splitter-color);
-}
-
-.requests-menu-footer-button,
-.requests-menu-footer-label {
-  min-width: 1em;
-  margin: 0;
-  border: none;
-  padding: 2px 1vw;
-}
-
-.theme-dark .requests-menu-footer-button,
-.theme-dark .requests-menu-footer-label {
-  color: var(--theme-selection-color);
-}
-
-.theme-light .requests-menu-footer-button,
-.theme-light .requests-menu-footer-label {
-  color: var(--theme-body-color);
-}
-
-.requests-menu-footer-spacer {
-  min-width: 2px;
-}
-
-.theme-dark .requests-menu-footer-spacer:not(:first-child),
-.theme-dark .requests-menu-footer-button:not(:first-child) {
-  -moz-border-start: 1px solid var(--table-splitter-color);
-}
-
-.theme-light .requests-menu-footer-spacer:not(:first-child),
-.theme-light .requests-menu-footer-button:not(:first-child) {
-  -moz-border-start: 1px solid var(--table-splitter-color);
-}
-
-.requests-menu-footer-button {
-  -moz-appearance: none;
-  background: rgba(0,0,0,0.025);
-}
-
-.requests-menu-footer-button:hover {
-  background: rgba(0,0,0,0.10);
-}
-
-.requests-menu-footer-button:hover:active {
-  background-color: var(--theme-selection-background-semitransparent);
-}
-
-.requests-menu-footer-button:not(:active)[checked] {
-  background-color: var(--theme-selection-background);
-  color: var(--theme-selection-color);
-}
-
-.requests-menu-footer-label {
-  padding-top: 3px;
-  font-weight: 600;
-}
-
-#requests-menu-filter-freetext-text {
-  transition-property: max-width, -moz-padding-end, -moz-padding-start;
-  transition-duration: 250ms;
-  transition-timing-function: ease;
-}
-
-#requests-menu-filter-freetext-text:not([focused]):not([filled]) > .textbox-input-box {
-  overflow: hidden;
-}
-
-#requests-menu-filter-freetext-text:not([focused]):not([filled]) {
-  max-width: 20px !important;
-  -moz-padding-end: 5px;
-  -moz-padding-start: 22px;
-  background-position: 8px center, top left, top left;
-}
-
-#requests-menu-filter-freetext-text[focused],
-#requests-menu-filter-freetext-text[filled] {
-  max-width: 200px !important;
-}
-
 /* Performance analysis buttons */
 
 #requests-menu-network-summary-button {
@@ -656,17 +748,10 @@
   box-shadow: none;
   border-color: transparent;
   list-style-image: url(images/profiler-stopwatch.svg);
-  -moz-padding-end: 0;
+  padding-inline-end: 0;
   cursor: pointer;
-}
-
-#requests-menu-network-summary-label {
-  -moz-padding-start: 0;
-  cursor: pointer;
-}
-
-#requests-menu-network-summary-label:hover {
-  text-decoration: underline;
+  margin-inline-end: 1em;
+  min-width: 0;
 }
 
 /* Performance analysis view */
@@ -685,7 +770,7 @@
   border-radius: 0;
   border-top: none;
   border-bottom: none;
-  -moz-border-start: none;
+  border-inline-start: none;
 }
 
 #network-statistics-view-splitter {
@@ -703,13 +788,13 @@
 }
 
 #network-statistics-charts .pie-chart-container {
-  -moz-margin-start: 3vw;
-  -moz-margin-end: 1vw;
+  margin-inline-start: 3vw;
+  margin-inline-end: 1vw;
 }
 
 #network-statistics-charts .table-chart-container {
-  -moz-margin-start: 1vw;
-  -moz-margin-end: 3vw;
+  margin-inline-start: 1vw;
+  margin-inline-end: 3vw;
 }
 
 .chart-colored-blob[name=html] {
@@ -773,6 +858,48 @@
   width: 7em;
 }
 
+/* Firebug theme support for network charts */
+
+.theme-firebug .chart-colored-blob[name=html] {
+  fill: rgba(94, 136, 176, 0.8); /* Blue-Grey highlight */
+  background: rgba(94, 136, 176, 0.8);
+}
+
+.theme-firebug .chart-colored-blob[name=css] {
+  fill: rgba(70, 175, 227, 0.8); /* light blue */
+  background: rgba(70, 175, 227, 0.8);
+}
+
+.theme-firebug .chart-colored-blob[name=js] {
+  fill: rgba(235, 83, 104, 0.8); /* red */
+  background: rgba(235, 83, 104, 0.8);
+}
+
+.theme-firebug .chart-colored-blob[name=xhr] {
+  fill: rgba(217, 102, 41, 0.8); /* orange  */
+  background: rgba(217, 102, 41, 0.8);
+}
+
+.theme-firebug .chart-colored-blob[name=fonts] {
+  fill: rgba(223, 128, 255, 0.8); /* pink */
+  background: rgba(223, 128, 255, 0.8);
+}
+
+.theme-firebug .chart-colored-blob[name=images] {
+  fill: rgba(112, 191, 83, 0.8); /* pink */
+  background: rgba(112, 191, 83, 0.8);
+}
+
+.theme-firebug .chart-colored-blob[name=media] {
+  fill: rgba(235, 235, 84, 0.8); /* yellow */
+  background: rgba(235, 235, 84, 0.8);
+}
+
+.theme-firebug .chart-colored-blob[name=flash] {
+  fill: rgba(84, 235, 159, 0.8); /* cyan */
+  background: rgba(84, 235, 159, 0.8);
+}
+
 /* Responsive sidebar */
 @media (max-width: 700px) {
   #requests-menu-toolbar {
@@ -790,11 +917,12 @@
   }
 
   .requests-menu-status {
-    width: 4vw;
+    max-width: none;
+    width: 12vw;
   }
 
-  #requests-menu-status-button {
-    min-width: 26px;
+  .requests-menu-status-code {
+    width: auto;
   }
 
   .requests-menu-method,
@@ -804,61 +932,44 @@
   }
 
   .requests-menu-icon-and-file {
-    width: 30vw;
+    width: 22vw;
   }
 
   .requests-menu-security-and-domain {
-    width: 28vw;
+    width: 18vw;
   }
 
-  .requests-menu-type,
-  .requests-menu-transferred {
-    width: 12vw;
+  .requests-menu-type {
+    width: 10vw;
   }
 
+  .requests-menu-transferred,
   .requests-menu-size {
-    width: 16vw;
+    width: 12vw;
   }
 }
 
 /* Platform overrides (copied in from the old platform specific files) */
-%ifdef XP_WIN
-.requests-menu-header-button > .button-box {
+:root[platform="win"] .requests-menu-header-button > .button-box {
   padding: 0;
 }
 
-.requests-menu-timings-division {
+:root[platform="win"] .requests-menu-timings-division {
   padding-top: 1px;
   font-size: 90%;
 }
 
-.requests-menu-footer-button,
-.requests-menu-footer-label {
-  padding-top: 0px;
-  padding-bottom: 0px;
-}
-
-/* Responsive sidebar */
-@media (max-width: 700px) {
-  .requests-menu-footer-button,
-  .requests-menu-footer-label {
-    padding-top: 0px;
-    padding-bottom: 0px;
-  }
-}
-%elifdef XP_LINUX
-#headers-summary-resend {
+:root[platform="linux"] #headers-summary-resend {
   padding: 4px;
 }
 
-#toggle-raw-headers {
+:root[platform="linux"] #toggle-raw-headers {
   padding: 4px;
 }
 
 /* Responsive sidebar */
 @media (max-width: 700px) {
-  .requests-menu-header-button {
+  :root[platform="linux"] .requests-menu-header-button {
     font-size: 85%;
   }
 }
-%endif

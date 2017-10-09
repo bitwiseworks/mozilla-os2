@@ -2,19 +2,27 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "CacheIndex.h"
 #include "CacheLog.h"
 #include "CacheFileUtils.h"
 #include "LoadContextInfo.h"
 #include "mozilla/Tokenizer.h"
+#include "mozilla/Telemetry.h"
 #include "nsCOMPtr.h"
 #include "nsAutoPtr.h"
 #include "nsString.h"
 #include <algorithm>
+#include "mozilla/Unused.h"
 
 
 namespace mozilla {
 namespace net {
 namespace CacheFileUtils {
+
+// This designates the format for the "alt-data" metadata.
+// When the format changes we need to update the version.
+static uint32_t const kAltDataVersion = 1;
+const char *kAltDataKey = "alt-data";
 
 namespace {
 
@@ -28,7 +36,6 @@ public:
     : Tokenizer(aInput)
     // Initialize attributes to their default values
     , originAttribs(0, false)
-    , isPrivate(false)
     , isAnonymous(false)
     // Initialize the cache key to a zero length by default
     , lastTag(0)
@@ -38,7 +45,6 @@ public:
 private:
   // Results
   NeckoOriginAttributes originAttribs;
-  bool isPrivate;
   bool isAnonymous;
   nsCString idEnhance;
   nsDependentCSubstring cacheKey;
@@ -84,11 +90,11 @@ private:
       break;
     }
     case 'p':
-      isPrivate = true;
+      originAttribs.SyncAttributesWithPrivateBrowsing(true);
       break;
     case 'b':
       // Leaving to be able to read and understand oldformatted entries
-      originAttribs.mInBrowser = true;
+      originAttribs.mInIsolatedMozBrowser = true;
       break;
     case 'a':
       isAnonymous = true;
@@ -158,7 +164,7 @@ public:
   {
     RefPtr<LoadContextInfo> info;
     if (ParseTags()) {
-      info = GetLoadContextInfo(isPrivate, isAnonymous, originAttribs);
+      info = GetLoadContextInfo(isAnonymous, originAttribs);
     }
 
     return info.forget();
@@ -504,6 +510,64 @@ DetailedCacheHitTelemetry::AddRecord(ERecType aType, TimeStamp aLoadStart)
       sHRStats[i].Reset();
     }
   }
+}
+
+void
+FreeBuffer(void *aBuf) {
+#ifndef NS_FREE_PERMANENT_DATA
+  if (CacheObserver::ShuttingDown()) {
+    return;
+  }
+#endif
+
+  free(aBuf);
+}
+
+nsresult
+ParseAlternativeDataInfo(const char *aInfo, int64_t *_offset, nsACString *_type)
+{
+  // The format is: "1;12345,javascript/binary"
+  //         <version>;<offset>,<type>
+  mozilla::Tokenizer p(aInfo, nullptr, "/");
+  uint32_t altDataVersion = 0;
+  int64_t altDataOffset = -1;
+
+  // The metadata format has a wrong version number.
+  if (!p.ReadInteger(&altDataVersion) ||
+      altDataVersion != kAltDataVersion) {
+    LOG(("ParseAlternativeDataInfo() - altDataVersion=%u, "
+         "expectedVersion=%u", altDataVersion, kAltDataVersion));
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  if (!p.CheckChar(';') ||
+      !p.ReadInteger(&altDataOffset) ||
+      !p.CheckChar(',')) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  // The requested alt-data representation is not available
+  if (altDataOffset < 0) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  *_offset = altDataOffset;
+  if (_type) {
+    mozilla::Unused << p.ReadUntil(Tokenizer::Token::EndOfFile(), *_type);
+  }
+
+  return NS_OK;
+}
+
+void
+BuildAlternativeDataInfo(const char *aInfo, int64_t aOffset, nsACString &_retval)
+{
+  _retval.Truncate();
+  _retval.AppendInt(kAltDataVersion);
+  _retval.Append(';');
+  _retval.AppendInt(aOffset);
+  _retval.Append(',');
+  _retval.Append(aInfo);
 }
 
 } // namespace CacheFileUtils

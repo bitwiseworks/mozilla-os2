@@ -7,13 +7,13 @@
 #ifndef nsTextEditorState_h__
 #define nsTextEditorState_h__
 
-#include "nsAutoPtr.h"
 #include "nsString.h"
 #include "nsITextControlElement.h"
 #include "nsITextControlFrame.h"
 #include "nsCycleCollectionParticipant.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/WeakPtr.h"
 
 class nsTextInputListener;
@@ -155,8 +155,7 @@ public:
     // Whether the value change should be notified to the frame/contet nor not.
     eSetValue_Notify                = 1 << 2
   };
-  MOZ_WARN_UNUSED_RESULT bool SetValue(const nsAString& aValue,
-                                       uint32_t aFlags);
+  MOZ_MUST_USE bool SetValue(const nsAString& aValue, uint32_t aFlags);
   void GetValue(nsAString& aValue, bool aIgnoreWrap) const;
   void EmptyValue() { if (mValue) mValue->Truncate(); }
   bool IsEmpty() const { return mValue ? mValue->IsEmpty() : true; }
@@ -164,8 +163,6 @@ public:
   nsresult CreatePlaceholderNode();
 
   mozilla::dom::Element* GetRootNode() {
-    if (!mRootNode)
-      CreateRootNode();
     return mRootNode;
   }
   mozilla::dom::Element* GetPlaceholderNode() {
@@ -199,7 +196,7 @@ public:
   bool GetPlaceholderVisibility() {
     return mPlaceholderVisibility;
   }
-  void UpdatePlaceholderText(bool aNotify); 
+  void UpdatePlaceholderText(bool aNotify);
 
   /**
    * Get the maxlength attribute
@@ -213,18 +210,55 @@ public:
   void HideSelectionIfBlurred();
 
   struct SelectionProperties {
-    SelectionProperties() : mStart(0), mEnd(0),
-      mDirection(nsITextControlFrame::eForward) {}
-    bool IsDefault() const {
-      return mStart == 0 && mEnd == 0 &&
-             mDirection == nsITextControlFrame::eForward;
-    }
-    int32_t mStart, mEnd;
-    nsITextControlFrame::SelectionDirection mDirection;
+    public:
+      SelectionProperties() : mStart(0), mEnd(0),
+        mDirection(nsITextControlFrame::eForward) {}
+      bool IsDefault() const
+      {
+        return mStart == 0 && mEnd == 0 &&
+               mDirection == nsITextControlFrame::eForward;
+      }
+      int32_t GetStart() const
+      {
+        return mStart;
+      }
+      void SetStart(int32_t value)
+      {
+        mIsDirty = true;
+        mStart = value;
+      }
+      int32_t GetEnd() const
+      {
+        return mEnd;
+      }
+      void SetEnd(int32_t value)
+      {
+        mIsDirty = true;
+        mEnd = value;
+      }
+      nsITextControlFrame::SelectionDirection GetDirection() const
+      {
+        return mDirection;
+      }
+      void SetDirection(nsITextControlFrame::SelectionDirection value)
+      {
+        mIsDirty = true;
+        mDirection = value;
+      }
+      // return true only if mStart, mEnd, or mDirection have been modified
+      bool IsDirty() const
+      {
+        return mIsDirty;
+      }
+    private:
+      int32_t mStart, mEnd;
+      bool mIsDirty = false;
+      nsITextControlFrame::SelectionDirection mDirection;
   };
 
   bool IsSelectionCached() const;
   SelectionProperties& GetSelectionProperties();
+  void SetSelectionProperties(SelectionProperties& aProps);
   void WillInitEagerly() { mSelectionRestoreEagerInit = true; }
   bool HasNeverInitializedBefore() const { return !mEverInited; }
 
@@ -293,7 +327,7 @@ private:
   nsCOMPtr<mozilla::dom::Element> mPlaceholderDiv;
   nsTextControlFrame* mBoundFrame;
   RefPtr<nsTextInputListener> mTextListener;
-  nsAutoPtr<nsCString> mValue;
+  mozilla::Maybe<nsString> mValue;
   RefPtr<nsAnonDivObserver> mMutationObserver;
   mutable nsString mCachedValue; // Caches non-hard-wrapped value on a multiline control.
   // mValueBeingSet is available only while SetValue() is requesting to commit

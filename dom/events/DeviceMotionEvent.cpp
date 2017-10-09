@@ -35,6 +35,24 @@ DeviceMotionEvent::InitDeviceMotionEvent(
                      const DeviceRotationRateInit& aRotationRate,
                      Nullable<double> aInterval)
 {
+  InitDeviceMotionEvent(aType, aCanBubble, aCancelable, aAcceleration,
+                        aAccelIncludingGravity, aRotationRate, aInterval,
+                        Nullable<uint64_t>());
+}
+
+void
+DeviceMotionEvent::InitDeviceMotionEvent(
+                     const nsAString& aType,
+                     bool aCanBubble,
+                     bool aCancelable,
+                     const DeviceAccelerationInit& aAcceleration,
+                     const DeviceAccelerationInit& aAccelIncludingGravity,
+                     const DeviceRotationRateInit& aRotationRate,
+                     Nullable<double> aInterval,
+                     Nullable<uint64_t> aTimeStamp)
+{
+  NS_ENSURE_TRUE_VOID(!mEvent->mFlags.mIsBeingDispatched);
+
   Event::InitEvent(aType, aCanBubble, aCancelable);
 
   mAcceleration = new DeviceAcceleration(this, aAcceleration.mX,
@@ -50,6 +68,9 @@ DeviceMotionEvent::InitDeviceMotionEvent(
                                          aRotationRate.mBeta,
                                          aRotationRate.mGamma);
   mInterval = aInterval;
+  if (!aTimeStamp.IsNull()) {
+    mEvent->mTime = aTimeStamp.Value();
+  }
 }
 
 already_AddRefed<DeviceMotionEvent>
@@ -80,7 +101,7 @@ DeviceMotionEvent::Constructor(const GlobalObject& aGlobal,
 
   e->mInterval = aEventInitDict.mInterval;
   e->SetTrusted(trusted);
-
+  e->SetComposed(aEventInitDict.mComposed);
   return e.forget();
 }
 
@@ -141,7 +162,7 @@ using namespace mozilla::dom;
 already_AddRefed<DeviceMotionEvent>
 NS_NewDOMDeviceMotionEvent(EventTarget* aOwner,
                            nsPresContext* aPresContext,
-                           WidgetEvent* aEvent) 
+                           WidgetEvent* aEvent)
 {
   RefPtr<DeviceMotionEvent> it =
     new DeviceMotionEvent(aOwner, aPresContext, aEvent);

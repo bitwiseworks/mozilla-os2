@@ -40,7 +40,7 @@ public:
     mHandler(aState);
 
     // Break the cycle so the object can be destroyed.
-    mDeathGrip = 0;
+    mDeathGrip = nullptr;
   }
 
   virtual size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const override
@@ -213,6 +213,14 @@ void
 URLSearchParams::NotifyObserver()
 {
   NS_NOTREACHED("Unexpected call to URLSearchParams::NotifyObserver");
+}
+
+NS_IMETHODIMP
+URLSearchParams::GetSendInfo(nsIInputStream** aBody, uint64_t* aContentLength,
+                             nsACString& aContentType, nsACString& aCharset)
+{
+  NS_NOTREACHED("Unexpected call to URLSearchParams::GetSendInfo");
+  return NS_OK;
 }
 
 } // namespace dom

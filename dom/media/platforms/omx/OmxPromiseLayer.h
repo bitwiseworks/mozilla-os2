@@ -7,16 +7,25 @@
 #if !defined(OmxPromiseLayer_h_)
 #define OmxPromiseLayer_h_
 
-#include "OMX_Core.h"
-#include "OMX_Types.h"
 #include "mozilla/MozPromise.h"
 #include "mozilla/TaskQueue.h"
+#include "nsAutoPtr.h"
+
+#include "OMX_Core.h"
+#include "OMX_Types.h"
 
 namespace mozilla {
 
-class TrackInfo;
-class OmxPlatformLayer;
+namespace layers
+{
+class ImageContainer;
+}
+
+class MediaData;
+class MediaRawData;
 class OmxDataDecoder;
+class OmxPlatformLayer;
+class TrackInfo;
 
 /* This class acts as a middle layer between OmxDataDecoder and the underlying
  * OmxPlatformLayer.
@@ -38,7 +47,9 @@ protected:
 public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(OmxPromiseLayer)
 
-  OmxPromiseLayer(TaskQueue* aTaskQueue, OmxDataDecoder* aDataDecoder);
+  OmxPromiseLayer(TaskQueue* aTaskQueue,
+                  OmxDataDecoder* aDataDecoder,
+                  layers::ImageContainer* aImageContainer);
 
   class BufferData;
 
@@ -74,7 +85,9 @@ public:
   typedef MozPromise<uint32_t, bool, /* IsExclusive = */ true> OmxPortConfigPromise;
 
   // TODO: maybe a generic promise is good enough for this case?
-  RefPtr<OmxCommandPromise> Init(TaskQueue* aQueue, const TrackInfo* aInfo);
+  RefPtr<OmxCommandPromise> Init(const TrackInfo* aInfo);
+
+  OMX_ERRORTYPE Config();
 
   RefPtr<OmxBufferPromise> FillBuffer(BufferData* aData);
 
@@ -97,6 +110,10 @@ public:
   OMX_ERRORTYPE SetParameter(OMX_INDEXTYPE nIndex,
                              OMX_PTR aComponentParameterStructure,
                              OMX_U32 aComponentParameterSize);
+
+  OMX_U32 InputPortIndex();
+
+  OMX_U32 OutputPortIndex();
 
   nsresult Shutdown();
 
@@ -123,6 +140,15 @@ public:
     virtual BufferID ID()
     {
       return mBuffer;
+    }
+
+    // Return the platform dependent MediaData().
+    // For example, it returns the MediaData with Gralloc texture.
+    // If it returns nullptr, then caller uses the normal way to
+    // create MediaData().
+    virtual already_AddRefed<MediaData> GetPlatformMediaData()
+    {
+      return nullptr;
     }
 
     // The buffer could be used by several objects. And only one object owns the
@@ -162,7 +188,7 @@ public:
     // records of the original data from demuxer, like duration, stream offset...etc.
     RefPtr<MediaRawData> mRawData;
 
-    // Because OMX buffer works acorssing threads, so it uses a promise
+    // Because OMX buffer works across threads, so it uses a promise
     // for each buffer when the buffer is used by Omx component.
     MozPromiseHolder<OmxBufferPromise> mPromise;
     BufferStatus mStatus;
@@ -179,10 +205,15 @@ public:
   already_AddRefed<BufferData>
   FindAndRemoveBufferHolder(OMX_DIRTYPE aType, BufferData::BufferID aId);
 
-  // Return truen if event is handled.
+  // Return true if event is handled.
   bool Event(OMX_EVENTTYPE aEvent, OMX_U32 aData1, OMX_U32 aData2);
 
 protected:
+  struct FlushCommand {
+    OMX_DIRTYPE type;
+    OMX_PTR cmd;
+  };
+
   BUFFERLIST* GetBufferHolders(OMX_DIRTYPE aType);
 
   already_AddRefed<MediaRawData> FindAndRemoveRawData(OMX_TICKS aTimecode);
@@ -197,15 +228,15 @@ protected:
 
   MozPromiseHolder<OmxCommandPromise> mFlushPromise;
 
-  OMX_U32 mFlushPortIndex;
+  nsTArray<FlushCommand> mFlushCommands;
 
   nsAutoPtr<OmxPlatformLayer> mPlatformLayer;
 
 private:
   // Elements are added to holders when FillBuffer() or FillBuffer(). And
-  // removing elelments when the promise is resolved. Buffers in these lists
+  // removing element when the promise is resolved. Buffers in these lists
   // should NOT be used by other component; for example, output it to audio
-  // output. These list should be empty when engine is about to shutdown.
+  // output. These lists should be empty when engine is about to shutdown.
   //
   // Note:
   //      There bufferlist should not be used by other class directly.

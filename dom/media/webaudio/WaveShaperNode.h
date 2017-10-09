@@ -24,13 +24,10 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(WaveShaperNode, AudioNode)
 
-  virtual JSObject* WrapObject(JSContext *aCx, JS::Handle<JSObject*> aGivenProto) override;
+  JSObject* WrapObject(JSContext *aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   void GetCurve(JSContext* aCx, JS::MutableHandle<JSObject*> aRetval) const
   {
-    if (mCurve) {
-      JS::ExposeObjectToActiveJS(mCurve);
-    }
     aRetval.set(mCurve);
   }
   void SetCurve(const Nullable<Float32Array>& aData, ErrorResult& aRv);
@@ -41,19 +38,19 @@ public:
   }
   void SetOversample(OverSampleType aType);
 
-  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override
+  size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override
   {
     // Possibly track in the future:
     // - mCurve
     return AudioNode::SizeOfExcludingThis(aMallocSizeOf);
   }
 
-  virtual const char* NodeType() const override
+  const char* NodeType() const override
   {
     return "WaveShaperNode";
   }
 
-  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override
+  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override
   {
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }

@@ -4,24 +4,28 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef _NSNSSIOLAYER_H
-#define _NSNSSIOLAYER_H
+#ifndef nsNSSIOLayer_h
+#define nsNSSIOLayer_h
 
 #include "TransportSecurityInfo.h"
-#include "nsISSLSocketControl.h"
+#include "mozilla/TimeStamp.h"
+#include "nsCOMPtr.h"
+#include "nsDataHashtable.h"
 #include "nsIClientAuthDialogs.h"
 #include "nsIProxyInfo.h"
+#include "nsISSLSocketControl.h"
 #include "nsNSSCertificate.h"
-#include "nsDataHashtable.h"
 #include "nsTHashtable.h"
-#include "mozilla/TimeStamp.h"
 #include "sslt.h"
 
 namespace mozilla {
+class NeckoOriginAttributes;
 namespace psm {
 class SharedSSLState;
 } // namespace psm
 } // namespace mozilla
+
+using mozilla::NeckoOriginAttributes;
 
 class nsIObserver;
 
@@ -52,6 +56,7 @@ public:
                 const nsNSSShutDownPreventionLock& proofOfLock);
 
   void SetNegotiatedNPN(const char* value, uint32_t length);
+  void SetEarlyDataAccepted(bool aAccepted);
 
   void SetHandshakeCompleted();
   void NoteTimeUntilReady();
@@ -112,14 +117,6 @@ public:
 
   void SetMACAlgorithmUsed(int16_t mac) { mMACAlgorithmUsed = mac; }
 
-  inline bool GetBypassAuthentication()
-  {
-    bool result = false;
-    mozilla::DebugOnly<nsresult> rv = GetBypassAuthentication(&result);
-    MOZ_ASSERT(NS_SUCCEEDED(rv));
-    return result;
-  }
-
 protected:
   virtual ~nsNSSSocketInfo();
 
@@ -139,6 +136,7 @@ private:
 
   nsCString mNegotiatedNPN;
   bool      mNPNCompleted;
+  bool      mEarlyDataAccepted;
   bool      mFalseStartCallbackCalled;
   bool      mFalseStarted;
   bool      mIsFullHandshake;
@@ -216,9 +214,7 @@ public:
                                    PRErrorCode intoleranceReason);
   bool rememberStrongCiphersFailed(const nsACString& hostName, int16_t port,
                                    PRErrorCode intoleranceReason);
-  // returns the known tolerant version
-  // or 0 if there is no known tolerant version
-  uint16_t forgetIntolerance(const nsACString& hostname, int16_t port);
+  void forgetIntolerance(const nsACString& hostname, int16_t port);
   void adjustForTLSIntolerance(const nsACString& hostname, int16_t port,
                                /*in/out*/ SSLVersionRange& range,
                                /*out*/ StrongCipherStatus& strongCipherStatus);
@@ -231,6 +227,7 @@ public:
   bool isPublic() const;
   void addInsecureFallbackSite(const nsCString& hostname, bool temporary);
   void removeInsecureFallbackSite(const nsACString& hostname, uint16_t port);
+  bool isInsecureFallbackSite(const nsACString& hostname);
 
   bool mFalseStartRequireNPN;
   bool mUnrestrictedRC4Fallback;
@@ -244,6 +241,7 @@ nsresult nsSSLIOLayerNewSocket(int32_t family,
                                const char* host,
                                int32_t port,
                                nsIProxyInfo *proxy,
+                               const NeckoOriginAttributes& originAttributes,
                                PRFileDesc** fd,
                                nsISupports** securityInfo,
                                bool forSTARTTLS,
@@ -253,6 +251,7 @@ nsresult nsSSLIOLayerAddToSocket(int32_t family,
                                  const char* host,
                                  int32_t port,
                                  nsIProxyInfo *proxy,
+                                 const NeckoOriginAttributes& originAttributes,
                                  PRFileDesc* fd,
                                  nsISupports** securityInfo,
                                  bool forSTARTTLS,
@@ -261,4 +260,4 @@ nsresult nsSSLIOLayerAddToSocket(int32_t family,
 nsresult nsSSLIOLayerFreeTLSIntolerantSites();
 nsresult displayUnknownCertErrorAlert(nsNSSSocketInfo* infoObject, int error);
 
-#endif /* _NSNSSIOLAYER_H */
+#endif // nsNSSIOLayer_h

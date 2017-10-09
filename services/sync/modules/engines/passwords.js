@@ -2,12 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-this.EXPORTED_SYMBOLS = ['PasswordEngine', 'LoginRec'];
+this.EXPORTED_SYMBOLS = ['PasswordEngine', 'LoginRec', 'PasswordValidator'];
 
 var {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
 Cu.import("resource://services-sync/record.js");
 Cu.import("resource://services-sync/constants.js");
+Cu.import("resource://services-sync/collection_validator.js");
 Cu.import("resource://services-sync/engines.js");
 Cu.import("resource://services-sync/util.js");
 Cu.import("resource://services-common/async.js");
@@ -68,8 +69,11 @@ PasswordEngine.prototype = {
         // record success.
         Svc.Prefs.set("deletePwdFxA", true);
         Svc.Prefs.reset("deletePwd"); // The old prefname we previously used.
-      } catch (ex if !Async.isShutdownException(ex)) {
-        this._log.debug("Password deletes failed: " + Utils.exceptionStr(ex));
+      } catch (ex) {
+        if (Async.isShutdownException(ex)) {
+          throw ex;
+        }
+        this._log.debug("Password deletes failed", ex);
       }
     }
   },
@@ -233,8 +237,7 @@ PasswordStore.prototype = {
     try {
       Services.logins.addLogin(login);
     } catch(ex) {
-      this._log.debug("Adding record " + record.id +
-                      " resulted in exception " + Utils.exceptionStr(ex));
+      this._log.debug(`Adding record ${record.id} resulted in exception`, ex);
     }
   },
 
@@ -266,9 +269,7 @@ PasswordStore.prototype = {
     try {
       Services.logins.modifyLogin(loginItem, newinfo);
     } catch(ex) {
-      this._log.debug("Modifying record " + record.id +
-                      " resulted in exception " + Utils.exceptionStr(ex) +
-                      ". Not modifying.");
+      this._log.debug(`Modifying record ${record.id} resulted in exception; not modifying`, ex);
     }
   },
 
@@ -325,3 +326,46 @@ PasswordTracker.prototype = {
     }
   },
 };
+
+class PasswordValidator extends CollectionValidator {
+  constructor() {
+    super("passwords", "id", [
+      "hostname",
+      "formSubmitURL",
+      "httpRealm",
+      "password",
+      "passwordField",
+      "username",
+      "usernameField",
+    ]);
+  }
+
+  getClientItems() {
+    let logins = Services.logins.getAllLogins({});
+    let syncHosts = Utils.getSyncCredentialsHosts()
+    let result = logins.map(l => l.QueryInterface(Ci.nsILoginMetaInfo))
+                       .filter(l => !syncHosts.has(l.hostname));
+    return Promise.resolve(result);
+  }
+
+  normalizeClientItem(item) {
+    return {
+      id: item.guid,
+      guid: item.guid,
+      hostname: item.hostname,
+      formSubmitURL: item.formSubmitURL,
+      httpRealm: item.httpRealm,
+      password: item.password,
+      passwordField: item.passwordField,
+      username: item.username,
+      usernameField: item.usernameField,
+      original: item,
+    }
+  }
+
+  normalizeServerItem(item) {
+    return Object.assign({ guid: item.id }, item);
+  }
+}
+
+

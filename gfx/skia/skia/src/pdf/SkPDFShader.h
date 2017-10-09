@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2011 Google Inc.
  *
@@ -10,14 +9,14 @@
 #ifndef SkPDFShader_DEFINED
 #define SkPDFShader_DEFINED
 
-#include "SkPDFStream.h"
+#include "SkBitmapKey.h"
 #include "SkPDFTypes.h"
-#include "SkMatrix.h"
-#include "SkRefCnt.h"
 #include "SkShader.h"
 
-class SkObjRef;
-class SkPDFCatalog;
+class SkPDFCanon;
+class SkPDFDocument;
+class SkMatrix;
+struct SkIRect;
 
 /** \class SkPDFShader
 
@@ -28,46 +27,60 @@ class SkPDFCatalog;
 class SkPDFShader {
 public:
     /** Get the PDF shader for the passed SkShader. If the SkShader is
-     *  invalid in some way, returns NULL. The reference count of
+     *  invalid in some way, returns nullptr. The reference count of
      *  the object is incremented and it is the caller's responsibility to
      *  unreference it when done.  This is needed to accommodate the weak
      *  reference pattern used when the returned object is new and has no
      *  other references.
-     *  @param shader     The SkShader to emulate.
-     *  @param matrix     The current transform. (PDF shaders are absolutely
-     *                    positioned, relative to where the page is drawn.)
-     *  @param surfceBBox The bounding box of the drawing surface (with matrix
-     *                    already applied).
+     *  @param shader      The SkShader to emulate.
+     *  @param matrix      The current transform. (PDF shaders are absolutely
+     *                     positioned, relative to where the page is drawn.)
+     *  @param surfceBBox  The bounding box of the drawing surface (with matrix
+     *                     already applied).
+     *  @param rasterScale Additional scale to be applied for early
+     *                     rasterization.
      */
-    static SkPDFObject* GetPDFShader(const SkShader& shader,
-                                     const SkMatrix& matrix,
-                                     const SkIRect& surfaceBBox);
+    static sk_sp<SkPDFObject> GetPDFShader(SkPDFDocument* doc,
+                                           SkScalar dpi,
+                                           SkShader* shader,
+                                           const SkMatrix& matrix,
+                                           const SkIRect& surfaceBBox,
+                                           SkScalar rasterScale);
 
-protected:
-    class State;
+    static sk_sp<SkPDFArray> MakeRangeObject();
 
-    class ShaderCanonicalEntry {
+    class State {
     public:
-        ShaderCanonicalEntry(SkPDFObject* pdfShader, const State* state);
-        bool operator==(const ShaderCanonicalEntry& b) const;
+        SkShader::GradientType fType;
+        SkShader::GradientInfo fInfo;
+        std::unique_ptr<SkColor[]> fColors;
+        std::unique_ptr<SkScalar[]> fStops;
+        SkMatrix fCanvasTransform;
+        SkMatrix fShaderTransform;
+        SkIRect fBBox;
 
-        SkPDFObject* fPDFShader;
-        const State* fState;
+        SkBitmapKey fBitmapKey;
+        SkShader::TileMode fImageTileModes[2];
+
+        State(SkShader* shader, const SkMatrix& canvasTransform,
+              const SkIRect& bbox, SkScalar rasterScale,
+              SkBitmap* dstImage);
+
+        bool operator==(const State& b) const;
+
+        State MakeAlphaToLuminosityState() const;
+        State MakeOpaqueState() const;
+
+        bool GradientHasAlpha() const;
+
+        State(State&&) = default;
+        State& operator=(State&&) = default;
+
+    private:
+        State(const State& other);
+        State& operator=(const State& rhs);
+        void allocateGradientInfoStorage();
     };
-    // This should be made a hash table if performance is a problem.
-    static SkTDArray<ShaderCanonicalEntry>& CanonicalShaders();
-    static SkBaseMutex& CanonicalShadersMutex();
-
-    // This is an internal method.
-    // CanonicalShadersMutex() should already be acquired.
-    // This also takes ownership of shaderState.
-    static SkPDFObject* GetPDFShaderByState(State* shaderState);
-    static void RemoveShader(SkPDFObject* shader);
-
-    SkPDFShader();
-    virtual ~SkPDFShader() {};
-
-    virtual bool isValid() = 0;
 };
 
 #endif

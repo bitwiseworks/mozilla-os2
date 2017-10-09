@@ -14,11 +14,11 @@ const KEY_STATES = [
   [".", "div."],
   ["VK_UP", "div.c1"],
   ["VK_DOWN", "div.l1"],
-  ["VK_DOWN", "div.l1"],
   ["VK_BACK_SPACE", "div.l"],
   ["VK_TAB", "div.l1"],
   [" ", "div.l1 "],
   ["VK_UP", "div.l1 div"],
+  ["VK_UP", "div.l1 span"],
   ["VK_UP", "div.l1 div"],
   [".", "div.l1 div."],
   ["VK_TAB", "div.l1 div.c1"],
@@ -33,13 +33,13 @@ const KEY_STATES = [
   ["VK_BACK_SPACE", "div.l1 d"],
   ["VK_BACK_SPACE", "div.l1 "],
   ["VK_UP", "div.l1 div"],
+  ["VK_UP", "div.l1 span"],
   ["VK_UP", "div.l1 div"],
   ["VK_TAB", "div.l1 div"],
   ["VK_BACK_SPACE", "div.l1 di"],
   ["VK_BACK_SPACE", "div.l1 d"],
   ["VK_BACK_SPACE", "div.l1 "],
   ["VK_DOWN", "div.l1 div"],
-  ["VK_DOWN", "div.l1 span"],
   ["VK_DOWN", "div.l1 span"],
   ["VK_BACK_SPACE", "div.l1 spa"],
   ["VK_BACK_SPACE", "div.l1 sp"],
@@ -54,7 +54,7 @@ const KEY_STATES = [
   ["VK_BACK_SPACE", ""],
 ];
 
-const TEST_URL = TEST_URL_ROOT +
+const TEST_URL = URL_ROOT +
   "doc_inspector_search-suggestions.html";
 
 add_task(function* () {
@@ -68,6 +68,9 @@ add_task(function* () {
     EventUtils.synthesizeKey(key, {}, inspector.panelWin);
     yield done;
 
-    is(inspector.searchBox.value, query, "The searchbox value is correct.");
+    info("Waiting for search query to complete");
+    yield inspector.searchSuggestions._lastQuery;
+
+    is(inspector.searchBox.value, query, "The searchbox value is correct");
   }
 });

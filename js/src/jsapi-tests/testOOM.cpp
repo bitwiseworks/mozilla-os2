@@ -17,18 +17,18 @@ BEGIN_TEST(testOOM)
     return true;
 }
 
-virtual JSRuntime * createRuntime() override
+virtual JSContext* createContext() override
 {
-    JSRuntime* rt = JS_NewRuntime(0);
-    if (!rt)
+    JSContext* cx = JS_NewContext(0);
+    if (!cx)
         return nullptr;
-    JS_SetGCParameter(rt, JSGC_MAX_BYTES, (uint32_t)-1);
-    setNativeStackQuota(rt);
-    return rt;
+    JS_SetGCParameter(cx, JSGC_MAX_BYTES, (uint32_t)-1);
+    setNativeStackQuota(cx);
+    return cx;
 }
 END_TEST(testOOM)
 
-#ifdef DEBUG  // OOM_maxAllocations is only available in debug builds.
+#ifdef DEBUG  // js::oom functions are only available in debug builds.
 
 const uint32_t maxAllocsPerTest = 100;
 
@@ -36,50 +36,36 @@ const uint32_t maxAllocsPerTest = 100;
     testName = name;                                                          \
     printf("Test %s: started\n", testName);                                   \
     for (oomAfter = 1; oomAfter < maxAllocsPerTest; ++oomAfter) {             \
-        setOOMAfter(oomAfter)
+    js::oom::SimulateOOMAfter(oomAfter, js::oom::THREAD_TYPE_MAIN, true)
 
 #define OOM_TEST_FINISHED                                                     \
     {                                                                         \
-        printf("Test %s: finished with %d allocations\n",                     \
+        printf("Test %s: finished with %" PRIu64 " allocations\n",            \
                testName, oomAfter - 1);                                       \
         break;                                                                \
     }
 
 #define END_OOM_TEST                                                          \
     }                                                                         \
-    cancelOOMAfter();                                                         \
+    js::oom::ResetSimulatedOOM();                                             \
     CHECK(oomAfter != maxAllocsPerTest)
 
-BEGIN_TEST(testNewRuntime)
+BEGIN_TEST(testNewContext)
 {
-    uninit(); // Get rid of test harness' original JSRuntime.
+    uninit(); // Get rid of test harness' original JSContext.
 
-    JSRuntime* rt;
-    START_OOM_TEST("new runtime");
-    rt = JS_NewRuntime(8L * 1024 * 1024);
-    if (rt)
+    JSContext* cx;
+    START_OOM_TEST("new context");
+    cx = JS_NewContext(8L * 1024 * 1024);
+    if (cx)
         OOM_TEST_FINISHED;
     END_OOM_TEST;
-    JS_DestroyRuntime(rt);
+    JS_DestroyContext(cx);
     return true;
 }
 
 const char* testName;
-uint32_t oomAfter;
-
-void
-setOOMAfter(uint32_t numAllocs)
-{
-    if (uint64_t(OOM_counter) + numAllocs >= UINT32_MAX)
-	MOZ_CRASH("Can't set maxAllocations - out of range");
-    OOM_maxAllocations = OOM_counter + numAllocs;
-}
-
-void
-cancelOOMAfter()
-{
-    OOM_maxAllocations = UINT32_MAX;
-}
-END_TEST(testNewRuntime)
+uint64_t oomAfter;
+END_TEST(testNewContext)
 
 #endif

@@ -20,10 +20,12 @@ class LIRGeneratorMIPS64 : public LIRGeneratorMIPSShared
     { }
 
   protected:
-    // Adds a box input to an instruction, setting operand |n| to the type and
-    // |n+1| to the payload.
-    void useBoxFixed(LInstruction* lir, size_t n, MDefinition* mir, Register reg1, Register reg2,
-                     bool useAtStart = false);
+    void lowerInt64PhiInput(MPhi*, uint32_t, LBlock*, size_t);
+    void defineInt64Phi(MPhi*, size_t);
+
+    // Returns a box allocation. reg2 is ignored on 64-bit platforms.
+    LBoxAllocation useBoxFixed(MDefinition* mir, Register reg1, Register reg2,
+                               bool useAtStart = false);
 
     inline LDefinition tempToUnbox() {
         return temp();
@@ -34,6 +36,11 @@ class LIRGeneratorMIPS64 : public LIRGeneratorMIPSShared
 
     void lowerTruncateDToInt32(MTruncateToInt32* ins);
     void lowerTruncateFToInt32(MTruncateToInt32* ins);
+
+    void lowerDivI64(MDiv* div);
+    void lowerModI64(MMod* mod);
+    void lowerUDivI64(MDiv* div);
+    void lowerUModI64(MMod* mod);
 
   public:
     void visitBox(MBox* box);

@@ -1,11 +1,7 @@
-/* vim:set ts=2 sw=2 sts=2 et: */
-/*
- * Any copyright is dedicated to the Public Domain.
- * http://creativecommons.org/publicdomain/zero/1.0/
- *
- * Contributor(s):
- *   Mihai Șucan <mihai.sucan@gmail.com>
- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
+/* Any copyright is dedicated to the Public Domain.
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 "use strict";
 
@@ -14,7 +10,7 @@ const TEST_URI = "data:text/html;charset=utf-8,Web Console test for " +
 
 var hud;
 
-var test = asyncTest(function* () {
+add_task(function* () {
   yield loadTab(TEST_URI);
 
   hud = yield openConsole();
@@ -24,11 +20,13 @@ var test = asyncTest(function* () {
   let outputNode = hud.outputNode;
 
   Services.prefs.setIntPref("devtools.hud.loglimit.console", 140);
-  let scrollBoxElement = outputNode.parentNode;
+  let scrollBoxElement = hud.ui.outputWrapper;
 
-  for (let i = 0; i < 150; i++) {
-    content.console.log("test message " + i);
-  }
+  ContentTask.spawn(gBrowser.selectedBrowser, {}, function* () {
+    for (let i = 0; i < 150; i++) {
+      content.console.log("test message " + i);
+    }
+  });
 
   yield waitForMessages({
     webconsole: hud,
@@ -57,7 +55,9 @@ var test = asyncTest(function* () {
   oldScrollTop = scrollBoxElement.scrollTop;
 
   // add a message
-  content.console.log("hello world");
+  ContentTask.spawn(gBrowser.selectedBrowser, {}, function* () {
+    content.console.log("hello world");
+  });
 
   yield waitForMessages({
     webconsole: hud,

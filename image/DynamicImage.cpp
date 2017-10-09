@@ -180,24 +180,23 @@ DynamicImage::GetFrameAtSize(const IntSize& aSize,
 {
   RefPtr<DrawTarget> dt = gfxPlatform::GetPlatform()->
     CreateOffscreenContentDrawTarget(aSize, SurfaceFormat::B8G8R8A8);
-  if (!dt) {
+  if (!dt || !dt->IsValid()) {
     gfxWarning() <<
       "DynamicImage::GetFrame failed in CreateOffscreenContentDrawTarget";
     return nullptr;
   }
-  RefPtr<gfxContext> context = new gfxContext(dt);
+  RefPtr<gfxContext> context = gfxContext::CreateOrNull(dt);
+  MOZ_ASSERT(context); // already checked the draw target above
 
   auto result = Draw(context, aSize, ImageRegion::Create(aSize),
-                     aWhichFrame, Filter::POINT, Nothing(), aFlags);
+                     aWhichFrame, SamplingFilter::POINT, Nothing(), aFlags);
 
   return result == DrawResult::SUCCESS ? dt->Snapshot() : nullptr;
 }
 
 NS_IMETHODIMP_(bool)
-DynamicImage::IsOpaque()
+DynamicImage::WillDrawOpaqueNow()
 {
-  // XXX(seth): For performance reasons it'd be better to return true here, but
-  // I'm not sure how we can guarantee it for an arbitrary gfxDrawable.
   return false;
 }
 
@@ -218,7 +217,7 @@ DynamicImage::Draw(gfxContext* aContext,
                    const nsIntSize& aSize,
                    const ImageRegion& aRegion,
                    uint32_t aWhichFrame,
-                   Filter aFilter,
+                   SamplingFilter aSamplingFilter,
                    const Maybe<SVGImageContext>& aSVGContext,
                    uint32_t aFlags)
 {
@@ -228,7 +227,7 @@ DynamicImage::Draw(gfxContext* aContext,
 
   if (aSize == drawableSize) {
     gfxUtils::DrawPixelSnapped(aContext, mDrawable, drawableSize, aRegion,
-                               SurfaceFormat::B8G8R8A8, aFilter);
+                               SurfaceFormat::B8G8R8A8, aSamplingFilter);
     return DrawResult::SUCCESS;
   }
 
@@ -242,7 +241,7 @@ DynamicImage::Draw(gfxContext* aContext,
   aContext->Multiply(gfxMatrix::Scaling(scale.width, scale.height));
 
   gfxUtils::DrawPixelSnapped(aContext, mDrawable, drawableSize, region,
-                             SurfaceFormat::B8G8R8A8, aFilter);
+                             SurfaceFormat::B8G8R8A8, aSamplingFilter);
   return DrawResult::SUCCESS;
 }
 
@@ -318,7 +317,8 @@ DynamicImage::SetAnimationStartTime(const mozilla::TimeStamp& aTime)
 nsIntSize
 DynamicImage::OptimalImageSizeForDest(const gfxSize& aDest,
                                       uint32_t aWhichFrame,
-                                      Filter aFilter, uint32_t aFlags)
+                                      SamplingFilter aSamplingFilter,
+                                      uint32_t aFlags)
 {
   IntSize size(mDrawable->Size());
   return nsIntSize(size.width, size.height);

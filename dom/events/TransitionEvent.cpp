@@ -22,7 +22,7 @@ TransitionEvent::TransitionEvent(EventTarget* aOwner,
   }
   else {
     mEventIsInternal = true;
-    mEvent->time = PR_Now();
+    mEvent->mTime = PR_Now();
   }
 }
 
@@ -47,18 +47,19 @@ TransitionEvent::Constructor(const GlobalObject& aGlobal,
   e->InitEvent(aType, aParam.mBubbles, aParam.mCancelable);
 
   InternalTransitionEvent* internalEvent = e->mEvent->AsTransitionEvent();
-  internalEvent->propertyName = aParam.mPropertyName;
-  internalEvent->elapsedTime = aParam.mElapsedTime;
-  internalEvent->pseudoElement = aParam.mPseudoElement;
+  internalEvent->mPropertyName = aParam.mPropertyName;
+  internalEvent->mElapsedTime = aParam.mElapsedTime;
+  internalEvent->mPseudoElement = aParam.mPseudoElement;
 
   e->SetTrusted(trusted);
+  e->SetComposed(aParam.mComposed);
   return e.forget();
 }
 
 NS_IMETHODIMP
 TransitionEvent::GetPropertyName(nsAString& aPropertyName)
 {
-  aPropertyName = mEvent->AsTransitionEvent()->propertyName;
+  aPropertyName = mEvent->AsTransitionEvent()->mPropertyName;
   return NS_OK;
 }
 
@@ -72,13 +73,13 @@ TransitionEvent::GetElapsedTime(float* aElapsedTime)
 float
 TransitionEvent::ElapsedTime()
 {
-  return mEvent->AsTransitionEvent()->elapsedTime;
+  return mEvent->AsTransitionEvent()->mElapsedTime;
 }
 
 NS_IMETHODIMP
 TransitionEvent::GetPseudoElement(nsAString& aPseudoElement)
 {
-  aPseudoElement = mEvent->AsTransitionEvent()->pseudoElement;
+  aPseudoElement = mEvent->AsTransitionEvent()->mPseudoElement;
   return NS_OK;
 }
 

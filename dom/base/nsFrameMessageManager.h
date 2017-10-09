@@ -21,6 +21,7 @@
 #include "nsDataHashtable.h"
 #include "nsClassHashtable.h"
 #include "mozilla/Services.h"
+#include "mozilla/StaticPtr.h"
 #include "nsIObserverService.h"
 #include "nsThreadUtils.h"
 #include "nsWeakPtr.h"
@@ -108,6 +109,11 @@ public:
     return false;
   }
 
+  virtual nsIMessageSender* GetProcessMessageManager() const
+  {
+    return nullptr;
+  }
+
 protected:
   bool BuildClonedMessageDataForParent(nsIContentParent* aParent,
                                        StructuredCloneData& aData,
@@ -144,8 +150,8 @@ struct nsMessageListenerInfo
 class MOZ_STACK_CLASS SameProcessCpowHolder : public mozilla::jsipc::CpowHolder
 {
 public:
-  SameProcessCpowHolder(JSRuntime *aRuntime, JS::Handle<JSObject*> aObj)
-    : mObj(aRuntime, aObj)
+  SameProcessCpowHolder(JS::RootingContext* aRootingCx, JS::Handle<JSObject*> aObj)
+    : mObj(aRootingCx, aObj)
   {
   }
 
@@ -206,6 +212,7 @@ public:
 
   void InitWithCallback(mozilla::dom::ipc::MessageManagerCallback* aCallback);
   void SetCallback(mozilla::dom::ipc::MessageManagerCallback* aCallback);
+
   mozilla::dom::ipc::MessageManagerCallback* GetCallback()
   {
     return mCallback;
@@ -215,8 +222,10 @@ public:
                                 const JS::Value& aJSON,
                                 const JS::Value& aObjects,
                                 nsIPrincipal* aPrincipal,
+                                const JS::Value& aTransfers,
                                 JSContext* aCx,
                                 uint8_t aArgc);
+
   nsresult DispatchAsyncMessageInternal(JSContext* aCx,
                                         const nsAString& aMessage,
                                         StructuredCloneData& aData,
@@ -315,9 +324,9 @@ private:
 /* A helper class for taking care of many details for async message sending
    within a single process.  Intended to be used like so:
 
-   class MyAsyncMessage : public nsSameProcessAsyncMessageBase, public nsRunnable
+   class MyAsyncMessage : public nsSameProcessAsyncMessageBase, public Runnable
    {
-     NS_IMETHOD Run() {
+     NS_IMETHOD Run() override {
        ReceiveMessage(..., ...);
        return NS_OK;
      }
@@ -335,9 +344,9 @@ class nsSameProcessAsyncMessageBase
 public:
   typedef mozilla::dom::ipc::StructuredCloneData StructuredCloneData;
 
-  nsSameProcessAsyncMessageBase(JSContext* aCx, JS::Handle<JSObject*> aCpows);
-  nsresult Init(JSContext* aCx,
-                const nsAString& aMessage,
+  nsSameProcessAsyncMessageBase(JS::RootingContext* aRootingCx,
+                                JS::Handle<JSObject*> aCpows);
+  nsresult Init(const nsAString& aMessage,
                 StructuredCloneData& aData,
                 nsIPrincipal* aPrincipal);
 
@@ -346,11 +355,14 @@ public:
 private:
   nsSameProcessAsyncMessageBase(const nsSameProcessAsyncMessageBase&);
 
-  JSRuntime* mRuntime;
+  JS::RootingContext* mRootingCx;
   nsString mMessage;
   StructuredCloneData mData;
   JS::PersistentRooted<JSObject*> mCpows;
   nsCOMPtr<nsIPrincipal> mPrincipal;
+#ifdef DEBUG
+  bool mCalledInit;
+#endif
 };
 
 class nsScriptCacheCleaner;
@@ -375,6 +387,7 @@ struct nsMessageManagerScriptHolder
 class nsMessageManagerScriptExecutor
 {
 public:
+  static void PurgeCache();
   static void Shutdown();
   already_AddRefed<nsIXPConnectJSObjectHolder> GetGlobal()
   {
@@ -397,12 +410,13 @@ protected:
   void TryCacheLoadAndCompileScript(const nsAString& aURL,
                                     bool aRunInGlobalScope);
   bool InitChildGlobalInternal(nsISupports* aScope, const nsACString& aID);
+  void Trace(const TraceCallbacks& aCallbacks, void* aClosure);
   nsCOMPtr<nsIXPConnectJSObjectHolder> mGlobal;
   nsCOMPtr<nsIPrincipal> mPrincipal;
-  nsAutoTArray<JS::Heap<JSObject*>, 2> mAnonymousGlobalScopes;
+  AutoTArray<JS::Heap<JSObject*>, 2> mAnonymousGlobalScopes;
 
   static nsDataHashtable<nsStringHashKey, nsMessageManagerScriptHolder*>* sCachedScripts;
-  static nsScriptCacheCleaner* sScriptCacheCleaner;
+  static mozilla::StaticRefPtr<nsScriptCacheCleaner> sScriptCacheCleaner;
 };
 
 class nsScriptCacheCleaner final : public nsIObserver
@@ -414,15 +428,21 @@ class nsScriptCacheCleaner final : public nsIObserver
   nsScriptCacheCleaner()
   {
     nsCOMPtr<nsIObserverService> obsSvc = mozilla::services::GetObserverService();
-    if (obsSvc)
+    if (obsSvc) {
+      obsSvc->AddObserver(this, "message-manager-flush-caches", false);
       obsSvc->AddObserver(this, "xpcom-shutdown", false);
+    }
   }
 
-  NS_IMETHODIMP Observe(nsISupports *aSubject,
-                        const char *aTopic,
-                        const char16_t *aData) override
+  NS_IMETHOD Observe(nsISupports *aSubject,
+                     const char *aTopic,
+                     const char16_t *aData) override
   {
-    nsMessageManagerScriptExecutor::Shutdown();
+    if (strcmp("message-manager-flush-caches", aTopic) == 0) {
+      nsMessageManagerScriptExecutor::PurgeCache();
+    } else if (strcmp("xpcom-shutdown", aTopic) == 0) {
+      nsMessageManagerScriptExecutor::Shutdown();
+    }
     return NS_OK;
   }
 };

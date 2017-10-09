@@ -24,7 +24,8 @@
 
 namespace mozilla {
 namespace dom {
-namespace indexedDB {
+
+using namespace indexedDB;
 
 IDBCursor::IDBCursor(Type aType,
                      BackgroundCursorChild* aBackgroundActor,
@@ -261,7 +262,7 @@ IDBCursor::Reset()
   mContinueCalled = false;
 }
 
-nsPIDOMWindow*
+nsPIDOMWindowInner*
 IDBCursor::GetParentObject() const
 {
   AssertIsOnOwningThread();
@@ -342,7 +343,6 @@ IDBCursor::GetKey(JSContext* aCx, JS::MutableHandle<JS::Value> aResult,
     mHaveCachedKey = true;
   }
 
-  JS::ExposeValueToActiveJS(mCachedKey);
   aResult.set(mCachedKey);
 }
 
@@ -378,7 +378,6 @@ IDBCursor::GetPrimaryKey(JSContext* aCx, JS::MutableHandle<JS::Value> aResult,
     mHaveCachedPrimaryKey = true;
   }
 
-  JS::ExposeValueToActiveJS(mCachedPrimaryKey);
   aResult.set(mCachedPrimaryKey);
 }
 
@@ -412,7 +411,6 @@ IDBCursor::GetValue(JSContext* aCx, JS::MutableHandle<JS::Value> aResult,
     mHaveCachedValue = true;
   }
 
-  JS::ExposeValueToActiveJS(mCachedValue);
   aResult.set(mCachedValue);
 }
 
@@ -509,7 +507,117 @@ IDBCursor::Continue(JSContext* aCx,
                  IDB_LOG_STRINGIFY(key));
   }
 
-  mBackgroundActor->SendContinueInternal(ContinueParams(key), mKey);
+  mBackgroundActor->SendContinueInternal(ContinueParams(key));
+
+  mContinueCalled = true;
+}
+
+void
+IDBCursor::ContinuePrimaryKey(JSContext* aCx,
+                             JS::Handle<JS::Value> aKey,
+                             JS::Handle<JS::Value> aPrimaryKey,
+                             ErrorResult &aRv)
+{
+  AssertIsOnOwningThread();
+
+  if (!mTransaction->IsOpen()) {
+    aRv.Throw(NS_ERROR_DOM_INDEXEDDB_TRANSACTION_INACTIVE_ERR);
+    return;
+  }
+
+  if (IsSourceDeleted()) {
+    aRv.Throw(NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR);
+    return;
+  }
+
+  if ((mType != Type_Index && mType != Type_IndexKey) ||
+      (mDirection != NEXT && mDirection != PREV)) {
+    aRv.Throw(NS_ERROR_DOM_INVALID_ACCESS_ERR);
+    return;
+  }
+
+  if (!mHaveValue || mContinueCalled) {
+    aRv.Throw(NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR);
+    return;
+  }
+
+  Key key;
+  aRv = key.SetFromJSVal(aCx, aKey);
+  if (aRv.Failed()) {
+    return;
+  }
+
+#ifdef ENABLE_INTL_API
+  if (IsLocaleAware() && !key.IsUnset()) {
+    Key tmp;
+    aRv = key.ToLocaleBasedKey(tmp, mSourceIndex->Locale());
+    if (aRv.Failed()) {
+      return;
+    }
+    key = tmp;
+  }
+
+  const Key& sortKey = IsLocaleAware() ? mSortKey : mKey;
+#else
+  const Key& sortKey = mKey;
+#endif
+
+  if (key.IsUnset()) {
+    aRv.Throw(NS_ERROR_DOM_INDEXEDDB_DATA_ERR);
+    return;
+  }
+
+  Key primaryKey;
+  aRv = primaryKey.SetFromJSVal(aCx, aPrimaryKey);
+  if (aRv.Failed()) {
+    return;
+  }
+
+  if (primaryKey.IsUnset()) {
+    aRv.Throw(NS_ERROR_DOM_INDEXEDDB_DATA_ERR);
+    return;
+  }
+
+  switch (mDirection) {
+    case NEXT:
+      if (key < sortKey ||
+          (key == sortKey && primaryKey <= mPrimaryKey)) {
+        aRv.Throw(NS_ERROR_DOM_INDEXEDDB_DATA_ERR);
+        return;
+      }
+      break;
+
+    case PREV:
+      if (key > sortKey ||
+          (key == sortKey && primaryKey >= mPrimaryKey)) {
+        aRv.Throw(NS_ERROR_DOM_INDEXEDDB_DATA_ERR);
+        return;
+      }
+      break;
+
+    default:
+      MOZ_CRASH("Unknown direction type!");
+  }
+
+  const uint64_t requestSerialNumber = IDBRequest::NextSerialNumber();
+  mRequest->SetLoggingSerialNumber(requestSerialNumber);
+
+  IDB_LOG_MARK("IndexedDB %s: Child  Transaction[%lld] Request[%llu]: "
+                 "database(%s).transaction(%s).objectStore(%s)."
+                 "index(%s).cursor(%s).continuePrimaryKey(%s, %s)",
+               "IndexedDB %s: C T[%lld] R[%llu]: IDBCursor.continuePrimaryKey()",
+               IDB_LOG_ID_STRING(),
+               mTransaction->LoggingSerialNumber(),
+               requestSerialNumber,
+               IDB_LOG_STRINGIFY(mTransaction->Database()),
+               IDB_LOG_STRINGIFY(mTransaction),
+               IDB_LOG_STRINGIFY(mSourceIndex->ObjectStore()),
+               IDB_LOG_STRINGIFY(mSourceIndex),
+               IDB_LOG_STRINGIFY(mDirection),
+               IDB_LOG_STRINGIFY(key),
+               IDB_LOG_STRINGIFY(primaryKey));
+
+  mBackgroundActor->SendContinueInternal(ContinuePrimaryKeyParams(key, primaryKey));
 
   mContinueCalled = true;
 }
@@ -567,7 +675,7 @@ IDBCursor::Advance(uint32_t aCount, ErrorResult &aRv)
                  aCount);
   }
 
-  mBackgroundActor->SendContinueInternal(AdvanceParams(aCount), mKey);
+  mBackgroundActor->SendContinueInternal(AdvanceParams(aCount));
 
   mContinueCalled = true;
 }
@@ -588,10 +696,12 @@ IDBCursor::Update(JSContext* aCx, JS::Handle<JS::Value> aValue,
     return nullptr;
   }
 
-  if (IsSourceDeleted() ||
+  if (mTransaction->GetMode() == IDBTransaction::CLEANUP ||
+      IsSourceDeleted() ||
       !mHaveValue ||
       mType == Type_ObjectStoreKey ||
-      mType == Type_IndexKey) {
+      mType == Type_IndexKey ||
+      mContinueCalled) {
     aRv.Throw(NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR);
     return nullptr;
   }
@@ -599,8 +709,6 @@ IDBCursor::Update(JSContext* aCx, JS::Handle<JS::Value> aValue,
   MOZ_ASSERT(mType == Type_ObjectStore || mType == Type_Index);
   MOZ_ASSERT(!mKey.IsUnset());
   MOZ_ASSERT_IF(mType == Type_Index, !mPrimaryKey.IsUnset());
-
-  mBackgroundActor->InvalidateCachedResponses();
 
   IDBObjectStore* objectStore;
   if (mType == Type_ObjectStore) {
@@ -718,8 +826,6 @@ IDBCursor::Delete(JSContext* aCx, ErrorResult& aRv)
 
   MOZ_ASSERT(mType == Type_ObjectStore || mType == Type_Index);
   MOZ_ASSERT(!mKey.IsUnset());
-
-  mBackgroundActor->InvalidateCachedResponses();
 
   IDBObjectStore* objectStore;
   if (mType == Type_ObjectStore) {
@@ -866,9 +972,9 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(IDBCursor)
 
   NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER
   NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mScriptOwner)
-  NS_IMPL_CYCLE_COLLECTION_TRACE_JSVAL_MEMBER_CALLBACK(mCachedKey)
-  NS_IMPL_CYCLE_COLLECTION_TRACE_JSVAL_MEMBER_CALLBACK(mCachedPrimaryKey)
-  NS_IMPL_CYCLE_COLLECTION_TRACE_JSVAL_MEMBER_CALLBACK(mCachedValue)
+  NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mCachedKey)
+  NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mCachedPrimaryKey)
+  NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mCachedValue)
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(IDBCursor)
@@ -896,6 +1002,5 @@ IDBCursor::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
   }
 }
 
-} // namespace indexedDB
 } // namespace dom
 } // namespace mozilla

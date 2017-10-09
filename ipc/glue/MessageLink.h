@@ -39,85 +39,6 @@ enum Side {
     UnknownSide
 };
 
-enum ChannelState {
-    ChannelClosed,
-    ChannelOpening,
-    ChannelConnected,
-    ChannelTimeout,
-    ChannelClosing,
-    ChannelError
-};
-
-// What happens if Interrupt calls race?
-enum RacyInterruptPolicy {
-    RIPError,
-    RIPChildWins,
-    RIPParentWins
-};
-
-class MessageListener
-  : protected HasResultCodes,
-    public mozilla::SupportsWeakPtr<MessageListener>
-{
-  public:
-    MOZ_DECLARE_WEAKREFERENCE_TYPENAME(MessageListener)
-    typedef IPC::Message Message;
-
-    virtual ~MessageListener() { }
-
-    virtual void OnChannelClose() = 0;
-    virtual void OnChannelError() = 0;
-    virtual Result OnMessageReceived(const Message& aMessage) = 0;
-    virtual Result OnMessageReceived(const Message& aMessage, Message *& aReply) = 0;
-    virtual Result OnCallReceived(const Message& aMessage, Message *& aReply) = 0;
-    virtual void OnProcessingError(Result aError, const char* aMsgName) = 0;
-    virtual void OnChannelConnected(int32_t peer_pid) {}
-    virtual bool OnReplyTimeout() {
-        return false;
-    }
-
-    // WARNING: This function is called with the MessageChannel monitor held.
-    virtual void IntentionalCrash() {
-        MOZ_CRASH("Intentional IPDL crash");
-    }
-
-    virtual void OnEnteredCxxStack() {
-        NS_RUNTIMEABORT("default impl shouldn't be invoked");
-    }
-    virtual void OnExitedCxxStack() {
-        NS_RUNTIMEABORT("default impl shouldn't be invoked");
-    }
-    virtual void OnEnteredCall() {
-        NS_RUNTIMEABORT("default impl shouldn't be invoked");
-    }
-    virtual void OnExitedCall() {
-        NS_RUNTIMEABORT("default impl shouldn't be invoked");
-    }
-    virtual RacyInterruptPolicy MediateInterruptRace(const Message& parent,
-                                                     const Message& child)
-    {
-        return RIPChildWins;
-    }
-
-    /**
-     * Return true if windows messages can be handled while waiting for a reply
-     * to a sync IPDL message.
-     */
-    virtual bool HandleWindowsMessages(const Message& aMsg) const { return true; }
-
-    virtual void OnEnteredSyncSend() {
-    }
-    virtual void OnExitedSyncSend() {
-    }
-
-    virtual void ProcessRemoteNativeEventsInInterruptCall() {
-    }
-
-    // FIXME/bug 792652: this doesn't really belong here, but a
-    // large refactoring is needed to put it where it belongs.
-    virtual int32_t GetProtocolTypeId() = 0;
-};
-
 class MessageLink
 {
   public:
@@ -134,12 +55,6 @@ class MessageLink
 
     virtual bool Unsound_IsClosed() const = 0;
     virtual uint32_t Unsound_NumQueuedMessages() const = 0;
-
-#ifdef MOZ_NUWA_PROCESS
-    // To be overridden by ProcessLink.
-    virtual void Block() {}
-    virtual void Unblock() {}
-#endif
 
   protected:
     MessageChannel *mChan;
@@ -177,7 +92,7 @@ class ProcessLink
     // These methods acquire the monitor and forward to the
     // similarly named methods in AsyncChannel below
     // (OnMessageReceivedFromLink(), etc)
-    virtual void OnMessageReceived(const Message& msg) override;
+    virtual void OnMessageReceived(Message&& msg) override;
     virtual void OnChannelConnected(int32_t peer_pid) override;
     virtual void OnChannelError() override;
 
@@ -188,23 +103,10 @@ class ProcessLink
     virtual bool Unsound_IsClosed() const override;
     virtual uint32_t Unsound_NumQueuedMessages() const override;
 
-#ifdef MOZ_NUWA_PROCESS
-    void Block() override {
-        mIsBlocked = true;
-    }
-    void Unblock() override {
-        mIsBlocked = false;
-    }
-#endif
-
   protected:
     Transport* mTransport;
     MessageLoop* mIOLoop;       // thread where IO happens
     Transport::Listener* mExistingListener; // channel's previous listener
-#ifdef MOZ_NUWA_PROCESS
-    bool mIsToNuwaProcess;
-    bool mIsBlocked;
-#endif
 };
 
 class ThreadLink : public MessageLink

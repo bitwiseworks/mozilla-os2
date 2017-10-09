@@ -7,29 +7,33 @@
 static const unsigned BufferSize = 20;
 static unsigned FinalizeCalls = 0;
 static JSFinalizeStatus StatusBuffer[BufferSize];
-static bool IsCompartmentGCBuffer[BufferSize];
+static bool IsZoneGCBuffer[BufferSize];
 
 BEGIN_TEST(testGCFinalizeCallback)
 {
-    JS_SetGCParameter(rt, JSGC_MODE, JSGC_MODE_INCREMENTAL);
+    JS_SetGCParameter(cx, JSGC_MODE, JSGC_MODE_INCREMENTAL);
 
     /* Full GC, non-incremental. */
     FinalizeCalls = 0;
-    JS_GC(rt);
-    CHECK(rt->gc.isFullGc());
+    JS_GC(cx);
+    CHECK(cx->gc.isFullGc());
     CHECK(checkSingleGroup());
     CHECK(checkFinalizeStatus());
-    CHECK(checkFinalizeIsCompartmentGC(false));
+    CHECK(checkFinalizeIsZoneGC(false));
 
     /* Full GC, incremental. */
     FinalizeCalls = 0;
-    JS::PrepareForFullGC(rt);
-    JS::StartIncrementalGC(rt, GC_NORMAL, JS::gcreason::API, 1000000);
-    CHECK(!rt->gc.isIncrementalGCInProgress());
-    CHECK(rt->gc.isFullGc());
+    JS::PrepareForFullGC(cx);
+    JS::StartIncrementalGC(cx, GC_NORMAL, JS::gcreason::API, 1000000);
+    while (cx->gc.isIncrementalGCInProgress()) {
+        JS::PrepareForFullGC(cx);
+        JS::IncrementalGCSlice(cx, JS::gcreason::API, 1000000);
+    }
+    CHECK(!cx->gc.isIncrementalGCInProgress());
+    CHECK(cx->gc.isFullGc());
     CHECK(checkMultipleGroups());
     CHECK(checkFinalizeStatus());
-    CHECK(checkFinalizeIsCompartmentGC(false));
+    CHECK(checkFinalizeIsZoneGC(false));
 
     JS::RootedObject global1(cx, createTestGlobal());
     JS::RootedObject global2(cx, createTestGlobal());
@@ -38,71 +42,83 @@ BEGIN_TEST(testGCFinalizeCallback)
     CHECK(global2);
     CHECK(global3);
 
-    /* Compartment GC, non-incremental, single compartment. */
+    /* Zone GC, non-incremental, single zone. */
     FinalizeCalls = 0;
     JS::PrepareZoneForGC(global1->zone());
-    JS::GCForReason(rt, GC_NORMAL, JS::gcreason::API);
-    CHECK(!rt->gc.isFullGc());
+    JS::GCForReason(cx, GC_NORMAL, JS::gcreason::API);
+    CHECK(!cx->gc.isFullGc());
     CHECK(checkSingleGroup());
     CHECK(checkFinalizeStatus());
-    CHECK(checkFinalizeIsCompartmentGC(true));
+    CHECK(checkFinalizeIsZoneGC(true));
 
-    /* Compartment GC, non-incremental, multiple compartments. */
+    /* Zone GC, non-incremental, multiple zones. */
     FinalizeCalls = 0;
     JS::PrepareZoneForGC(global1->zone());
     JS::PrepareZoneForGC(global2->zone());
     JS::PrepareZoneForGC(global3->zone());
-    JS::GCForReason(rt, GC_NORMAL, JS::gcreason::API);
-    CHECK(!rt->gc.isFullGc());
+    JS::GCForReason(cx, GC_NORMAL, JS::gcreason::API);
+    CHECK(!cx->gc.isFullGc());
     CHECK(checkSingleGroup());
     CHECK(checkFinalizeStatus());
-    CHECK(checkFinalizeIsCompartmentGC(true));
+    CHECK(checkFinalizeIsZoneGC(true));
 
-    /* Compartment GC, incremental, single compartment. */
+    /* Zone GC, incremental, single zone. */
     FinalizeCalls = 0;
     JS::PrepareZoneForGC(global1->zone());
-    JS::StartIncrementalGC(rt, GC_NORMAL, JS::gcreason::API, 1000000);
-    CHECK(!rt->gc.isIncrementalGCInProgress());
-    CHECK(!rt->gc.isFullGc());
+    JS::StartIncrementalGC(cx, GC_NORMAL, JS::gcreason::API, 1000000);
+    while (cx->gc.isIncrementalGCInProgress()) {
+        JS::PrepareZoneForGC(global1->zone());
+        JS::IncrementalGCSlice(cx, JS::gcreason::API, 1000000);
+    }
+    CHECK(!cx->gc.isIncrementalGCInProgress());
+    CHECK(!cx->gc.isFullGc());
     CHECK(checkSingleGroup());
     CHECK(checkFinalizeStatus());
-    CHECK(checkFinalizeIsCompartmentGC(true));
+    CHECK(checkFinalizeIsZoneGC(true));
 
-    /* Compartment GC, incremental, multiple compartments. */
+    /* Zone GC, incremental, multiple zones. */
     FinalizeCalls = 0;
     JS::PrepareZoneForGC(global1->zone());
     JS::PrepareZoneForGC(global2->zone());
     JS::PrepareZoneForGC(global3->zone());
-    JS::StartIncrementalGC(rt, GC_NORMAL, JS::gcreason::API, 1000000);
-    CHECK(!rt->gc.isIncrementalGCInProgress());
-    CHECK(!rt->gc.isFullGc());
+    JS::StartIncrementalGC(cx, GC_NORMAL, JS::gcreason::API, 1000000);
+    while (cx->gc.isIncrementalGCInProgress()) {
+        JS::PrepareZoneForGC(global1->zone());
+        JS::PrepareZoneForGC(global2->zone());
+        JS::PrepareZoneForGC(global3->zone());
+        JS::IncrementalGCSlice(cx, JS::gcreason::API, 1000000);
+    }
+    CHECK(!cx->gc.isIncrementalGCInProgress());
+    CHECK(!cx->gc.isFullGc());
     CHECK(checkMultipleGroups());
     CHECK(checkFinalizeStatus());
-    CHECK(checkFinalizeIsCompartmentGC(true));
+    CHECK(checkFinalizeIsZoneGC(true));
 
 #ifdef JS_GC_ZEAL
 
-    /* Full GC with reset due to new compartment, becoming compartment GC. */
+    /* Full GC with reset due to new zone, becoming zone GC. */
 
     FinalizeCalls = 0;
     JS_SetGCZeal(cx, 9, 1000000);
-    JS::PrepareForFullGC(rt);
+    JS::PrepareForFullGC(cx);
     js::SliceBudget budget(js::WorkBudget(1));
-    rt->gc.startDebugGC(GC_NORMAL, budget);
-    CHECK(rt->gc.state() == js::gc::MARK);
-    CHECK(rt->gc.isFullGc());
+    cx->gc.startDebugGC(GC_NORMAL, budget);
+    CHECK(cx->gc.state() == js::gc::State::Mark);
+    CHECK(cx->gc.isFullGc());
 
     JS::RootedObject global4(cx, createTestGlobal());
     budget = js::SliceBudget(js::WorkBudget(1));
-    rt->gc.debugGCSlice(budget);
-    CHECK(!rt->gc.isIncrementalGCInProgress());
-    CHECK(!rt->gc.isFullGc());
+    cx->gc.debugGCSlice(budget);
+    while (cx->gc.isIncrementalGCInProgress())
+        cx->gc.debugGCSlice(budget);
+    CHECK(!cx->gc.isIncrementalGCInProgress());
+    CHECK(!cx->gc.isFullGc());
     CHECK(checkMultipleGroups());
     CHECK(checkFinalizeStatus());
 
     for (unsigned i = 0; i < FinalizeCalls - 1; ++i)
-        CHECK(!IsCompartmentGCBuffer[i]);
-    CHECK(IsCompartmentGCBuffer[FinalizeCalls - 1]);
+        CHECK(!IsZoneGCBuffer[i]);
+    CHECK(IsZoneGCBuffer[FinalizeCalls - 1]);
 
     JS_SetGCZeal(cx, 0, 0);
 
@@ -110,7 +126,7 @@ BEGIN_TEST(testGCFinalizeCallback)
 
     /*
      * Make some use of the globals here to ensure the compiler doesn't optimize
-     * them away in release builds, causing the compartments to be collected and
+     * them away in release builds, causing the zones to be collected and
      * the test to fail.
      */
     CHECK(JS_IsGlobalObject(global1));
@@ -123,7 +139,6 @@ BEGIN_TEST(testGCFinalizeCallback)
 JSObject* createTestGlobal()
 {
     JS::CompartmentOptions options;
-    options.setVersion(JSVERSION_LATEST);
     return JS_NewGlobalObject(cx, getGlobalClass(), nullptr, JS::FireOnNewGlobalHook, options);
 }
 
@@ -132,13 +147,13 @@ virtual bool init() override
     if (!JSAPITest::init())
         return false;
 
-    JS_AddFinalizeCallback(rt, FinalizeCallback, nullptr);
+    JS_AddFinalizeCallback(cx, FinalizeCallback, nullptr);
     return true;
 }
 
 virtual void uninit() override
 {
-    JS_RemoveFinalizeCallback(rt, FinalizeCallback);
+    JS_RemoveFinalizeCallback(cx, FinalizeCallback);
     JSAPITest::uninit();
 }
 
@@ -160,7 +175,7 @@ bool checkMultipleGroups()
 bool checkFinalizeStatus()
 {
     /*
-     * The finalize callback should be called twice for each compartment group
+     * The finalize callback should be called twice for each zone group
      * finalized, with status JSFINALIZE_GROUP_START and JSFINALIZE_GROUP_END,
      * and then once more with JSFINALIZE_COLLECTION_END.
      */
@@ -175,20 +190,20 @@ bool checkFinalizeStatus()
     return true;
 }
 
-bool checkFinalizeIsCompartmentGC(bool isCompartmentGC)
+bool checkFinalizeIsZoneGC(bool isZoneGC)
 {
     for (unsigned i = 0; i < FinalizeCalls; ++i)
-        CHECK(IsCompartmentGCBuffer[i] == isCompartmentGC);
+        CHECK(IsZoneGCBuffer[i] == isZoneGC);
 
     return true;
 }
 
 static void
-FinalizeCallback(JSFreeOp* fop, JSFinalizeStatus status, bool isCompartmentGC, void* data)
+FinalizeCallback(JSFreeOp* fop, JSFinalizeStatus status, bool isZoneGC, void* data)
 {
     if (FinalizeCalls < BufferSize) {
         StatusBuffer[FinalizeCalls] = status;
-        IsCompartmentGCBuffer[FinalizeCalls] = isCompartmentGC;
+        IsZoneGCBuffer[FinalizeCalls] = isZoneGC;
     }
     ++FinalizeCalls;
 }

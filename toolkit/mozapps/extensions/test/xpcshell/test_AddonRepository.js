@@ -208,7 +208,7 @@ var SEARCH_RESULTS = [{
   repositoryStatus:       8,
   size:                   5555,
   updateDate:             new Date(1265033045000),
-  
+
 }, {
   id:                     "purchase1@tests.mozilla.org",
   type:                   "extension",
@@ -403,7 +403,7 @@ function run_test() {
       try {
         aInstall.install();
       }
-      catch(e) {
+      catch (e) {
         do_print("Failed to install add-on " + aInstall.sourceURI.spec);
         do_report_unexpected_exception(e);
       }

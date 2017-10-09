@@ -1,24 +1,18 @@
 /* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
-"use strict";
 
-///////////////////
-//
-// Whitelisting this test.
-// As part of bug 1077403, the leaking uncaught rejection should be fixed.
-//
-thisTestLeaksUncaughtRejectionsAndShouldBeFixed("TypeError: can't convert undefined to object");
+"use strict";
 
 /**
  * Tests if cached requests have the correct status code
  */
 
-var test = Task.async(function*() {
-  let [tab, debuggee, monitor] = yield initNetMonitor(STATUS_CODES_URL, null, true);
+add_task(function* () {
+  let { tab, monitor } = yield initNetMonitor(STATUS_CODES_URL, null, true);
   info("Starting test... ");
 
-  let { document, L10N, NetMonitorView } = monitor.panelWin;
+  let { NetMonitorView } = monitor.panelWin;
   let { RequestsMenu, NetworkDetails } = NetMonitorView;
 
   RequestsMenu.lazyUpdate = false;
@@ -26,63 +20,63 @@ var test = Task.async(function*() {
 
   const REQUEST_DATA = [
     {
-      method: 'GET',
+      method: "GET",
       uri: STATUS_CODES_SJS + "?sts=ok&cached",
       details: {
         status: 200,
-        statusText: 'OK',
+        statusText: "OK",
         type: "plain",
         fullMimeType: "text/plain; charset=utf-8"
       }
     },
     {
-      method: 'GET',
+      method: "GET",
       uri: STATUS_CODES_SJS + "?sts=redirect&cached",
       details: {
         status: 301,
-        statusText: 'Moved Permanently',
+        statusText: "Moved Permanently",
         type: "html",
         fullMimeType: "text/html; charset=utf-8"
       }
     },
     {
-      method: 'GET',
-      uri: 'http://example.com/redirected',
+      method: "GET",
+      uri: "http://example.com/redirected",
       details: {
         status: 404,
-        statusText: 'Not Found',
+        statusText: "Not Found",
         type: "html",
         fullMimeType: "text/html; charset=utf-8"
       }
     },
     {
-      method: 'GET',
+      method: "GET",
       uri: STATUS_CODES_SJS + "?sts=ok&cached",
       details: {
         status: 200,
         statusText: "OK (cached)",
-        fromCache: true,
+        displayedStatus: "cached",
         type: "plain",
         fullMimeType: "text/plain; charset=utf-8"
       }
     },
     {
-      method: 'GET',
+      method: "GET",
       uri: STATUS_CODES_SJS + "?sts=redirect&cached",
       details: {
         status: 301,
         statusText: "Moved Permanently (cached)",
-        fromCache: true,
+        displayedStatus: "cached",
         type: "html",
         fullMimeType: "text/html; charset=utf-8"
       }
     },
     {
-      method: 'GET',
-      uri: 'http://example.com/redirected',
+      method: "GET",
+      uri: "http://example.com/redirected",
       details: {
         status: 404,
-        statusText: 'Not Found',
+        statusText: "Not Found",
         type: "html",
         fullMimeType: "text/html; charset=utf-8"
       }
@@ -90,12 +84,10 @@ var test = Task.async(function*() {
   ];
 
   info("Performing requests #1...");
-  debuggee.performCachedRequests();
-  yield waitForNetworkEvents(monitor, 3);
+  yield performRequestsAndWait();
 
   info("Performing requests #2...");
-  debuggee.performCachedRequests();
-  yield waitForNetworkEvents(monitor, 3);
+  yield performRequestsAndWait();
 
   let index = 0;
   for (let request of REQUEST_DATA) {
@@ -108,5 +100,12 @@ var test = Task.async(function*() {
   }
 
   yield teardown(monitor);
-  finish();
+
+  function* performRequestsAndWait() {
+    let wait = waitForNetworkEvents(monitor, 3);
+    yield ContentTask.spawn(tab.linkedBrowser, {}, function* () {
+      content.wrappedJSObject.performCachedRequests();
+    });
+    yield wait;
+  }
 });

@@ -5,13 +5,13 @@
 
 #include "nsNSSCertificateFakeTransport.h"
 
+#include "mozilla/Assertions.h"
 #include "nsIClassInfoImpl.h"
 #include "nsIObjectInputStream.h"
 #include "nsIObjectOutputStream.h"
 #include "nsISupportsPrimitives.h"
 #include "nsNSSCertificate.h"
 #include "nsString.h"
-#include "nsXPIDLString.h"
 
 NS_IMPL_ISUPPORTS(nsNSSCertificateFakeTransport,
                   nsIX509Cert,
@@ -25,13 +25,11 @@ nsNSSCertificateFakeTransport::nsNSSCertificateFakeTransport()
 
 nsNSSCertificateFakeTransport::~nsNSSCertificateFakeTransport()
 {
-  if (mCertSerialization) {
-    SECITEM_FreeItem(mCertSerialization, true);
-  }
+  mCertSerialization = nullptr;
 }
 
 NS_IMETHODIMP
-nsNSSCertificateFakeTransport::GetDbKey(char**)
+nsNSSCertificateFakeTransport::GetDbKey(nsACString&)
 {
   NS_NOTREACHED("Unimplemented on content process");
   return NS_ERROR_NOT_IMPLEMENTED;
@@ -185,17 +183,9 @@ nsNSSCertificateFakeTransport::GetValidity(nsIX509CertValidity**)
 }
 
 NS_IMETHODIMP
-nsNSSCertificateFakeTransport::GetUsagesArray(bool, uint32_t*, uint32_t*,
-                                              char16_t***)
+nsNSSCertificateFakeTransport::GetKeyUsages(nsAString&)
 {
-  NS_NOTREACHED("Unimplemented on content process");
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
-nsNSSCertificateFakeTransport::GetUsagesString(bool, uint32_t*, nsAString&)
-{
-  NS_NOTREACHED("Unimplemented on content process");
+  MOZ_ASSERT_UNREACHABLE("Unimplemented on content process");
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -228,10 +218,9 @@ nsNSSCertificateFakeTransport::Write(nsIObjectOutputStream* aStream)
   // nsNSSComponent. nsNSSCertificateFakeTransport object is used only to
   // carry the certificate serialization.
 
-  // This serialization has to match that of nsNSSCertificate,
-  // so write a fake cached EV Status.
-  uint32_t status = static_cast<uint32_t>(nsNSSCertificate::ev_status_unknown);
-  nsresult rv = aStream->Write32(status);
+  // This serialization has to match that of nsNSSCertificate, so include this
+  // now-unused field.
+  nsresult rv = aStream->Write32(0);
   if (NS_FAILED(rv)) {
     return rv;
   }
@@ -248,10 +237,10 @@ nsNSSCertificateFakeTransport::Write(nsIObjectOutputStream* aStream)
 NS_IMETHODIMP
 nsNSSCertificateFakeTransport::Read(nsIObjectInputStream* aStream)
 {
-  // This serialization has to match that of nsNSSCertificate,
-  // so read the cachedEVStatus but don't actually use it.
-  uint32_t cachedEVStatus;
-  nsresult rv = aStream->Read32(&cachedEVStatus);
+  // This serialization has to match that of nsNSSCertificate, so read the (now
+  // unused) cachedEVStatus.
+  uint32_t unusedCachedEVStatus;
+  nsresult rv = aStream->Read32(&unusedCachedEVStatus);
   if (NS_FAILED(rv)) {
     return rv;
   }
@@ -271,10 +260,11 @@ nsNSSCertificateFakeTransport::Read(nsIObjectInputStream* aStream)
   // On a non-chrome process we cannot instatiate mCert because we lack
   // nsNSSComponent. nsNSSCertificateFakeTransport object is used only to
   // carry the certificate serialization.
-
-  mCertSerialization = SECITEM_AllocItem(nullptr, nullptr, len);
-  if (!mCertSerialization)
-      return NS_ERROR_OUT_OF_MEMORY;
+  mCertSerialization =
+    mozilla::UniqueSECItem(SECITEM_AllocItem(nullptr, nullptr, len));
+  if (!mCertSerialization) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
   PORT_Memcpy(mCertSerialization->data, str.Data(), len);
 
   return NS_OK;
@@ -349,8 +339,7 @@ nsNSSCertificateFakeTransport::GetIsSelfSigned(bool*)
 }
 
 NS_IMETHODIMP
-nsNSSCertificateFakeTransport::RequestUsagesArrayAsync(
-  nsICertVerificationListener*)
+nsNSSCertificateFakeTransport::GetIsBuiltInRoot(bool* aIsBuiltInRoot)
 {
   NS_NOTREACHED("Unimplemented on content process");
   return NS_ERROR_NOT_IMPLEMENTED;
@@ -418,7 +407,7 @@ nsNSSCertListFakeTransport::DeleteCert(nsIX509Cert* aCert)
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
-void*
+CERTCertList*
 nsNSSCertListFakeTransport::GetRawCertList()
 {
   NS_NOTREACHED("Unimplemented on content process");
@@ -480,7 +469,9 @@ nsNSSCertListFakeTransport::Read(nsIObjectInputStream* aStream)
     }
 
     nsCOMPtr<nsIX509Cert> cert = do_QueryInterface(certSupports);
-    mFakeCertList.append(cert);
+    if (!mFakeCertList.append(cert)) {
+      return NS_ERROR_OUT_OF_MEMORY;
+    }
   }
 
   return rv;

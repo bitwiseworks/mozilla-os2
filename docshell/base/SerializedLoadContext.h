@@ -28,6 +28,10 @@ class SerializedLoadContext
 {
 public:
   SerializedLoadContext()
+    : mIsNotNull(false)
+    , mIsPrivateBitValid(false)
+    , mIsContent(false)
+    , mUseRemoteTabs(false)
   {
     Init(nullptr);
   }
@@ -47,7 +51,6 @@ public:
   // mIsNotNull is false, i.e., child LoadContext was null.
   bool mIsPrivateBitValid;
   bool mIsContent;
-  bool mUsePrivateBrowsing;
   bool mUseRemoteTabs;
   mozilla::DocShellOriginAttributes mOriginAttributes;
 };
@@ -66,25 +69,21 @@ struct ParamTraits<SerializedLoadContext>
     WriteParam(aMsg, aParam.mIsNotNull);
     WriteParam(aMsg, aParam.mIsContent);
     WriteParam(aMsg, aParam.mIsPrivateBitValid);
-    WriteParam(aMsg, aParam.mUsePrivateBrowsing);
     WriteParam(aMsg, aParam.mUseRemoteTabs);
     WriteParam(aMsg, suffix);
   }
 
-  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
+  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
   {
     nsAutoCString suffix;
     if (!ReadParam(aMsg, aIter, &aResult->mIsNotNull) ||
         !ReadParam(aMsg, aIter, &aResult->mIsContent) ||
         !ReadParam(aMsg, aIter, &aResult->mIsPrivateBitValid) ||
-        !ReadParam(aMsg, aIter, &aResult->mUsePrivateBrowsing) ||
         !ReadParam(aMsg, aIter, &aResult->mUseRemoteTabs) ||
         !ReadParam(aMsg, aIter, &suffix)) {
       return false;
     }
-    aResult->mOriginAttributes.PopulateFromSuffix(suffix);
-
-    return true;
+    return aResult->mOriginAttributes.PopulateFromSuffix(suffix);
   }
 };
 

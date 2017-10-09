@@ -10,6 +10,7 @@ from mozprofile.permissions import ServerLocations, \
     MissingPrimaryLocationError, MultiplePrimaryLocationsError, \
     DuplicateLocationError, BadPortLocationError, LocationsSyntaxError
 
+
 class ServerLocationsTest(unittest.TestCase):
     """test server locations"""
 
@@ -95,7 +96,7 @@ http://example.org:80           privileged
         exc = None
         try:
             ServerLocations(f.name)
-        except LocationsSyntaxError, e:
+        except LocationsSyntaxError as e:
             exc = e
         self.assertNotEqual(exc, None)
         self.assertEqual(exc.err.__class__, MissingPrimaryLocationError)
@@ -108,7 +109,7 @@ http://example.org:80           privileged
         exc = None
         try:
             ServerLocations(f.name)
-        except LocationsSyntaxError, e:
+        except LocationsSyntaxError as e:
             exc = e
         self.assertNotEqual(exc, None)
         self.assertEqual(exc.err.__class__, BadPortLocationError)

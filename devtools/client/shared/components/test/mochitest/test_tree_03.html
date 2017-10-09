@@ -1,3 +1,6 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
 <!DOCTYPE HTML>
 <html>
 <!--
@@ -19,11 +22,9 @@ window.onload = Task.async(function* () {
     let React = browserRequire("devtools/client/shared/vendor/react");
     let Tree = React.createFactory(browserRequire("devtools/client/shared/components/tree"));
 
-    const tree = ReactDOM.render(Tree(TEST_TREE_INTERFACE), window.document.body);
-
-    yield setProps(tree, {
+    const tree = ReactDOM.render(Tree(Object.assign({}, TEST_TREE_INTERFACE, {
       autoExpandDepth: 1
-    });
+    })), window.document.body);
 
     isRenderedTree(document.body.textContent, [
       "A:false",

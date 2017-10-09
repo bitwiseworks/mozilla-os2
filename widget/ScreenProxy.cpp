@@ -4,7 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsContentUtils.h"
 #include "nsIAppShell.h"
 #include "nsScreenManagerProxy.h"
@@ -20,7 +20,11 @@ using namespace mozilla::dom;
 static NS_DEFINE_CID(kAppShellCID, NS_APPSHELL_CID);
 
 ScreenProxy::ScreenProxy(nsScreenManagerProxy* aScreenManager, ScreenDetails aDetails)
-  : mScreenManager(aScreenManager)
+  : mContentsScaleFactor(0)
+  , mScreenManager(aScreenManager)
+  , mId(0)
+  , mPixelDepth(0)
+  , mColorDepth(0)
   , mCacheValid(false)
   , mCacheWillInvalidate(false)
 {
@@ -170,9 +174,7 @@ ScreenProxy::InvalidateCacheOnNextTick()
 
   mCacheWillInvalidate = true;
 
-  nsCOMPtr<nsIRunnable> r =
-    NS_NewRunnableMethod(this, &ScreenProxy::InvalidateCache);
-  nsContentUtils::RunInStableState(r.forget());
+  nsContentUtils::RunInStableState(NewRunnableMethod(this, &ScreenProxy::InvalidateCache));
 }
 
 void

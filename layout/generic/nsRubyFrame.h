@@ -10,10 +10,7 @@
 #define nsRubyFrame_h___
 
 #include "nsInlineFrame.h"
-
-class nsRubyBaseContainerFrame;
-
-typedef nsInlineFrame nsRubyFrameSuper;
+#include "RubyUtils.h"
 
 /**
  * Factory function.
@@ -22,7 +19,7 @@ typedef nsInlineFrame nsRubyFrameSuper;
 nsContainerFrame* NS_NewRubyFrame(nsIPresShell* aPresShell,
                                   nsStyleContext* aContext);
 
-class nsRubyFrame final : public nsRubyFrameSuper
+class nsRubyFrame final : public nsInlineFrame
 {
 public:
   NS_DECL_FRAMEARENA_HELPERS
@@ -37,37 +34,35 @@ public:
   virtual void AddInlinePrefISize(nsRenderingContext *aRenderingContext,
                                   InlinePrefISizeData *aData) override;
   virtual void Reflow(nsPresContext* aPresContext,
-                      nsHTMLReflowMetrics& aDesiredSize,
-                      const nsHTMLReflowState& aReflowState,
+                      ReflowOutput& aDesiredSize,
+                      const ReflowInput& aReflowInput,
                       nsReflowStatus& aStatus) override;
 
 #ifdef DEBUG_FRAME_DUMP
   virtual nsresult GetFrameName(nsAString& aResult) const override;
 #endif
 
-  void GetBlockLeadings(nscoord& aStartLeading, nscoord& aEndLeading)
-  {
-    aStartLeading = mBStartLeading;
-    aEndLeading = mBEndLeading;
+  mozilla::RubyBlockLeadings GetBlockLeadings() const {
+    return mLeadings;
   }
 
 protected:
   friend nsContainerFrame* NS_NewRubyFrame(nsIPresShell* aPresShell,
                                            nsStyleContext* aContext);
   explicit nsRubyFrame(nsStyleContext* aContext)
-    : nsRubyFrameSuper(aContext) {}
+    : nsInlineFrame(aContext) {}
 
   void ReflowSegment(nsPresContext* aPresContext,
-                     const nsHTMLReflowState& aReflowState,
+                     const ReflowInput& aReflowInput,
                      nsRubyBaseContainerFrame* aBaseContainer,
                      nsReflowStatus& aStatus);
 
-  nsRubyBaseContainerFrame* PullOneSegment(ContinuationTraversingState& aState);
+  nsRubyBaseContainerFrame* PullOneSegment(const nsLineLayout* aLineLayout,
+                                           ContinuationTraversingState& aState);
 
-  // The leading required to put the annotations.
-  // They are not initialized until the first reflow.
-  nscoord mBStartLeading;
-  nscoord mBEndLeading;
+  // The leadings required to put the annotations. They are dummy-
+  // initialized to 0, and get meaningful values at first reflow.
+  mozilla::RubyBlockLeadings mLeadings;
 };
 
 #endif /* nsRubyFrame_h___ */

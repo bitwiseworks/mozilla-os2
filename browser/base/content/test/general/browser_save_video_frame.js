@@ -24,7 +24,7 @@ function createTemporarySaveDirectory() {
                   .get("TmpD", Ci.nsIFile);
   saveDir.append("testsavedir");
   if (!saveDir.exists())
-    saveDir.create(Ci.nsIFile.DIRECTORY_TYPE, 0755);
+    saveDir.create(Ci.nsIFile.DIRECTORY_TYPE, 0o755);
   return saveDir;
 }
 /**
@@ -104,7 +104,6 @@ add_task(function*() {
   yield promiseTabLoadEvent(tab, VIDEO_URL);
   info("Video tab loaded.");
 
-  let video = browser.contentDocument.getElementById("video1");
   let context = document.getElementById("contentAreaContextMenu");
   let popupPromise = promisePopupShown(context);
 

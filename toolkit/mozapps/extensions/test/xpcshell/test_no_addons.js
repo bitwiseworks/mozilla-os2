@@ -33,7 +33,7 @@ function checkString(aPref, aValue) {
     do_check_eq(Services.prefs.getCharPref(aPref), aValue)
   }
   catch (e) {
-    //OK
+    // OK
   }
 }
 
@@ -72,7 +72,7 @@ function* trigger_db_load() {
   check_empty_state();
 
   yield true;
-};
+}
 add_task(trigger_db_load);
 
 // Now restart the manager and check again

@@ -4,14 +4,18 @@
 
 "use strict";
 
-const { Ci, Cu } = require("chrome");
+const { Ci } = require("chrome");
 const promise = require("promise");
+const defer = require("devtools/shared/defer");
 const EventEmitter = require("devtools/shared/event-emitter");
+const Services = require("Services");
+const { XPCOMUtils } = require("resource://gre/modules/XPCOMUtils.jsm");
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 loader.lazyRequireGetter(this, "DebuggerServer", "devtools/server/main", true);
 loader.lazyRequireGetter(this, "DebuggerClient",
   "devtools/shared/client/main", true);
+loader.lazyRequireGetter(this, "gDevTools",
+  "devtools/client/framework/devtools", true);
 
 const targets = new WeakMap();
 const promiseTargets = new WeakMap();
@@ -19,7 +23,7 @@ const promiseTargets = new WeakMap();
 /**
  * Functions for creating Targets
  */
-exports.TargetFactory = {
+const TargetFactory = exports.TargetFactory = {
   /**
    * Construct a Target
    * @param {XULTab} tab
@@ -27,7 +31,7 @@ exports.TargetFactory = {
    *
    * @return A target object
    */
-  forTab: function(tab) {
+  forTab: function (tab) {
     let target = targets.get(tab);
     if (target == null) {
       target = new TabTarget(tab);
@@ -49,7 +53,7 @@ exports.TargetFactory = {
    *
    * @return A promise of a target object
    */
-  forRemoteTab: function(options) {
+  forRemoteTab: function (options) {
     let targetPromise = promiseTargets.get(options);
     if (targetPromise == null) {
       let target = new TabTarget(options);
@@ -59,7 +63,7 @@ exports.TargetFactory = {
     return targetPromise;
   },
 
-  forWorker: function(workerClient) {
+  forWorker: function (workerClient) {
     let target = targets.get(workerClient);
     if (target == null) {
       target = new WorkerTarget(workerClient);
@@ -75,7 +79,7 @@ exports.TargetFactory = {
    * target for a tab without creating a target
    * @return true/false
    */
-  isKnownTab: function(tab) {
+  isKnownTab: function (tab) {
     return targets.has(tab);
   },
 };
@@ -117,9 +121,6 @@ exports.TargetFactory = {
 function TabTarget(tab) {
   EventEmitter.decorate(this);
   this.destroy = this.destroy.bind(this);
-  this._handleThreadState = this._handleThreadState.bind(this);
-  this.on("thread-resumed", this._handleThreadState);
-  this.on("thread-paused", this._handleThreadState);
   this.activeTab = this.activeConsole = null;
   // Only real tabs need initialization here. Placeholder objects for remote
   // targets will be initialized after a makeRemote method call.
@@ -128,6 +129,9 @@ function TabTarget(tab) {
     this._setupListeners();
   } else {
     this._form = tab.form;
+    this._url = this._form.url;
+    this._title = this._form.title;
+
     this._client = tab.client;
     this._chrome = tab.chrome;
   }
@@ -180,13 +184,13 @@ TabTarget.prototype = {
    *  "events": {}
    * }
    */
-  getActorDescription: function(actorName) {
+  getActorDescription: function (actorName) {
     if (!this.client) {
       throw new Error("TabTarget#getActorDescription() can only be called on " +
                       "remote tabs.");
     }
 
-    let deferred = promise.defer();
+    let deferred = defer();
 
     if (this._protocolDescription &&
         this._protocolDescription.types[actorName]) {
@@ -208,7 +212,7 @@ TabTarget.prototype = {
    * @param {String} actorName
    * @return {Boolean}
    */
-  hasActor: function(actorName) {
+  hasActor: function (actorName) {
     if (!this.client) {
       throw new Error("TabTarget#hasActor() can only be called on remote " +
                       "tabs.");
@@ -230,7 +234,7 @@ TabTarget.prototype = {
    * @param {String} methodName
    * @return {Promise}
    */
-  actorHasMethod: function(actorName, methodName) {
+  actorHasMethod: function (actorName, methodName) {
     if (!this.client) {
       throw new Error("TabTarget#actorHasMethod() can only be called on " +
                       "remote tabs.");
@@ -249,7 +253,7 @@ TabTarget.prototype = {
    * @param {String} traitName
    * @return {Mixed}
    */
-  getTrait: function(traitName) {
+  getTrait: function (traitName) {
     if (!this.client) {
       throw new Error("TabTarget#getTrait() can only be called on remote " +
                       "tabs.");
@@ -281,7 +285,7 @@ TabTarget.prototype = {
     return this._root;
   },
 
-  _getRoot: function() {
+  _getRoot: function () {
     return new Promise((resolve, reject) => {
       this.client.listTabs(response => {
         if (response.error) {
@@ -319,8 +323,8 @@ TabTarget.prototype = {
     // in all contexts.  Consumers of .window need to be refactored to not
     // rely on this.
     if (Services.appinfo.processType != Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT) {
-      Cu.reportError("The .window getter on devtools' |target| object isn't " +
-                     "e10s friendly!\n" + Error().stack);
+      console.error("The .window getter on devtools' |target| object isn't " +
+                    "e10s friendly!\n" + Error().stack);
     }
     // Be extra careful here, since this may be called by HS_getHudByWindow
     // during shutdown.
@@ -331,18 +335,14 @@ TabTarget.prototype = {
   },
 
   get name() {
-    if (this._tab && this._tab.linkedBrowser.contentDocument) {
-      return this._tab.linkedBrowser.contentDocument.title;
-    }
     if (this.isAddon) {
       return this._form.name;
     }
-    return this._form.title;
+    return this._title;
   },
 
   get url() {
-    return this._tab ? this._tab.linkedBrowser.currentURI.spec :
-                       this._form.url;
+    return this._url;
   },
 
   get isRemote() {
@@ -350,8 +350,15 @@ TabTarget.prototype = {
   },
 
   get isAddon() {
+    return !!(this._form && this._form.actor && (
+      this._form.actor.match(/conn\d+\.addon\d+/) ||
+      this._form.actor.match(/conn\d+\.webExtension\d+/)
+    ));
+  },
+
+  get isWebExtension() {
     return !!(this._form && this._form.actor &&
-              this._form.actor.match(/conn\d+\.addon\d+/));
+              this._form.actor.match(/conn\d+\.webExtension\d+/));
   },
 
   get isLocalTab() {
@@ -362,21 +369,17 @@ TabTarget.prototype = {
     return !this.window;
   },
 
-  get isThreadPaused() {
-    return !!this._isThreadPaused;
-  },
-
   /**
    * Adds remote protocol capabilities to the target, so that it can be used
    * for tools that support the Remote Debugging Protocol even for local
    * connections.
    */
-  makeRemote: function() {
+  makeRemote: function () {
     if (this._remote) {
       return this._remote.promise;
     }
 
-    this._remote = promise.defer();
+    this._remote = defer();
 
     if (this.isLocalTab) {
       // Since a remote protocol connection will be made, let's start the
@@ -401,6 +404,7 @@ TabTarget.prototype = {
         }
         this.activeTab = tabClient;
         this.threadActor = response.threadActor;
+
         attachConsole();
       });
     };
@@ -421,12 +425,15 @@ TabTarget.prototype = {
     };
 
     if (this.isLocalTab) {
-      this._client.connect(() => {
-        this._client.getTab({ tab: this.tab }).then(response => {
+      this._client.connect()
+        .then(() => this._client.getTab({ tab: this.tab }))
+        .then(response => {
           this._form = response.tab;
+          this._url = this._form.url;
+          this._title = this._form.title;
+
           attachTab();
-        });
-      });
+        }, e => this._remote.reject(e));
     } else if (this.isTabActor) {
       // In the remote debugging case, the protocol connection will have been
       // already initialized in the connection screen code.
@@ -443,18 +450,19 @@ TabTarget.prototype = {
   /**
    * Listen to the different events.
    */
-  _setupListeners: function() {
+  _setupListeners: function () {
     this._webProgressListener = new TabWebProgressListener(this);
     this.tab.linkedBrowser.addProgressListener(this._webProgressListener);
     this.tab.addEventListener("TabClose", this);
     this.tab.parentNode.addEventListener("TabSelect", this);
     this.tab.ownerDocument.defaultView.addEventListener("unload", this);
+    this.tab.addEventListener("TabRemotenessChange", this);
   },
 
   /**
    * Teardown event listeners.
    */
-  _teardownListeners: function() {
+  _teardownListeners: function () {
     if (this._webProgressListener) {
       this._webProgressListener.destroy();
     }
@@ -462,12 +470,13 @@ TabTarget.prototype = {
     this._tab.ownerDocument.defaultView.removeEventListener("unload", this);
     this._tab.removeEventListener("TabClose", this);
     this._tab.parentNode.removeEventListener("TabSelect", this);
+    this._tab.removeEventListener("TabRemotenessChange", this);
   },
 
   /**
    * Setup listeners for remote debugging, updating existing ones as necessary.
    */
-  _setupRemoteListeners: function() {
+  _setupRemoteListeners: function () {
     this.client.addListener("closed", this.destroy);
 
     this._onTabDetached = (aType, aPacket) => {
@@ -484,6 +493,13 @@ TabTarget.prototype = {
       event.title = aPacket.title;
       event.nativeConsoleAPI = aPacket.nativeConsoleAPI;
       event.isFrameSwitching = aPacket.isFrameSwitching;
+
+      if (!aPacket.isFrameSwitching) {
+        // Update the title and url unless this is a frame switch.
+        this._url = aPacket.url;
+        this._title = aPacket.title;
+      }
+
       // Send any stored event payload (DOMWindow or nsIRequest) for backwards
       // compatibility with non-remotable tools.
       if (aPacket.state == "start") {
@@ -502,22 +518,28 @@ TabTarget.prototype = {
       this.emit("frame-update", aPacket);
     };
     this.client.addListener("frameUpdate", this._onFrameUpdate);
+
+    this._onSourceUpdated = (event, packet) => this.emit("source-updated", packet);
+    this.client.addListener("newSource", this._onSourceUpdated);
+    this.client.addListener("updatedSource", this._onSourceUpdated);
   },
 
   /**
    * Teardown listeners for remote debugging.
    */
-  _teardownRemoteListeners: function() {
+  _teardownRemoteListeners: function () {
     this.client.removeListener("closed", this.destroy);
     this.client.removeListener("tabNavigated", this._onTabNavigated);
     this.client.removeListener("tabDetached", this._onTabDetached);
     this.client.removeListener("frameUpdate", this._onFrameUpdate);
+    this.client.removeListener("newSource", this._onSourceUpdated);
+    this.client.removeListener("updatedSource", this._onSourceUpdated);
   },
 
   /**
    * Handle tabs events.
    */
-  handleEvent: function(event) {
+  handleEvent: function (event) {
     switch (event.type) {
       case "TabClose":
       case "unload":
@@ -530,42 +552,52 @@ TabTarget.prototype = {
           this.emit("hidden", event);
         }
         break;
+      case "TabRemotenessChange":
+        this.onRemotenessChange();
+        break;
     }
   },
 
-  /**
-   * Handle script status.
-   */
-  _handleThreadState: function(event) {
-    switch (event) {
-      case "thread-resumed":
-        this._isThreadPaused = false;
-        break;
-      case "thread-paused":
-        this._isThreadPaused = true;
-        break;
+  // Automatically respawn the toolbox when the tab changes between being
+  // loaded within the parent process and loaded from a content process.
+  // Process change can go in both ways.
+  onRemotenessChange: function () {
+    // Responsive design do a crazy dance around tabs and triggers
+    // remotenesschange events. But we should ignore them as at the end
+    // the content doesn't change its remoteness.
+    if (this._tab.isResponsiveDesignMode) {
+      return;
     }
+
+    // Save a reference to the tab as it will be nullified on destroy
+    let tab = this._tab;
+    let onToolboxDestroyed = (event, target) => {
+      if (target != this) {
+        return;
+      }
+      gDevTools.off("toolbox-destroyed", target);
+
+      // Recreate a fresh target instance as the current one is now destroyed
+      let newTarget = TargetFactory.forTab(tab);
+      gDevTools.showToolbox(newTarget);
+    };
+    gDevTools.on("toolbox-destroyed", onToolboxDestroyed);
   },
 
   /**
    * Target is not alive anymore.
    */
-  destroy: function() {
+  destroy: function () {
     // If several things call destroy then we give them all the same
     // destruction promise so we're sure to destroy only once
     if (this._destroyer) {
       return this._destroyer.promise;
     }
 
-    this._destroyer = promise.defer();
+    this._destroyer = defer();
 
     // Before taking any action, notify listeners that destruction is imminent.
     this.emit("close");
-
-    // First of all, do cleanup tasks that pertain to both remoted and
-    // non-remoted targets.
-    this.off("thread-resumed", this._handleThreadState);
-    this.off("thread-paused", this._handleThreadState);
 
     if (this._tab) {
       this._teardownListeners();
@@ -587,7 +619,7 @@ TabTarget.prototype = {
       if (this.isLocalTab) {
         // We started with a local tab and created the client ourselves, so we
         // should close it.
-        this._client.close(cleanupAndResolve);
+        this._client.close().then(cleanupAndResolve);
       } else if (this.activeTab) {
         // The client was handed to us, so we are not responsible for closing
         // it. We just need to detach from the tab, if already attached.
@@ -606,23 +638,42 @@ TabTarget.prototype = {
   /**
    * Clean up references to what this target points to.
    */
-  _cleanup: function() {
+  _cleanup: function () {
     if (this._tab) {
       targets.delete(this._tab);
     } else {
       promiseTargets.delete(this._form);
     }
+
     this.activeTab = null;
     this.activeConsole = null;
     this._client = null;
     this._tab = null;
     this._form = null;
     this._remote = null;
+    this._root = null;
+    this._title = null;
+    this._url = null;
+    this.threadActor = null;
   },
 
-  toString: function() {
+  toString: function () {
     let id = this._tab ? this._tab : (this._form && this._form.actor);
     return `TabTarget:${id}`;
+  },
+
+  /**
+   * @see TabActor.prototype.onResolveLocation
+   */
+  resolveLocation(loc) {
+    let deferred = defer();
+
+    this.client.request(Object.assign({
+      to: this._form.actor,
+      type: "resolveLocation",
+    }, loc), deferred.resolve);
+
+    return deferred.promise;
   },
 };
 
@@ -642,7 +693,7 @@ TabWebProgressListener.prototype = {
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIWebProgressListener,
                                          Ci.nsISupportsWeakReference]),
 
-  onStateChange: function(progress, request, flag) {
+  onStateChange: function (progress, request, flag) {
     let isStart = flag & Ci.nsIWebProgressListener.STATE_START;
     let isDocument = flag & Ci.nsIWebProgressListener.STATE_IS_DOCUMENT;
     let isNetwork = flag & Ci.nsIWebProgressListener.STATE_IS_NETWORK;
@@ -665,11 +716,11 @@ TabWebProgressListener.prototype = {
     }
   },
 
-  onProgressChange: function() {},
-  onSecurityChange: function() {},
-  onStatusChange: function() {},
+  onProgressChange: function () {},
+  onSecurityChange: function () {},
+  onStatusChange: function () {},
 
-  onLocationChange: function(webProgress, request, URI, flags) {
+  onLocationChange: function (webProgress, request, URI, flags) {
     if (this.target &&
         !(flags & Ci.nsIWebProgressListener.LOCATION_CHANGE_SAME_DOCUMENT)) {
       let window = webProgress.DOMWindow;
@@ -686,7 +737,7 @@ TabWebProgressListener.prototype = {
   /**
    * Destroy the progress listener instance.
    */
-  destroy: function() {
+  destroy: function () {
     if (this.target.tab) {
       try {
         this.target.tab.linkedBrowser.removeProgressListener(this);
@@ -718,14 +769,16 @@ function WorkerTarget(workerClient) {
  * requiring only minimal changes to the rest of the frontend.
  */
 WorkerTarget.prototype = {
-  destroy: function () {},
-
   get isRemote() {
     return true;
   },
 
   get isTabActor() {
     return true;
+  },
+
+  get name() {
+    return "Worker";
   },
 
   get url() {
@@ -750,13 +803,19 @@ WorkerTarget.prototype = {
     return this._workerClient.client;
   },
 
-  destroy: function() {},
+  destroy: function () {
+    this._workerClient.detach();
+  },
 
   hasActor: function (name) {
+    // console is the only one actor implemented by WorkerActor
+    if (name == "console") {
+      return true;
+    }
     return false;
   },
 
-  getTrait: function() {
+  getTrait: function () {
     return undefined;
   },
 

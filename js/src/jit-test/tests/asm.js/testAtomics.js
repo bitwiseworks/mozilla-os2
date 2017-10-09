@@ -1,6 +1,4 @@
-// |jit-test| test-also-noasmjs
-
-if (!this.SharedArrayBuffer || !this.Atomics)
+if (!this.SharedArrayBuffer || !this.Atomics || !isAsmJSCompilationAvailable())
     quit();
 
 // The code duplication below is very far from elegant but provides
@@ -9,9 +7,13 @@ if (!this.SharedArrayBuffer || !this.Atomics)
 load(libdir + "asm.js");
 load(libdir + "asserts.js");
 
+setJitCompilerOption('asmjs.atomics.enable', 1);
+
+const RuntimeError = WebAssembly.RuntimeError;
+const outOfBounds = /index out of bounds/;
+
 var loadModule_int32_code =
     USE_ASM + `
-    var atomic_fence = stdlib.Atomics.fence;
     var atomic_load = stdlib.Atomics.load;
     var atomic_store = stdlib.Atomics.store;
     var atomic_cmpxchg = stdlib.Atomics.compareExchange;
@@ -23,10 +25,6 @@ var loadModule_int32_code =
     var atomic_xor = stdlib.Atomics.xor;
 
     var i32a = new stdlib.Int32Array(heap);
-
-    function do_fence() {
-        atomic_fence();
-    }
 
     // Load element 0
     function do_load() {
@@ -204,8 +202,7 @@ var loadModule_int32_code =
         return v|0;
     }
 
-    return { fence: do_fence,
-        load: do_load,
+    return { load: do_load,
         load_i: do_load_i,
         store: do_store,
         store_i: do_store_i,
@@ -237,8 +234,6 @@ function test_int32(heap) {
     var i32m = asmLink(loadModule_int32, this, {}, heap);
 
     var size = Int32Array.BYTES_PER_ELEMENT;
-
-    i32m.fence();
 
     i32a[0] = 12345;
     assertEq(i32m.load(), 12345);
@@ -301,22 +296,26 @@ function test_int32(heap) {
 
     var oob = (heap.byteLength * 2) & ~7;
 
-    assertErrorMessage(() => i32m.cas1_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i32m.cas2_i(oob), RangeError, /out-of-range index/);
+    assertErrorMessage(() => i32m.cas1_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i32m.cas2_i(oob), RuntimeError, outOfBounds);
 
-    assertErrorMessage(() => i32m.or_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i32m.xor_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i32m.and_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i32m.add_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i32m.sub_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i32m.load_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i32m.store_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i32m.xchg_i(oob), RangeError, /out-of-range index/);
+    assertErrorMessage(() => i32m.or_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i32m.xor_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i32m.and_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i32m.add_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i32m.sub_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i32m.load_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i32m.store_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i32m.xchg_i(oob), RuntimeError, outOfBounds);
 
     // Edge cases
-    assertErrorMessage(() => i32m.load_i(i32a.length*4), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i32m.store_i(i32a.length*4), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i32m.add_i(i32a.length*4), RangeError, /out-of-range index/);
+    const INT32_MAX = Math.pow(2, 31);
+    const UINT32_MAX = Math.pow(2, 32);
+    for (var i of [i32a.length*4, INT32_MAX - 4, INT32_MAX, UINT32_MAX - 4]) {
+        assertErrorMessage(() => i32m.load_i(i), RuntimeError, outOfBounds);
+        assertErrorMessage(() => i32m.store_i(i), RuntimeError, outOfBounds);
+        assertErrorMessage(() => i32m.add_i(i), RuntimeError, outOfBounds);
+    }
 
     i32a[i32a.length-1] = 88;
     assertEq(i32m.load_i((i32a.length-1)*4), 88);
@@ -328,7 +327,6 @@ function test_int32(heap) {
 
 var loadModule_uint32_code =
     USE_ASM + `
-    var atomic_fence = stdlib.Atomics.fence;
     var atomic_load = stdlib.Atomics.load;
     var atomic_store = stdlib.Atomics.store;
     var atomic_cmpxchg = stdlib.Atomics.compareExchange;
@@ -582,22 +580,26 @@ function test_uint32(heap) {
 
     var oob = (heap.byteLength * 2) & ~7;
 
-    assertErrorMessage(() => i32m.cas1_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i32m.cas2_i(oob), RangeError, /out-of-range index/);
+    assertErrorMessage(() => i32m.cas1_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i32m.cas2_i(oob), RuntimeError, outOfBounds);
 
-    assertErrorMessage(() => i32m.or_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i32m.xor_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i32m.and_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i32m.add_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i32m.sub_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i32m.load_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i32m.store_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i32m.xchg_i(oob), RangeError, /out-of-range index/);
+    assertErrorMessage(() => i32m.or_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i32m.xor_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i32m.and_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i32m.add_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i32m.sub_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i32m.load_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i32m.store_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i32m.xchg_i(oob), RuntimeError, outOfBounds);
 
     // Edge cases
-    assertErrorMessage(() => i32m.load_i(i32a.length*4), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i32m.store_i(i32a.length*4), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i32m.add_i(i32a.length*4), RangeError, /out-of-range index/);
+    const INT32_MAX = Math.pow(2, 31);
+    const UINT32_MAX = Math.pow(2, 32);
+    for (var i of [i32a.length*4, INT32_MAX - 4, INT32_MAX, UINT32_MAX - 4]) {
+        assertErrorMessage(() => i32m.load_i(i), RuntimeError, outOfBounds);
+        assertErrorMessage(() => i32m.store_i(i), RuntimeError, outOfBounds);
+        assertErrorMessage(() => i32m.add_i(i), RuntimeError, outOfBounds);
+    }
 
     i32a[i32a.length-1] = 88;
     assertEq(i32m.load_i((i32a.length-1)*4), 88);
@@ -609,7 +611,6 @@ function test_uint32(heap) {
 
 var loadModule_int16_code =
     USE_ASM + `
-    var atomic_fence = stdlib.Atomics.fence;
     var atomic_load = stdlib.Atomics.load;
     var atomic_store = stdlib.Atomics.store;
     var atomic_cmpxchg = stdlib.Atomics.compareExchange;
@@ -621,10 +622,6 @@ var loadModule_int16_code =
     var atomic_xor = stdlib.Atomics.xor;
 
     var i16a = new stdlib.Int16Array(heap);
-
-    function do_fence() {
-        atomic_fence();
-    }
 
     // Load element 0
     function do_load() {
@@ -776,8 +773,7 @@ var loadModule_int16_code =
         return v|0;
     }
 
-    return { fence: do_fence,
-        load: do_load,
+    return { load: do_load,
         load_i: do_load_i,
         store: do_store,
         store_i: do_store_i,
@@ -806,8 +802,6 @@ function test_int16(heap) {
     var i16m = loadModule_int16(this, {}, heap);
 
     var size = Int16Array.BYTES_PER_ELEMENT;
-
-    i16m.fence();
 
     i16a[0] = 12345;
     assertEq(i16m.load(), 12345);
@@ -878,22 +872,26 @@ function test_int16(heap) {
 
     var oob = (heap.byteLength * 2) & ~7;
 
-    assertErrorMessage(() => i16m.cas1_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i16m.cas2_i(oob), RangeError, /out-of-range index/);
+    assertErrorMessage(() => i16m.cas1_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i16m.cas2_i(oob), RuntimeError, outOfBounds);
 
-    assertErrorMessage(() => i16m.or_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i16m.xor_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i16m.and_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i16m.add_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i16m.sub_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i16m.load_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i16m.store_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i16m.xchg_i(oob), RangeError, /out-of-range index/);
+    assertErrorMessage(() => i16m.or_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i16m.xor_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i16m.and_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i16m.add_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i16m.sub_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i16m.load_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i16m.store_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i16m.xchg_i(oob), RuntimeError, outOfBounds);
 
     // Edge cases
-    assertErrorMessage(() => i16m.load_i(i16a.length*2), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i16m.store_i(i16a.length*2), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i16m.add_i(i16a.length*2), RangeError, /out-of-range index/);
+    const INT32_MAX = Math.pow(2, 31);
+    const UINT32_MAX = Math.pow(2, 32);
+    for (var i of [i16a.length*2, INT32_MAX - 2, INT32_MAX, UINT32_MAX - 2]) {
+        assertErrorMessage(() => i16m.load_i(i), RuntimeError, outOfBounds);
+        assertErrorMessage(() => i16m.store_i(i), RuntimeError, outOfBounds);
+        assertErrorMessage(() => i16m.add_i(i), RuntimeError, outOfBounds);
+    }
 
     i16a[i16a.length-1] = 88;
     assertEq(i16m.load_i((i16a.length-1)*2), 88);
@@ -1166,22 +1164,26 @@ function test_uint16(heap) {
 
     var oob = (heap.byteLength * 2) & ~7;
 
-    assertErrorMessage(() => i16m.cas1_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i16m.cas2_i(oob), RangeError, /out-of-range index/);
+    assertErrorMessage(() => i16m.cas1_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i16m.cas2_i(oob), RuntimeError, outOfBounds);
 
-    assertErrorMessage(() => i16m.or_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i16m.xor_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i16m.and_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i16m.add_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i16m.sub_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i16m.load_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i16m.store_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i16m.xchg_i(oob), RangeError, /out-of-range index/);
+    assertErrorMessage(() => i16m.or_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i16m.xor_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i16m.and_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i16m.add_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i16m.sub_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i16m.load_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i16m.store_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i16m.xchg_i(oob), RuntimeError, outOfBounds);
 
     // Edge cases
-    assertErrorMessage(() => i16m.load_i(i16a.length*2), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i16m.store_i(i16a.length*2), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i16m.add_i(i16a.length*2), RangeError, /out-of-range index/);
+    const INT32_MAX = Math.pow(2, 31);
+    const UINT32_MAX = Math.pow(2, 32);
+    for (var i of [i16a.length*2, INT32_MAX - 2, INT32_MAX, UINT32_MAX - 2]) {
+        assertErrorMessage(() => i16m.load_i(i), RuntimeError, outOfBounds);
+        assertErrorMessage(() => i16m.store_i(i), RuntimeError, outOfBounds);
+        assertErrorMessage(() => i16m.add_i(i), RuntimeError, outOfBounds);
+    }
 
     i16a[i16a.length-1] = 88;
     assertEq(i16m.load_i((i16a.length-1)*2), 88);
@@ -1384,7 +1386,7 @@ function test_int8(heap) {
     var i8m = loadModule_int8(this, {}, heap);
 
     for ( var i=0 ; i < i8a.length ; i++ )
-	i8a[i] = 0;
+        i8a[i] = 0;
 
     var size = Int8Array.BYTES_PER_ELEMENT;
 
@@ -1447,22 +1449,26 @@ function test_int8(heap) {
 
     var oob = (heap.byteLength * 2) & ~7;
 
-    assertErrorMessage(() => i8m.cas1_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i8m.cas2_i(oob), RangeError, /out-of-range index/);
+    assertErrorMessage(() => i8m.cas1_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i8m.cas2_i(oob), RuntimeError, outOfBounds);
 
-    assertErrorMessage(() => i8m.or_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i8m.xor_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i8m.and_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i8m.add_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i8m.sub_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i8m.load_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i8m.store_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i8m.xchg_i(oob), RangeError, /out-of-range index/);
+    assertErrorMessage(() => i8m.or_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i8m.xor_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i8m.and_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i8m.add_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i8m.sub_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i8m.load_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i8m.store_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i8m.xchg_i(oob), RuntimeError, outOfBounds);
 
     // Edge cases
-    assertErrorMessage(() => i8m.load_i(i8a.length), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i8m.store_i(i8a.length), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i8m.add_i(i8a.length), RangeError, /out-of-range index/);
+    const INT32_MAX = Math.pow(2, 31);
+    const UINT32_MAX = Math.pow(2, 32);
+    for (var i of [i8a.length, INT32_MAX - 1, INT32_MAX, UINT32_MAX - 1]) {
+        assertErrorMessage(() => i8m.load_i(i), RuntimeError, outOfBounds);
+        assertErrorMessage(() => i8m.store_i(i), RuntimeError, outOfBounds);
+        assertErrorMessage(() => i8m.add_i(i), RuntimeError, outOfBounds);
+    }
 
     i8a[i8a.length-1] = 88;
     assertEq(i8m.load_i(i8a.length-1), 88);
@@ -1738,22 +1744,26 @@ function test_uint8(heap) {
 
     var oob = (heap.byteLength * 2) & ~7;
 
-    assertErrorMessage(() => i8m.cas1_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i8m.cas2_i(oob), RangeError, /out-of-range index/);
+    assertErrorMessage(() => i8m.cas1_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i8m.cas2_i(oob), RuntimeError, outOfBounds);
 
-    assertErrorMessage(() => i8m.or_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i8m.xor_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i8m.and_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i8m.add_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i8m.sub_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i8m.load_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i8m.store_i(oob), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i8m.xchg_i(oob), RangeError, /out-of-range index/);
+    assertErrorMessage(() => i8m.or_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i8m.xor_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i8m.and_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i8m.add_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i8m.sub_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i8m.load_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i8m.store_i(oob), RuntimeError, outOfBounds);
+    assertErrorMessage(() => i8m.xchg_i(oob), RuntimeError, outOfBounds);
 
     // Edge cases
-    assertErrorMessage(() => i8m.load_i(i8a.length), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i8m.store_i(i8a.length), RangeError, /out-of-range index/);
-    assertErrorMessage(() => i8m.add_i(i8a.length), RangeError, /out-of-range index/);
+    const INT32_MAX = Math.pow(2, 31);
+    const UINT32_MAX = Math.pow(2, 32);
+    for (var i of [i8a.length, INT32_MAX - 1, INT32_MAX, UINT32_MAX - 1]) {
+        assertErrorMessage(() => i8m.load_i(i), RuntimeError, outOfBounds);
+        assertErrorMessage(() => i8m.store_i(i), RuntimeError, outOfBounds);
+        assertErrorMessage(() => i8m.add_i(i), RuntimeError, outOfBounds);
+    }
 
     i8a[i8a.length-1] = 88;
     assertEq(i8m.load_i(i8a.length-1), 88);
@@ -1819,15 +1829,14 @@ var loadModule_misc = asmCompile('stdlib', 'foreign', 'heap', loadModule_misc_co
 function test_misc(heap) {
     var misc = loadModule_misc(this, {}, heap);
 
-    assertEq(misc.ilf1(), 1);
-    assertEq(misc.ilf2(), 1);
+    assertEq(misc.ilf1(), 1);   // Guaranteed by SpiderMonkey, not spec
+    assertEq(misc.ilf2(), 1);   // Guaranteed by SpiderMonkey, not spec
     assertEq(misc.ilf3(), 0);
-    assertEq(misc.ilf4(), 1);
+    assertEq(misc.ilf4(), 1);   // Guaranteed by SpiderMonkey, not spec
     assertEq(misc.ilf5(), 0);
     assertEq(misc.ilf6(), 0);
     assertEq(misc.ilf7(), 0);
-    var v = misc.ilf8();
-    assertEq(v === 0 || v === 1, true);
+    assertEq(misc.ilf8(), 0);   // Required by spec, for now
     assertEq(misc.ilf9(), 0);
 }
 
@@ -1842,6 +1851,21 @@ test_uint16(heap);
 test_int32(heap);
 test_uint32(heap);
 test_misc(heap);
+
+// Bug 1254167: Effective Address Analysis should be void on atomics accesses,
+var code = `
+    "use asm";
+    var HEAP32 = new stdlib.Int32Array(heap);
+    var load = stdlib.Atomics.load;
+    function f() {
+        var i2 = 0;
+        i2 = 305002 | 0;
+        return load(HEAP32, i2 >> 2) | 0;
+    }
+    return f;
+`;
+var f = asmLink(asmCompile('stdlib', 'ffi', 'heap', code), this, {}, new SharedArrayBuffer(0x10000));
+assertErrorMessage(f, RuntimeError, outOfBounds);
 
 // Test that ARM callouts compile.
 setARMHwCapFlags('vfp');
@@ -1859,3 +1883,4 @@ asmCompile('stdlib', 'ffi', 'heap',
 
     return { xchg: do_xchg }
 `);
+

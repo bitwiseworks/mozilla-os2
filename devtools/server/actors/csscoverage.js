@@ -4,27 +4,20 @@
 
 "use strict";
 
-const { Cc, Ci, Cu } = require("chrome");
+const { Cc, Ci } = require("chrome");
 
 const Services = require("Services");
 const { XPCOMUtils } = require("resource://gre/modules/XPCOMUtils.jsm");
 
 const events = require("sdk/event/core");
-const protocol = require("devtools/server/protocol");
-const { method, custom, RetVal, Arg } = protocol;
+const protocol = require("devtools/shared/protocol");
+const { cssUsageSpec } = require("devtools/shared/specs/csscoverage");
 
-loader.lazyGetter(this, "gDevTools", () => {
-  return require("resource://devtools/client/framework/gDevTools.jsm").gDevTools;
-});
 loader.lazyGetter(this, "DOMUtils", () => {
-  return Cc["@mozilla.org/inspector/dom-utils;1"].getService(Ci.inIDOMUtils)
+  return Cc["@mozilla.org/inspector/dom-utils;1"].getService(Ci.inIDOMUtils);
 });
-loader.lazyGetter(this, "stylesheets", () => {
-  return require("devtools/server/actors/stylesheets");
-});
-loader.lazyGetter(this, "CssLogic", () => {
-  return require("devtools/shared/styleinspector/css-logic").CssLogic;
-});
+loader.lazyRequireGetter(this, "stylesheets", "devtools/server/actors/stylesheets");
+loader.lazyRequireGetter(this, "prettifyCSS", "devtools/shared/inspector/css-logic", true);
 
 const CSSRule = Ci.nsIDOMCSSRule;
 
@@ -35,7 +28,7 @@ const MAX_UNUSED_RULES = 10000;
  */
 const l10n = exports.l10n = {
   _URI: "chrome://devtools-shared/locale/csscoverage.properties",
-  lookup: function(msg) {
+  lookup: function (msg) {
     if (this._stringBundle == null) {
       this._stringBundle = Services.strings.createBundle(this._URI);
     }
@@ -74,17 +67,8 @@ const l10n = exports.l10n = {
  *       }, ...
  *     });
  */
-var CSSUsageActor = protocol.ActorClass({
-  typeName: "cssUsage",
-
-  events: {
-    "state-change" : {
-      type: "stateChange",
-      stateChange: Arg(0, "json")
-    }
-  },
-
-  initialize: function(conn, tabActor) {
+var CSSUsageActor = protocol.ActorClassWithSpec(cssUsageSpec, {
+  initialize: function (conn, tabActor) {
     protocol.Actor.prototype.initialize.call(this, conn);
 
     this._tabActor = tabActor;
@@ -94,10 +78,10 @@ var CSSUsageActor = protocol.ActorClass({
     this._onChange = this._onChange.bind(this);
 
     this._notifyOn = Ci.nsIWebProgress.NOTIFY_STATUS |
-                     Ci.nsIWebProgress.NOTIFY_STATE_ALL
+                     Ci.nsIWebProgress.NOTIFY_STATE_ALL;
   },
 
-  destroy: function() {
+  destroy: function () {
     this._tabActor = undefined;
 
     delete this._onTabLoad;
@@ -113,7 +97,7 @@ var CSSUsageActor = protocol.ActorClass({
    * why we don't want to do that (e.g. the page contains state that will be
    * lost across a reload)
    */
-  start: method(function(noreload) {
+  start: function (noreload) {
     if (this._running) {
       throw new Error(l10n.lookup("csscoverageRunningError"));
     }
@@ -152,20 +136,17 @@ var CSSUsageActor = protocol.ActorClass({
       // If we're not starting by reloading the page, then pretend that onload
       // has just happened.
       this._onTabLoad(this._tabActor.window.document);
-    }
-    else {
+    } else {
       this._tabActor.window.location.reload();
     }
 
     events.emit(this, "state-change", { isRunning: true });
-  }, {
-    request: { url: Arg(0, "boolean") }
-  }),
+  },
 
   /**
    * Cease recording usage data
    */
-  stop: method(function() {
+  stop: function () {
     if (!this._running) {
       throw new Error(l10n.lookup("csscoverageNotRunningError"));
     }
@@ -175,20 +156,20 @@ var CSSUsageActor = protocol.ActorClass({
 
     this._running = false;
     events.emit(this, "state-change", { isRunning: false });
-  }),
+  },
 
   /**
    * Start/stop recording usage data depending on what we're currently doing.
    */
-  toggle: method(function() {
+  toggle: function () {
     return this._running ? this.stop() : this.start();
-  }),
+  },
 
   /**
    * Running start() quickly followed by stop() does a bunch of unnecessary
    * work, so this cuts all that out
    */
-  oneshot: method(function() {
+  oneshot: function () {
     if (this._running) {
       throw new Error(l10n.lookup("csscoverageRunningError"));
     }
@@ -199,12 +180,12 @@ var CSSUsageActor = protocol.ActorClass({
 
     this._populateKnownRules(this._tabActor.window.document);
     this._updateUsage(this._tabActor.window.document, false);
-  }),
+  },
 
   /**
    * Called by the ProgressListener to simulate a "load" event
    */
-  _onTabLoad: function(document) {
+  _onTabLoad: function (document) {
     this._populateKnownRules(document);
     this._updateUsage(document, true);
 
@@ -214,7 +195,7 @@ var CSSUsageActor = protocol.ActorClass({
   /**
    * Setup a MutationObserver on the current document
    */
-  _observeMutations: function(document) {
+  _observeMutations: function (document) {
     let MutationObserver = document.defaultView.MutationObserver;
     let observer = new MutationObserver(mutations => {
       // It's possible that one of the mutations in this list adds a 'use' of
@@ -234,7 +215,7 @@ var CSSUsageActor = protocol.ActorClass({
    * Event handler for whenever we think the page has changed in a way that
    * means the CSS usage might have changed.
    */
-  _onChange: function(document) {
+  _onChange: function (document) {
     // Ignore changes pre 'load'
     if (!this._visitedPages.has(getURL(document))) {
       return;
@@ -246,7 +227,7 @@ var CSSUsageActor = protocol.ActorClass({
    * Called whenever we think the list of stylesheets might have changed so
    * we can update the list of rules that we should be checking
    */
-  _populateKnownRules: function(document) {
+  _populateKnownRules: function (document) {
     let url = getURL(document);
     this._visitedPages.add(url);
     // Go through all the rules in the current sheets adding them to knownRules
@@ -256,13 +237,13 @@ var CSSUsageActor = protocol.ActorClass({
       let ruleData = this._knownRules.get(ruleId);
       if (ruleData == null) {
         ruleData = {
-           selectorText: rule.selectorText,
-           cssText: rule.cssText,
-           test: getTestSelector(rule.selectorText),
-           isUsed: false,
-           presentOn: new Set(),
-           preLoadOn: new Set(),
-           isError: false
+          selectorText: rule.selectorText,
+          cssText: rule.cssText,
+          test: getTestSelector(rule.selectorText),
+          isUsed: false,
+          presentOn: new Set(),
+          preLoadOn: new Set(),
+          isError: false
         };
         this._knownRules.set(ruleId, ruleData);
       }
@@ -274,7 +255,7 @@ var CSSUsageActor = protocol.ActorClass({
   /**
    * Update knownRules with usage information from the current page
    */
-  _updateUsage: function(document, isLoad) {
+  _updateUsage: function (document, isLoad) {
     let qsaCount = 0;
 
     // Update this._data with matches to say 'used at load time' by sheet X
@@ -312,8 +293,7 @@ var CSSUsageActor = protocol.ActorClass({
             ruleData.preLoadOn.add(url);
           }
         }
-      }
-      catch (ex) {
+      } catch (ex) {
         ruleData.isError = true;
       }
     }
@@ -332,7 +312,7 @@ var CSSUsageActor = protocol.ActorClass({
    *     ...
    *   ]
    */
-  createEditorReport: method(function(url) {
+  createEditorReport: function (url) {
     if (this._knownRules == null) {
       return { reports: [] };
     }
@@ -357,10 +337,19 @@ var CSSUsageActor = protocol.ActorClass({
     }
 
     return { reports: reports };
-  }, {
-    request: { url: Arg(0, "string") },
-    response: { reports: RetVal("array:json") }
-  }),
+  },
+
+  /**
+   * Compute the stylesheet URL and delegate the report creation to createEditorReport.
+   * See createEditorReport documentation.
+   *
+   * @param {StyleSheetActor} stylesheetActor
+   *        the stylesheet actor for which the coverage report should be generated.
+   */
+  createEditorReportForSheet: function (stylesheetActor) {
+    let url = sheetToUrl(stylesheetActor.rawSheet);
+    return this.createEditorReport(url);
+  },
 
   /**
    * Returns a JSONable structure designed for the page report which shows
@@ -397,7 +386,7 @@ var CSSUsageActor = protocol.ActorClass({
    *     ]
    *   }
    */
-  createPageReport: method(function() {
+  createPageReport: function () {
     if (this._running) {
       throw new Error(l10n.lookup("csscoverageRunningError"));
     }
@@ -411,15 +400,15 @@ var CSSUsageActor = protocol.ActorClass({
     }
 
     // Helper function to create a JSONable data structure representing a rule
-    const ruleToRuleReport = function(rule, ruleData) {
+    const ruleToRuleReport = function (rule, ruleData) {
       return {
         url: rule.url,
         shortUrl: rule.url.split("/").slice(-1)[0],
         start: { line: rule.line, column: rule.column },
         selectorText: ruleData.selectorText,
-        formattedCssText: CssLogic.prettifyCSS(ruleData.cssText)
+        formattedCssText: prettifyCSS(ruleData.cssText)
       };
-    }
+    };
 
     // A count of each type of rule for the bar chart
     let summary = { used: 0, unused: 0, preload: 0 };
@@ -428,7 +417,7 @@ var CSSUsageActor = protocol.ActorClass({
     let unusedMap = new Map();
     for (let [ruleId, ruleData] of this._knownRules) {
       let rule = deconstructRuleId(ruleId);
-      let rules = unusedMap.get(rule.url)
+      let rules = unusedMap.get(rule.url);
       if (rules == null) {
         rules = [];
         unusedMap.set(rule.url, rules);
@@ -436,8 +425,7 @@ var CSSUsageActor = protocol.ActorClass({
       if (!ruleData.isUsed) {
         let ruleReport = ruleToRuleReport(rule, ruleData);
         rules.push(ruleReport);
-      }
-      else {
+      } else {
         summary.unused++;
       }
     }
@@ -465,8 +453,7 @@ var CSSUsageActor = protocol.ActorClass({
           let ruleReport = ruleToRuleReport(rule, ruleData);
           page.rules.push(ruleReport);
           summary.preload++;
-        }
-        else {
+        } else {
           summary.used++;
         }
       }
@@ -481,18 +468,14 @@ var CSSUsageActor = protocol.ActorClass({
       preload: preload,
       unused: unused
     };
-  }, {
-    response: RetVal("json")
-  }),
+  },
 
   /**
    * For testing only. What pages did we visit.
    */
-  _testOnly_visitedPages: method(function() {
+  _testOnlyVisitedPages: function () {
     return [...this._visitedPages];
-  }, {
-    response: { value: RetVal("array:string") }
-  }),
+  },
 });
 
 exports.CSSUsageActor = CSSUsageActor;
@@ -573,7 +556,7 @@ function ruleToId(rule) {
  * Convert a ruleId to an object with { url, line, column } properties
  * @see ruleToId(rule)
  */
-const deconstructRuleId = exports.deconstructRuleId = function(ruleId) {
+const deconstructRuleId = exports.deconstructRuleId = function (ruleId) {
   let split = ruleId.split("|");
   if (split.length > 3) {
     let replace = split.slice(0, split.length - 3 + 1).join("|");
@@ -593,9 +576,9 @@ const deconstructRuleId = exports.deconstructRuleId = function(ruleId) {
  * change the CSS usage properties of a page.
  * @param document
  */
-const getURL = exports.getURL = function(document) {
+const getURL = exports.getURL = function (document) {
   let url = new document.defaultView.URL(document.documentURI);
-  return url == 'about:blank' ? '' : '' + url.origin + url.pathname;
+  return url == "about:blank" ? "" : "" + url.origin + url.pathname;
 };
 
 /**
@@ -616,7 +599,7 @@ const getURL = exports.getURL = function(document) {
  */
 const SEL_EXTERNAL = [
   "active", "active-drop", "current", "dir", "focus", "future", "hover",
-  "invalid-drop",  "lang", "past", "placeholder-shown", "target", "valid-drop",
+  "invalid-drop", "lang", "past", "placeholder-shown", "target", "valid-drop",
   "visited"
 ];
 
@@ -717,12 +700,15 @@ function getTestSelector(selector) {
 exports.SEL_ALL = [
   SEL_EXTERNAL, SEL_FORM, SEL_ELEMENT, SEL_STRUCTURAL, SEL_SEMI,
   SEL_COMBINING, SEL_MEDIA
-].reduce(function(prev, curr) { return prev.concat(curr); }, []);
+].reduce(function (prev, curr) {
+  return prev.concat(curr);
+}, []);
 
 /**
  * Find a URL for a given stylesheet
+ * @param {StyleSheet} stylesheet raw stylesheet
  */
-const sheetToUrl = exports.sheetToUrl = function(stylesheet) {
+const sheetToUrl = function (stylesheet) {
   // For <link> elements
   if (stylesheet.href) {
     return stylesheet.href;
@@ -733,114 +719,8 @@ const sheetToUrl = exports.sheetToUrl = function(stylesheet) {
     let document = stylesheet.ownerNode.ownerDocument;
     let sheets = [...document.querySelectorAll("style")];
     let index = sheets.indexOf(stylesheet.ownerNode);
-    return getURL(document) + ' → <style> index ' + index;
+    return getURL(document) + " → <style> index " + index;
   }
 
   throw new Error("Unknown sheet source");
-}
-
-/**
- * Running more than one usage report at a time is probably bad for performance
- * and it isn't particularly useful, and it's confusing from a notification POV
- * so we only allow one.
- */
-var isRunning = false;
-var notification;
-var target;
-var chromeWindow;
-
-/**
- * Front for CSSUsageActor
- */
-const CSSUsageFront = protocol.FrontClass(CSSUsageActor, {
-  initialize: function(client, form) {
-    protocol.Front.prototype.initialize.call(this, client, form);
-    this.actorID = form.cssUsageActor;
-    this.manage(this);
-  },
-
-  _onStateChange: protocol.preEvent("state-change", function(ev) {
-    isRunning = ev.isRunning;
-    ev.target = target;
-
-    if (isRunning) {
-      let gnb = chromeWindow.document.getElementById("global-notificationbox");
-      notification = gnb.getNotificationWithValue("csscoverage-running");
-
-      if (notification == null) {
-        let notifyStop = reason => {
-          if (reason == "removed") {
-            this.stop();
-          }
-        };
-
-        let msg = l10n.lookup("csscoverageRunningReply");
-        notification = gnb.appendNotification(msg, "csscoverage-running",
-                                              "", // i.e. no image
-                                              gnb.PRIORITY_INFO_HIGH,
-                                              null, // i.e. no buttons
-                                              notifyStop);
-      }
-    }
-    else {
-      if (notification) {
-        notification.remove();
-        notification = undefined;
-      }
-
-      gDevTools.showToolbox(target, "styleeditor");
-      target = undefined;
-    }
-  }),
-
-  /**
-   * Server-side start is above. Client-side start adds a notification box
-   */
-  start: custom(function(newChromeWindow, newTarget, noreload=false) {
-    target = newTarget;
-    chromeWindow = newChromeWindow;
-
-    return this._start(noreload);
-  }, {
-    impl: "_start"
-  }),
-
-  /**
-   * Server-side start is above. Client-side start adds a notification box
-   */
-  toggle: custom(function(newChromeWindow, newTarget) {
-    target = newTarget;
-    chromeWindow = newChromeWindow;
-
-    return this._toggle();
-  }, {
-    impl: "_toggle"
-  }),
-
-  /**
-   * We count STARTING and STOPPING as 'running'
-   */
-  isRunning: function() {
-    return isRunning;
-  }
-});
-
-exports.CSSUsageFront = CSSUsageFront;
-
-const knownFronts = new WeakMap();
-
-/**
- * Create a CSSUsageFront only when needed (returns a promise)
- * For notes on target.makeRemote(), see
- * https://bugzilla.mozilla.org/show_bug.cgi?id=1016330#c7
- */
-const getUsage = exports.getUsage = function(target) {
-  return target.makeRemote().then(() => {
-    let front = knownFronts.get(target.client)
-    if (front == null && target.form.cssUsageActor != null) {
-      front = new CSSUsageFront(target.client, target.form);
-      knownFronts.set(target.client, front);
-    }
-    return front;
-  });
 };

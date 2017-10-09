@@ -98,6 +98,13 @@ mozconfig
 
    Optional.
 
+nightly_build
+   Whether this is a nightly build.
+
+   Values are ``true`` and ``false``.
+
+   Always defined.
+
 os
    The operating system the build is produced for. Values for tier-1
    supported platforms are ``linux``, ``win``, ``mac``, ``b2g``, and
@@ -122,8 +129,16 @@ processor
 
    Always defined.
 
-release_build
-   Whether this is a release build.
+release_or_beta
+   Whether this is a release or beta build.
+
+   Values are ``true`` and ``false``.
+
+   Always defined.
+
+sm_promise
+   Whether spidermonkey promises have been enabled or not.  This is set
+   by adding --enable-sm-promise to the mozconfig file.
 
    Values are ``true`` and ``false``.
 

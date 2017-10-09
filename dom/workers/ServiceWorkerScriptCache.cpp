@@ -5,7 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "ServiceWorkerScriptCache.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/dom/CacheBinding.h"
 #include "mozilla/dom/cache/CacheStorage.h"
 #include "mozilla/dom/cache/Cache.h"
@@ -18,9 +18,13 @@
 #include "nsIStreamLoader.h"
 #include "nsIThreadRetargetableRequest.h"
 
+#include "nsIInputStreamPump.h"
 #include "nsIPrincipal.h"
+#include "nsIScriptError.h"
+#include "nsContentUtils.h"
 #include "nsNetUtil.h"
 #include "nsScriptLoader.h"
+#include "ServiceWorkerManager.h"
 #include "Workers.h"
 #include "nsStringStream.h"
 
@@ -287,7 +291,7 @@ public:
     return NS_OK;
   }
 
-  const nsAString&
+  const nsString&
   URL() const
   {
     AssertIsOnMainThread();
@@ -385,15 +389,13 @@ public:
         return;
       }
 
-      Cache* cache = nullptr;
+      RefPtr<Cache> cache;
       nsresult rv = UNWRAP_OBJECT(Cache, obj, cache);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         Fail(rv);
         return;
       }
 
-      // Just to be safe.
-      RefPtr<Cache> kungfuDeathGrip = cache;
       WriteToCache(cache);
       return;
     }
@@ -535,7 +537,8 @@ private:
 
     ErrorResult result;
     nsCOMPtr<nsIInputStream> body;
-    result = NS_NewStringInputStream(getter_AddRefs(body), mCN->Buffer());
+    result = NS_NewCStringInputStream(getter_AddRefs(body),
+                                      NS_ConvertUTF16toUTF8(mCN->Buffer()));
     if (NS_WARN_IF(result.Failed())) {
       MOZ_ASSERT(!result.IsErrorWithMessage());
       Fail(result.StealNSResult());
@@ -544,7 +547,7 @@ private:
 
     RefPtr<InternalResponse> ir =
       new InternalResponse(200, NS_LITERAL_CSTRING("OK"));
-    ir->SetBody(body);
+    ir->SetBody(body, mCN->Buffer().Length());
 
     ir->InitChannelInfo(mChannelInfo);
     if (mPrincipalInfo) {
@@ -724,83 +727,75 @@ CompareNetwork::OnStreamComplete(nsIStreamLoader* aLoader, nsISupports* aContext
   }
 
   nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(request);
-  if (httpChannel) {
-    bool requestSucceeded;
-    rv = httpChannel->GetRequestSucceeded(&requestSucceeded);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      mManager->NetworkFinished(rv);
-      return NS_OK;
-    }
+  MOZ_ASSERT(httpChannel, "How come we don't have an HTTP channel?");
 
-    if (NS_WARN_IF(!requestSucceeded)) {
-      mManager->NetworkFinished(NS_ERROR_FAILURE);
-      return NS_OK;
-    }
-
-    nsAutoCString maxScope;
-    // Note: we explicitly don't check for the return value here, because the
-    // absence of the header is not an error condition.
-    Unused << httpChannel->GetResponseHeader(NS_LITERAL_CSTRING("Service-Worker-Allowed"),
-                                             maxScope);
-
-    mManager->SetMaxScope(maxScope);
-
-    bool isFromCache = false;
-    nsCOMPtr<nsICacheInfoChannel> cacheChannel(do_QueryInterface(httpChannel));
-    if (cacheChannel) {
-      cacheChannel->IsFromCache(&isFromCache);
-    }
-
-    // [9.2 Update]4.13, If response's cache state is not "local",
-    // set registration's last update check time to the current time
-    if (!isFromCache) {
-      RefPtr<ServiceWorkerRegistrationInfo> registration =
-        mManager->GetRegistration();
-      registration->RefreshLastUpdateCheckTime();
-    }
-
-    nsAutoCString mimeType;
-    rv = httpChannel->GetContentType(mimeType);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      mManager->NetworkFinished(NS_ERROR_DOM_SECURITY_ERR);
-      return rv;
-    }
-
-    if (!mimeType.LowerCaseEqualsLiteral("text/javascript") &&
-        !mimeType.LowerCaseEqualsLiteral("application/x-javascript") &&
-        !mimeType.LowerCaseEqualsLiteral("application/javascript")) {
-      mManager->NetworkFinished(NS_ERROR_DOM_SECURITY_ERR);
-      return rv;
-    }
+  bool requestSucceeded;
+  rv = httpChannel->GetRequestSucceeded(&requestSucceeded);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    mManager->NetworkFinished(rv);
+    return NS_OK;
   }
-  else {
-    // The only supported request schemes are http, https, and app.
-    // Above, we check to ensure that the request is http or https
-    // based on the channel qi.  Here we test the scheme to ensure
-    // that it is app.  Otherwise, bail.
-    nsCOMPtr<nsIChannel> channel = do_QueryInterface(request);
-    if (NS_WARN_IF(!channel)) {
-      mManager->NetworkFinished(NS_ERROR_FAILURE);
-      return NS_OK;
-    }
-    nsCOMPtr<nsIURI> uri;
-    rv = channel->GetURI(getter_AddRefs(uri));
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      mManager->NetworkFinished(rv);
-      return NS_OK;
-    }
 
-    nsAutoCString scheme;
-    rv = uri->GetScheme(scheme);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      mManager->NetworkFinished(rv);
-      return NS_OK;
-    }
+  if (NS_WARN_IF(!requestSucceeded)) {
+    // Get the stringified numeric status code, not statusText which could be
+    // something misleading like OK for a 404.
+    uint32_t status = 0;
+    httpChannel->GetResponseStatus(&status); // don't care if this fails, use 0.
+    nsAutoString statusAsText;
+    statusAsText.AppendInt(status);
 
-    if (NS_WARN_IF(!scheme.LowerCaseEqualsLiteral("app"))) {
-      mManager->NetworkFinished(NS_ERROR_FAILURE);
-      return NS_OK;
-    }
+    RefPtr<ServiceWorkerRegistrationInfo> registration = mManager->GetRegistration();
+    ServiceWorkerManager::LocalizeAndReportToAllClients(
+      registration->mScope, "ServiceWorkerRegisterNetworkError",
+      nsTArray<nsString> { NS_ConvertUTF8toUTF16(registration->mScope),
+        statusAsText, mManager->URL() });
+    mManager->NetworkFinished(NS_ERROR_FAILURE);
+    return NS_OK;
+  }
+
+  nsAutoCString maxScope;
+  // Note: we explicitly don't check for the return value here, because the
+  // absence of the header is not an error condition.
+  Unused << httpChannel->GetResponseHeader(NS_LITERAL_CSTRING("Service-Worker-Allowed"),
+                                           maxScope);
+
+  mManager->SetMaxScope(maxScope);
+
+  bool isFromCache = false;
+  nsCOMPtr<nsICacheInfoChannel> cacheChannel(do_QueryInterface(httpChannel));
+  if (cacheChannel) {
+    cacheChannel->IsFromCache(&isFromCache);
+  }
+
+  // [9.2 Update]4.13, If response's cache state is not "local",
+  // set registration's last update check time to the current time
+  if (!isFromCache) {
+    RefPtr<ServiceWorkerRegistrationInfo> registration =
+      mManager->GetRegistration();
+    registration->RefreshLastUpdateCheckTime();
+  }
+
+  nsAutoCString mimeType;
+  rv = httpChannel->GetContentType(mimeType);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    // We should only end up here if !mResponseHead in the channel.  If headers
+    // were received but no content type was specified, we'll be given
+    // UNKNOWN_CONTENT_TYPE "application/x-unknown-content-type" and so fall
+    // into the next case with its better error message.
+    mManager->NetworkFinished(NS_ERROR_DOM_SECURITY_ERR);
+    return rv;
+  }
+
+  if (!mimeType.LowerCaseEqualsLiteral("text/javascript") &&
+      !mimeType.LowerCaseEqualsLiteral("application/x-javascript") &&
+      !mimeType.LowerCaseEqualsLiteral("application/javascript")) {
+    RefPtr<ServiceWorkerRegistrationInfo> registration = mManager->GetRegistration();
+    ServiceWorkerManager::LocalizeAndReportToAllClients(
+      registration->mScope, "ServiceWorkerRegisterMimeTypeError",
+      nsTArray<nsString> { NS_ConvertUTF8toUTF16(registration->mScope),
+        NS_ConvertUTF8toUTF16(mimeType), mManager->URL() });
+    mManager->NetworkFinished(NS_ERROR_DOM_SECURITY_ERR);
+    return rv;
   }
 
   char16_t* buffer = nullptr;
@@ -897,13 +892,9 @@ CompareCache::ManageCacheResult(JSContext* aCx, JS::Handle<JS::Value> aValue)
   }
 
   JS::Rooted<JSObject*> obj(aCx, &aValue.toObject());
-  if (NS_WARN_IF(!obj)) {
-    mManager->CacheFinished(NS_ERROR_FAILURE, false);
-    return;
-  }
 
   Cache* cache = nullptr;
-  nsresult rv = UNWRAP_OBJECT(Cache, obj, cache);
+  nsresult rv = UNWRAP_OBJECT(Cache, &obj, cache);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     mManager->CacheFinished(rv, false);
     return;
@@ -937,13 +928,9 @@ CompareCache::ManageValueResult(JSContext* aCx, JS::Handle<JS::Value> aValue)
   MOZ_ASSERT(aValue.isObject());
 
   JS::Rooted<JSObject*> obj(aCx, &aValue.toObject());
-  if (NS_WARN_IF(!obj)) {
-    mManager->CacheFinished(NS_ERROR_FAILURE, false);
-    return;
-  }
 
   Response* response = nullptr;
-  nsresult rv = UNWRAP_OBJECT(Response, obj, response);
+  nsresult rv = UNWRAP_OBJECT(Response, &obj, response);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     mManager->CacheFinished(rv, false);
     return;
@@ -1039,7 +1026,9 @@ GenerateCacheName(nsAString& aName)
 
   char chars[NSID_LENGTH];
   id.ToProvidedString(chars);
-  aName.AssignASCII(chars, NSID_LENGTH);
+
+  // NSID_LENGTH counts the null terminator.
+  aName.AssignASCII(chars, NSID_LENGTH - 1);
 
   return NS_OK;
 }

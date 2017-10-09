@@ -1,98 +1,101 @@
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-var toolbox;
+"use strict";
 
-function test() {
-  addTab("about:blank").then(function() {
-    let target = TargetFactory.forTab(gBrowser.selectedTab);
-    gDevTools.showToolbox(target, "webconsole").then(testSelect);
-  });
-}
+const PAGE_URL = "data:text/html;charset=utf-8,test select events";
 
-var called = {
-  inspector: false,
-  webconsole: false,
-  styleeditor: false,
-  //jsdebugger: false,
-}
+requestLongerTimeout(2);
 
-function testSelect(aToolbox) {
-  toolbox = aToolbox;
+add_task(function* () {
+  let tab = yield addTab(PAGE_URL);
 
-  info("Toolbox fired a `ready` event");
+  let toolbox = yield openToolboxForTab(tab, "webconsole", "bottom");
+  yield testSelectEvent("inspector");
+  yield testSelectEvent("webconsole");
+  yield testSelectEvent("styleeditor");
+  yield testSelectEvent("inspector");
+  yield testSelectEvent("webconsole");
+  yield testSelectEvent("styleeditor");
 
-  toolbox.on("select", selectCB);
+  yield testToolSelectEvent("inspector");
+  yield testToolSelectEvent("webconsole");
+  yield testToolSelectEvent("styleeditor");
+  yield toolbox.destroy();
 
-  toolbox.selectTool("inspector");
-  toolbox.selectTool("webconsole");
-  toolbox.selectTool("styleeditor");
-  //toolbox.selectTool("jsdebugger");
-}
+  toolbox = yield openToolboxForTab(tab, "webconsole", "side");
+  yield testSelectEvent("inspector");
+  yield testSelectEvent("webconsole");
+  yield testSelectEvent("styleeditor");
+  yield testSelectEvent("inspector");
+  yield testSelectEvent("webconsole");
+  yield testSelectEvent("styleeditor");
+  yield toolbox.destroy();
 
-function selectCB(event, id) {
-  called[id] = true;
-  info("toolbox-select event from " + id);
+  toolbox = yield openToolboxForTab(tab, "webconsole", "window");
+  yield testSelectEvent("inspector");
+  yield testSelectEvent("webconsole");
+  yield testSelectEvent("styleeditor");
+  yield testSelectEvent("inspector");
+  yield testSelectEvent("webconsole");
+  yield testSelectEvent("styleeditor");
+  yield toolbox.destroy();
 
-  for (let tool in called) {
-    if (!called[tool]) {
-      return;
-    }
+  yield testSelectToolRace();
+
+  /**
+   * Assert that selecting the given toolId raises a select event
+   * @param {toolId} Id of the tool to test
+   */
+  function* testSelectEvent(toolId) {
+    let onSelect = toolbox.once("select");
+    toolbox.selectTool(toolId);
+    let id = yield onSelect;
+    is(id, toolId, toolId + " selected");
   }
 
-  ok(true, "All the tools fired a 'select event'");
-  toolbox.off("select", selectCB);
-
-  reselect();
-}
-
-function reselect() {
-  for (let tool in called) {
-    called[tool] = false;
+  /**
+   * Assert that selecting the given toolId raises its corresponding
+   * selected event
+   * @param {toolId} Id of the tool to test
+   */
+  function* testToolSelectEvent(toolId) {
+    let onSelected = toolbox.once(toolId + "-selected");
+    toolbox.selectTool(toolId);
+    yield onSelected;
+    is(toolbox.currentToolId, toolId, toolId + " tool selected");
   }
 
-  toolbox.once("inspector-selected", function() {
-    tidyUpIfAllCalled("inspector");
-  });
+  /**
+   * Assert that two calls to selectTool won't race
+   */
+  function* testSelectToolRace() {
+    let toolbox = yield openToolboxForTab(tab, "webconsole");
+    let selected = false;
+    let onSelect = (event, id) => {
+      if (selected) {
+        ok(false, "Got more than one 'select' event");
+      } else {
+        selected = true;
+      }
+    };
+    toolbox.once("select", onSelect);
+    let p1 = toolbox.selectTool("inspector")
+    let p2 = toolbox.selectTool("inspector");
+    // Check that both promises don't resolve too early
+    let checkSelectToolResolution = panel => {
+      ok(selected, "selectTool resolves only after 'select' event is fired");
+      let inspector = toolbox.getPanel("inspector");
+      is(panel, inspector, "selecTool resolves to the panel instance");
+    };
+    p1.then(checkSelectToolResolution);
+    p2.then(checkSelectToolResolution);
+    yield p1;
+    yield p2;
 
-  toolbox.once("webconsole-selected", function() {
-    tidyUpIfAllCalled("webconsole");
-  });
-
-  /*
-  toolbox.once("jsdebugger-selected", function() {
-    tidyUpIfAllCalled("jsdebugger");
-  });
-  */
-
-  toolbox.once("styleeditor-selected", function() {
-    tidyUpIfAllCalled("styleeditor");
-  });
-
-  toolbox.selectTool("inspector");
-  toolbox.selectTool("webconsole");
-  toolbox.selectTool("styleeditor");
-  //toolbox.selectTool("jsdebugger");
-}
-
-function tidyUpIfAllCalled(id) {
-  called[id] = true;
-  info("select event from " + id);
-
-  for (let tool in called) {
-    if (!called[tool]) {
-      return;
-    }
+    yield toolbox.destroy();
   }
+});
 
-  ok(true, "All the tools fired a {id}-selected event");
-  tidyUp();
-}
-
-function tidyUp() {
-  toolbox.destroy();
-  gBrowser.removeCurrentTab();
-
-  toolbox = null;
-  finish();
-}

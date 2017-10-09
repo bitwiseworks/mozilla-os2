@@ -21,22 +21,31 @@ namespace mozilla {
 namespace dom {
 
 TabContext::TabContext()
-  : mInitialized(false)
+  : mIsPrerendered(false)
+  , mInitialized(false)
+  , mIsMozBrowserElement(false)
   , mContainingAppId(NO_APP_ID)
-  , mOriginAttributes()
+  , mShowAccelerators(UIStateChangeType_NoChange)
+  , mShowFocusRings(UIStateChangeType_NoChange)
 {
 }
 
 bool
-TabContext::IsBrowserElement() const
+TabContext::IsMozBrowserElement() const
 {
-  return mOriginAttributes.mInBrowser;
+  return mIsMozBrowserElement;
 }
 
 bool
-TabContext::IsBrowserOrApp() const
+TabContext::IsIsolatedMozBrowserElement() const
 {
-  return HasOwnApp() || IsBrowserElement();
+  return mOriginAttributes.mInIsolatedMozBrowser;
+}
+
+bool
+TabContext::IsMozBrowserOrApp() const
+{
+  return HasOwnApp() || IsMozBrowserElement();
 }
 
 uint32_t
@@ -62,7 +71,7 @@ TabContext::HasOwnApp() const
 uint32_t
 TabContext::BrowserOwnerAppId() const
 {
-  if (IsBrowserElement()) {
+  if (IsMozBrowserElement()) {
     return mContainingAppId;
   }
   return NO_APP_ID;
@@ -72,7 +81,7 @@ already_AddRefed<mozIApplication>
 TabContext::GetBrowserOwnerApp() const
 {
   nsCOMPtr<mozIApplication> ownerApp;
-  if (IsBrowserElement()) {
+  if (IsMozBrowserElement()) {
     ownerApp = mContainingApp;
   }
   return ownerApp.forget();
@@ -152,23 +161,63 @@ TabContext::SetTabContext(const TabContext& aContext)
   return true;
 }
 
+void
+TabContext::SetPrivateBrowsingAttributes(bool aIsPrivateBrowsing)
+{
+  mOriginAttributes.SyncAttributesWithPrivateBrowsing(aIsPrivateBrowsing);
+}
+
+bool
+TabContext::UpdateTabContextAfterSwap(const TabContext& aContext)
+{
+  // This is only used after already initialized.
+  MOZ_ASSERT(mInitialized);
+
+  // The only permissable change is to `mIsMozBrowserElement`.  All other fields
+  // must match for the change to be accepted.
+  if (aContext.OwnAppId() != OwnAppId() ||
+      aContext.mContainingAppId != mContainingAppId ||
+      aContext.mOriginAttributes != mOriginAttributes) {
+    return false;
+  }
+
+  mIsMozBrowserElement = aContext.mIsMozBrowserElement;
+  return true;
+}
+
 const DocShellOriginAttributes&
 TabContext::OriginAttributesRef() const
 {
   return mOriginAttributes;
 }
 
-const nsACString&
-TabContext::SignedPkgOriginNoSuffix() const
+const nsAString&
+TabContext::PresentationURL() const
 {
-  return mSignedPkgOriginNoSuffix;
+  return mPresentationURL;
+}
+
+UIStateChangeType
+TabContext::ShowAccelerators() const
+{
+  return mShowAccelerators;
+}
+
+UIStateChangeType
+TabContext::ShowFocusRings() const
+{
+  return mShowFocusRings;
 }
 
 bool
-TabContext::SetTabContext(mozIApplication* aOwnApp,
+TabContext::SetTabContext(bool aIsMozBrowserElement,
+                          bool aIsPrerendered,
+                          mozIApplication* aOwnApp,
                           mozIApplication* aAppFrameOwnerApp,
+                          UIStateChangeType aShowAccelerators,
+                          UIStateChangeType aShowFocusRings,
                           const DocShellOriginAttributes& aOriginAttributes,
-                          const nsACString& aSignedPkgOriginNoSuffix)
+                          const nsAString& aPresentationURL)
 {
   NS_ENSURE_FALSE(mInitialized, false);
 
@@ -194,22 +243,28 @@ TabContext::SetTabContext(mozIApplication* aOwnApp,
                      aOriginAttributes.mAppId == NO_APP_ID);
 
   mInitialized = true;
+  mIsMozBrowserElement = aIsMozBrowserElement;
+  mIsPrerendered = aIsPrerendered;
   mOriginAttributes = aOriginAttributes;
   mContainingAppId = containingAppId;
   mOwnApp = aOwnApp;
   mContainingApp = aAppFrameOwnerApp;
-  mSignedPkgOriginNoSuffix = aSignedPkgOriginNoSuffix;
+  mPresentationURL = aPresentationURL;
+  mShowAccelerators = aShowAccelerators;
+  mShowFocusRings = aShowFocusRings;
   return true;
 }
 
 IPCTabContext
 TabContext::AsIPCTabContext() const
 {
-  nsAutoCString originSuffix;
-  mOriginAttributes.CreateSuffix(originSuffix);
-  return IPCTabContext(FrameIPCTabContext(originSuffix,
+  return IPCTabContext(FrameIPCTabContext(mOriginAttributes,
                                           mContainingAppId,
-                                          mSignedPkgOriginNoSuffix));
+                                          mIsMozBrowserElement,
+                                          mIsPrerendered,
+                                          mPresentationURL,
+                                          mShowAccelerators,
+                                          mShowFocusRings));
 }
 
 static already_AddRefed<mozIApplication>
@@ -227,10 +282,13 @@ GetAppForId(uint32_t aAppId)
 MaybeInvalidTabContext::MaybeInvalidTabContext(const IPCTabContext& aParams)
   : mInvalidReason(nullptr)
 {
+  bool isMozBrowserElement = false;
+  bool isPrerendered = false;
   uint32_t containingAppId = NO_APP_ID;
   DocShellOriginAttributes originAttributes;
-  nsAutoCString originSuffix;
-  nsAutoCString signedPkgOriginNoSuffix;
+  nsAutoString presentationURL;
+  UIStateChangeType showAccelerators = UIStateChangeType_NoChange;
+  UIStateChangeType showFocusRings = UIStateChangeType_NoChange;
 
   switch(aParams.type()) {
     case IPCTabContext::TPopupIPCTabContext: {
@@ -239,7 +297,13 @@ MaybeInvalidTabContext::MaybeInvalidTabContext(const IPCTabContext& aParams)
       TabContext *context;
       if (ipcContext.opener().type() == PBrowserOrId::TPBrowserParent) {
         context = TabParent::GetFrom(ipcContext.opener().get_PBrowserParent());
-        if (context->IsBrowserElement() && !ipcContext.isBrowserElement()) {
+        if (!context) {
+          mInvalidReason = "Child is-browser process tried to "
+                           "open a null tab.";
+          return;
+        }
+        if (context->IsMozBrowserElement() &&
+            !ipcContext.isMozBrowserElement()) {
           // If the TabParent corresponds to a browser element, then it can only
           // open other browser elements, for security reasons.  We should have
           // checked this before calling the TabContext constructor, so this is
@@ -269,8 +333,9 @@ MaybeInvalidTabContext::MaybeInvalidTabContext(const IPCTabContext& aParams)
       //
       // Otherwise, we're a new app window and we inherit from our
       // opener app.
+      isMozBrowserElement = ipcContext.isMozBrowserElement();
       originAttributes = context->mOriginAttributes;
-      if (ipcContext.isBrowserElement()) {
+      if (isMozBrowserElement) {
         containingAppId = context->OwnOrContainingAppId();
       } else {
         containingAppId = context->mContainingAppId;
@@ -281,10 +346,13 @@ MaybeInvalidTabContext::MaybeInvalidTabContext(const IPCTabContext& aParams)
       const FrameIPCTabContext &ipcContext =
         aParams.get_FrameIPCTabContext();
 
+      isMozBrowserElement = ipcContext.isMozBrowserElement();
+      isPrerendered = ipcContext.isPrerendered();
       containingAppId = ipcContext.frameOwnerAppId();
-      signedPkgOriginNoSuffix = ipcContext.signedPkgOriginNoSuffix();
-      originSuffix = ipcContext.originSuffix();
-      originAttributes.PopulateFromSuffix(originSuffix);
+      presentationURL = ipcContext.presentationURL();
+      showAccelerators = ipcContext.showAccelerators();
+      showFocusRings = ipcContext.showFocusRings();
+      originAttributes = ipcContext.originAttributes();
       break;
     }
     case IPCTabContext::TUnsafeIPCTabContext: {
@@ -310,8 +378,8 @@ MaybeInvalidTabContext::MaybeInvalidTabContext(const IPCTabContext& aParams)
   }
 
   nsCOMPtr<mozIApplication> ownApp;
-  if (!originAttributes.mInBrowser) {
-    // mAppId corresponds to OwnOrContainingAppId; if mInBrowser is
+  if (!isMozBrowserElement) {
+    // mAppId corresponds to OwnOrContainingAppId; if isMozBrowserElement is
     // false then it's ownApp otherwise it's containingApp
     ownApp = GetAppForId(originAttributes.mAppId);
     if ((ownApp == nullptr) != (originAttributes.mAppId == NO_APP_ID)) {
@@ -327,10 +395,14 @@ MaybeInvalidTabContext::MaybeInvalidTabContext(const IPCTabContext& aParams)
   }
 
   bool rv;
-  rv = mTabContext.SetTabContext(ownApp,
+  rv = mTabContext.SetTabContext(isMozBrowserElement,
+                                 isPrerendered,
+                                 ownApp,
                                  containingApp,
+                                 showAccelerators,
+                                 showFocusRings,
                                  originAttributes,
-                                 signedPkgOriginNoSuffix);
+                                 presentationURL);
   if (!rv) {
     mInvalidReason = "Couldn't initialize TabContext.";
   }

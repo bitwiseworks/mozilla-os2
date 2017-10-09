@@ -26,6 +26,7 @@
 #include "nsContentUtils.h"
 #include "nsUTF8Utils.h"
 #include "mozilla/TextEvents.h"
+#include "mozilla/dom/Event.h"
 
 using namespace mozilla;
 
@@ -78,11 +79,14 @@ nsMenuBarFrame::Init(nsIContent*       aContent,
   mTarget->AddSystemEventListener(NS_LITERAL_STRING("keypress"), mMenuBarListener, false);
   mTarget->AddSystemEventListener(NS_LITERAL_STRING("keydown"), mMenuBarListener, false);
   mTarget->AddSystemEventListener(NS_LITERAL_STRING("keyup"), mMenuBarListener, false);
+  mTarget->AddSystemEventListener(NS_LITERAL_STRING("mozaccesskeynotfound"), mMenuBarListener, false);
 
   // mousedown event should be handled in all phase
   mTarget->AddEventListener(NS_LITERAL_STRING("mousedown"), mMenuBarListener, true);
   mTarget->AddEventListener(NS_LITERAL_STRING("mousedown"), mMenuBarListener, false);
   mTarget->AddEventListener(NS_LITERAL_STRING("blur"), mMenuBarListener, true);
+
+  mTarget->AddEventListener(NS_LITERAL_STRING("MozDOMFullscreen:Entered"), mMenuBarListener, false);
 }
 
 NS_IMETHODIMP
@@ -163,11 +167,12 @@ nsMenuBarFrame::FindMenuWithShortcut(nsIDOMKeyEvent* aKeyEvent)
   uint32_t charCode;
   aKeyEvent->GetCharCode(&charCode);
 
-  nsAutoTArray<uint32_t, 10> accessKeys;
+  AutoTArray<uint32_t, 10> accessKeys;
   WidgetKeyboardEvent* nativeKeyEvent =
-    aKeyEvent->GetInternalNSEvent()->AsKeyboardEvent();
-  if (nativeKeyEvent)
-    nsContentUtils::GetAccessKeyCandidates(nativeKeyEvent, accessKeys);
+    aKeyEvent->AsEvent()->WidgetEventPtr()->AsKeyboardEvent();
+  if (nativeKeyEvent) {
+    nativeKeyEvent->GetAccessKeyCandidates(accessKeys);
+  }
   if (accessKeys.IsEmpty() && charCode)
     accessKeys.AppendElement(charCode);
 
@@ -184,7 +189,7 @@ nsMenuBarFrame::FindMenuWithShortcut(nsIDOMKeyEvent* aKeyEvent)
   // Find a most preferred accesskey which should be returned.
   nsIFrame* foundMenu = nullptr;
   size_t foundIndex = accessKeys.NoIndex;
-  nsIFrame* currFrame = immediateParent->GetFirstPrincipalChild();
+  nsIFrame* currFrame = immediateParent->PrincipalChildList().FirstChild();
 
   while (currFrame) {
     nsIContent* current = currFrame->GetContent();
@@ -267,7 +272,7 @@ nsMenuBarFrame::CurrentMenuIsBeingDestroyed()
   mCurrentMenu = nullptr;
 }
 
-class nsMenuBarSwitchMenu : public nsRunnable
+class nsMenuBarSwitchMenu : public Runnable
 {
 public:
   nsMenuBarSwitchMenu(nsIContent* aMenuBar,
@@ -414,10 +419,13 @@ nsMenuBarFrame::DestroyFrom(nsIFrame* aDestructRoot)
   mTarget->RemoveSystemEventListener(NS_LITERAL_STRING("keypress"), mMenuBarListener, false);
   mTarget->RemoveSystemEventListener(NS_LITERAL_STRING("keydown"), mMenuBarListener, false);
   mTarget->RemoveSystemEventListener(NS_LITERAL_STRING("keyup"), mMenuBarListener, false);
+  mTarget->RemoveSystemEventListener(NS_LITERAL_STRING("mozaccesskeynotfound"), mMenuBarListener, false);
 
   mTarget->RemoveEventListener(NS_LITERAL_STRING("mousedown"), mMenuBarListener, true);
   mTarget->RemoveEventListener(NS_LITERAL_STRING("mousedown"), mMenuBarListener, false);
   mTarget->RemoveEventListener(NS_LITERAL_STRING("blur"), mMenuBarListener, true);
+
+  mTarget->RemoveEventListener(NS_LITERAL_STRING("MozDOMFullscreen:Entered"), mMenuBarListener, false);
 
   mMenuBarListener->OnDestroyMenuBarFrame();
   mMenuBarListener = nullptr;

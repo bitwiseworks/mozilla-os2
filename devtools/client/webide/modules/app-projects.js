@@ -2,14 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const {Cc,Ci,Cu,Cr} = require("chrome");
-const ObservableObject = require("devtools/client/shared/observable-object");
-const promise = require("devtools/shared/deprecated-sync-thenables");
+const {Cc, Ci, Cu, Cr} = require("chrome");
+const promise = require("promise");
 
-const {EventEmitter} = Cu.import("resource://devtools/shared/event-emitter.js", {});
-const {generateUUID} = Cc['@mozilla.org/uuid-generator;1'].getService(Ci.nsIUUIDGenerator);
+const EventEmitter = require("devtools/shared/event-emitter");
+const {generateUUID} = Cc["@mozilla.org/uuid-generator;1"].getService(Ci.nsIUUIDGenerator);
 const {FileUtils} = Cu.import("resource://gre/modules/FileUtils.jsm", {});
-const {indexedDB} = require("sdk/indexed-db");
 
 /**
  * IndexedDB wrapper that just save project objects
@@ -26,21 +24,21 @@ const IDB = {
     let deferred = promise.defer();
 
     let request = indexedDB.open(IDB.databaseName, 5);
-    request.onerror = function(event) {
+    request.onerror = function (event) {
       deferred.reject("Unable to open AppProjects indexedDB: " +
-                      this.error.name + " - " + this.error.message );
+                      this.error.name + " - " + this.error.message);
     };
-    request.onupgradeneeded = function(event) {
+    request.onupgradeneeded = function (event) {
       let db = event.target.result;
       db.createObjectStore("projects", { keyPath: "location" });
     };
 
-    request.onsuccess = function() {
+    request.onsuccess = function () {
       let db = IDB._db = request.result;
       let objectStore = db.transaction("projects").objectStore("projects");
-      let projects = []
+      let projects = [];
       let toRemove = [];
-      objectStore.openCursor().onsuccess = function(event) {
+      objectStore.openCursor().onsuccess = function (event) {
         let cursor = event.target.result;
         if (cursor) {
           if (cursor.value.location) {
@@ -85,10 +83,8 @@ const IDB = {
     return deferred.promise;
   },
 
-  add: function(project) {
+  add: function (project) {
     let deferred = promise.defer();
-
-    project = JSON.parse(JSON.stringify(project));
 
     if (!project.location) {
       // We need to make sure this object has a `.location` property.
@@ -97,11 +93,11 @@ const IDB = {
       let transaction = IDB._db.transaction(["projects"], "readwrite");
       let objectStore = transaction.objectStore("projects");
       let request = objectStore.add(project);
-      request.onerror = function(event) {
+      request.onerror = function (event) {
         deferred.reject("Unable to add project to the AppProjects indexedDB: " +
-                        this.error.name + " - " + this.error.message );
+                        this.error.name + " - " + this.error.message);
       };
-      request.onsuccess = function() {
+      request.onsuccess = function () {
         deferred.resolve();
       };
     }
@@ -109,62 +105,54 @@ const IDB = {
     return deferred.promise;
   },
 
-  update: function(project) {
+  update: function (project) {
     let deferred = promise.defer();
-
-    // Clone object to make it storable by IndexedDB.
-    // Projects are proxified objects (for the template
-    // mechanismn in the first version of the App Manager).
-    // This will change in the future.
-    project = JSON.parse(JSON.stringify(project));
 
     var transaction = IDB._db.transaction(["projects"], "readwrite");
     var objectStore = transaction.objectStore("projects");
     var request = objectStore.put(project);
-    request.onerror = function(event) {
+    request.onerror = function (event) {
       deferred.reject("Unable to update project to the AppProjects indexedDB: " +
-                      this.error.name + " - " + this.error.message );
+                      this.error.name + " - " + this.error.message);
     };
-    request.onsuccess = function() {
+    request.onsuccess = function () {
       deferred.resolve();
     };
 
     return deferred.promise;
   },
 
-  remove: function(location) {
+  remove: function (location) {
     let deferred = promise.defer();
 
     let request = IDB._db.transaction(["projects"], "readwrite")
                     .objectStore("projects")
                     .delete(location);
-    request.onsuccess = function(event) {
+    request.onsuccess = function (event) {
       deferred.resolve();
     };
-    request.onerror = function() {
+    request.onerror = function () {
       deferred.reject("Unable to delete project to the AppProjects indexedDB: " +
-                      this.error.name + " - " + this.error.message );
+                      this.error.name + " - " + this.error.message);
     };
 
     return deferred.promise;
   }
 };
 
-const store = new ObservableObject({ projects:[] });
-
 var loadDeferred = promise.defer();
 
 loadDeferred.resolve(IDB.open().then(function (projects) {
-  store.object.projects = projects;
-  AppProjects.emit("ready", store.object.projects);
+  AppProjects.projects = projects;
+  AppProjects.emit("ready", projects);
 }));
 
 const AppProjects = {
-  load: function() {
+  load: function () {
     return loadDeferred.promise;
   },
 
-  addPackaged: function(folder) {
+  addPackaged: function (folder) {
     let file = FileUtils.File(folder.path);
     if (!file.exists()) {
       return promise.reject("path doesn't exist");
@@ -185,14 +173,13 @@ const AppProjects = {
       // we will override this random UUID on app install.
       packagedAppOrigin: generateUUID().toString().slice(1, -1)
     };
-    return IDB.add(project).then(function () {
-      store.object.projects.push(project);
-      // return the added objects (proxified)
-      return store.object.projects[store.object.projects.length - 1];
+    return IDB.add(project).then(() => {
+      this.projects.push(project);
+      return project;
     });
   },
 
-  addHosted: function(manifestURL) {
+  addHosted: function (manifestURL) {
     let existingProject = this.get(manifestURL);
     if (existingProject) {
       return promise.reject("Already added");
@@ -201,10 +188,9 @@ const AppProjects = {
       type: "hosted",
       location: manifestURL
     };
-    return IDB.add(project).then(function () {
-      store.object.projects.push(project);
-      // return the added objects (proxified)
-      return store.object.projects[store.object.projects.length - 1];
+    return IDB.add(project).then(() => {
+      this.projects.push(project);
+      return project;
     });
   },
 
@@ -212,7 +198,7 @@ const AppProjects = {
     return IDB.update(project);
   },
 
-  updateLocation: function(project, newLocation) {
+  updateLocation: function (project, newLocation) {
     return IDB.remove(project.location)
               .then(() => {
                 project.location = newLocation;
@@ -220,12 +206,11 @@ const AppProjects = {
               });
   },
 
-  remove: function(location) {
-    return IDB.remove(location).then(function () {
-      let projects = store.object.projects;
-      for (let i = 0; i < projects.length; i++) {
-        if (projects[i].location == location) {
-          projects.splice(i, 1);
+  remove: function (location) {
+    return IDB.remove(location).then(() => {
+      for (let i = 0; i < this.projects.length; i++) {
+        if (this.projects[i].location == location) {
+          this.projects.splice(i, 1);
           return;
         }
       }
@@ -233,17 +218,16 @@ const AppProjects = {
     });
   },
 
-  get: function(location) {
-    let projects = store.object.projects;
-    for (let i = 0; i < projects.length; i++) {
-      if (projects[i].location == location) {
-        return projects[i];
+  get: function (location) {
+    for (let i = 0; i < this.projects.length; i++) {
+      if (this.projects[i].location == location) {
+        return this.projects[i];
       }
     }
     return null;
   },
 
-  store: store
+  projects: []
 };
 
 EventEmitter.decorate(AppProjects);

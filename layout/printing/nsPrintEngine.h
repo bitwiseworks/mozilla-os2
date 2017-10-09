@@ -6,20 +6,20 @@
 #define nsPrintEngine_h___
 
 #include "mozilla/Attributes.h"
+#include "mozilla/UniquePtr.h"
 
 #include "nsCOMPtr.h"
 
 #include "nsPrintObject.h"
 #include "nsPrintData.h"
 #include "nsFrameList.h"
-#include "mozilla/Attributes.h"
+#include "nsIFrame.h"
 #include "nsIWebProgress.h"
 #include "mozilla/dom/HTMLCanvasElement.h"
 #include "nsIWebProgressListener.h"
 #include "nsWeakReference.h"
 
 // Interfaces
-#include "nsIDOMWindow.h"
 #include "nsIObserver.h"
 
 // Classes
@@ -52,7 +52,7 @@ public:
   NS_IMETHOD Print(nsIPrintSettings*       aPrintSettings,
                    nsIWebProgressListener* aWebProgressListener);
   NS_IMETHOD PrintPreview(nsIPrintSettings* aPrintSettings,
-                          nsIDOMWindow *aChildDOMWin,
+                          mozIDOMWindowProxy* aChildDOMWin,
                           nsIWebProgressListener* aWebProgressListener);
   NS_IMETHOD GetIsFramesetDocument(bool *aIsFramesetDocument);
   NS_IMETHOD GetIsIFrameSelected(bool *aIsIFrameSelected);
@@ -78,7 +78,7 @@ public:
   void Destroy();
   void DestroyPrintingData();
 
-  nsresult Initialize(nsIDocumentViewerPrint* aDocViewerPrint, 
+  nsresult Initialize(nsIDocumentViewerPrint* aDocViewerPrint,
                       nsIDocShell*            aContainer,
                       nsIDocument*            aDocument,
                       float                   aScreenDPI,
@@ -135,7 +135,7 @@ public:
   nsresult CheckForPrinters(nsIPrintSettings* aPrintSettings);
   void CleanupDocTitleArray(char16_t**& aArray, int32_t& aCount);
 
-  bool IsThereARangeSelection(nsIDOMWindow * aDOMWin);
+  bool IsThereARangeSelection(nsPIDOMWindowOuter* aDOMWin);
 
   void FirePrintingErrorEvent(nsresult aPrintError);
   //---------------------------------------------------------------------
@@ -144,17 +144,17 @@ public:
   // Timer Methods
   nsresult StartPagePrintTimer(nsPrintObject* aPO);
 
-  bool IsWindowsInOurSubTree(nsPIDOMWindow * aDOMWindow);
+  bool IsWindowsInOurSubTree(nsPIDOMWindowOuter* aDOMWindow);
   static bool IsParentAFrameSet(nsIDocShell * aParent);
   bool IsThereAnIFrameSelected(nsIDocShell* aDocShell,
-                                 nsIDOMWindow* aDOMWin,
-                                 bool& aIsParentFrameSet);
+                               nsPIDOMWindowOuter* aDOMWin,
+                               bool& aIsParentFrameSet);
 
   static nsPrintObject* FindPrintObjectByDOMWin(nsPrintObject* aParentObject,
-                                                nsIDOMWindow* aDOMWin);
+                                                nsPIDOMWindowOuter* aDOMWin);
 
   // get the currently infocus frame for the document viewer
-  already_AddRefed<nsIDOMWindow> FindFocusedDOMWindow();
+  already_AddRefed<nsPIDOMWindowOuter> FindFocusedDOMWindow();
 
   //---------------------------------------------------------------------
   // Static Methods
@@ -176,7 +176,7 @@ public:
 
   float GetPrintPreviewScale() { return mPrtPreview->mPrintObject->
                                         mPresContext->GetPrintPreviewScale(); }
-  
+
   static nsIPresShell* GetPresShellFor(nsIDocShell* aDocShell);
 
   // These calls also update the DocViewer
@@ -202,10 +202,6 @@ public:
   void SetDisallowSelectionPrint(bool aDisallowSelectionPrint)
   {
     mDisallowSelectionPrint = aDisallowSelectionPrint;
-  }
-
-  void SetNoMarginBoxes(bool aNoMarginBoxes) {
-    mNoMarginBoxes = aNoMarginBoxes;
   }
 
 protected:
@@ -253,6 +249,8 @@ protected:
 
   static void SetPrintAsIs(nsPrintObject* aPO, bool aAsIs = true);
 
+  void DisconnectPagePrintTimer();
+
   // Static member variables
   bool mIsCreatingPrintPreview;
   bool mIsDoingPrinting;
@@ -262,14 +260,20 @@ protected:
   nsCOMPtr<nsIDocumentViewerPrint> mDocViewerPrint;
   nsWeakPtr               mContainer;
   float                   mScreenDPI;
-  
-  nsPrintData*            mPrt;
+
+  // We are the primary owner of our nsPrintData member vars.  These vars
+  // are refcounted so that functions (e.g. nsPrintData methods) can create
+  // temporary owning references when they need to fire a callback that
+  // could conceivably destroy this nsPrintEngine owner object and all its
+  // member-data.
+  RefPtr<nsPrintData> mPrt;
+
   nsPagePrintTimer*       mPagePrintTimer;
-  nsIPageSequenceFrame*   mPageSeqFrame;
+  nsWeakFrame             mPageSeqFrame;
 
   // Print Preview
-  nsPrintData*            mPrtPreview;
-  nsPrintData*            mOldPrtPreview;
+  RefPtr<nsPrintData> mPrtPreview;
+  RefPtr<nsPrintData> mOldPrtPreview;
 
   nsCOMPtr<nsIDocument>   mDocument;
 
@@ -279,7 +283,6 @@ protected:
   bool mDidLoadDataForPrinting;
   bool mIsDestroying;
   bool mDisallowSelectionPrint;
-  bool mNoMarginBoxes;
 
   nsresult AfterNetworkPrint(bool aHandleError);
 

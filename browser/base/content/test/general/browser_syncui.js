@@ -44,9 +44,9 @@ function checkBroadcasterVisible(broadcasterId) {
 
 function promiseObserver(topic) {
   return new Promise(resolve => {
-    let obs = (subject, topic, data) => {
-      Services.obs.removeObserver(obs, topic);
-      resolve(subject);
+    let obs = (aSubject, aTopic, aData) => {
+      Services.obs.removeObserver(obs, aTopic);
+      resolve(aSubject);
     }
     Services.obs.addObserver(obs, topic, false);
   });
@@ -137,7 +137,7 @@ function checkButtonsStatus(shouldBeActive) {
     ]) {
     let elt = document.getElementById(eid);
     if (shouldBeActive) {
-      Assert.equal(elt.getAttribute("syncstatus"), "active", `${eid} should be active`);;
+      Assert.equal(elt.getAttribute("syncstatus"), "active", `${eid} should be active`);
     } else {
       Assert.ok(!elt.hasAttribute("syncstatus"), `${eid} should have no status attr`);
     }
@@ -177,6 +177,19 @@ add_task(function* testButtonActivitiesInNavBar() {
   // check the button's functionality while the button is in the NavBar - which
   // it already is.
   yield doTestButtonActivities();
+});
+
+add_task(function* testFormatLastSyncDateNow() {
+  let now = new Date();
+  let nowString = gSyncUI.formatLastSyncDate(now);
+  Assert.equal(nowString, "Last sync: " + now.toLocaleDateString(undefined, {weekday: 'long', hour: 'numeric', minute: 'numeric'}));
+});
+
+add_task(function* testFormatLastSyncDateMonthAgo() {
+  let monthAgo = new Date();
+  monthAgo.setMonth(monthAgo.getMonth() - 1);
+  let monthAgoString = gSyncUI.formatLastSyncDate(monthAgo);
+  Assert.equal(monthAgoString, "Last sync: " + monthAgo.toLocaleDateString(undefined, {month: 'long', day: 'numeric'}));
 });
 
 add_task(function* testButtonActivitiesInPanel() {

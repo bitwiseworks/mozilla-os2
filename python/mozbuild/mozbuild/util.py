@@ -5,9 +5,11 @@
 # This file contains miscellaneous utility functions that don't belong anywhere
 # in particular.
 
-from __future__ import absolute_import, unicode_literals
+from __future__ import absolute_import, unicode_literals, print_function
 
+import argparse
 import collections
+import ctypes
 import difflib
 import errno
 import functools
@@ -22,6 +24,7 @@ import types
 
 from collections import (
     defaultdict,
+    Iterable,
     OrderedDict,
 )
 from io import (
@@ -34,6 +37,27 @@ if sys.version_info[0] == 3:
     str_type = str
 else:
     str_type = basestring
+
+if sys.platform == 'win32':
+    _kernel32 = ctypes.windll.kernel32
+    _FILE_ATTRIBUTE_NOT_CONTENT_INDEXED = 0x2000
+
+
+def exec_(object, globals=None, locals=None):
+    """Wrapper around the exec statement to avoid bogus errors like:
+
+    SyntaxError: unqualified exec is not allowed in function ...
+    it is a nested function.
+
+    or
+
+    SyntaxError: unqualified exec is not allowed in function ...
+    it contains a nested function with free variable
+
+    which happen with older versions of python 2.7.
+    """
+    exec(object, globals, locals)
+
 
 def hash_file(path, hasher=None):
     """Hashes a file specified by the path given and returns the hex digest."""
@@ -63,6 +87,29 @@ class EmptyValue(unicode):
     """
     def __init__(self):
         super(EmptyValue, self).__init__()
+
+
+class ReadOnlyNamespace(object):
+    """A class for objects with immutable attributes set at initialization."""
+    def __init__(self, **kwargs):
+        for k, v in kwargs.iteritems():
+            super(ReadOnlyNamespace, self).__setattr__(k, v)
+
+    def __delattr__(self, key):
+        raise Exception('Object does not support deletion.')
+
+    def __setattr__(self, key, value):
+        raise Exception('Object does not support assignment.')
+
+    def __ne__(self, other):
+        return not (self == other)
+
+    def __eq__(self, other):
+        return self is other or (
+            hasattr(other, '__dict__') and self.__dict__ == other.__dict__)
+
+    def __repr__(self):
+        return '<%s %r>' % (self.__class__.__name__, self.__dict__)
 
 
 class ReadOnlyDict(dict):
@@ -110,6 +157,48 @@ def ensureParentDir(path):
                 raise
 
 
+def mkdir(path, not_indexed=False):
+    """Ensure a directory exists.
+
+    If ``not_indexed`` is True, an attribute is set that disables content
+    indexing on the directory.
+    """
+    try:
+        os.makedirs(path)
+    except OSError as e:
+        if e.errno != errno.EEXIST:
+            raise
+
+    if not_indexed:
+        if sys.platform == 'win32':
+            if isinstance(path, str_type):
+                fn = _kernel32.SetFileAttributesW
+            else:
+                fn = _kernel32.SetFileAttributesA
+
+            fn(path, _FILE_ATTRIBUTE_NOT_CONTENT_INDEXED)
+        elif sys.platform == 'darwin':
+            with open(os.path.join(path, '.metadata_never_index'), 'a'):
+                pass
+
+
+def simple_diff(filename, old_lines, new_lines):
+    """Returns the diff between old_lines and new_lines, in unified diff form,
+    as a list of lines.
+
+    old_lines and new_lines are lists of non-newline terminated lines to
+    compare.
+    old_lines can be None, indicating a file creation.
+    new_lines can be None, indicating a file deletion.
+    """
+
+    old_name = '/dev/null' if old_lines is None else filename
+    new_name = '/dev/null' if new_lines is None else filename
+
+    return difflib.unified_diff(old_lines or [], new_lines or [],
+                                old_name, new_name, n=4, lineterm='')
+
+
 class FileAvoidWrite(BytesIO):
     """File-like object that buffers output and only writes if content changed.
 
@@ -121,11 +210,16 @@ class FileAvoidWrite(BytesIO):
     Instances can optionally capture diffs of file changes. This feature is not
     enabled by default because it a) doesn't make sense for binary files b)
     could add unwanted overhead to calls.
+
+    Additionally, there is dry run mode where the file is not actually written
+    out, but reports whether the file was existing and would have been updated
+    still occur, as well as diff capture if requested.
     """
-    def __init__(self, filename, capture_diff=False, mode='rU'):
+    def __init__(self, filename, capture_diff=False, dry_run=False, mode='rU'):
         BytesIO.__init__(self)
         self.name = filename
         self._capture_diff = capture_diff
+        self._dry_run = dry_run
         self.diff = None
         self.mode = mode
 
@@ -165,17 +259,22 @@ class FileAvoidWrite(BytesIO):
             finally:
                 existing.close()
 
-        ensureParentDir(self.name)
-        with open(self.name, 'w') as file:
-            file.write(buf)
+        if not self._dry_run:
+            ensureParentDir(self.name)
+            # Maintain 'b' if specified.  'U' only applies to modes starting with
+            # 'r', so it is dropped.
+            writemode = 'w'
+            if 'b' in self.mode:
+                writemode += 'b'
+            with open(self.name, writemode) as file:
+                file.write(buf)
 
         if self._capture_diff:
             try:
-                old_lines = old_content.splitlines() if old_content else []
+                old_lines = old_content.splitlines() if existed else None
                 new_lines = buf.splitlines()
 
-                self.diff = difflib.unified_diff(old_lines, new_lines,
-                    self.name, self.name, n=4, lineterm='')
+                self.diff = simple_diff(self.name, old_lines, new_lines)
             # FileAvoidWrite isn't unicode/bytes safe. So, files with non-ascii
             # content or opened and written in different modes may involve
             # implicit conversion and this will make Python unhappy. Since
@@ -183,14 +282,16 @@ class FileAvoidWrite(BytesIO):
             # This can go away once FileAvoidWrite uses io.BytesIO and
             # io.StringIO. But that will require a lot of work.
             except (UnicodeDecodeError, UnicodeEncodeError):
-                self.diff = 'Binary or non-ascii file changed: %s' % self.name
+                self.diff = ['Binary or non-ascii file changed: %s' %
+                             self.name]
 
         return existed, True
 
     def __enter__(self):
         return self
     def __exit__(self, type, value, traceback):
-        self.close()
+        if not self.closed:
+            self.close()
 
 
 def resolve_target_to_make(topobjdir, target):
@@ -256,11 +357,14 @@ def resolve_target_to_make(topobjdir, target):
 
 
 class ListMixin(object):
-    def __init__(self, iterable=[]):
+    def __init__(self, iterable=None, **kwargs):
+        if iterable is None:
+            iterable = []
         if not isinstance(iterable, list):
             raise ValueError('List can only be created from other list instances.')
 
-        return super(ListMixin, self).__init__(iterable)
+        self._kwargs = kwargs
+        return super(ListMixin, self).__init__(iterable, **kwargs)
 
     def extend(self, l):
         if not isinstance(l, list):
@@ -281,7 +385,7 @@ class ListMixin(object):
         if not isinstance(other, list):
             raise ValueError('Only lists can be appended to lists.')
 
-        new_list = self.__class__(self)
+        new_list = self.__class__(self, **self._kwargs)
         new_list.extend(other)
         return new_list
 
@@ -334,15 +438,22 @@ class StrictOrderingOnAppendListMixin(object):
         if isinstance(l, StrictOrderingOnAppendList):
             return
 
-        srtd = sorted(l, key=lambda x: x.lower())
+        def _first_element(e):
+            # If the list entry is a tuple, we sort based on the first element
+            # in the tuple.
+            return e[0] if isinstance(e, tuple) else e
+        srtd = sorted(l, key=lambda x: _first_element(x).lower())
 
         if srtd != l:
             raise UnsortedError(srtd, l)
 
-    def __init__(self, iterable=[]):
+    def __init__(self, iterable=None, **kwargs):
+        if iterable is None:
+            iterable = []
+
         StrictOrderingOnAppendListMixin.ensure_sorted(iterable)
 
-        super(StrictOrderingOnAppendListMixin, self).__init__(iterable)
+        super(StrictOrderingOnAppendListMixin, self).__init__(iterable, **kwargs)
 
     def extend(self, l):
         StrictOrderingOnAppendListMixin.ensure_sorted(l)
@@ -374,6 +485,48 @@ class StrictOrderingOnAppendList(ListMixin, StrictOrderingOnAppendListMixin,
     elements be ordered. This enforces cleaner style in moz.build files.
     """
 
+class ListWithActionMixin(object):
+    """Mixin to create lists with pre-processing. See ListWithAction."""
+    def __init__(self, iterable=None, action=None):
+        if iterable is None:
+            iterable = []
+        if not callable(action):
+            raise ValueError('A callabe action is required to construct '
+                             'a ListWithAction')
+
+        self._action = action
+        iterable = [self._action(i) for i in iterable]
+        super(ListWithActionMixin, self).__init__(iterable)
+
+    def extend(self, l):
+        l = [self._action(i) for i in l]
+        return super(ListWithActionMixin, self).extend(l)
+
+    def __setslice__(self, i, j, sequence):
+        sequence = [self._action(item) for item in sequence]
+        return super(ListWithActionMixin, self).__setslice__(i, j, sequence)
+
+    def __iadd__(self, other):
+        other = [self._action(i) for i in other]
+        return super(ListWithActionMixin, self).__iadd__(other)
+
+class StrictOrderingOnAppendListWithAction(StrictOrderingOnAppendListMixin,
+    ListMixin, ListWithActionMixin, list):
+    """An ordered list that accepts a callable to be applied to each item.
+
+    A callable (action) passed to the constructor is run on each item of input.
+    The result of running the callable on each item will be stored in place of
+    the original input, but the original item must be used to enforce sortedness.
+    Note that the order of superclasses is therefore significant.
+    """
+
+class ListWithAction(ListMixin, ListWithActionMixin, list):
+    """A list that accepts a callable to be applied to each item.
+
+    A callable (action) may optionally be passed to the constructor to run on
+    each item of input. The result of calling the callable on each item will be
+    stored in place of the original input.
+    """
 
 class MozbuildDeletionError(Exception):
     pass
@@ -426,6 +579,14 @@ def FlagsFactory(flags):
     return Flags
 
 
+class StrictOrderingOnAppendListWithFlags(StrictOrderingOnAppendList):
+    """A list with flags specialized for moz.build environments.
+
+    Each subclass has a set of typed flags; this class lets us use `isinstance`
+    for natural testing.
+    """
+
+
 def StrictOrderingOnAppendListWithFlagsFactory(flags):
     """Returns a StrictOrderingOnAppendList-like object, with optional
     flags on each item.
@@ -441,9 +602,11 @@ def StrictOrderingOnAppendListWithFlagsFactory(flags):
         foo['a'].foo = True
         foo['b'].bar = 'bar'
     """
-    class StrictOrderingOnAppendListWithFlags(StrictOrderingOnAppendList):
-        def __init__(self, iterable=[]):
-            StrictOrderingOnAppendList.__init__(self, iterable)
+    class StrictOrderingOnAppendListWithFlagsSpecialization(StrictOrderingOnAppendListWithFlags):
+        def __init__(self, iterable=None):
+            if iterable is None:
+                iterable = []
+            StrictOrderingOnAppendListWithFlags.__init__(self, iterable)
             self._flags_type = FlagsFactory(flags)
             self._flags = dict()
 
@@ -458,7 +621,50 @@ def StrictOrderingOnAppendListWithFlagsFactory(flags):
             raise TypeError("'%s' object does not support item assignment" %
                             self.__class__.__name__)
 
-    return StrictOrderingOnAppendListWithFlags
+        def _update_flags(self, other):
+            if self._flags_type._flags != other._flags_type._flags:
+                raise ValueError('Expected a list of strings with flags like %s, not like %s' %
+                                 (self._flags_type._flags, other._flags_type._flags))
+            intersection = set(self._flags.keys()) & set(other._flags.keys())
+            if intersection:
+                raise ValueError('Cannot update flags: both lists of strings with flags configure %s' %
+                                 intersection)
+            self._flags.update(other._flags)
+
+        def extend(self, l):
+            result = super(StrictOrderingOnAppendList, self).extend(l)
+            if isinstance(l, StrictOrderingOnAppendListWithFlags):
+                self._update_flags(l)
+            return result
+
+        def __setslice__(self, i, j, sequence):
+            result = super(StrictOrderingOnAppendList, self).__setslice__(i, j, sequence)
+            # We may have removed items.
+            for name in set(self._flags.keys()) - set(self):
+                del self._flags[name]
+            if isinstance(sequence, StrictOrderingOnAppendListWithFlags):
+                self._update_flags(sequence)
+            return result
+
+        def __add__(self, other):
+            result = super(StrictOrderingOnAppendList, self).__add__(other)
+            if isinstance(other, StrictOrderingOnAppendListWithFlags):
+                # Result has flags from other but not from self, since
+                # internally we duplicate self and then extend with other, and
+                # only extend knows about flags.  Since we don't allow updating
+                # when the set of flag keys intersect, which we instance we pass
+                # to _update_flags here matters.  This needs to be correct but
+                # is an implementation detail.
+                result._update_flags(self)
+            return result
+
+        def __iadd__(self, other):
+            result = super(StrictOrderingOnAppendList, self).__iadd__(other)
+            if isinstance(other, StrictOrderingOnAppendListWithFlags):
+                self._update_flags(other)
+            return result
+
+    return StrictOrderingOnAppendListWithFlagsSpecialization
 
 
 class HierarchicalStringList(object):
@@ -797,10 +1003,12 @@ class TypedListMixin(object):
 
         return [self.normalize(e) for e in l]
 
-    def __init__(self, iterable=[]):
+    def __init__(self, iterable=None, **kwargs):
+        if iterable is None:
+            iterable = []
         iterable = self._ensure_type(iterable)
 
-        super(TypedListMixin, self).__init__(iterable)
+        super(TypedListMixin, self).__init__(iterable, **kwargs)
 
     def extend(self, l):
         l = self._ensure_type(l)
@@ -918,3 +1126,139 @@ def expand_variables(s, variables):
             value = ' '.join(value)
         result += value
     return result
+
+
+class DefinesAction(argparse.Action):
+    '''An ArgumentParser action to handle -Dvar[=value] type of arguments.'''
+    def __call__(self, parser, namespace, values, option_string):
+        defines = getattr(namespace, self.dest)
+        if defines is None:
+            defines = {}
+        values = values.split('=', 1)
+        if len(values) == 1:
+            name, value = values[0], 1
+        else:
+            name, value = values
+            if value.isdigit():
+                value = int(value)
+        defines[name] = value
+        setattr(namespace, self.dest, defines)
+
+
+class EnumStringComparisonError(Exception):
+    pass
+
+
+class EnumString(unicode):
+    '''A string type that only can have a limited set of values, similarly to
+    an Enum, and can only be compared against that set of values.
+
+    The class is meant to be subclassed, where the subclass defines
+    POSSIBLE_VALUES. The `subclass` method is a helper to create such
+    subclasses.
+    '''
+    POSSIBLE_VALUES = ()
+    def __init__(self, value):
+        if value not in self.POSSIBLE_VALUES:
+            raise ValueError("'%s' is not a valid value for %s"
+                             % (value, self.__class__.__name__))
+
+    def __eq__(self, other):
+        if other not in self.POSSIBLE_VALUES:
+            raise EnumStringComparisonError(
+                'Can only compare with %s'
+                % ', '.join("'%s'" % v for v in self.POSSIBLE_VALUES))
+        return super(EnumString, self).__eq__(other)
+
+    def __ne__(self, other):
+        return not (self == other)
+
+    @staticmethod
+    def subclass(*possible_values):
+        class EnumStringSubclass(EnumString):
+            POSSIBLE_VALUES = possible_values
+        return EnumStringSubclass
+
+
+def _escape_char(c):
+    # str.encode('unicode_espace') doesn't escape quotes, presumably because
+    # quoting could be done with either ' or ".
+    if c == "'":
+        return "\\'"
+    return unicode(c.encode('unicode_escape'))
+
+# Mapping table between raw characters below \x80 and their escaped
+# counterpart, when they differ
+_INDENTED_REPR_TABLE = {
+    c: e
+    for c, e in map(lambda x: (x, _escape_char(x)),
+                    map(unichr, range(128)))
+    if c != e
+}
+# Regexp matching all characters to escape.
+_INDENTED_REPR_RE = re.compile(
+    '([' + ''.join(_INDENTED_REPR_TABLE.values()) + ']+)')
+
+
+def indented_repr(o, indent=4):
+    '''Similar to repr(), but returns an indented representation of the object
+
+    One notable difference with repr is that the returned representation
+    assumes `from __future__ import unicode_literals`.
+    '''
+    one_indent = ' ' * indent
+    def recurse_indented_repr(o, level):
+        if isinstance(o, dict):
+            yield '{\n'
+            for k, v in sorted(o.items()):
+                yield one_indent * (level + 1)
+                for d in recurse_indented_repr(k, level + 1):
+                    yield d
+                yield ': '
+                for d in recurse_indented_repr(v, level + 1):
+                    yield d
+                yield ',\n'
+            yield one_indent * level
+            yield '}'
+        elif isinstance(o, bytes):
+            yield 'b'
+            yield repr(o)
+        elif isinstance(o, unicode):
+            yield "'"
+            # We want a readable string (non escaped unicode), but some
+            # special characters need escaping (e.g. \n, \t, etc.)
+            for i, s in enumerate(_INDENTED_REPR_RE.split(o)):
+                if i % 2:
+                    for c in s:
+                        yield _INDENTED_REPR_TABLE[c]
+                else:
+                    yield s
+            yield "'"
+        elif hasattr(o, '__iter__'):
+            yield '[\n'
+            for i in o:
+                yield one_indent * (level + 1)
+                for d in recurse_indented_repr(i, level + 1):
+                    yield d
+                yield ',\n'
+            yield one_indent * level
+            yield ']'
+        else:
+            yield repr(o)
+    return ''.join(recurse_indented_repr(o, 0))
+
+
+def encode(obj, encoding='utf-8'):
+    '''Recursively encode unicode strings with the given encoding.'''
+    if isinstance(obj, dict):
+        return {
+            encode(k, encoding): encode(v, encoding)
+            for k, v in obj.iteritems()
+        }
+    if isinstance(obj, bytes):
+        return obj
+    if isinstance(obj, unicode):
+        return obj.encode(encoding)
+    if isinstance(obj, Iterable):
+        return [encode(i, encoding) for i in obj]
+    return obj

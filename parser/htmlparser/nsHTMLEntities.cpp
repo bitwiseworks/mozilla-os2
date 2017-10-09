@@ -23,30 +23,25 @@ struct EntityNodeEntry : public PLDHashEntryHdr
   const EntityNode* node;
 }; 
 
-static bool
-  matchNodeString(PLDHashTable*, const PLDHashEntryHdr* aHdr,
-                  const void* key)
+static bool matchNodeString(const PLDHashEntryHdr* aHdr, const void* key)
 {
   const EntityNodeEntry* entry = static_cast<const EntityNodeEntry*>(aHdr);
   const char* str = static_cast<const char*>(key);
   return (nsCRT::strcmp(entry->node->mStr, str) == 0);
 }
 
-static bool
-  matchNodeUnicode(PLDHashTable*, const PLDHashEntryHdr* aHdr,
-                   const void* key)
+static bool matchNodeUnicode(const PLDHashEntryHdr* aHdr, const void* key)
 {
   const EntityNodeEntry* entry = static_cast<const EntityNodeEntry*>(aHdr);
   const int32_t ucode = NS_PTR_TO_INT32(key);
   return (entry->node->mUnicode == ucode);
 }
 
-static PLDHashNumber
-  hashUnicodeValue(PLDHashTable*, const void* key)
+static PLDHashNumber hashUnicodeValue(const void* key)
 {
   // key is actually the unicode value
   return PLDHashNumber(NS_PTR_TO_INT32(key));
-  }
+}
 
 
 static const PLDHashTableOps EntityToUnicodeOps = {
@@ -120,8 +115,9 @@ nsHTMLEntities::AddRefTable(void)
 void
 nsHTMLEntities::ReleaseTable(void)
 {
-  if (--gTableRefCnt != 0)
+  if (--gTableRefCnt != 0) {
     return;
+  }
 
   delete gEntityToUnicode;
   delete gUnicodeToEntity;
@@ -133,17 +129,18 @@ int32_t
 nsHTMLEntities::EntityToUnicode(const nsCString& aEntity)
 {
   NS_ASSERTION(gEntityToUnicode, "no lookup table, needs addref");
-  if (!gEntityToUnicode)
+  if (!gEntityToUnicode) {
     return -1;
+  }
 
-    //this little piece of code exists because entities may or may not have the terminating ';'.
-    //if we see it, strip if off for this test...
+  //this little piece of code exists because entities may or may not have the terminating ';'.
+  //if we see it, strip if off for this test...
 
-    if(';'==aEntity.Last()) {
-      nsAutoCString temp(aEntity);
-      temp.Truncate(aEntity.Length()-1);
-      return EntityToUnicode(temp);
-    }
+  if(';'==aEntity.Last()) {
+    nsAutoCString temp(aEntity);
+    temp.Truncate(aEntity.Length()-1);
+    return EntityToUnicode(temp);
+  }
 
   auto entry =
     static_cast<EntityNodeEntry*>(gEntityToUnicode->Search(aEntity.get()));

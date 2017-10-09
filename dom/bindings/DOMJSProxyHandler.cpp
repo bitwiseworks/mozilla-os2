@@ -71,6 +71,33 @@ struct SetDOMProxyInformation
 SetDOMProxyInformation gSetDOMProxyInformation;
 
 // static
+void
+DOMProxyHandler::ClearExternalRefsForWrapperRelease(JSObject* obj)
+{
+  MOZ_ASSERT(IsDOMProxy(obj), "expected a DOM proxy object");
+  JS::Value v = js::GetProxyExtra(obj, JSPROXYSLOT_EXPANDO);
+  if (v.isUndefined()) {
+    // No expando.
+    return;
+  }
+
+  // See EnsureExpandoObject for the work we're trying to undo here.
+
+  if (v.isObject()) {
+    // Drop us from the DOM expando hashtable.  Don't worry about clearing our
+    // slot reference to the expando; we're about to die anyway.
+    xpc::ObjectScope(obj)->RemoveDOMExpandoObject(obj);
+    return;
+  }
+
+  // Prevent having a dangling pointer to our expando from the
+  // ExpandoAndGeneration.
+  js::ExpandoAndGeneration* expandoAndGeneration =
+    static_cast<js::ExpandoAndGeneration*>(v.toPrivate());
+  expandoAndGeneration->expando = UndefinedValue();
+}
+
+// static
 JSObject*
 DOMProxyHandler::GetAndClearExpandoObject(JSObject* obj)
 {
@@ -90,6 +117,19 @@ DOMProxyHandler::GetAndClearExpandoObject(JSObject* obj)
     if (v.isUndefined()) {
       return nullptr;
     }
+    // We have to expose v to active JS here.  The reason for that is that we
+    // might be in the middle of a GC right now.  If our proxy hasn't been
+    // traced yet, when it _does_ get traced it won't trace the expando, since
+    // we're breaking that link.  But the Rooted we're presumably being placed
+    // into is also not going to trace us, because Rooted marking is done at
+    // the very beginning of the GC.  In that situation, we need to manually
+    // mark the expando as live here.  JS::ExposeValueToActiveJS will do just
+    // that for us.
+    //
+    // We don't need to do this in the non-expandoAndGeneration case, because
+    // in that case our value is stored in a slot and slots will already mark
+    // the old thing live when the value in the slot changes.
+    JS::ExposeValueToActiveJS(v);
     expandoAndGeneration->expando = UndefinedValue();
   }
 
@@ -162,7 +202,7 @@ bool
 BaseDOMProxyHandler::getOwnPropertyDescriptor(JSContext* cx,
                                               JS::Handle<JSObject*> proxy,
                                               JS::Handle<jsid> id,
-                                              MutableHandle<JSPropertyDescriptor> desc) const
+                                              MutableHandle<PropertyDescriptor> desc) const
 {
   return getOwnPropDescriptor(cx, proxy, id, /* ignoreNamedProps = */ false,
                               desc);
@@ -170,7 +210,7 @@ BaseDOMProxyHandler::getOwnPropertyDescriptor(JSContext* cx,
 
 bool
 DOMProxyHandler::defineProperty(JSContext* cx, JS::Handle<JSObject*> proxy, JS::Handle<jsid> id,
-                                Handle<JSPropertyDescriptor> desc,
+                                Handle<PropertyDescriptor> desc,
                                 JS::ObjectOpResult &result, bool *defined) const
 {
   if (desc.hasGetterObject() && desc.setter() == JS_StrictPropertyStub) {
@@ -210,7 +250,7 @@ DOMProxyHandler::set(JSContext *cx, Handle<JSObject*> proxy, Handle<jsid> id,
 
   // Make sure to ignore our named properties when checking for own
   // property descriptors for a set.
-  JS::Rooted<JSPropertyDescriptor> ownDesc(cx);
+  JS::Rooted<PropertyDescriptor> ownDesc(cx);
   if (!getOwnPropDescriptor(cx, proxy, id, /* ignoreNamedProps = */ true,
                             &ownDesc)) {
     return false;
@@ -252,63 +292,21 @@ BaseDOMProxyHandler::ownPropertyKeys(JSContext* cx,
 }
 
 bool
+BaseDOMProxyHandler::getPrototypeIfOrdinary(JSContext* cx, JS::Handle<JSObject*> proxy,
+                                            bool* isOrdinary,
+                                            JS::MutableHandle<JSObject*> proto) const
+{
+  *isOrdinary = true;
+  proto.set(GetStaticPrototype(proxy));
+  return true;
+}
+
+bool
 BaseDOMProxyHandler::getOwnEnumerablePropertyKeys(JSContext* cx,
                                                   JS::Handle<JSObject*> proxy,
                                                   JS::AutoIdVector& props) const
 {
   return ownPropNames(cx, proxy, JSITER_OWNONLY, props);
-}
-
-bool
-BaseDOMProxyHandler::enumerate(JSContext *cx, JS::Handle<JSObject*> proxy,
-                               JS::MutableHandle<JSObject*> objp) const
-{
-  return BaseProxyHandler::enumerate(cx, proxy, objp);
-}
-
-bool
-DOMProxyHandler::has(JSContext* cx, JS::Handle<JSObject*> proxy, JS::Handle<jsid> id, bool* bp) const
-{
-  if (!hasOwn(cx, proxy, id, bp)) {
-    return false;
-  }
-
-  if (*bp) {
-    // We have the property ourselves; no need to worry about our prototype
-    // chain.
-    return true;
-  }
-
-  // OK, now we have to look at the proto
-  JS::Rooted<JSObject*> proto(cx);
-  if (!js::GetObjectProto(cx, proxy, &proto)) {
-    return false;
-  }
-  if (!proto) {
-    return true;
-  }
-  bool protoHasProp;
-  bool ok = JS_HasPropertyById(cx, proto, id, &protoHasProp);
-  if (ok) {
-    *bp = protoHasProp;
-  }
-  return ok;
-}
-
-int32_t
-IdToInt32(JSContext* cx, JS::Handle<jsid> id)
-{
-  JS::Rooted<JS::Value> idval(cx);
-  double array_index;
-  int32_t i;
-  if (JSID_IS_SYMBOL(id) ||
-      !::JS_IdToValue(cx, id, &idval) ||
-      !JS::ToNumber(cx, idval, &array_index) ||
-      !::JS_DoubleIsInt32(array_index, &i)) {
-    return -1;
-  }
-
-  return i;
 }
 
 bool
@@ -337,6 +335,27 @@ DOMProxyHandler::GetExpandoObject(JSObject *obj)
     static_cast<js::ExpandoAndGeneration*>(v.toPrivate());
   v = expandoAndGeneration->expando;
   return v.isUndefined() ? nullptr : &v.toObject();
+}
+
+void
+ShadowingDOMProxyHandler::trace(JSTracer* trc, JSObject* proxy) const
+{
+  DOMProxyHandler::trace(trc, proxy);
+
+  MOZ_ASSERT(IsDOMProxy(proxy), "expected a DOM proxy object");
+  JS::Value v = js::GetProxyExtra(proxy, JSPROXYSLOT_EXPANDO);
+  MOZ_ASSERT(!v.isObject(), "Should not have expando object directly!");
+
+  if (v.isUndefined()) {
+    // This can happen if we GC while creating our object, before we get a
+    // chance to set up its JSPROXYSLOT_EXPANDO slot.
+    return;
+  }
+
+  js::ExpandoAndGeneration* expandoAndGeneration =
+    static_cast<js::ExpandoAndGeneration*>(v.toPrivate());
+  JS::TraceEdge(trc, &expandoAndGeneration->expando,
+                "Shadowing DOM proxy expando");
 }
 
 } // namespace dom

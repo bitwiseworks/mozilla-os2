@@ -9,7 +9,7 @@
 const { require } = Components.utils.import("resource://devtools/shared/Loader.jsm", {});
 
 Object.defineProperty(this, "NetworkHelper", {
-  get: function() {
+  get: function () {
     return require("devtools/shared/webconsole/network-helper");
   },
   configurable: true,
@@ -43,7 +43,7 @@ function run_test() {
     "Common name is correct.");
   equal(result.subject.organization, DUMMY_CERT.organization,
     "Organization is correct.");
-  equal(result.subject.organizationalUnit, DUMMY_CERT.organizationalUnit,
+  equal(result.subject.organizationUnit, DUMMY_CERT.organizationUnit,
     "Organizational unit is correct.");
 
   // Issuer
@@ -51,7 +51,7 @@ function run_test() {
     "Common name of the issuer is correct.");
   equal(result.issuer.organization, DUMMY_CERT.issuerOrganization,
     "Organization of the issuer is correct.");
-  equal(result.issuer.organizationalUnit, DUMMY_CERT.issuerOrganizationalUnit,
+  equal(result.issuer.organizationUnit, DUMMY_CERT.issuerOrganizationUnit,
     "Organizational unit of the issuer is correct.");
 
   // Validity

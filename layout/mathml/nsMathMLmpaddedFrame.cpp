@@ -255,7 +255,7 @@ void
 nsMathMLmpaddedFrame::UpdateValue(int32_t                  aSign,
                                   int32_t                  aPseudoUnit,
                                   const nsCSSValue&        aCSSValue,
-                                  const nsHTMLReflowMetrics& aDesiredSize,
+                                  const ReflowOutput& aDesiredSize,
                                   nscoord&                 aValueToUpdate,
                                   float                aFontSizeInflation) const
 {
@@ -304,8 +304,8 @@ nsMathMLmpaddedFrame::UpdateValue(int32_t                  aSign,
 
 void
 nsMathMLmpaddedFrame::Reflow(nsPresContext*          aPresContext,
-                             nsHTMLReflowMetrics&     aDesiredSize,
-                             const nsHTMLReflowState& aReflowState,
+                             ReflowOutput&     aDesiredSize,
+                             const ReflowInput& aReflowInput,
                              nsReflowStatus&          aStatus)
 {
   mPresentationData.flags &= ~NS_MATHML_ERROR;
@@ -314,19 +314,19 @@ nsMathMLmpaddedFrame::Reflow(nsPresContext*          aPresContext,
   ///////////////
   // Let the base class format our content like an inferred mrow
   nsMathMLContainerFrame::Reflow(aPresContext, aDesiredSize,
-                                 aReflowState, aStatus);
+                                 aReflowInput, aStatus);
   //NS_ASSERTION(NS_FRAME_IS_COMPLETE(aStatus), "bad status");
 }
 
 /* virtual */ nsresult
-nsMathMLmpaddedFrame::Place(nsRenderingContext& aRenderingContext,
+nsMathMLmpaddedFrame::Place(DrawTarget*          aDrawTarget,
                             bool                 aPlaceOrigin,
-                            nsHTMLReflowMetrics& aDesiredSize)
+                            ReflowOutput& aDesiredSize)
 {
   nsresult rv =
-    nsMathMLContainerFrame::Place(aRenderingContext, false, aDesiredSize);
+    nsMathMLContainerFrame::Place(aDrawTarget, false, aDesiredSize);
   if (NS_MATHML_HAS_ERROR(mPresentationData.flags) || NS_FAILED(rv)) {
-    DidReflowChildren(GetFirstPrincipalChild());
+    DidReflowChildren(PrincipalChildList().FirstChild());
     return rv;
   }
 
@@ -441,9 +441,9 @@ nsMathMLmpaddedFrame::Place(nsRenderingContext& aRenderingContext,
 }
 
 /* virtual */ nsresult
-nsMathMLmpaddedFrame::MeasureForWidth(nsRenderingContext& aRenderingContext,
-                                      nsHTMLReflowMetrics& aDesiredSize)
+nsMathMLmpaddedFrame::MeasureForWidth(DrawTarget* aDrawTarget,
+                                      ReflowOutput& aDesiredSize)
 {
   ProcessAttributes();
-  return Place(aRenderingContext, false, aDesiredSize);
+  return Place(aDrawTarget, false, aDesiredSize);
 }

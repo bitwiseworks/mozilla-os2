@@ -95,7 +95,7 @@ xul|scrollbarbutton {
 %ifndef MOZ_GRAPHENE
 /* -moz-touch-enabled? media elements */
 :-moz-any(video, audio) > xul|videocontrols {
-  -moz-binding: url("chrome://global/content/bindings/videocontrols.xml#touchControls");
+  -moz-binding: url("chrome://global/content/bindings/videocontrols.xml#touchControlsGonk");
 }
 
 select:not([size]):not([multiple]) > xul|scrollbar,
@@ -173,8 +173,8 @@ select[size="1"] {
 textarea {
   resize: none;
   border-width: 1px;
-  -moz-padding-start: 1px;
-  -moz-padding-end: 1px;
+  padding-inline-start: 1px;
+  padding-inline-end: 1px;
   padding-block-start: 2px;
   padding-block-end: 2px;
 }
@@ -184,8 +184,8 @@ input[type="submit"],
 input[type="reset"],
 button {
   border-width: 1px;
-  -moz-padding-start: 7px;
-  -moz-padding-end: 7px;
+  padding-inline-start: 7px;
+  padding-inline-end: 7px;
   padding-block-start: 0;
   padding-block-end: 0;
 }
@@ -193,8 +193,8 @@ button {
 input[type="radio"],
 input[type="checkbox"] {
   border: 1px solid #a7a7a7 !important;
-  -moz-padding-start: 1px;
-  -moz-padding-end: 1px;
+  padding-inline-start: 1px;
+  padding-inline-end: 1px;
   padding-block-start: 2px;
   padding-block-end: 2px;
 }
@@ -274,8 +274,8 @@ input[type="button"][disabled],
 input[type="submit"][disabled],
 input[type="reset"][disabled],
 button[disabled] {
-  -moz-padding-start: 7px;
-  -moz-padding-end: 7px;
+  padding-inline-start: 7px;
+  padding-inline-end: 7px;
   padding-block-start: 0;
   padding-block-end: 0;
   background-color: #f5f5f5;
@@ -297,7 +297,7 @@ select[disabled] > button {
   padding: 1px 7px 1px 7px;
 }
 
-*:-moz-any-link:active,
+*:any-link:active,
 *[role=button]:active,
 button:active,
 option:active,

@@ -30,7 +30,7 @@ class TypePolicy
     //  * If untyped, optionally ask the input to try and specialize its value.
     //  * Replace the operand with a conversion instruction.
     //  * Insert an unconditional deoptimization (no conversion possible).
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* def) = 0;
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* def) = 0;
 };
 
 struct TypeSpecializationData
@@ -80,8 +80,8 @@ class BoxInputsPolicy final : public TypePolicy
 {
   public:
     SPECIALIZATION_DATA_;
-    static bool staticAdjustInputs(TempAllocator& alloc, MInstruction* def);
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* def) override {
+    static MOZ_MUST_USE bool staticAdjustInputs(TempAllocator& alloc, MInstruction* def);
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* def) override {
         return staticAdjustInputs(alloc, def);
     }
 };
@@ -90,28 +90,28 @@ class ArithPolicy final : public TypePolicy
 {
   public:
     SPECIALIZATION_DATA_;
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* def) override;
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* def) override;
 };
 
 class AllDoublePolicy final : public TypePolicy
 {
   public:
     EMPTY_DATA_;
-    bool adjustInputs(TempAllocator& alloc, MInstruction* def);
+    MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* def);
 };
 
 class BitwisePolicy final : public TypePolicy
 {
   public:
     SPECIALIZATION_DATA_;
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* def) override;
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* def) override;
 };
 
 class ComparePolicy final : public TypePolicy
 {
   public:
     EMPTY_DATA_;
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* def) override;
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* def) override;
 };
 
 // Policy for MTest instructions.
@@ -119,21 +119,21 @@ class TestPolicy final : public TypePolicy
 {
   public:
     EMPTY_DATA_;
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override;
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override;
 };
 
 class TypeBarrierPolicy final : public TypePolicy
 {
   public:
     EMPTY_DATA_;
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override;
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override;
 };
 
 class CallPolicy final : public TypePolicy
 {
   public:
     EMPTY_DATA_;
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* def) override;
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* def) override;
 };
 
 // Policy for MPow. First operand Double; second Double or Int32.
@@ -141,7 +141,7 @@ class PowPolicy final : public TypePolicy
 {
   public:
     SPECIALIZATION_DATA_;
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override;
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override;
 };
 
 // Expect a string for operand Op. If the input is a Value, it is unboxed.
@@ -150,8 +150,8 @@ class StringPolicy final : public TypePolicy
 {
   public:
     EMPTY_DATA_;
-    static bool staticAdjustInputs(TempAllocator& alloc, MInstruction* def);
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* def) override {
+    static MOZ_MUST_USE bool staticAdjustInputs(TempAllocator& alloc, MInstruction* def);
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* def) override {
         return staticAdjustInputs(alloc, def);
     }
 };
@@ -162,8 +162,20 @@ class ConvertToStringPolicy final : public TypePolicy
 {
   public:
     EMPTY_DATA_;
-    static bool staticAdjustInputs(TempAllocator& alloc, MInstruction* def);
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* def) override {
+    static MOZ_MUST_USE bool staticAdjustInputs(TempAllocator& alloc, MInstruction* def);
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* def) override {
+        return staticAdjustInputs(alloc, def);
+    }
+};
+
+// Expect an Boolean for operand Op. If the input is a Value, it is unboxed.
+template <unsigned Op>
+class BooleanPolicy final : private TypePolicy
+{
+  public:
+    EMPTY_DATA_;
+    static MOZ_MUST_USE bool staticAdjustInputs(TempAllocator& alloc, MInstruction* def);
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* def) override {
         return staticAdjustInputs(alloc, def);
     }
 };
@@ -174,8 +186,8 @@ class IntPolicy final : private TypePolicy
 {
   public:
     EMPTY_DATA_;
-    static bool staticAdjustInputs(TempAllocator& alloc, MInstruction* def);
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* def) override {
+    static MOZ_MUST_USE bool staticAdjustInputs(TempAllocator& alloc, MInstruction* def);
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* def) override {
         return staticAdjustInputs(alloc, def);
     }
 };
@@ -186,8 +198,8 @@ class ConvertToInt32Policy final : public TypePolicy
 {
   public:
     EMPTY_DATA_;
-    static bool staticAdjustInputs(TempAllocator& alloc, MInstruction* def);
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* def) override {
+    static MOZ_MUST_USE bool staticAdjustInputs(TempAllocator& alloc, MInstruction* def);
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* def) override {
         return staticAdjustInputs(alloc, def);
     }
 };
@@ -198,8 +210,8 @@ class TruncateToInt32Policy final : public TypePolicy
 {
   public:
     EMPTY_DATA_;
-    static bool staticAdjustInputs(TempAllocator& alloc, MInstruction* def);
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* def) override {
+    static MOZ_MUST_USE bool staticAdjustInputs(TempAllocator& alloc, MInstruction* def);
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* def) override {
         return staticAdjustInputs(alloc, def);
     }
 };
@@ -210,8 +222,8 @@ class DoublePolicy final : public TypePolicy
 {
   public:
     EMPTY_DATA_;
-    static bool staticAdjustInputs(TempAllocator& alloc, MInstruction* def);
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* def) override {
+    static MOZ_MUST_USE bool staticAdjustInputs(TempAllocator& alloc, MInstruction* def);
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* def) override {
         return staticAdjustInputs(alloc, def);
     }
 };
@@ -222,8 +234,8 @@ class Float32Policy final : public TypePolicy
 {
   public:
     EMPTY_DATA_;
-    static bool staticAdjustInputs(TempAllocator& alloc, MInstruction* def);
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* def) override {
+    static MOZ_MUST_USE bool staticAdjustInputs(TempAllocator& alloc, MInstruction* def);
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* def) override {
         return staticAdjustInputs(alloc, def);
     }
 };
@@ -235,7 +247,7 @@ class FloatingPointPolicy final : public TypePolicy
 {
   public:
     SPECIALIZATION_DATA_;
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* def) override;
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* def) override;
 };
 
 template <unsigned Op>
@@ -243,8 +255,8 @@ class NoFloatPolicy final : public TypePolicy
 {
   public:
     EMPTY_DATA_;
-    static bool staticAdjustInputs(TempAllocator& alloc, MInstruction* def);
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* def) override {
+    static MOZ_MUST_USE bool staticAdjustInputs(TempAllocator& alloc, MInstruction* def);
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* def) override {
         return staticAdjustInputs(alloc, def);
     }
 };
@@ -256,7 +268,7 @@ class NoFloatPolicyAfter final : public TypePolicy
 {
   public:
     EMPTY_DATA_;
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override;
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override;
 };
 
 // Box objects or strings as an input to a ToDouble instruction.
@@ -264,8 +276,8 @@ class ToDoublePolicy final : public TypePolicy
 {
   public:
     EMPTY_DATA_;
-    static bool staticAdjustInputs(TempAllocator& alloc, MInstruction* def);
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* def) override {
+    static MOZ_MUST_USE bool staticAdjustInputs(TempAllocator& alloc, MInstruction* def);
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* def) override {
         return staticAdjustInputs(alloc, def);
     }
 };
@@ -275,8 +287,8 @@ class ToInt32Policy final : public TypePolicy
 {
   public:
     EMPTY_DATA_;
-    static bool staticAdjustInputs(TempAllocator& alloc, MInstruction* def);
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* def) override {
+    static MOZ_MUST_USE bool staticAdjustInputs(TempAllocator& alloc, MInstruction* def);
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* def) override {
         return staticAdjustInputs(alloc, def);
     }
 };
@@ -286,8 +298,8 @@ class ToStringPolicy final : public TypePolicy
 {
   public:
     EMPTY_DATA_;
-    static bool staticAdjustInputs(TempAllocator& alloc, MInstruction* def);
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* def) override {
+    static MOZ_MUST_USE bool staticAdjustInputs(TempAllocator& alloc, MInstruction* def);
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* def) override {
         return staticAdjustInputs(alloc, def);
     }
 };
@@ -297,8 +309,8 @@ class ObjectPolicy final : public TypePolicy
 {
   public:
     EMPTY_DATA_;
-    static bool staticAdjustInputs(TempAllocator& alloc, MInstruction* ins);
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override {
+    static MOZ_MUST_USE bool staticAdjustInputs(TempAllocator& alloc, MInstruction* ins);
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override {
         return staticAdjustInputs(alloc, ins);
     }
 };
@@ -314,8 +326,8 @@ class SimdScalarPolicy final : public TypePolicy
 {
   public:
     EMPTY_DATA_;
-    static bool staticAdjustInputs(TempAllocator& alloc, MInstruction* def);
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* def) override {
+    static MOZ_MUST_USE bool staticAdjustInputs(TempAllocator& alloc, MInstruction* def);
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* def) override {
         return staticAdjustInputs(alloc, def);
     }
 };
@@ -324,7 +336,7 @@ class SimdAllPolicy final : public TypePolicy
 {
   public:
     SPECIALIZATION_DATA_;
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override;
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override;
 };
 
 template <unsigned Op>
@@ -332,21 +344,21 @@ class SimdPolicy final : public TypePolicy
 {
   public:
     SPECIALIZATION_DATA_;
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override;
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override;
 };
 
 class SimdSelectPolicy final : public TypePolicy
 {
   public:
     SPECIALIZATION_DATA_;
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override;
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override;
 };
 
 class SimdShufflePolicy final : public TypePolicy
 {
   public:
     SPECIALIZATION_DATA_;
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override;
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override;
 };
 
 // SIMD value-type policy, use the returned type of the instruction to determine
@@ -356,8 +368,8 @@ class SimdSameAsReturnedTypePolicy final : public TypePolicy
 {
   public:
     EMPTY_DATA_;
-    static bool staticAdjustInputs(TempAllocator& alloc, MInstruction* ins);
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override {
+    static MOZ_MUST_USE bool staticAdjustInputs(TempAllocator& alloc, MInstruction* ins);
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override {
         return staticAdjustInputs(alloc, ins);
     }
 };
@@ -367,8 +379,8 @@ class BoxPolicy final : public TypePolicy
 {
   public:
     EMPTY_DATA_;
-    static bool staticAdjustInputs(TempAllocator& alloc, MInstruction* ins);
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override {
+    static MOZ_MUST_USE bool staticAdjustInputs(TempAllocator& alloc, MInstruction* ins);
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override {
         return staticAdjustInputs(alloc, ins);
     }
 };
@@ -379,8 +391,8 @@ class BoxExceptPolicy final : public TypePolicy
 {
   public:
     EMPTY_DATA_;
-    static bool staticAdjustInputs(TempAllocator& alloc, MInstruction* ins);
-    bool adjustInputs(TempAllocator& alloc, MInstruction* ins) {
+    static MOZ_MUST_USE bool staticAdjustInputs(TempAllocator& alloc, MInstruction* ins);
+    MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* ins) {
         return staticAdjustInputs(alloc, ins);
     }
 };
@@ -391,8 +403,8 @@ class CacheIdPolicy final : public TypePolicy
 {
   public:
     EMPTY_DATA_;
-    static bool staticAdjustInputs(TempAllocator& alloc, MInstruction* ins);
-    bool adjustInputs(TempAllocator& alloc, MInstruction* ins) {
+    static MOZ_MUST_USE bool staticAdjustInputs(TempAllocator& alloc, MInstruction* ins);
+    MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* ins) {
         return staticAdjustInputs(alloc, ins);
     }
 };
@@ -403,10 +415,10 @@ class MixPolicy final : public TypePolicy
 {
   public:
     EMPTY_DATA_;
-    static bool staticAdjustInputs(TempAllocator& alloc, MInstruction* ins) {
+    static MOZ_MUST_USE bool staticAdjustInputs(TempAllocator& alloc, MInstruction* ins) {
         return Lhs::staticAdjustInputs(alloc, ins) && Rhs::staticAdjustInputs(alloc, ins);
     }
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override {
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override {
         return staticAdjustInputs(alloc, ins);
     }
 };
@@ -417,12 +429,12 @@ class Mix3Policy final : public TypePolicy
 {
   public:
     EMPTY_DATA_;
-    static bool staticAdjustInputs(TempAllocator& alloc, MInstruction* ins) {
+    static MOZ_MUST_USE bool staticAdjustInputs(TempAllocator& alloc, MInstruction* ins) {
         return Policy1::staticAdjustInputs(alloc, ins) &&
                Policy2::staticAdjustInputs(alloc, ins) &&
                Policy3::staticAdjustInputs(alloc, ins);
     }
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override {
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override {
         return staticAdjustInputs(alloc, ins);
     }
 };
@@ -433,13 +445,13 @@ class Mix4Policy : public TypePolicy
 {
   public:
     EMPTY_DATA_;
-    static bool staticAdjustInputs(TempAllocator& alloc, MInstruction* ins) {
+    static MOZ_MUST_USE bool staticAdjustInputs(TempAllocator& alloc, MInstruction* ins) {
         return Policy1::staticAdjustInputs(alloc, ins) &&
                Policy2::staticAdjustInputs(alloc, ins) &&
                Policy3::staticAdjustInputs(alloc, ins) &&
                Policy4::staticAdjustInputs(alloc, ins);
     }
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override {
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override {
         return staticAdjustInputs(alloc, ins);
     }
 };
@@ -448,7 +460,7 @@ class CallSetElementPolicy final : public TypePolicy
 {
   public:
     EMPTY_DATA_;
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* def) override;
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* def) override;
 };
 
 // First operand will be boxed to a Value (except for an object)
@@ -457,7 +469,7 @@ class InstanceOfPolicy final : public TypePolicy
 {
   public:
     EMPTY_DATA_;
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* def) override;
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* def) override;
 };
 
 class StoreTypedArrayHolePolicy;
@@ -466,36 +478,37 @@ class StoreTypedArrayElementStaticPolicy;
 class StoreUnboxedScalarPolicy : public TypePolicy
 {
   private:
-    static bool adjustValueInput(TempAllocator& alloc, MInstruction* ins, Scalar::Type arrayType,
-                                 MDefinition* value, int valueOperand);
+    static MOZ_MUST_USE bool adjustValueInput(TempAllocator& alloc, MInstruction* ins,
+                                              Scalar::Type arrayType, MDefinition* value,
+                                              int valueOperand);
 
     friend class StoreTypedArrayHolePolicy;
     friend class StoreTypedArrayElementStaticPolicy;
 
   public:
     EMPTY_DATA_;
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override;
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override;
 };
 
 class StoreTypedArrayHolePolicy final : public StoreUnboxedScalarPolicy
 {
   public:
     EMPTY_DATA_;
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override;
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override;
 };
 
 class StoreTypedArrayElementStaticPolicy final : public StoreUnboxedScalarPolicy
 {
   public:
     EMPTY_DATA_;
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override;
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override;
 };
 
 class StoreUnboxedObjectOrNullPolicy final : public TypePolicy
 {
   public:
     EMPTY_DATA_;
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* def) override;
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* def) override;
 };
 
 // Accepts integers and doubles. Everything else is boxed.
@@ -503,23 +516,15 @@ class ClampPolicy final : public TypePolicy
 {
   public:
     EMPTY_DATA_;
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override;
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override;
 };
 
 class FilterTypeSetPolicy final : public TypePolicy
 {
   public:
     EMPTY_DATA_;
-    virtual bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override;
+    virtual MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override;
 };
-
-static inline bool
-CoercesToDouble(MIRType type)
-{
-    if (type == MIRType_Undefined || IsFloatingPointType(type))
-        return true;
-    return false;
-}
 
 #undef SPECIALIZATION_DATA_
 #undef INHERIT_DATA_

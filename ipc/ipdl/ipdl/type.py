@@ -9,7 +9,7 @@ from ipdl.ast import CxxInclude, Decl, Loc, QualifiedId, State, StructDecl, Tran
 from ipdl.ast import TypeSpec, UnionDecl, UsingStmt, Visitor
 from ipdl.ast import ASYNC, SYNC, INTR
 from ipdl.ast import IN, OUT, INOUT, ANSWER, CALL, RECV, SEND
-from ipdl.ast import NORMAL_PRIORITY, HIGH_PRIORITY, URGENT_PRIORITY
+from ipdl.ast import NOT_NESTED, INSIDE_SYNC_NESTED, INSIDE_CPOW_NESTED
 import ipdl.builtin as builtin
 
 _DELETE_MSG = '__delete__'
@@ -97,6 +97,8 @@ class TypeVisitor:
     def visitFDType(self, s, *args):
         pass
 
+    def visitEndpointType(self, s, *args):
+        pass
 
 class Type:
     def __cmp__(self, o):
@@ -205,6 +207,7 @@ class IPDLType(Type):
     def isShmem(self): return False
     def isChmod(self): return False
     def isFD(self): return False
+    def isEndpoint(self): return False
 
     def isAsync(self): return self.sendSemantics == ASYNC
     def isSync(self): return self.sendSemantics == SYNC
@@ -214,14 +217,14 @@ class IPDLType(Type):
 
     @classmethod
     def convertsTo(cls, lesser, greater):
-        if (lesser.priorityRange[0] < greater.priorityRange[0] or
-            lesser.priorityRange[1] > greater.priorityRange[1]):
+        if (lesser.nestedRange[0] < greater.nestedRange[0] or
+            lesser.nestedRange[1] > greater.nestedRange[1]):
             return False
 
         # Protocols that use intr semantics are not allowed to use
-        # message priorities.
+        # message nesting.
         if (greater.isInterrupt() and
-            lesser.priorityRange != (NORMAL_PRIORITY, NORMAL_PRIORITY)):
+            lesser.nestedRange != (NOT_NESTED, NOT_NESTED)):
             return False
 
         if lesser.isAsync():
@@ -248,13 +251,15 @@ class StateType(IPDLType):
         return self.name()
 
 class MessageType(IPDLType):
-    def __init__(self, priority, sendSemantics, direction,
-                 ctor=False, dtor=False, cdtype=None, compress=False):
+    def __init__(self, nested, prio, sendSemantics, direction,
+                 ctor=False, dtor=False, cdtype=None, compress=False,
+                 verify=False):
         assert not (ctor and dtor)
         assert not (ctor or dtor) or type is not None
 
-        self.priority = priority
-        self.priorityRange = (priority, priority)
+        self.nested = nested
+        self.prio = prio
+        self.nestedRange = (nested, nested)
         self.sendSemantics = sendSemantics
         self.direction = direction
         self.params = [ ]
@@ -263,6 +268,7 @@ class MessageType(IPDLType):
         self.dtor = dtor
         self.cdtype = cdtype
         self.compress = compress
+        self.verify = verify
     def isMessage(self): return True
 
     def isCtor(self): return self.ctor
@@ -290,9 +296,9 @@ class Bridge:
         return hash(self.parent) + hash(self.child)
 
 class ProtocolType(IPDLType):
-    def __init__(self, qname, priorityRange, sendSemantics, stateless=False):
+    def __init__(self, qname, nestedRange, sendSemantics, stateless=False):
         self.qname = qname
-        self.priorityRange = priorityRange
+        self.nestedRange = nestedRange
         self.sendSemantics = sendSemantics
         self.spawns = set()             # ProtocolType
         self.opens = set()              # ProtocolType
@@ -459,6 +465,16 @@ class FDType(IPDLType):
     def __init__(self, qname):
         self.qname = qname
     def isFD(self): return True
+
+    def name(self):
+        return self.qname.baseid
+    def fullname(self):
+        return str(self.qname)
+
+class EndpointType(IPDLType):
+    def __init__(self, qname):
+        self.qname = qname
+    def isEndpoint(self): return True
 
     def name(self):
         return self.qname.baseid
@@ -700,10 +716,19 @@ class GatherDecls(TcheckVisitor):
                 fullname = str(qname)
             p.decl = self.declare(
                 loc=p.loc,
-                type=ProtocolType(qname, p.priorityRange, p.sendSemantics,
+                type=ProtocolType(qname, p.nestedRange, p.sendSemantics,
                                   stateless=(0 == len(p.transitionStmts))),
                 shortname=p.name,
                 fullname=fullname)
+
+            p.parentEndpointDecl = self.declare(
+                loc=p.loc,
+                type=EndpointType(QualifiedId(p.loc, 'Endpoint<' + fullname + 'Parent>', ['mozilla', 'ipc'])),
+                shortname='Endpoint<' + p.name + 'Parent>')
+            p.childEndpointDecl = self.declare(
+                loc=p.loc,
+                type=EndpointType(QualifiedId(p.loc, 'Endpoint<' + fullname + 'Child>', ['mozilla', 'ipc'])),
+                shortname='Endpoint<' + p.name + 'Child>')
 
             # XXX ugh, this sucks.  but we need this information to compute
             # what friend decls we need in generated C++
@@ -778,6 +803,8 @@ class GatherDecls(TcheckVisitor):
         inc.tu.accept(self)
         if inc.tu.protocol:
             self.symtab.declare(inc.tu.protocol.decl)
+            self.symtab.declare(inc.tu.protocol.parentEndpointDecl)
+            self.symtab.declare(inc.tu.protocol.childEndpointDecl)
         else:
             # This is a header.  Import its "exported" globals into
             # our scope.
@@ -1099,9 +1126,9 @@ class GatherDecls(TcheckVisitor):
         # enter message scope
         self.symtab.enterScope(md)
 
-        msgtype = MessageType(md.priority, md.sendSemantics, md.direction,
+        msgtype = MessageType(md.nested, md.prio, md.sendSemantics, md.direction,
                               ctor=isctor, dtor=isdtor, cdtype=cdtype,
-                              compress=md.compress)
+                              compress=md.compress, verify=md.verify)
 
         # replace inparam Param nodes with proper Decls
         def paramToDecl(param):
@@ -1473,22 +1500,22 @@ class CheckTypes(TcheckVisitor):
 
         loc = md.decl.loc
 
-        if mtype.priority == HIGH_PRIORITY and not mtype.isSync():
+        if mtype.nested == INSIDE_SYNC_NESTED and not mtype.isSync():
             self.error(
                 loc,
-                "high priority messages must be sync (here, message `%s' in protocol `%s')",
+                "inside_sync nested messages must be sync (here, message `%s' in protocol `%s')",
                 mname, pname)
 
-        if mtype.priority == URGENT_PRIORITY and (mtype.isOut() or mtype.isInout()):
+        if mtype.nested == INSIDE_CPOW_NESTED and (mtype.isOut() or mtype.isInout()):
             self.error(
                 loc,
-                "urgent parent-to-child messages are verboten (here, message `%s' in protocol `%s')",
+                "inside_cpow nested parent-to-child messages are verboten (here, message `%s' in protocol `%s')",
                 mname, pname)
 
-        # We allow high priority sync messages to be sent from the
-        # parent. Normal and urgent sync messages can only come from
+        # We allow inside_sync messages that are themselves sync to be sent from the
+        # parent. Normal and inside_cpow nested messages that are sync can only come from
         # the child.
-        if mtype.isSync() and mtype.priority == NORMAL_PRIORITY and (mtype.isOut() or mtype.isInout()):
+        if mtype.isSync() and mtype.nested == NOT_NESTED and (mtype.isOut() or mtype.isInout()):
             self.error(
                 loc,
                 "sync parent-to-child messages are verboten (here, message `%s' in protocol `%s')",

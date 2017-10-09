@@ -1,18 +1,21 @@
+import os
+
+ABS_WORK_DIR = os.path.join(os.getcwd(), "build")
+
 config = {
     "log_name": "beta_to_release",
-    "version_files": [
-        "browser/config/version.txt",
-        "browser/config/version_display.txt",
-        "config/milestone.txt",
-        "b2g/confvars.sh",
+    "copy_files": [
+        {
+            "src": "browser/config/version.txt",
+            "dst": "browser/config/version_display.txt",
+        },
     ],
     "replacements": [
         # File, from, to
         ("{}/{}".format(d, f),
         "ac_add_options --with-branding=mobile/android/branding/beta",
         "ac_add_options --with-branding=mobile/android/branding/official")
-        for d in ["mobile/android/config/mozconfigs/android-api-11/",
-                  "mobile/android/config/mozconfigs/android-api-9-10-constrained/",
+        for d in ["mobile/android/config/mozconfigs/android-api-15/",
                   "mobile/android/config/mozconfigs/android-x86/"]
         for f in ["debug", "nightly", "l10n-nightly", "l10n-release", "release"]
     ] + [
@@ -25,11 +28,10 @@ config = {
          "MAR_CHANNEL_ID=firefox-mozilla-release"),
     ],
 
-    # Disallow sharing, since we want pristine .hg directories.
-    # "vcs_share_base": None,
+    "vcs_share_base": os.path.join(ABS_WORK_DIR, 'hg-shared'),
     # "hg_share_base": None,
     "tools_repo_url": "https://hg.mozilla.org/build/tools",
-    "tools_repo_revision": "default",
+    "tools_repo_branch": "default",
     "from_repo_url": "ssh://hg.mozilla.org/releases/mozilla-beta",
     "to_repo_url": "ssh://hg.mozilla.org/releases/mozilla-release",
 
@@ -44,9 +46,7 @@ config = {
         "requests==2.8.1",
     ],
 
-    "post_merge_builders": [
-        "mozilla-release hg bundle",
-    ],
+    "post_merge_builders": [],
     "post_merge_nightly_branches": [
         # No nightlies on mozilla-release
     ],

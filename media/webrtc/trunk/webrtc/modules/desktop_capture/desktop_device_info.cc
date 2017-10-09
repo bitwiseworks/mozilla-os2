@@ -34,6 +34,7 @@ DesktopDisplayDevice::DesktopDisplayDevice() {
   screenId_ = kInvalidScreenId;
   deviceUniqueIdUTF8_ = NULL;
   deviceNameUTF8_ = NULL;
+  pid_ = 0;
 }
 
 DesktopDisplayDevice::~DesktopDisplayDevice() {
@@ -63,6 +64,10 @@ void DesktopDisplayDevice::setUniqueIdName(const char *deviceUniqueIdUTF8) {
   SetStringMember(&deviceUniqueIdUTF8_, deviceUniqueIdUTF8);
 }
 
+void DesktopDisplayDevice::setPid(const int pid) {
+  pid_ = pid;
+}
+
 ScreenId DesktopDisplayDevice::getScreenId() {
   return screenId_;
 }
@@ -75,6 +80,10 @@ const char *DesktopDisplayDevice::getUniqueIdName() {
   return deviceUniqueIdUTF8_;
 }
 
+pid_t DesktopDisplayDevice::getPid() {
+  return pid_;
+}
+
 DesktopDisplayDevice& DesktopDisplayDevice::operator= (DesktopDisplayDevice& other) {
   if (&other == this) {
     return *this;
@@ -82,6 +91,7 @@ DesktopDisplayDevice& DesktopDisplayDevice::operator= (DesktopDisplayDevice& oth
   screenId_ = other.getScreenId();
   setUniqueIdName(other.getUniqueIdName());
   setDeviceName(other.getDeviceName());
+  pid_ = other.getPid();
 
   return *this;
 }
@@ -96,6 +106,21 @@ DesktopApplication::DesktopApplication() {
 }
 
 DesktopApplication::~DesktopApplication() {
+  if (processPathNameUTF8_) {
+    delete [] processPathNameUTF8_;
+  }
+
+  if (applicationNameUTF8_) {
+    delete [] applicationNameUTF8_;
+  }
+
+  if (processUniqueIdUTF8_) {
+    delete [] processUniqueIdUTF8_;
+  }
+
+  processPathNameUTF8_= NULL;
+  applicationNameUTF8_= NULL;
+  processUniqueIdUTF8_= NULL;
 }
 
 void DesktopApplication::setProcessId(const ProcessId processId) {
@@ -256,9 +281,10 @@ void DesktopDeviceInfoImpl::InitializeWindowList() {
 
       pWinDevice->setScreenId(itr->id);
       pWinDevice->setDeviceName(itr->title.c_str());
+      pWinDevice->setPid(itr->pid);
 
       char idStr[BUFSIZ];
-#if XP_WIN
+#if WEBRTC_WIN
       _snprintf_s(idStr, sizeof(idStr), sizeof(idStr) - 1, "%ld", pWinDevice->getScreenId());
 #else
       snprintf(idStr, sizeof(idStr), "%ld", pWinDevice->getScreenId());

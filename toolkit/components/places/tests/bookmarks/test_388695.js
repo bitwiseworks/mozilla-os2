@@ -8,7 +8,7 @@
 try {
   var bmsvc = Cc["@mozilla.org/browser/nav-bookmarks-service;1"].
               getService(Ci.nsINavBookmarksService);
-} catch(ex) {
+} catch (ex) {
   do_throw("Could not get nav-bookmarks-service\n");
 }
 
@@ -35,7 +35,7 @@ function run_test() {
 }
 
 function phase2() {
-  gItemId2 = bmsvc.insertBookmark(gTestRoot, gURI, bmsvc.DEFAULT_INDEX, "");  
+  gItemId2 = bmsvc.insertBookmark(gTestRoot, gURI, bmsvc.DEFAULT_INDEX, "");
   var b = bmsvc.getBookmarkIdsForURI(gURI);
   do_check_eq(b[0], gItemId2);
   do_check_eq(b[1], gItemId1);

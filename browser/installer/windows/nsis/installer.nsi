@@ -5,7 +5,7 @@
 # Required Plugins:
 # AppAssocReg    http://nsis.sourceforge.net/Application_Association_Registration_plug-in
 # ApplicationID  http://nsis.sourceforge.net/ApplicationID_plug-in
-# CityHash       http://mxr.mozilla.org/mozilla-central/source/other-licenses/nsis/Contrib/CityHash
+# CityHash       http://dxr.mozilla.org/mozilla-central/source/other-licenses/nsis/Contrib/CityHash
 # ShellLink      http://nsis.sourceforge.net/ShellLink_plug-in
 # UAC            http://nsis.sourceforge.net/UAC_plug-in
 # ServicesHelper Mozilla specific plugin that is located in /other-licenses/nsis
@@ -34,6 +34,7 @@ RequestExecutionLevel user
 Var TmpVal
 Var InstallType
 Var AddStartMenuSC
+Var AddTaskbarSC
 Var AddQuickLaunchSC
 Var AddDesktopSC
 Var InstallMaintenanceService
@@ -395,10 +396,12 @@ Section "-Application" APP_IDX
 
     ; If we are writing to HKLM and create either the desktop or start menu
     ; shortcuts set IconsVisible to 1 otherwise to 0.
+    ; Taskbar shortcuts imply having a start menu shortcut.
     ${StrFilter} "${FileMainEXE}" "+" "" "" $R9
     StrCpy $0 "Software\Clients\StartMenuInternet\$R9\InstallInfo"
     ${If} $AddDesktopSC == 1
     ${OrIf} $AddStartMenuSC == 1
+    ${OrIf} $AddTaskbarSC == 1
       WriteRegDWORD HKLM "$0" "IconsVisible" 1
     ${Else}
       WriteRegDWORD HKLM "$0" "IconsVisible" 0
@@ -412,20 +415,16 @@ Section "-Application" APP_IDX
 
     ; If we create either the desktop or start menu shortcuts, then
     ; set IconsVisible to 1 otherwise to 0.
+    ; Taskbar shortcuts imply having a start menu shortcut.
     ${StrFilter} "${FileMainEXE}" "+" "" "" $R9
     StrCpy $0 "Software\Clients\StartMenuInternet\$R9\InstallInfo"
     ${If} $AddDesktopSC == 1
     ${OrIf} $AddStartMenuSC == 1
+    ${OrIf} $AddTaskbarSC == 1
       WriteRegDWORD HKCU "$0" "IconsVisible" 1
     ${Else}
       WriteRegDWORD HKCU "$0" "IconsVisible" 0
     ${EndIf}
-  ${If} ${AtLeastWin8}
-    ${RemoveDEHRegistration} ${DELEGATE_EXECUTE_HANDLER_ID} \
-                             $AppUserModelID \
-                             "FirefoxURL" \
-                             "FirefoxHTML"
-  ${EndIf}
   ${EndIf}
 
 !ifdef MOZ_MAINTENANCE_SERVICE
@@ -537,6 +536,13 @@ Section "-Application" APP_IDX
     ${EndIf}
   ${EndIf}
 
+  ; Update lastwritetime of the Start Menu shortcut to clear the tile cache.
+  ${If} ${AtLeastWin8}
+  ${AndIf} ${FileExists} "$SMPROGRAMS\${BrandFullName}.lnk"
+    FileOpen $0 "$SMPROGRAMS\${BrandFullName}.lnk" a
+    FileClose $0
+  ${EndIf}
+
   ${If} $AddDesktopSC == 1
     CreateShortCut "$DESKTOP\${BrandFullName}.lnk" "$INSTDIR\${FileMainEXE}"
     ${If} ${FileExists} "$DESKTOP\${BrandFullName}.lnk"
@@ -588,8 +594,35 @@ Section "-InstallEndCleanup"
   SetDetailsPrint none
 
   ${Unless} ${Silent}
+    ClearErrors
     ${MUI_INSTALLOPTIONS_READ} $0 "summary.ini" "Field 4" "State"
     ${If} "$0" == "1"
+      ; NB: this code is duplicated in stub.nsi. Please keep in sync.
+      ; For data migration in the app, we want to know what the default browser
+      ; value was before we changed it. To do so, we read it here and store it
+      ; in our own registry key.
+      StrCpy $0 ""
+      ${If} ${AtLeastWinVista}
+        AppAssocReg::QueryCurrentDefault "http" "protocol" "effective"
+        Pop $1
+        ; If the method hasn't failed, $1 will contain the progid. Check:
+        ${If} "$1" != "method failed"
+        ${AndIf} "$1" != "method not available"
+          ; Read the actual command from the progid
+          ReadRegStr $0 HKCR "$1\shell\open\command" ""
+        ${EndIf}
+      ${EndIf}
+      ; If using the App Association Registry didn't happen or failed, fall back
+      ; to the effective http default:
+      ${If} "$0" == ""
+        ReadRegStr $0 HKCR "http\shell\open\command" ""
+      ${EndIf}
+      ; If we have something other than empty string now, write the value.
+      ${If} "$0" != ""
+        ClearErrors
+        WriteRegStr HKCU "Software\Mozilla\Firefox" "OldDefaultBrowserCommand" "$0"
+      ${EndIf}
+
       ${LogHeader} "Setting as the default browser"
       ClearErrors
       ${GetParameters} $0
@@ -600,13 +633,18 @@ Section "-InstallEndCleanup"
         GetFunctionAddress $0 SetAsDefaultAppUserHKCU
         UAC::ExecCodeSegment $0
       ${EndIf}
+    ${ElseIfNot} ${Errors}
+      ${LogHeader} "Writing default-browser opt-out"
+      ClearErrors
+      WriteRegStr HKCU "Software\Mozilla\Firefox" "DefaultBrowserOptOut" "True"
+      ${If} ${Errors}
+        ${LogMsg} "Error writing default-browser opt-out"
+      ${EndIf}
     ${EndIf}
-    ; Adds a pinned Task Bar shortcut (see MigrateTaskBarShortcut for details).
-    ${MigrateTaskBarShortcut}
   ${EndUnless}
 
-  ${GetShortcutsLogPath} $0
-  WriteIniStr "$0" "TASKBAR" "Migrated" "true"
+  ; Adds a pinned Task Bar shortcut (see MigrateTaskBarShortcut for details).
+  ${MigrateTaskBarShortcut}
 
   ; Add the Firewall entries during install
   Call AddFirewallEntries
@@ -1099,7 +1137,71 @@ Function .onInit
   StrCpy $LANGUAGE 0
   ${SetBrandNameVars} "$EXEDIR\core\distribution\setup.ini"
 
-  ${InstallOnInitCommon} "$(WARN_MIN_SUPPORTED_OS_MSG)"
+  ; Don't install on systems that don't support SSE2. The parameter value of
+  ; 10 is for PF_XMMI64_INSTRUCTIONS_AVAILABLE which will check whether the
+  ; SSE2 instruction set is available.
+  System::Call "kernel32::IsProcessorFeaturePresent(i 10)i .R7"
+
+!ifdef HAVE_64BIT_BUILD
+  ; Restrict x64 builds from being installed on x86 and pre Win7
+  ${Unless} ${RunningX64}
+  ${OrUnless} ${AtLeastWin7}
+    ${If} "$R7" == "0"
+      strCpy $R7 "$(WARN_MIN_SUPPORTED_OSVER_CPU_MSG)"
+    ${Else}
+      strCpy $R7 "$(WARN_MIN_SUPPORTED_OSVER_MSG)"
+    ${EndIf}
+    MessageBox MB_OKCANCEL|MB_ICONSTOP "$R7" IDCANCEL +2
+    ExecShell "open" "${URLSystemRequirements}"
+    Quit
+  ${EndUnless}
+
+  SetRegView 64
+!else
+  StrCpy $R8 "0"
+  ${If} ${AtMostWin2000}
+    StrCpy $R8 "1"
+  ${EndIf}
+
+  ${If} ${IsWinXP}
+  ${AndIf} ${AtMostServicePack} 1
+    StrCpy $R8 "1"
+  ${EndIf}
+
+  ${If} $R8 == "1"
+    ; XXX-rstrong - some systems failed the AtLeastWin2000 test that we
+    ; used to use for an unknown reason and likely fail the AtMostWin2000
+    ; and possibly the IsWinXP test as well. To work around this also
+    ; check if the Windows NT registry Key exists and if it does if the
+    ; first char in CurrentVersion is equal to 3 (Windows NT 3.5 and
+    ; 3.5.1), 4 (Windows NT 4), or 5 (Windows 2000 and Windows XP).
+    StrCpy $R8 ""
+    ClearErrors
+    ReadRegStr $R8 HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion" "CurrentVersion"
+    StrCpy $R8 "$R8" 1
+    ${If} ${Errors}
+    ${OrIf} "$R8" == "3"
+    ${OrIf} "$R8" == "4"
+    ${OrIf} "$R8" == "5"
+      ${If} "$R7" == "0"
+        strCpy $R7 "$(WARN_MIN_SUPPORTED_OSVER_CPU_MSG)"
+      ${Else}
+        strCpy $R7 "$(WARN_MIN_SUPPORTED_OSVER_MSG)"
+      ${EndIf}
+      MessageBox MB_OKCANCEL|MB_ICONSTOP "$R7" IDCANCEL +2
+      ExecShell "open" "${URLSystemRequirements}"
+      Quit
+    ${EndIf}
+  ${EndUnless}
+!endif
+
+  ${If} "$R7" == "0"
+    MessageBox MB_OKCANCEL|MB_ICONSTOP "$(WARN_MIN_SUPPORTED_CPU_MSG)" IDCANCEL +2
+    ExecShell "open" "${URLSystemRequirements}"
+    Quit
+  ${EndIf}
+
+  ${InstallOnInitCommon} "$(WARN_MIN_SUPPORTED_OSVER_CPU_MSG)"
 
 ; The commands inside this ifndef are needed prior to NSIS 3.0a2 and can be
 ; removed after we require NSIS 3.0a2 or greater.

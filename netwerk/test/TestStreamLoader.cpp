@@ -3,7 +3,7 @@
 #include "nsNetUtil.h"
 #include "nsServiceManagerUtils.h"
 #include "nsThreadUtils.h"
-#include "mozilla/Logging.h"
+#include "NetwerkTestLogging.h"
 #include "mozilla/Attributes.h"
 #include "nsIScriptSecurityManager.h"
 
@@ -15,7 +15,7 @@ static PRLogModuleInfo *gTestLog = nullptr;
 
 class MyStreamLoaderObserver final : public nsIStreamLoaderObserver
 {
-  ~MyStreamLoaderObserver() {}
+  ~MyStreamLoaderObserver() = default;
 
 public:
   NS_DECL_ISUPPORTS

@@ -81,6 +81,7 @@ public:
    *   the caller. The caller may decide to override the actual SVG bbox.
    */
   nsSVGFilterInstance(const nsStyleFilter& aFilter,
+                      nsIFrame* aTargetFrame,
                       nsIContent* aTargetContent,
                       const UserSpaceMetrics& aMetrics,
                       const gfxRect& aTargetBBox,
@@ -97,9 +98,17 @@ public:
    * FilterPrimitiveDescription for each one. Appends the new
    * FilterPrimitiveDescription(s) to the aPrimitiveDescrs list. Also, appends
    * new images from feImage filter primitive elements to the aInputImages list.
+   * aInputIsTainted describes whether the input to this filter is tainted, i.e.
+   * whether it contains security-sensitive content. This is needed to propagate
+   * taintedness to the FilterPrimitive that take tainted inputs. Something being
+   * tainted means that it contains security sensitive content.
+   * The input to this filter is the previous filter's output, i.e. the last
+   * element in aPrimitiveDescrs, or the SourceGraphic input if this is the first
+   * filter in the filter chain.
    */
   nsresult BuildPrimitives(nsTArray<FilterPrimitiveDescription>& aPrimitiveDescrs,
-                           nsTArray<RefPtr<SourceSurface>>& aInputImages);
+                           nsTArray<RefPtr<SourceSurface>>& aInputImages,
+                           bool aInputIsTainted);
 
   /**
    * Returns the user specified "filter region", in the filtered element's user
@@ -140,7 +149,7 @@ private:
   /**
    * Finds the filter frame associated with this SVG filter.
    */
-  nsSVGFilterFrame* GetFilterFrame();
+  nsSVGFilterFrame* GetFilterFrame(nsIFrame* aTargetFrame);
 
   /**
    * Computes the filter primitive subregion for the given primitive.
@@ -155,6 +164,7 @@ private:
    */
   void GetInputsAreTainted(const nsTArray<FilterPrimitiveDescription>& aPrimitiveDescrs,
                            const nsTArray<int32_t>& aInputIndices,
+                           bool aFilterInputIsTainted,
                            nsTArray<bool>& aOutInputsAreTainted);
 
   /**
@@ -253,16 +263,16 @@ private:
   /**
    * The index of the FilterPrimitiveDescription that this SVG filter should use
    * as its SourceGraphic, or the SourceGraphic keyword index if this is the
-   * first filter in a chain.
+   * first filter in a chain. Initialized in BuildPrimitives
    */
-  int32_t mSourceGraphicIndex;
+  MOZ_INIT_OUTSIDE_CTOR int32_t mSourceGraphicIndex;
 
   /**
    * The index of the FilterPrimitiveDescription that this SVG filter should use
    * as its SourceAlpha, or the SourceAlpha keyword index if this is the first
-   * filter in a chain.
+   * filter in a chain. Initialized in BuildPrimitives
    */
-  int32_t mSourceAlphaIndex;
+  MOZ_INIT_OUTSIDE_CTOR int32_t mSourceAlphaIndex;
 
   /**
    * SourceAlpha is available if GetOrCreateSourceAlphaIndex has been called.

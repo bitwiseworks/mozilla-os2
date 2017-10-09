@@ -11,7 +11,6 @@
 
 #include "mozilla/Attributes.h"
 #include "nsGenConList.h"
-#include "nsAutoPtr.h"
 #include "nsClassHashtable.h"
 #include "mozilla/Likely.h"
 #include "CounterStyleManager.h"
@@ -187,7 +186,7 @@ public:
     }
 
     nsCounterNode* First() {
-        return static_cast<nsCounterNode*>(mFirstNode);
+        return static_cast<nsCounterNode*>(mList.getFirst());
     }
 
     static nsCounterNode* Next(nsCounterNode* aNode) {
@@ -272,11 +271,11 @@ public:
 
 private:
     // for |AddCounterResetsAndIncrements| only
-    bool AddResetOrIncrement(nsIFrame *aFrame, int32_t aIndex,
-                               const nsStyleCounterData *aCounterData,
-                               nsCounterNode::Type aType);
+  bool AddResetOrIncrement(nsIFrame* aFrame, int32_t aIndex,
+                           const nsStyleCounterData& aCounterData,
+                           nsCounterNode::Type aType);
 
-    nsClassHashtable<nsStringHashKey, nsCounterList> mNames;
+  nsClassHashtable<nsStringHashKey, nsCounterList> mNames;
 };
 
 #endif /* nsCounterManager_h_ */

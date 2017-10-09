@@ -1,4 +1,5 @@
 /* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+ * vim: set ts=8 sts=2 et sw=2 tw=80:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -17,12 +18,16 @@ class DrawTargetRecording : public DrawTarget
 public:
   MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(DrawTargetRecording, override)
   DrawTargetRecording(DrawEventRecorder *aRecorder, DrawTarget *aDT, bool aHasData = false);
+
   ~DrawTargetRecording();
 
   virtual DrawTargetType GetType() const override { return mFinalDT->GetType(); }
   virtual BackendType GetBackendType() const override { return mFinalDT->GetBackendType(); }
+  virtual bool IsRecording() const override { return true; }
 
   virtual already_AddRefed<SourceSurface> Snapshot() override;
+
+  virtual void DetachAllSnapshots() override;
 
   virtual IntSize GetSize() override { return mFinalDT->GetSize(); }
 
@@ -204,6 +209,35 @@ public:
    */
   virtual void PopClip() override;
 
+  /**
+   * Push a 'layer' to the DrawTarget, a layer is a temporary surface that all
+   * drawing will be redirected to, this is used for example to support group
+   * opacity or the masking of groups. Clips must be balanced within a layer,
+   * i.e. between a matching PushLayer/PopLayer pair there must be as many
+   * PushClip(Rect) calls as there are PopClip calls.
+   *
+   * @param aOpaque Whether the layer will be opaque
+   * @param aOpacity Opacity of the layer
+   * @param aMask Mask applied to the layer
+   * @param aMaskTransform Transform applied to the layer mask
+   * @param aBounds Optional bounds in device space to which the layer is
+   *                limited in size.
+   * @param aCopyBackground Whether to copy the background into the layer, this
+   *                        is only supported when aOpaque is true.
+   */
+  virtual void PushLayer(bool aOpaque, Float aOpacity,
+                         SourceSurface* aMask,
+                         const Matrix& aMaskTransform,
+                         const IntRect& aBounds = IntRect(),
+                         bool aCopyBackground = false) override;
+
+  /**
+   * This balances a call to PushLayer and proceeds to blend the layer back
+   * onto the background. This blend will blend the temporary surface back
+   * onto the target in device space using POINT sampling and operator over.
+   */
+  virtual void PopLayer() override;
+
   /*
    * Create a SourceSurface optimized for use with this DrawTarget from
    * existing bitmap data in memory.
@@ -273,9 +307,25 @@ public:
    */
   virtual void *GetNativeSurface(NativeSurfaceType aType) override { return mFinalDT->GetNativeSurface(aType); }
 
+  virtual bool IsCurrentGroupOpaque() override {
+    return mFinalDT->IsCurrentGroupOpaque();
+  }
+
 private:
+  /**
+   * Used for creating a DrawTargetRecording for a CreateSimilarDrawTarget call.
+   * We have to call CreateSimilarDrawTarget on mFinalDT up front and pass it in
+   * as it can fail.
+   *
+   * @param aDT DrawTargetRecording on which CreateSimilarDrawTarget was called
+   * @param aSimilarDT Similar DrawTarget created from aDT.mFinalDT.
+   */
+  DrawTargetRecording(const DrawTargetRecording *aDT,
+                      DrawTarget *aSimilarDT);
+
   Path *GetPathForPathRecording(const Path *aPath) const;
-  void EnsureStored(const Path *aPath);
+  already_AddRefed<PathRecording> EnsurePathStored(const Path *aPath);
+  void EnsurePatternDependenciesStored(const Pattern &aPattern);
 
   RefPtr<DrawEventRecorderPrivate> mRecorder;
   RefPtr<DrawTarget> mFinalDT;

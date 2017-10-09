@@ -26,11 +26,11 @@
 #include "mozilla/Vector.h"
 #include "nsProxyRelease.h"
 #include "mozilla/Telemetry.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/StaticMutex.h"
 #include "mozilla/RefPtr.h"
 
-#include "rlogringbuffer.h"
+#include "rlogconnector.h"
 #include "runnable_utils.h"
 #include "PeerConnectionCtx.h"
 #include "PeerConnectionImpl.h"
@@ -292,7 +292,7 @@ GetAllStats_s(WebrtcGlobalChild* aThisChild,
               nsAutoPtr<RTCStatsQueries> aQueryList)
 {
   MOZ_ASSERT(aQueryList);
-  // The call to PeerConnetionImpl must happen on the from a runnable
+  // The call to PeerConnetionImpl must happen from a runnable
   // dispatched on the STS thread.
 
   // Get stats from active connections.
@@ -359,7 +359,7 @@ static void GetLogging_s(WebrtcGlobalChild* aThisChild,
                          const std::string& aPattern)
 {
   // Request log while not on the main thread.
-  RLogRingBuffer* logs = RLogRingBuffer::GetInstance();
+  RLogConnector* logs = RLogConnector::GetInstance();
   nsAutoPtr<std::deque<std::string>> result(new std::deque<std::string>);
   // Might not exist yet.
   if (logs) {
@@ -386,7 +386,9 @@ BuildStatsQueryList(
     if (aPcIdFilter.IsEmpty() ||
         aPcIdFilter.EqualsASCII(pc.second->GetIdAsAscii().c_str())) {
       if (pc.second->HasMedia()) {
-        queries->append(nsAutoPtr<RTCStatsQuery>(new RTCStatsQuery(true)));
+        if (!queries->append(nsAutoPtr<RTCStatsQuery>(new RTCStatsQuery(true)))) {
+	  return NS_ERROR_OUT_OF_MEMORY;
+	}
         rv = pc.second->BuildStatsQuery_m(nullptr, queries->back()); // all tracks
         if (NS_WARN_IF(NS_FAILED(rv))) {
           return rv;
@@ -431,6 +433,37 @@ RunStatsQuery(
   return rv;
 }
 
+void ClearClosedStats()
+{
+  PeerConnectionCtx* ctx = GetPeerConnectionCtx();
+
+  if (ctx) {
+    ctx->mStatsForClosedPeerConnections.Clear();
+  }
+}
+
+void
+WebrtcGlobalInformation::ClearAllStats(
+  const GlobalObject& aGlobal)
+{
+  if (!NS_IsMainThread()) {
+    return;
+  }
+
+  // Chrome-only API
+  MOZ_ASSERT(XRE_IsParentProcess());
+
+  if (!WebrtcContentParents::Empty()) {
+    // Pass on the request to any content process based PeerConnections.
+    for (auto& cp : WebrtcContentParents::GetAll()) {
+      Unused << cp->SendClearStatsRequest();
+    }
+  }
+
+  // Flush the history for the chrome process
+  ClearClosedStats();
+}
+
 void
 WebrtcGlobalInformation::GetAllStats(
   const GlobalObject& aGlobal,
@@ -446,7 +479,7 @@ WebrtcGlobalInformation::GetAllStats(
   MOZ_ASSERT(XRE_IsParentProcess());
 
   // CallbackObject does not support threadsafe refcounting, and must be
-  // destroyed on main.
+  // used and destroyed on main.
   StatsRequestCallback callbackHandle(
     new nsMainThreadPtrHolder<WebrtcGlobalStatisticsCallback>(&aStatsCallback));
 
@@ -455,7 +488,7 @@ WebrtcGlobalInformation::GetAllStats(
     filter = pcIdFilter.Value();
   }
 
-  StatsRequest* request = StatsRequest::Create(callbackHandle, filter);
+  auto* request = StatsRequest::Create(callbackHandle, filter);
 
   if (!request) {
     aRv.Throw(NS_ERROR_FAILURE);
@@ -522,6 +555,56 @@ RunLogQuery(const nsCString& aPattern,
   return rv;
 }
 
+static void ClearLogs_s()
+{
+  // Make call off main thread.
+  RLogConnector* logs = RLogConnector::GetInstance();
+  if (logs) {
+    logs->Clear();
+  }
+}
+
+static nsresult
+RunLogClear()
+{
+  nsresult rv;
+  nsCOMPtr<nsIEventTarget> stsThread =
+    do_GetService(NS_SOCKETTRANSPORTSERVICE_CONTRACTID, &rv);
+
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  if (!stsThread) {
+    return NS_ERROR_FAILURE;
+  }
+
+  return RUN_ON_THREAD(stsThread,
+                       WrapRunnableNM(&ClearLogs_s),
+                       NS_DISPATCH_NORMAL);
+}
+
+void
+WebrtcGlobalInformation::ClearLogging(
+  const GlobalObject& aGlobal)
+{
+  if (!NS_IsMainThread()) {
+    return;
+  }
+
+  // Chrome-only API
+  MOZ_ASSERT(XRE_IsParentProcess());
+
+  if (!WebrtcContentParents::Empty()) {
+  // Clear content process signaling logs
+    for (auto& cp : WebrtcContentParents::GetAll()) {
+      Unused << cp->SendClearLogRequest();
+    }
+  }
+
+  // Clear chrome process signaling logs
+  Unused << RunLogClear();
+}
+
 void
 WebrtcGlobalInformation::GetLogging(
   const GlobalObject& aGlobal,
@@ -581,7 +664,11 @@ static bool sLastAECDebug = false;
 void
 WebrtcGlobalInformation::SetDebugLevel(const GlobalObject& aGlobal, int32_t aLevel)
 {
-  StartWebRtcLog(webrtc::TraceLevel(aLevel));
+  if (aLevel) {
+    StartWebRtcLog(webrtc::TraceLevel(aLevel));
+  } else {
+    StopWebRtcLog();
+  }
   sLastSetLevel = aLevel;
 
   for (auto& cp : WebrtcContentParents::GetAll()){
@@ -598,8 +685,12 @@ WebrtcGlobalInformation::DebugLevel(const GlobalObject& aGlobal)
 void
 WebrtcGlobalInformation::SetAecDebug(const GlobalObject& aGlobal, bool aEnable)
 {
-  StartWebRtcLog(sLastSetLevel); // to make it read the aec path
-  webrtc::Trace::set_aec_debug(aEnable);
+  if (aEnable) {
+    StartAecLog();
+  } else {
+    StopAecLog();
+  }
+
   sLastAECDebug = aEnable;
 
   for (auto& cp : WebrtcContentParents::GetAll()){
@@ -745,6 +836,17 @@ WebrtcGlobalChild::RecvGetStatsRequest(const int& aRequestId,
 }
 
 bool
+WebrtcGlobalChild::RecvClearStatsRequest()
+{
+  if (mShutdown) {
+    return true;
+  }
+
+  ClearClosedStats();
+  return true;
+}
+
+bool
 WebrtcGlobalChild::RecvGetLogRequest(const int& aRequestId,
                                      const nsCString& aPattern)
 {
@@ -773,11 +875,25 @@ WebrtcGlobalChild::RecvGetLogRequest(const int& aRequestId,
 }
 
 bool
+WebrtcGlobalChild::RecvClearLogRequest()
+{
+  if (mShutdown) {
+    return true;
+  }
+
+  RunLogClear();
+  return true;
+}
+
+bool
 WebrtcGlobalChild::RecvSetAecLogging(const bool& aEnable)
 {
   if (!mShutdown) {
-    StartWebRtcLog(sLastSetLevel); // to make it read the aec path
-    webrtc::Trace::set_aec_debug(aEnable);
+    if (aEnable) {
+      StartAecLog();
+    } else {
+      StopAecLog();
+    }
   }
   return true;
 }
@@ -786,7 +902,11 @@ bool
 WebrtcGlobalChild::RecvSetDebugMode(const int& aLevel)
 {
   if (!mShutdown) {
-    StartWebRtcLog(webrtc::TraceLevel(aLevel));
+    if (aLevel) {
+      StartWebRtcLog(webrtc::TraceLevel(aLevel));
+    } else {
+      StopWebRtcLog();
+    }
   }
   return true;
 }
@@ -855,8 +975,7 @@ static uint32_t GetCandidateIpAndTransportMask(const RTCIceCandidateStats *cand)
 
 static void StoreLongTermICEStatisticsImpl_m(
     nsresult result,
-    nsAutoPtr<RTCStatsQuery> query,
-    bool aIsLoop) {
+    nsAutoPtr<RTCStatsQuery> query) {
 
   using namespace Telemetry;
 
@@ -973,7 +1092,7 @@ static void StoreLongTermICEStatisticsImpl_m(
 
   for (auto i = streamResults.begin(); i != streamResults.end(); ++i) {
     Telemetry::RecordWebrtcIceCandidates(i->second.candidateTypeBitpattern,
-                                         i->second.streamSucceeded, aIsLoop);
+                                         i->second.streamSucceeded);
   }
 
   // Beyond ICE, accumulate telemetry for various PER_CALL settings here.
@@ -987,30 +1106,25 @@ static void StoreLongTermICEStatisticsImpl_m(
         continue;
       }
       if (s.mBitrateMean.WasPassed()) {
-        Accumulate(aIsLoop ? LOOP_VIDEO_ENCODER_BITRATE_AVG_PER_CALL_KBPS :
-                             WEBRTC_VIDEO_ENCODER_BITRATE_AVG_PER_CALL_KBPS,
+        Accumulate(WEBRTC_VIDEO_ENCODER_BITRATE_AVG_PER_CALL_KBPS,
                    uint32_t(s.mBitrateMean.Value() / 1000));
       }
       if (s.mBitrateStdDev.WasPassed()) {
-        Accumulate(aIsLoop? LOOP_VIDEO_ENCODER_BITRATE_STD_DEV_PER_CALL_KBPS :
-                            WEBRTC_VIDEO_ENCODER_BITRATE_STD_DEV_PER_CALL_KBPS,
+        Accumulate(WEBRTC_VIDEO_ENCODER_BITRATE_STD_DEV_PER_CALL_KBPS,
                    uint32_t(s.mBitrateStdDev.Value() / 1000));
       }
       if (s.mFramerateMean.WasPassed()) {
-        Accumulate(aIsLoop ? LOOP_VIDEO_ENCODER_FRAMERATE_AVG_PER_CALL :
-                             WEBRTC_VIDEO_ENCODER_FRAMERATE_AVG_PER_CALL,
+        Accumulate(WEBRTC_VIDEO_ENCODER_FRAMERATE_AVG_PER_CALL,
                    uint32_t(s.mFramerateMean.Value()));
       }
       if (s.mFramerateStdDev.WasPassed()) {
-        Accumulate(aIsLoop ? LOOP_VIDEO_ENCODER_FRAMERATE_10X_STD_DEV_PER_CALL :
-                             WEBRTC_VIDEO_ENCODER_FRAMERATE_10X_STD_DEV_PER_CALL,
+        Accumulate(WEBRTC_VIDEO_ENCODER_FRAMERATE_10X_STD_DEV_PER_CALL,
                    uint32_t(s.mFramerateStdDev.Value() * 10));
       }
       if (s.mDroppedFrames.WasPassed() && !query->iceStartTime.IsNull()) {
         double mins = (TimeStamp::Now() - query->iceStartTime).ToSeconds() / 60;
         if (mins > 0) {
-          Accumulate(aIsLoop ? LOOP_VIDEO_ENCODER_DROPPED_FRAMES_PER_CALL_FPM :
-                               WEBRTC_VIDEO_ENCODER_DROPPED_FRAMES_PER_CALL_FPM,
+          Accumulate(WEBRTC_VIDEO_ENCODER_DROPPED_FRAMES_PER_CALL_FPM,
                      uint32_t(double(s.mDroppedFrames.Value()) / mins));
         }
       }
@@ -1026,30 +1140,25 @@ static void StoreLongTermICEStatisticsImpl_m(
         continue;
       }
       if (s.mBitrateMean.WasPassed()) {
-        Accumulate(aIsLoop ? LOOP_VIDEO_DECODER_BITRATE_AVG_PER_CALL_KBPS :
-                             WEBRTC_VIDEO_DECODER_BITRATE_AVG_PER_CALL_KBPS,
+        Accumulate(WEBRTC_VIDEO_DECODER_BITRATE_AVG_PER_CALL_KBPS,
                    uint32_t(s.mBitrateMean.Value() / 1000));
       }
       if (s.mBitrateStdDev.WasPassed()) {
-        Accumulate(aIsLoop ? LOOP_VIDEO_DECODER_BITRATE_STD_DEV_PER_CALL_KBPS :
-                             WEBRTC_VIDEO_DECODER_BITRATE_STD_DEV_PER_CALL_KBPS,
+        Accumulate(WEBRTC_VIDEO_DECODER_BITRATE_STD_DEV_PER_CALL_KBPS,
                    uint32_t(s.mBitrateStdDev.Value() / 1000));
       }
       if (s.mFramerateMean.WasPassed()) {
-        Accumulate(aIsLoop ? LOOP_VIDEO_DECODER_FRAMERATE_AVG_PER_CALL :
-                             WEBRTC_VIDEO_DECODER_FRAMERATE_AVG_PER_CALL,
+        Accumulate(WEBRTC_VIDEO_DECODER_FRAMERATE_AVG_PER_CALL,
                    uint32_t(s.mFramerateMean.Value()));
       }
       if (s.mFramerateStdDev.WasPassed()) {
-        Accumulate(aIsLoop ? LOOP_VIDEO_DECODER_FRAMERATE_10X_STD_DEV_PER_CALL :
-                             WEBRTC_VIDEO_DECODER_FRAMERATE_10X_STD_DEV_PER_CALL,
+        Accumulate(WEBRTC_VIDEO_DECODER_FRAMERATE_10X_STD_DEV_PER_CALL,
                    uint32_t(s.mFramerateStdDev.Value() * 10));
       }
       if (s.mDiscardedPackets.WasPassed() && !query->iceStartTime.IsNull()) {
         double mins = (TimeStamp::Now() - query->iceStartTime).ToSeconds() / 60;
         if (mins > 0) {
-          Accumulate(aIsLoop ? LOOP_VIDEO_DECODER_DISCARDED_PACKETS_PER_CALL_PPM :
-                               WEBRTC_VIDEO_DECODER_DISCARDED_PACKETS_PER_CALL_PPM,
+          Accumulate(WEBRTC_VIDEO_DECODER_DISCARDED_PACKETS_PER_CALL_PPM,
                      uint32_t(double(s.mDiscardedPackets.Value()) / mins));
         }
       }
@@ -1065,8 +1174,7 @@ static void StoreLongTermICEStatisticsImpl_m(
 }
 
 static void GetStatsForLongTermStorage_s(
-    nsAutoPtr<RTCStatsQuery> query,
-    const bool aIsLoop) {
+    nsAutoPtr<RTCStatsQuery> query) {
 
   MOZ_ASSERT(query);
 
@@ -1102,15 +1210,13 @@ static void GetStatsForLongTermStorage_s(
       WrapRunnableNM(
           &StoreLongTermICEStatisticsImpl_m,
           rv,
-          query,
-          aIsLoop),
+          query),
       NS_DISPATCH_NORMAL);
 }
 
 void WebrtcGlobalInformation::StoreLongTermICEStatistics(
     PeerConnectionImpl& aPc) {
-  Telemetry::Accumulate(aPc.IsLoop() ? Telemetry::LOOP_ICE_FINAL_CONNECTION_STATE :
-                                       Telemetry::WEBRTC_ICE_FINAL_CONNECTION_STATE,
+  Telemetry::Accumulate(Telemetry::WEBRTC_ICE_FINAL_CONNECTION_STATE,
                         static_cast<uint32_t>(aPc.IceConnectionState()));
 
   if (aPc.IceConnectionState() == PCImplIceConnectionState::New) {
@@ -1127,7 +1233,7 @@ void WebrtcGlobalInformation::StoreLongTermICEStatistics(
 
   RUN_ON_THREAD(aPc.GetSTSThread(),
                 WrapRunnableNM(&GetStatsForLongTermStorage_s,
-                               query, aPc.IsLoop()),
+                               query),
                 NS_DISPATCH_NORMAL);
 }
 

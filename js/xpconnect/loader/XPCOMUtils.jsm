@@ -284,11 +284,60 @@ this.XPCOMUtils = {
   },
 
   /**
-   * Convenience access to category manager
+   * Defines a getter on a specified object for preference value. The
+   * preference is read the first time that the property is accessed,
+   * and is thereafter kept up-to-date using a preference observer.
+   *
+   * @param aObject
+   *        The object to define the lazy getter on.
+   * @param aName
+   *        The name of the getter property to define on aObject.
+   * @param aPreference
+   *        The name of the preference to read.
+   * @param aDefaultValue
+   *        The default value to use, if the preference is not defined.
    */
-  get categoryManager() {
-    return Components.classes["@mozilla.org/categorymanager;1"]
-           .getService(Ci.nsICategoryManager);
+  defineLazyPreferenceGetter: function XPCU_defineLazyPreferenceGetter(
+                                   aObject, aName, aPreference, aDefaultValue = null)
+  {
+    // Note: We need to keep a reference to this observer alive as long
+    // as aObject is alive. This means that all of our getters need to
+    // explicitly close over the variable that holds the object, and we
+    // cannot define a value in place of a getter after we read the
+    // preference.
+    let observer = {
+      QueryInterface: this.generateQI([Ci.nsIObserver, Ci.nsISupportsWeakReference]),
+
+      value: undefined,
+
+      observe(subject, topic, data) {
+        if (data == aPreference) {
+          this.value = undefined;
+        }
+      },
+    }
+
+    let defineGetter = get => {
+      Object.defineProperty(aObject, aName, {
+        configurable: true,
+        enumerable: true,
+        get,
+      });
+    };
+
+    function lazyGetter() {
+      if (observer.value === undefined) {
+        observer.value = Preferences.get(aPreference, aDefaultValue);
+      }
+      return observer.value;
+    }
+
+    defineGetter(() => {
+      Services.prefs.addObserver(aPreference, observer, true);
+
+      defineGetter(lazyGetter);
+      return lazyGetter();
+    });
   },
 
   /**
@@ -296,7 +345,7 @@ this.XPCOMUtils = {
    * @param e The nsISimpleEnumerator to iterate over.
    * @param i The expected interface for each element.
    */
-  IterSimpleEnumerator: function XPCU_IterSimpleEnumerator(e, i)
+  IterSimpleEnumerator: function* XPCU_IterSimpleEnumerator(e, i)
   {
     while (e.hasMoreElements())
       yield e.getNext().QueryInterface(i);
@@ -307,10 +356,22 @@ this.XPCOMUtils = {
    * @param e The string enumerator (nsIUTF8StringEnumerator or
    *          nsIStringEnumerator) over which to iterate.
    */
-  IterStringEnumerator: function XPCU_IterStringEnumerator(e)
+  IterStringEnumerator: function* XPCU_IterStringEnumerator(e)
   {
     while (e.hasMore())
       yield e.getNext();
+  },
+
+  /**
+   * Helper which iterates over the entries in a category.
+   * @param aCategory The name of the category over which to iterate.
+   */
+  enumerateCategoryEntries: function* XPCOMUtils_enumerateCategoryEntries(aCategory)
+  {
+    let category = this.categoryManager.enumerateCategory(aCategory);
+    for (let entry of this.IterSimpleEnumerator(category, Ci.nsISupportsCString)) {
+      yield [entry.data, this.categoryManager.getCategoryEntry(aCategory, entry.data)];
+    }
   },
 
   /**
@@ -381,6 +442,15 @@ this.XPCOMUtils = {
     });
   },
 };
+
+XPCOMUtils.defineLazyModuleGetter(this, "Preferences",
+                                  "resource://gre/modules/Preferences.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Services",
+                                  "resource://gre/modules/Services.jsm");
+
+XPCOMUtils.defineLazyServiceGetter(XPCOMUtils, "categoryManager",
+                                   "@mozilla.org/categorymanager;1",
+                                   "nsICategoryManager");
 
 /**
  * Helper for XPCOMUtils.generateQI to avoid leaks - see bug 381651#c1

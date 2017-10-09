@@ -10,6 +10,7 @@
 #include "nsWrapperCache.h"
 
 #include "WebGLObjectModel.h"
+#include "nsThreadUtils.h"
 
 namespace mozilla {
 
@@ -17,41 +18,50 @@ class WebGLQuery final
     : public nsWrapperCache
     , public WebGLRefCountedObject<WebGLQuery>
     , public LinkedListElement<WebGLQuery>
-    , public WebGLContextBoundObject
 {
+    friend class AvailableRunnable;
+    friend class WebGLRefCountedObject<WebGLQuery>;
+
 public:
-    explicit WebGLQuery(WebGLContext* webgl);
+    const GLuint mGLName;
+private:
+    GLenum mTarget;
+    WebGLRefPtr<WebGLQuery>* mActiveSlot;
 
-    bool IsActive() const;
+    bool mCanBeAvailable; // Track whether the event loop has spun
 
-    bool HasEverBeenActive() {
-        return mType != 0;
-    }
+    ////
+public:
+    GLenum Target() const { return mTarget; }
+    bool IsActive() const { return bool(mActiveSlot); }
 
-    // WebGLRefCountedObject
-    void Delete();
-
-    // nsWrapperCache
-    WebGLContext* GetParentObject() const {
-        return mContext;
-    }
-
-    // NS
-    virtual JSObject* WrapObject(JSContext* cx, JS::Handle<JSObject*> givenProto) override;
+    ////
 
     NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(WebGLQuery)
     NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(WebGLQuery)
 
+    explicit WebGLQuery(WebGLContext* webgl);
 
 private:
     ~WebGLQuery() {
         DeleteOnce();
     };
 
-    GLuint mGLName;
-    GLenum mType;
+    // WebGLRefCountedObject
+    void Delete();
 
-    friend class WebGL2Context;
+public:
+    WebGLContext* GetParentObject() const { return mContext; }
+    virtual JSObject* WrapObject(JSContext* cx, JS::Handle<JSObject*> givenProto) override;
+
+    ////
+
+    void BeginQuery(GLenum target, WebGLRefPtr<WebGLQuery>& slot);
+    void DeleteQuery();
+    void EndQuery();
+    void GetQueryParameter(GLenum pname, JS::MutableHandleValue retval) const;
+    bool IsQuery() const;
+    void QueryCounter(const char* funcName, GLenum target);
 };
 
 } // namespace mozilla

@@ -1,13 +1,14 @@
-/* vim:set ts=2 sw=2 sts=2 et: */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
-   http://creativecommons.org/publicdomain/zero/1.0/ */
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 "use strict";
 
 const TEST_URI = "data:text/html;charset=utf-8,<p>bug 660806 - history " +
                  "navigation must not show the autocomplete popup";
 
-var test = asyncTest(function* () {
+add_task(function* () {
   yield loadTab(TEST_URI);
 
   let hud = yield openConsole();
@@ -20,16 +21,16 @@ function consoleOpened(HUD) {
 
   let jsterm = HUD.jsterm;
   let popup = jsterm.autocompletePopup;
-  let onShown = function() {
+  let onShown = function () {
     ok(false, "popup shown");
   };
 
-  jsterm.execute("window.foobarBug660806 = {\
-    'location': 'value0',\
-    'locationbar': 'value1'\
-  }");
+  jsterm.execute(`window.foobarBug660806 = {
+    'location': 'value0',
+    'locationbar': 'value1'
+  }`);
 
-  popup._panel.addEventListener("popupshown", onShown, false);
+  popup.on("popup-opened", onShown);
 
   ok(!popup.isOpen, "popup is not open");
 
@@ -44,9 +45,9 @@ function consoleOpened(HUD) {
   is(jsterm.lastInputValue, "window.foobarBug660806.location",
      "lastInputValue is correct, again");
 
-  executeSoon(function() {
+  executeSoon(function () {
     ok(!popup.isOpen, "popup is not open");
-    popup._panel.removeEventListener("popupshown", onShown, false);
+    popup.off("popup-opened", onShown);
     executeSoon(deferred.resolve);
   });
   return deferred.promise;

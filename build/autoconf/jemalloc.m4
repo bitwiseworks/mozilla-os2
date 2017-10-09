@@ -4,11 +4,11 @@ dnl file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 AC_DEFUN([MOZ_SUBCONFIGURE_JEMALLOC], [
 
-if test -z "$BUILDING_JS" -o -n "$JS_STANDALONE"; then
+if test "$MOZ_BUILD_APP" != js -o -n "$JS_STANDALONE"; then
 
   # Run jemalloc configure script
 
-  if test -z "$MOZ_NATIVE_JEMALLOC" -a "$MOZ_MEMORY" && test -n "$MOZ_JEMALLOC4" -o -n "$MOZ_REPLACE_MALLOC"; then
+  if test -z "$MOZ_SYSTEM_JEMALLOC" -a "$MOZ_MEMORY" && test -n "$MOZ_JEMALLOC4" -o -n "$MOZ_REPLACE_MALLOC"; then
     ac_configure_args="--build=$build --host=$target --enable-stats --with-jemalloc-prefix=je_ --disable-valgrind"
     # We're using memalign for _aligned_malloc in memory/build/mozmemory_wrap.c
     # on Windows, so just export memalign on all platforms.
@@ -34,6 +34,11 @@ if test -z "$BUILDING_JS" -o -n "$JS_STANDALONE"; then
         # Lazy lock initialization doesn't play well with lazy linking of
         # mozglue.dll on Windows XP (leads to startup crash), so disable it.
         ac_configure_args="$ac_configure_args --disable-lazy-lock"
+
+        # 64-bit Windows builds require a minimum 16-byte alignment.
+        if test -n "$HAVE_64BIT_BUILD"; then
+          ac_configure_args="$ac_configure_args --with-lg-tiny-min=4"
+        fi
       fi
     elif test "${OS_ARCH}" = Darwin; then
       # When building as a replace-malloc lib, disabling the zone allocator
@@ -71,6 +76,15 @@ if test -z "$BUILDING_JS" -o -n "$JS_STANDALONE"; then
     for var in AS CC CXX CPP LD AR RANLIB STRIP CPPFLAGS EXTRA_CFLAGS LDFLAGS; do
       ac_configure_args="$ac_configure_args $var='`eval echo \\${${var}}`'"
     done
+
+    # jemalloc's configure assumes that if you have CFLAGS set at all, you set
+    # all the flags necessary to configure jemalloc, which is not likely to be
+    # the case on Windows if someone is building Firefox with flags set in
+    # their mozconfig.
+    if test "$_MSC_VER"; then
+       ac_configure_args="$ac_configure_args CFLAGS="
+    fi
+
     # Force disable DSS support in jemalloc.
     ac_configure_args="$ac_configure_args ac_cv_func_sbrk=false"
 

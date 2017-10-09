@@ -3,67 +3,74 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsPKCS11Slot.h"
-#include "nsPK11TokenDB.h"
 
-#include "nsCOMPtr.h"
-#include "nsISupportsArray.h"
-#include "nsString.h"
-#include "nsReadableUtils.h"
-#include "nsCRT.h"
+#include <string.h>
 
-#include "secmod.h"
-
+#include "mozilla/Casting.h"
 #include "mozilla/Logging.h"
+#include "mozilla/Telemetry.h"
+#include "mozilla/Unused.h"
+#include "nsCOMPtr.h"
+#include "nsIMutableArray.h"
+#include "nsPK11TokenDB.h"
+#include "nsPromiseFlatString.h"
+#include "secmod.h"
 
 using mozilla::LogLevel;
 
-extern PRLogModuleInfo* gPIPNSSLog;
+extern mozilla::LazyLogModule gPIPNSSLog;
 
 NS_IMPL_ISUPPORTS(nsPKCS11Slot, nsIPKCS11Slot)
 
-nsPKCS11Slot::nsPKCS11Slot(PK11SlotInfo *slot)
+nsPKCS11Slot::nsPKCS11Slot(PK11SlotInfo* slot)
 {
+  MOZ_ASSERT(slot);
+
   nsNSSShutDownPreventionLock locker;
   if (isAlreadyShutDown())
     return;
 
-  PK11_ReferenceSlot(slot);
-  mSlot = slot;
+  mSlot.reset(PK11_ReferenceSlot(slot));
   mSeries = PK11_GetSlotSeries(slot);
-  refreshSlotInfo();
+  Unused << refreshSlotInfo(locker);
 }
 
-void
-nsPKCS11Slot::refreshSlotInfo()
+nsresult
+nsPKCS11Slot::refreshSlotInfo(const nsNSSShutDownPreventionLock& /*proofOfLock*/)
 {
-  CK_SLOT_INFO slot_info;
-  if (PK11_GetSlotInfo(mSlot, &slot_info) == SECSuccess) {
-    // Set the Description field
-    const char *ccDesc = (const char*)slot_info.slotDescription;
-    const nsACString &cDesc = Substring(
-      ccDesc, 
-      ccDesc+PL_strnlen(ccDesc, sizeof(slot_info.slotDescription)));
-    mSlotDesc = NS_ConvertUTF8toUTF16(cDesc);
-    mSlotDesc.Trim(" ", false, true);
-    // Set the Manufacturer field
-    const char *ccManID = (const char*)slot_info.manufacturerID;
-    const nsACString &cManID = Substring(
-      ccManID, 
-      ccManID+PL_strnlen(ccManID, sizeof(slot_info.manufacturerID)));
-    mSlotManID = NS_ConvertUTF8toUTF16(cManID);
-    mSlotManID.Trim(" ", false, true);
-    // Set the Hardware Version field
-    mSlotHWVersion = EmptyString();
-    mSlotHWVersion.AppendInt(slot_info.hardwareVersion.major);
-    mSlotHWVersion.Append('.');
-    mSlotHWVersion.AppendInt(slot_info.hardwareVersion.minor);
-    // Set the Firmware Version field
-    mSlotFWVersion = EmptyString();
-    mSlotFWVersion.AppendInt(slot_info.firmwareVersion.major);
-    mSlotFWVersion.Append('.');
-    mSlotFWVersion.AppendInt(slot_info.firmwareVersion.minor);
+  CK_SLOT_INFO slotInfo;
+  nsresult rv = MapSECStatus(PK11_GetSlotInfo(mSlot.get(), &slotInfo));
+  if (NS_FAILED(rv)) {
+    return rv;
   }
 
+  // Set the Description field
+  const char* ccDesc =
+    mozilla::BitwiseCast<char*, CK_UTF8CHAR*>(slotInfo.slotDescription);
+  mSlotDesc.Assign(ccDesc, strnlen(ccDesc, sizeof(slotInfo.slotDescription)));
+  mSlotDesc.Trim(" ", false, true);
+
+  // Set the Manufacturer field
+  const char* ccManID =
+    mozilla::BitwiseCast<char*, CK_UTF8CHAR*>(slotInfo.manufacturerID);
+  mSlotManufacturerID.Assign(
+    ccManID,
+    strnlen(ccManID, sizeof(slotInfo.manufacturerID)));
+  mSlotManufacturerID.Trim(" ", false, true);
+
+  // Set the Hardware Version field
+  mSlotHWVersion.Truncate();
+  mSlotHWVersion.AppendInt(slotInfo.hardwareVersion.major);
+  mSlotHWVersion.Append('.');
+  mSlotHWVersion.AppendInt(slotInfo.hardwareVersion.minor);
+
+  // Set the Firmware Version field
+  mSlotFWVersion.Truncate();
+  mSlotFWVersion.AppendInt(slotInfo.firmwareVersion.major);
+  mSlotFWVersion.Append('.');
+  mSlotFWVersion.AppendInt(slotInfo.firmwareVersion.minor);
+
+  return NS_OK;
 }
 
 nsPKCS11Slot::~nsPKCS11Slot()
@@ -73,160 +80,163 @@ nsPKCS11Slot::~nsPKCS11Slot()
     return;
   }
   destructorSafeDestroyNSSReference();
-  shutdown(calledFromObject);
+  shutdown(ShutdownCalledFrom::Object);
 }
 
-void nsPKCS11Slot::virtualDestroyNSSReference()
+void
+nsPKCS11Slot::virtualDestroyNSSReference()
 {
   destructorSafeDestroyNSSReference();
 }
 
-void nsPKCS11Slot::destructorSafeDestroyNSSReference()
+void
+nsPKCS11Slot::destructorSafeDestroyNSSReference()
 {
-  if (mSlot) {
-    PK11_FreeSlot(mSlot);
-    mSlot = nullptr;
-  }
+  mSlot = nullptr;
 }
 
-NS_IMETHODIMP 
-nsPKCS11Slot::GetName(char16_t **aName)
+nsresult
+nsPKCS11Slot::GetAttributeHelper(const nsACString& attribute,
+                         /*out*/ nsACString& xpcomOutParam)
 {
   nsNSSShutDownPreventionLock locker;
-  if (isAlreadyShutDown())
+  if (isAlreadyShutDown()) {
     return NS_ERROR_NOT_AVAILABLE;
-
-  char *csn = PK11_GetSlotName(mSlot);
-  if (*csn) {
-    *aName = ToNewUnicode(NS_ConvertUTF8toUTF16(csn));
-  } else if (PK11_HasRootCerts(mSlot)) {
-    // This is a workaround to an Root Module bug - the root certs module has
-    // no slot name.  Not bothering to localize, because this is a workaround
-    // and for now all the slot names returned by NSS are char * anyway.
-    *aName = ToNewUnicode(NS_LITERAL_STRING("Root Certificates"));
-  } else {
-    // same as above, this is a catch-all
-    *aName = ToNewUnicode(NS_LITERAL_STRING("Unnamed Slot"));
-  }
-  if (!*aName) return NS_ERROR_OUT_OF_MEMORY;
-  return NS_OK;
-}
-
-NS_IMETHODIMP 
-nsPKCS11Slot::GetDesc(char16_t **aDesc)
-{
-  nsNSSShutDownPreventionLock locker;
-  if (isAlreadyShutDown())
-    return NS_ERROR_NOT_AVAILABLE;
-
-  if (mSeries != PK11_GetSlotSeries(mSlot)) {
-    refreshSlotInfo();
   }
 
-  *aDesc = ToNewUnicode(mSlotDesc);
-  if (!*aDesc) return NS_ERROR_OUT_OF_MEMORY;
-  return NS_OK;
-}
-
-NS_IMETHODIMP 
-nsPKCS11Slot::GetManID(char16_t **aManID)
-{
-  if (mSeries != PK11_GetSlotSeries(mSlot)) {
-    refreshSlotInfo();
-  }
-  *aManID = ToNewUnicode(mSlotManID);
-  if (!*aManID) return NS_ERROR_OUT_OF_MEMORY;
-  return NS_OK;
-}
-
-NS_IMETHODIMP 
-nsPKCS11Slot::GetHWVersion(char16_t **aHWVersion)
-{
-  if (mSeries != PK11_GetSlotSeries(mSlot)) {
-    refreshSlotInfo();
-  }
-  *aHWVersion = ToNewUnicode(mSlotHWVersion);
-  if (!*aHWVersion) return NS_ERROR_OUT_OF_MEMORY;
-  return NS_OK;
-}
-
-NS_IMETHODIMP 
-nsPKCS11Slot::GetFWVersion(char16_t **aFWVersion)
-{
-  if (mSeries != PK11_GetSlotSeries(mSlot)) {
-    refreshSlotInfo();
-  }
-  *aFWVersion = ToNewUnicode(mSlotFWVersion);
-  if (!*aFWVersion) return NS_ERROR_OUT_OF_MEMORY;
-  return NS_OK;
-}
-
-NS_IMETHODIMP 
-nsPKCS11Slot::GetToken(nsIPK11Token **_retval)
-{
-  nsNSSShutDownPreventionLock locker;
-  if (isAlreadyShutDown())
-    return NS_ERROR_NOT_AVAILABLE;
-
-  nsCOMPtr<nsIPK11Token> token = new nsPK11Token(mSlot);
-  token.forget(_retval);
-  return NS_OK;
-}
-
-NS_IMETHODIMP 
-nsPKCS11Slot::GetTokenName(char16_t **aName)
-{
-  nsNSSShutDownPreventionLock locker;
-  if (isAlreadyShutDown())
-    return NS_ERROR_NOT_AVAILABLE;
-
-  if (!PK11_IsPresent(mSlot)) {
-    *aName = nullptr;
-    return NS_OK;
+  if (PK11_GetSlotSeries(mSlot.get()) != mSeries) {
+    nsresult rv = refreshSlotInfo(locker);
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
   }
 
-  if (mSeries != PK11_GetSlotSeries(mSlot)) {
-    refreshSlotInfo();
-  }
-
-
-  *aName = ToNewUnicode(NS_ConvertUTF8toUTF16(PK11_GetTokenName(mSlot)));
-  if (!*aName) return NS_ERROR_OUT_OF_MEMORY;
+  xpcomOutParam = attribute;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsPKCS11Slot::GetStatus(uint32_t *_retval)
+nsPKCS11Slot::GetName(/*out*/ nsACString& name)
 {
   nsNSSShutDownPreventionLock locker;
   if (isAlreadyShutDown())
     return NS_ERROR_NOT_AVAILABLE;
 
-  if (PK11_IsDisabled(mSlot))
+  // |csn| is non-owning.
+  char* csn = PK11_GetSlotName(mSlot.get());
+  if (csn && *csn) {
+    name = csn;
+  } else if (PK11_HasRootCerts(mSlot.get())) {
+    // This is a workaround to an Root Module bug - the root certs module has
+    // no slot name.  Not bothering to localize, because this is a workaround
+    // and for now all the slot names returned by NSS are char * anyway.
+    name = NS_LITERAL_CSTRING("Root Certificates");
+  } else {
+    // same as above, this is a catch-all
+    name = NS_LITERAL_CSTRING("Unnamed Slot");
+  }
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsPKCS11Slot::GetDesc(/*out*/ nsACString& desc)
+{
+  return GetAttributeHelper(mSlotDesc, desc);
+}
+
+NS_IMETHODIMP
+nsPKCS11Slot::GetManID(/*out*/ nsACString& manufacturerID)
+{
+  return GetAttributeHelper(mSlotManufacturerID, manufacturerID);
+}
+
+NS_IMETHODIMP
+nsPKCS11Slot::GetHWVersion(/*out*/ nsACString& hwVersion)
+{
+  return GetAttributeHelper(mSlotHWVersion, hwVersion);
+}
+
+NS_IMETHODIMP
+nsPKCS11Slot::GetFWVersion(/*out*/ nsACString& fwVersion)
+{
+  return GetAttributeHelper(mSlotFWVersion, fwVersion);
+}
+
+NS_IMETHODIMP
+nsPKCS11Slot::GetToken(nsIPK11Token** _retval)
+{
+  NS_ENSURE_ARG_POINTER(_retval);
+
+  nsNSSShutDownPreventionLock locker;
+  if (isAlreadyShutDown())
+    return NS_ERROR_NOT_AVAILABLE;
+
+  nsCOMPtr<nsIPK11Token> token = new nsPK11Token(mSlot.get());
+  token.forget(_retval);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsPKCS11Slot::GetTokenName(/*out*/ nsACString& tokenName)
+{
+  nsNSSShutDownPreventionLock locker;
+  if (isAlreadyShutDown())
+    return NS_ERROR_NOT_AVAILABLE;
+
+  if (!PK11_IsPresent(mSlot.get())) {
+    tokenName.SetIsVoid(true);
+    return NS_OK;
+  }
+
+  if (PK11_GetSlotSeries(mSlot.get()) != mSeries) {
+    nsresult rv = refreshSlotInfo(locker);
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
+  }
+
+  tokenName = PK11_GetTokenName(mSlot.get());
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsPKCS11Slot::GetStatus(uint32_t* _retval)
+{
+  NS_ENSURE_ARG_POINTER(_retval);
+
+  nsNSSShutDownPreventionLock locker;
+  if (isAlreadyShutDown())
+    return NS_ERROR_NOT_AVAILABLE;
+
+  if (PK11_IsDisabled(mSlot.get())) {
     *_retval = SLOT_DISABLED;
-  else if (!PK11_IsPresent(mSlot))
+  } else if (!PK11_IsPresent(mSlot.get())) {
     *_retval = SLOT_NOT_PRESENT;
-  else if (PK11_NeedLogin(mSlot) && PK11_NeedUserInit(mSlot))
+  } else if (PK11_NeedLogin(mSlot.get()) && PK11_NeedUserInit(mSlot.get())) {
     *_retval = SLOT_UNINITIALIZED;
-  else if (PK11_NeedLogin(mSlot) && !PK11_IsLoggedIn(mSlot, nullptr))
+  } else if (PK11_NeedLogin(mSlot.get()) &&
+             !PK11_IsLoggedIn(mSlot.get(), nullptr)) {
     *_retval = SLOT_NOT_LOGGED_IN;
-  else if (PK11_NeedLogin(mSlot))
+  } else if (PK11_NeedLogin(mSlot.get())) {
     *_retval = SLOT_LOGGED_IN;
-  else
+  } else {
     *_retval = SLOT_READY;
+  }
   return NS_OK;
 }
 
 NS_IMPL_ISUPPORTS(nsPKCS11Module, nsIPKCS11Module)
 
-nsPKCS11Module::nsPKCS11Module(SECMODModule *module)
+nsPKCS11Module::nsPKCS11Module(SECMODModule* module)
 {
+  MOZ_ASSERT(module);
+
   nsNSSShutDownPreventionLock locker;
   if (isAlreadyShutDown())
     return;
 
-  SECMOD_ReferenceModule(module);
-  mModule = module;
+  mModule.reset(SECMOD_ReferenceModule(module));
 }
 
 nsPKCS11Module::~nsPKCS11Module()
@@ -236,120 +246,118 @@ nsPKCS11Module::~nsPKCS11Module()
     return;
   }
   destructorSafeDestroyNSSReference();
-  shutdown(calledFromObject);
+  shutdown(ShutdownCalledFrom::Object);
 }
 
-void nsPKCS11Module::virtualDestroyNSSReference()
+void
+nsPKCS11Module::virtualDestroyNSSReference()
 {
   destructorSafeDestroyNSSReference();
 }
 
-void nsPKCS11Module::destructorSafeDestroyNSSReference()
+void
+nsPKCS11Module::destructorSafeDestroyNSSReference()
 {
-  if (mModule) {
-    SECMOD_DestroyModule(mModule);
-    mModule = nullptr;
-  }
+  mModule = nullptr;
 }
 
-NS_IMETHODIMP 
-nsPKCS11Module::GetName(char16_t **aName)
+NS_IMETHODIMP
+nsPKCS11Module::GetName(/*out*/ nsACString& name)
 {
   nsNSSShutDownPreventionLock locker;
   if (isAlreadyShutDown())
     return NS_ERROR_NOT_AVAILABLE;
 
-  *aName = ToNewUnicode(NS_ConvertUTF8toUTF16(mModule->commonName));
+  name = mModule->commonName;
   return NS_OK;
 }
 
-NS_IMETHODIMP 
-nsPKCS11Module::GetLibName(char16_t **aName)
+NS_IMETHODIMP
+nsPKCS11Module::GetLibName(/*out*/ nsACString& libName)
 {
   nsNSSShutDownPreventionLock locker;
   if (isAlreadyShutDown())
     return NS_ERROR_NOT_AVAILABLE;
 
-  if ( mModule->dllName ) {
-    *aName = ToNewUnicode(NS_ConvertUTF8toUTF16(mModule->dllName));
+  if (mModule->dllName) {
+    libName = mModule->dllName;
   } else {
-    *aName = nullptr;
+    libName.SetIsVoid(true);
   }
   return NS_OK;
 }
 
-NS_IMETHODIMP 
-nsPKCS11Module::FindSlotByName(const char16_t *aName,
-                               nsIPKCS11Slot **_retval)
+NS_IMETHODIMP
+nsPKCS11Module::FindSlotByName(const nsACString& name,
+                       /*out*/ nsIPKCS11Slot** _retval)
 {
+  NS_ENSURE_ARG_POINTER(_retval);
+
   nsNSSShutDownPreventionLock locker;
   if (isAlreadyShutDown())
     return NS_ERROR_NOT_AVAILABLE;
 
-  char *asciiname = ToNewUTF8String(nsDependentString(aName));
-  MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("Getting \"%s\"\n", asciiname));
-  PK11SlotInfo *slotinfo = nullptr;
-  PK11SlotList *slotList = PK11_FindSlotsByNames(mModule->dllName, 
-        asciiname /* slotName */, nullptr /* token Name */, false);
+  const nsCString& flatName = PromiseFlatCString(name);
+  MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("Getting \"%s\"", flatName.get()));
+  UniquePK11SlotInfo slotInfo;
+  UniquePK11SlotList slotList(PK11_FindSlotsByNames(mModule->dllName,
+                                                    flatName.get() /*slotName*/,
+                                                    nullptr /*tokenName*/,
+                                                    false));
   if (!slotList) {
     /* name must be the token name */
-    slotList = PK11_FindSlotsByNames(mModule->dllName, 
-        nullptr /*slot Name */, asciiname /* token Name */, false);
+    slotList.reset(PK11_FindSlotsByNames(mModule->dllName, nullptr /*slotName*/,
+                                         flatName.get() /*tokenName*/, false));
   }
-  if (slotList) {
-    /* should only be one */
-    if (slotList->head && slotList->head->slot) {
-      slotinfo =  PK11_ReferenceSlot(slotList->head->slot);
-    }
-    PK11_FreeSlotList(slotList);
+  if (slotList && slotList->head && slotList->head->slot) {
+    slotInfo.reset(PK11_ReferenceSlot(slotList->head->slot));
   }
-  if (!slotinfo) {
+  if (!slotInfo) {
     // workaround - the builtin module has no name
-    if (!asciiname) {
-      return NS_ERROR_FAILURE;
-    } else if (nsCRT::strcmp(asciiname, "Root Certificates") == 0) {
-      slotinfo = PK11_ReferenceSlot(mModule->slots[0]);
-    } else {
-      // give up
-      free(asciiname);
+    if (!flatName.EqualsLiteral("Root Certificates")) {
+      // Give up.
       return NS_ERROR_FAILURE;
     }
-  } 
-  free(asciiname);
-  nsCOMPtr<nsIPKCS11Slot> slot = new nsPKCS11Slot(slotinfo);
-  PK11_FreeSlot(slotinfo);
+
+    slotInfo.reset(PK11_ReferenceSlot(mModule->slots[0]));
+  }
+
+  nsCOMPtr<nsIPKCS11Slot> slot = new nsPKCS11Slot(slotInfo.get());
   slot.forget(_retval);
   return NS_OK;
 }
 
-NS_IMETHODIMP 
-nsPKCS11Module::ListSlots(nsIEnumerator **_retval)
+NS_IMETHODIMP
+nsPKCS11Module::ListSlots(nsISimpleEnumerator** _retval)
 {
-  nsNSSShutDownPreventionLock locker;
-  if (isAlreadyShutDown())
-    return NS_ERROR_NOT_AVAILABLE;
+  NS_ENSURE_ARG_POINTER(_retval);
 
-  nsresult rv = NS_OK;
-  int i;
-  /* get isupports array */
-  nsCOMPtr<nsISupportsArray> array;
-  rv = NS_NewISupportsArray(getter_AddRefs(array));
-  if (NS_FAILED(rv)) return rv;
+  nsNSSShutDownPreventionLock locker;
+  if (isAlreadyShutDown()) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  nsCOMPtr<nsIMutableArray> array = do_CreateInstance(NS_ARRAY_CONTRACTID);
+  if (!array) {
+    return NS_ERROR_FAILURE;
+  }
+
   /* applications which allow new slot creation (which Firefox now does
    * since it uses the WaitForSlotEvent call) need to hold the
    * ModuleList Read lock to prevent the slot array from changing out
    * from under it. */
-  SECMODListLock *lock = SECMOD_GetDefaultModuleListLock();
-  SECMOD_GetReadLock(lock);
-  for (i=0; i<mModule->slotCount; i++) {
+  AutoSECMODListReadLock lock;
+  for (int i = 0; i < mModule->slotCount; i++) {
     if (mModule->slots[i]) {
       nsCOMPtr<nsIPKCS11Slot> slot = new nsPKCS11Slot(mModule->slots[i]);
-      array->AppendElement(slot);
+      nsresult rv = array->AppendElement(slot, false);
+      if (NS_FAILED(rv)) {
+        return rv;
+      }
     }
   }
-  SECMOD_ReleaseReadLock(lock);
-  rv = array->Enumerate(_retval);
-  return rv;
+
+  return array->Enumerate(_retval);
 }
 
 NS_IMPL_ISUPPORTS(nsPKCS11ModuleDB, nsIPKCS11ModuleDB, nsICryptoFIPSInfo)
@@ -360,44 +368,73 @@ nsPKCS11ModuleDB::nsPKCS11ModuleDB()
 
 nsPKCS11ModuleDB::~nsPKCS11ModuleDB()
 {
+  nsNSSShutDownPreventionLock locker;
+  if (isAlreadyShutDown()) {
+    return;
+  }
+
+  shutdown(ShutdownCalledFrom::Object);
 }
 
-NS_IMETHODIMP 
-nsPKCS11ModuleDB::GetInternal(nsIPKCS11Module **_retval)
+NS_IMETHODIMP
+nsPKCS11ModuleDB::GetInternal(nsIPKCS11Module** _retval)
 {
-  nsNSSShutDownPreventionLock locker;
-  SECMODModule *nssMod = 
-    SECMOD_CreateModule(nullptr, SECMOD_INT_NAME, nullptr, SECMOD_INT_FLAGS);
-  nsCOMPtr<nsIPKCS11Module> module = new nsPKCS11Module(nssMod);
-  SECMOD_DestroyModule(nssMod);
-  module.forget(_retval);
-  return NS_OK;
-}
+  NS_ENSURE_ARG_POINTER(_retval);
 
-NS_IMETHODIMP 
-nsPKCS11ModuleDB::GetInternalFIPS(nsIPKCS11Module **_retval)
-{
   nsNSSShutDownPreventionLock locker;
-  SECMODModule *nssMod = 
-    SECMOD_CreateModule(nullptr, SECMOD_FIPS_NAME, nullptr, SECMOD_FIPS_FLAGS);
-  nsCOMPtr<nsIPKCS11Module> module = new nsPKCS11Module(nssMod);
-  SECMOD_DestroyModule(nssMod);
-  module.forget(_retval);
-  return NS_OK;
-}
+  if (isAlreadyShutDown()) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
 
-NS_IMETHODIMP 
-nsPKCS11ModuleDB::FindModuleByName(const char16_t *aName,
-                                   nsIPKCS11Module **_retval)
-{
-  nsNSSShutDownPreventionLock locker;
-  NS_ConvertUTF16toUTF8 aUtf8Name(aName);
-  SECMODModule *mod =
-    SECMOD_FindModule(const_cast<char *>(aUtf8Name.get()));
-  if (!mod)
+  UniqueSECMODModule nssMod(
+    SECMOD_CreateModule(nullptr, SECMOD_INT_NAME, nullptr, SECMOD_INT_FLAGS));
+  if (!nssMod) {
     return NS_ERROR_FAILURE;
-  nsCOMPtr<nsIPKCS11Module> module = new nsPKCS11Module(mod);
-  SECMOD_DestroyModule(mod);
+  }
+
+  nsCOMPtr<nsIPKCS11Module> module = new nsPKCS11Module(nssMod.get());
+  module.forget(_retval);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsPKCS11ModuleDB::GetInternalFIPS(nsIPKCS11Module** _retval)
+{
+  NS_ENSURE_ARG_POINTER(_retval);
+
+  nsNSSShutDownPreventionLock locker;
+  if (isAlreadyShutDown()) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  UniqueSECMODModule nssMod(
+    SECMOD_CreateModule(nullptr, SECMOD_FIPS_NAME, nullptr, SECMOD_FIPS_FLAGS));
+  if (!nssMod) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsCOMPtr<nsIPKCS11Module> module = new nsPKCS11Module(nssMod.get());
+  module.forget(_retval);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsPKCS11ModuleDB::FindModuleByName(const nsACString& name,
+                           /*out*/ nsIPKCS11Module** _retval)
+{
+  NS_ENSURE_ARG_POINTER(_retval);
+
+  nsNSSShutDownPreventionLock locker;
+  if (isAlreadyShutDown()) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  UniqueSECMODModule mod(SECMOD_FindModule(PromiseFlatCString(name).get()));
+  if (!mod) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsCOMPtr<nsIPKCS11Module> module = new nsPKCS11Module(mod.get());
   module.forget(_retval);
   return NS_OK;
 }
@@ -405,92 +442,128 @@ nsPKCS11ModuleDB::FindModuleByName(const char16_t *aName,
 /* This is essentially the same as nsIPK11Token::findTokenByName, except
  * that it returns an nsIPKCS11Slot, which may be desired.
  */
-NS_IMETHODIMP 
-nsPKCS11ModuleDB::FindSlotByName(const char16_t *aName,
-                                 nsIPKCS11Slot **_retval)
+NS_IMETHODIMP
+nsPKCS11ModuleDB::FindSlotByName(const nsACString& name,
+                         /*out*/ nsIPKCS11Slot** _retval)
 {
+  NS_ENSURE_ARG_POINTER(_retval);
+
   nsNSSShutDownPreventionLock locker;
-  NS_ConvertUTF16toUTF8 aUtf8Name(aName);
-  PK11SlotInfo *slotinfo =
-   PK11_FindSlotByName(const_cast<char*>(aUtf8Name.get()));
-  if (!slotinfo)
+  if (isAlreadyShutDown()) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  UniquePK11SlotInfo slotInfo(
+    PK11_FindSlotByName(PromiseFlatCString(name).get()));
+  if (!slotInfo) {
     return NS_ERROR_FAILURE;
-  nsCOMPtr<nsIPKCS11Slot> slot = new nsPKCS11Slot(slotinfo);
-  PK11_FreeSlot(slotinfo);
+  }
+
+  nsCOMPtr<nsIPKCS11Slot> slot = new nsPKCS11Slot(slotInfo.get());
   slot.forget(_retval);
   return NS_OK;
 }
 
-NS_IMETHODIMP 
-nsPKCS11ModuleDB::ListModules(nsIEnumerator **_retval)
+NS_IMETHODIMP
+nsPKCS11ModuleDB::ListModules(nsISimpleEnumerator** _retval)
 {
+  NS_ENSURE_ARG_POINTER(_retval);
+
   nsNSSShutDownPreventionLock locker;
-  nsresult rv = NS_OK;
-  /* get isupports array */
-  nsCOMPtr<nsISupportsArray> array;
-  rv = NS_NewISupportsArray(getter_AddRefs(array));
-  if (NS_FAILED(rv)) return rv;
-  /* get the default list of modules */
-  SECMODModuleList *list = SECMOD_GetDefaultModuleList();
+  if (isAlreadyShutDown()) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  nsCOMPtr<nsIMutableArray> array = do_CreateInstance(NS_ARRAY_CONTRACTID);
+  if (!array) {
+    return NS_ERROR_FAILURE;
+  }
+
   /* lock down the list for reading */
-  SECMODListLock *lock = SECMOD_GetDefaultModuleListLock();
-  SECMOD_GetReadLock(lock);
-  while (list) {
+  AutoSECMODListReadLock lock;
+  for (SECMODModuleList* list = SECMOD_GetDefaultModuleList(); list;
+       list = list->next) {
     nsCOMPtr<nsIPKCS11Module> module = new nsPKCS11Module(list->module);
-    array->AppendElement(module);
-    list = list->next;
+    nsresult rv = array->AppendElement(module, false);
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
   }
+
   /* Get the modules in the database that didn't load */
-  list = SECMOD_GetDeadModuleList();
-  while (list) {
+  for (SECMODModuleList* list = SECMOD_GetDeadModuleList(); list;
+       list = list->next) {
     nsCOMPtr<nsIPKCS11Module> module = new nsPKCS11Module(list->module);
-    array->AppendElement(module);
-    list = list->next;
+    nsresult rv = array->AppendElement(module, false);
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
   }
-  SECMOD_ReleaseReadLock(lock);
-  rv = array->Enumerate(_retval);
-  return rv;
+
+  return array->Enumerate(_retval);
 }
 
-NS_IMETHODIMP nsPKCS11ModuleDB::GetCanToggleFIPS(bool *aCanToggleFIPS)
+NS_IMETHODIMP
+nsPKCS11ModuleDB::GetCanToggleFIPS(bool* aCanToggleFIPS)
 {
+  NS_ENSURE_ARG_POINTER(aCanToggleFIPS);
+
   nsNSSShutDownPreventionLock locker;
+  if (isAlreadyShutDown()) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
   *aCanToggleFIPS = SECMOD_CanDeleteInternalModule();
   return NS_OK;
 }
 
 
-NS_IMETHODIMP nsPKCS11ModuleDB::ToggleFIPSMode()
+NS_IMETHODIMP
+nsPKCS11ModuleDB::ToggleFIPSMode()
 {
   nsNSSShutDownPreventionLock locker;
-  // The way to toggle FIPS mode in NSS is extremely obscure.
-  // Basically, we delete the internal module, and voila it
-  // gets replaced with the opposite module, ie if it was 
-  // FIPS before, then it becomes non-FIPS next.
-  SECMODModule *internal;
+  if (isAlreadyShutDown()) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
 
-  // This function returns us a pointer to a local copy of 
-  // the internal module stashed in NSS.  We don't want to
-  // delete it since it will cause much pain in NSS.
-  internal = SECMOD_GetInternalModule();
-  if (!internal)
+  // The way to toggle FIPS mode in NSS is extremely obscure. Basically, we
+  // delete the internal module, and it gets replaced with the opposite module
+  // (i.e. if it was FIPS before, then it becomes non-FIPS next).
+  // SECMOD_GetInternalModule() returns a pointer to a local copy of the
+  // internal module stashed in NSS.  We don't want to delete it since it will
+  // cause much pain in NSS.
+  SECMODModule* internal = SECMOD_GetInternalModule();
+  if (!internal) {
     return NS_ERROR_FAILURE;
+  }
 
-  SECStatus srv = SECMOD_DeleteInternalModule(internal->commonName);
-  if (srv != SECSuccess)
+  if (SECMOD_DeleteInternalModule(internal->commonName) != SECSuccess) {
     return NS_ERROR_FAILURE;
+  }
+
+  if (PK11_IsFIPS()) {
+    Telemetry::Accumulate(Telemetry::FIPS_ENABLED, true);
+  }
 
   return NS_OK;
 }
 
-NS_IMETHODIMP nsPKCS11ModuleDB::GetIsFIPSEnabled(bool *aIsFIPSEnabled)
+NS_IMETHODIMP
+nsPKCS11ModuleDB::GetIsFIPSEnabled(bool* aIsFIPSEnabled)
 {
+  NS_ENSURE_ARG_POINTER(aIsFIPSEnabled);
+
   nsNSSShutDownPreventionLock locker;
+  if (isAlreadyShutDown()) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
   *aIsFIPSEnabled = PK11_IsFIPS();
   return NS_OK;
 }
 
-NS_IMETHODIMP nsPKCS11ModuleDB::GetIsFIPSModeActive(bool *aIsFIPSModeActive)
+NS_IMETHODIMP
+nsPKCS11ModuleDB::GetIsFIPSModeActive(bool* aIsFIPSModeActive)
 {
   return GetIsFIPSEnabled(aIsFIPSModeActive);
 }

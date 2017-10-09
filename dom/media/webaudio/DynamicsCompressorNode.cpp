@@ -6,6 +6,7 @@
 
 #include "DynamicsCompressorNode.h"
 #include "mozilla/dom/DynamicsCompressorNodeBinding.h"
+#include "nsAutoPtr.h"
 #include "AudioNodeEngine.h"
 #include "AudioNodeStream.h"
 #include "AudioDestinationNode.h"
@@ -84,11 +85,11 @@ public:
     }
   }
 
-  virtual void ProcessBlock(AudioNodeStream* aStream,
-                            GraphTime aFrom,
-                            const AudioBlock& aInput,
-                            AudioBlock* aOutput,
-                            bool* aFinished) override
+  void ProcessBlock(AudioNodeStream* aStream,
+                    GraphTime aFrom,
+                    const AudioBlock& aInput,
+                    AudioBlock* aOutput,
+                    bool* aFinished) override
   {
     if (aInput.IsNull()) {
       // Just output silence
@@ -122,7 +123,7 @@ public:
                                    mCompressor->parameterValue(DynamicsCompressor::ParamReduction));
   }
 
-  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override
+  size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override
   {
     // Not owned:
     // - mDestination (probably)
@@ -133,7 +134,7 @@ public:
     return amount;
   }
 
-  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override
+  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override
   {
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }
@@ -143,7 +144,7 @@ private:
   {
     MOZ_ASSERT(!NS_IsMainThread());
 
-    class Command final : public nsRunnable
+    class Command final : public Runnable
     {
     public:
       Command(AudioNodeStream* aStream, float aReduction)
@@ -200,7 +201,8 @@ DynamicsCompressorNode::DynamicsCompressorNode(AudioContext* aContext)
 {
   DynamicsCompressorNodeEngine* engine = new DynamicsCompressorNodeEngine(this, aContext->Destination());
   mStream = AudioNodeStream::Create(aContext, engine,
-                                    AudioNodeStream::NO_STREAM_FLAGS);
+                                    AudioNodeStream::NO_STREAM_FLAGS,
+                                    aContext->Graph());
 }
 
 DynamicsCompressorNode::~DynamicsCompressorNode()

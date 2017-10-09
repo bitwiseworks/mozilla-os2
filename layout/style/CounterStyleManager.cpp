@@ -18,6 +18,8 @@
 #include "nsTArray.h"
 #include "nsTHashtable.h"
 #include "nsUnicodeProperties.h"
+#include "mozilla/StyleSetHandle.h"
+#include "mozilla/StyleSetHandleInlines.h"
 
 namespace mozilla {
 
@@ -121,7 +123,7 @@ GetAlphabeticCounterText(CounterValue aOrdinal,
   // The precise length of this array should be
   // ceil(log((double) aOrdinal / n * (n - 1) + 1) / log(n)).
   // The max length is slightly smaller than which defined below.
-  nsAutoTArray<int32_t, std::numeric_limits<CounterValue>::digits> indexes;
+  AutoTArray<int32_t, std::numeric_limits<CounterValue>::digits> indexes;
   while (aOrdinal > 0) {
     --aOrdinal;
     indexes.AppendElement(aOrdinal % n);
@@ -150,7 +152,7 @@ GetNumericCounterText(CounterValue aOrdinal,
   }
 
   auto n = aSymbols.Length();
-  nsAutoTArray<int32_t, std::numeric_limits<CounterValue>::digits> indexes;
+  AutoTArray<int32_t, std::numeric_limits<CounterValue>::digits> indexes;
   while (aOrdinal > 0) {
     indexes.AppendElement(aOrdinal % n);
     aOrdinal /= n;
@@ -218,7 +220,7 @@ DecimalToText(CounterValue aOrdinal, nsSubstring& aResult)
 // armenian needs 12 at most
 // hebrew may need more...
 
-#define NUM_BUF_SIZE 34 
+#define NUM_BUF_SIZE 34
 
 enum CJKIdeographicLang {
   CHINESE, KOREAN, JAPANESE
@@ -394,7 +396,7 @@ CJKIdeographicToText(CounterValue aOrdinal, nsSubstring& aResult,
 }
 
 #define HEBREW_GERESH       0x05F3
-static const char16_t gHebrewDigit[22] = 
+static const char16_t gHebrewDigit[22] =
 {
   //   1       2       3       4       5       6       7       8       9
   0x05D0, 0x05D1, 0x05D2, 0x05D3, 0x05D4, 0x05D5, 0x05D6, 0x05D7, 0x05D8,
@@ -445,11 +447,11 @@ HebrewToText(CounterValue aOrdinal, nsSubstring& aResult)
       } // if
       n3 -= n2;
     } // if
-  
-    // Process digit for 1 - 9 
+
+    // Process digit for 1 - 9
     if ( n3 > 0)
       thousandsGroup.Append(gHebrewDigit[n3-1]);
-    if (outputSep) 
+    if (outputSep)
       thousandsGroup.Append((char16_t)HEBREW_GERESH);
     if (allText.IsEmpty())
       allText = thousandsGroup;
@@ -576,18 +578,19 @@ public:
   friend class CounterStyleManager;
 
   // will be initialized by CounterStyleManager::InitializeBuiltinCounterStyles
-  MOZ_CONSTEXPR BuiltinCounterStyle()
+  constexpr BuiltinCounterStyle()
     : CounterStyle(NS_STYLE_LIST_STYLE_NONE)
   {
   }
 
 protected:
-  MOZ_CONSTEXPR explicit BuiltinCounterStyle(int32_t aStyle)
+  constexpr explicit BuiltinCounterStyle(int32_t aStyle)
     : CounterStyle(aStyle)
   {
   }
 
 public:
+  virtual void GetStyleName(nsSubstring& aResult) override;
   virtual void GetPrefix(nsSubstring& aResult) override;
   virtual void GetSuffix(nsSubstring& aResult) override;
   virtual void GetSpokenCounterText(CounterValue aOrdinal,
@@ -615,6 +618,16 @@ public:
 };
 
 /* virtual */ void
+BuiltinCounterStyle::GetStyleName(nsSubstring& aResult)
+{
+  MOZ_ASSERT(mStyle != NS_STYLE_LIST_STYLE_CUSTOM);
+  const nsAFlatCString& str =
+    nsCSSProps::ValueToKeyword(mStyle, nsCSSProps::kListStyleKTable);
+  MOZ_ASSERT(!str.IsEmpty());
+  aResult.Assign(NS_ConvertUTF8toUTF16(str));
+}
+
+/* virtual */ void
 BuiltinCounterStyle::GetPrefix(nsSubstring& aResult)
 {
   aResult.Truncate();
@@ -627,7 +640,7 @@ BuiltinCounterStyle::GetSuffix(nsSubstring& aResult)
     case NS_STYLE_LIST_STYLE_NONE:
       aResult.Truncate();
       break;
- 
+
     case NS_STYLE_LIST_STYLE_DISC:
     case NS_STYLE_LIST_STYLE_CIRCLE:
     case NS_STYLE_LIST_STYLE_SQUARE:
@@ -649,11 +662,11 @@ BuiltinCounterStyle::GetSuffix(nsSubstring& aResult)
     case NS_STYLE_LIST_STYLE_KOREAN_HANGUL_FORMAL:
     case NS_STYLE_LIST_STYLE_KOREAN_HANJA_INFORMAL:
     case NS_STYLE_LIST_STYLE_KOREAN_HANJA_FORMAL:
-      aResult.AssignLiteral(MOZ_UTF16(", "));
+      aResult.AssignLiteral(u", ");
       break;
 
     default:
-      aResult.AssignLiteral(MOZ_UTF16(". "));
+      aResult.AssignLiteral(u". ");
       break;
   }
 }
@@ -745,7 +758,7 @@ BuiltinCounterStyle::GetNegative(NegativeType& aResult)
       break;
 
     default:
-      aResult.before.AssignLiteral(MOZ_UTF16("-"));
+      aResult.before.AssignLiteral(u"-");
   }
   aResult.after.Truncate();
 }
@@ -934,10 +947,10 @@ BuiltinCounterStyle::GetInitialCounterText(CounterValue aOrdinal,
     case NS_STYLE_LIST_STYLE_KOREAN_HANJA_FORMAL:
       return CJKIdeographicToText(aOrdinal, aResult, gDataKoreanHanjaFormal);
 
-    case NS_STYLE_LIST_STYLE_HEBREW: 
+    case NS_STYLE_LIST_STYLE_HEBREW:
       aIsRTL = true;
       return HebrewToText(aOrdinal, aResult);
- 
+
     case NS_STYLE_LIST_STYLE_ETHIOPIC_NUMERIC:
       return EthiopicToText(aOrdinal, aResult);
 
@@ -953,7 +966,7 @@ private:
   ~DependentBuiltinCounterStyle() {}
 public:
   DependentBuiltinCounterStyle(int32_t aStyle, CounterStyleManager* aManager)
-    : BuiltinCounterStyle(aStyle), 
+    : BuiltinCounterStyle(aStyle),
       mManager(aManager)
   {
     NS_ASSERTION(IsDependentStyle(), "Not a dependent builtin style");
@@ -967,7 +980,7 @@ public:
   NS_IMETHOD_(MozExternalRefCountType) AddRef() override;
   NS_IMETHOD_(MozExternalRefCountType) Release() override;
 
-  void* operator new(size_t sz, nsPresContext* aPresContext) CPP_THROW_NEW
+  void* operator new(size_t sz, nsPresContext* aPresContext)
   {
     return aPresContext->PresShell()->AllocateByObjectID(
         eArenaObjectID_DependentBuiltinCounterStyle, sz);
@@ -1019,9 +1032,11 @@ class CustomCounterStyle final : public CounterStyle
 private:
   ~CustomCounterStyle() {}
 public:
-  CustomCounterStyle(CounterStyleManager* aManager,
+  CustomCounterStyle(const nsAString& aName,
+                     CounterStyleManager* aManager,
                      nsCSSCounterStyleRule* aRule)
     : CounterStyle(NS_STYLE_LIST_STYLE_CUSTOM),
+      mName(aName),
       mManager(aManager),
       mRule(aRule),
       mRuleGeneration(aRule->GetGeneration()),
@@ -1049,6 +1064,7 @@ public:
   nsCSSCounterStyleRule* GetRule() const { return mRule; }
   uint32_t GetRuleGeneration() const { return mRuleGeneration; }
 
+  virtual void GetStyleName(nsSubstring& aResult) override;
   virtual void GetPrefix(nsSubstring& aResult) override;
   virtual void GetSuffix(nsSubstring& aResult) override;
   virtual void GetSpokenCounterText(CounterValue aOrdinal,
@@ -1085,7 +1101,7 @@ public:
   NS_IMETHOD_(MozExternalRefCountType) AddRef() override;
   NS_IMETHOD_(MozExternalRefCountType) Release() override;
 
-  void* operator new(size_t sz, nsPresContext* aPresContext) CPP_THROW_NEW
+  void* operator new(size_t sz, nsPresContext* aPresContext)
   {
     return aPresContext->PresShell()->AllocateByObjectID(
         eArenaObjectID_CustomCounterStyle, sz);
@@ -1118,6 +1134,8 @@ private:
   CounterStyle* GetExtends();
   CounterStyle* GetExtendsRoot();
 
+  nsString mName;
+
   // CounterStyleManager should always overlive any CounterStyle as it
   // is owned by nsPresContext, and will be released after all nodes and
   // frames are released.
@@ -1127,7 +1145,8 @@ private:
   uint32_t mRuleGeneration;
 
   uint8_t mSystem;
-  uint8_t mSpeakAs;
+  // GetSpeakAs will ensure that private member mSpeakAs is initialized before used
+  MOZ_INIT_OUTSIDE_CTOR uint8_t mSpeakAs;
 
   enum {
     // loop detection
@@ -1213,6 +1232,12 @@ CustomCounterStyle::ResetDependentData()
 }
 
 /* virtual */ void
+CustomCounterStyle::GetStyleName(nsSubstring& aResult)
+{
+  aResult.Assign(mName);
+}
+
+/* virtual */ void
 CustomCounterStyle::GetPrefix(nsSubstring& aResult)
 {
   if (!(mFlags & FLAG_PREFIX_INITED)) {
@@ -1242,7 +1267,7 @@ CustomCounterStyle::GetSuffix(nsSubstring& aResult)
     } else if (IsExtendsSystem()) {
       GetExtends()->GetSuffix(mSuffix);
     } else {
-      mSuffix.AssignLiteral(MOZ_UTF16(". "));
+      mSuffix.AssignLiteral(u". ");
     }
   }
   aResult = mSuffix;
@@ -1301,7 +1326,7 @@ CustomCounterStyle::GetNegative(NegativeType& aResult)
         if (IsExtendsSystem()) {
           GetExtends()->GetNegative(mNegative);
         } else {
-          mNegative.before.AssignLiteral(MOZ_UTF16("-"));
+          mNegative.before.AssignLiteral(u"-");
           mNegative.after.Truncate();
         }
       }
@@ -1715,6 +1740,12 @@ AnonymousCounterStyle::AnonymousCounterStyle(const nsCSSValue::Array* aParams)
 }
 
 /* virtual */ void
+AnonymousCounterStyle::GetStyleName(nsAString& aResult)
+{
+  aResult.Truncate();
+}
+
+/* virtual */ void
 AnonymousCounterStyle::GetPrefix(nsAString& aResult)
 {
   aResult.Truncate();
@@ -1745,7 +1776,7 @@ AnonymousCounterStyle::IsBullet()
 /* virtual */ void
 AnonymousCounterStyle::GetNegative(NegativeType& aResult)
 {
-  aResult.before.AssignLiteral(MOZ_UTF16("-"));
+  aResult.before.AssignLiteral(u"-");
   aResult.after.Truncate();
 }
 
@@ -1844,19 +1875,6 @@ CounterStyle::IsDependentStyle() const
   }
 }
 
-static int32_t
-CountGraphemeClusters(const nsSubstring& aText)
-{
-  using mozilla::unicode::ClusterIterator;
-  ClusterIterator iter(aText.Data(), aText.Length());
-  int32_t result = 0;
-  while (!iter.AtEnd()) {
-    ++result;
-    iter.Next();
-  }
-  return result;
-}
-
 void
 CounterStyle::GetCounterText(CounterValue aOrdinal,
                              WritingMode aWritingMode,
@@ -1887,7 +1905,9 @@ CounterStyle::GetCounterText(CounterValue aOrdinal,
       GetPad(pad);
       // We have to calculate the difference here since suffix part of negative
       // sign may be appended to initialText later.
-      int32_t diff = pad.width - CountGraphemeClusters(initialText);
+      int32_t diff = pad.width -
+        unicode::CountGraphemeClusters(initialText.Data(),
+                                       initialText.Length());
       aResult.Truncate();
       if (useNegativeSign && aOrdinal < 0) {
         NegativeType negative;
@@ -2009,10 +2029,15 @@ CounterStyleManager::BuildCounterStyle(const nsSubstring& aName)
 
   // It is intentional that the predefined names are case-insensitive
   // but the user-defined names case-sensitive.
-  nsCSSCounterStyleRule* rule =
-    mPresContext->StyleSet()->CounterStyleRuleForName(aName);
+  // XXXheycam ServoStyleSets do not support custom counter styles yet.
+  StyleSetHandle styleSet = mPresContext->StyleSet();
+  NS_ASSERTION(styleSet->IsGecko(),
+               "stylo: ServoStyleSets do not support custom counter "
+               "styles yet");
+  nsCSSCounterStyleRule* rule = styleSet->IsGecko() ?
+    styleSet->AsGecko()->CounterStyleRuleForName(aName) : nullptr;
   if (rule) {
-    data = new (mPresContext) CustomCounterStyle(this, rule);
+    data = new (mPresContext) CustomCounterStyle(aName, this, rule);
   } else {
     int32_t type;
     nsCSSKeyword keyword = nsCSSKeywords::LookupKeyword(aName);
@@ -2050,8 +2075,13 @@ CounterStyleManager::NotifyRuleChanged()
     RefPtr<CounterStyle>& style = iter.Data();
     bool toBeUpdated = false;
     bool toBeRemoved = false;
-    nsCSSCounterStyleRule* newRule =
-      mPresContext->StyleSet()->CounterStyleRuleForName(iter.Key());
+    // XXXheycam ServoStyleSets do not support custom counter styles yet.
+    StyleSetHandle styleSet = mPresContext->StyleSet();
+    NS_ASSERTION(styleSet->IsGecko(),
+                 "stylo: ServoStyleSets do not support custom counter "
+                 "styles yet");
+    nsCSSCounterStyleRule* newRule = styleSet->IsGecko() ?
+        styleSet->AsGecko()->CounterStyleRuleForName(iter.Key()) : nullptr;
     if (!newRule) {
       if (style->IsCustomStyle()) {
         toBeRemoved = true;

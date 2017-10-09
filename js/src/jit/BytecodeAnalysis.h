@@ -38,14 +38,14 @@ class BytecodeAnalysis
     JSScript* script_;
     Vector<BytecodeInfo, 0, JitAllocPolicy> infos_;
 
-    bool usesScopeChain_;
+    bool usesEnvironmentChain_;
     bool hasTryFinally_;
     bool hasSetArg_;
 
   public:
     explicit BytecodeAnalysis(TempAllocator& alloc, JSScript* script);
 
-    bool init(TempAllocator& alloc, GSNCache& gsn);
+    MOZ_MUST_USE bool init(TempAllocator& alloc, GSNCache& gsn);
 
     BytecodeInfo& info(jsbytecode* pc) {
         MOZ_ASSERT(infos_[script_->pcToOffset(pc)].initialized);
@@ -58,8 +58,8 @@ class BytecodeAnalysis
         return nullptr;
     }
 
-    bool usesScopeChain() const {
-        return usesScopeChain_;
+    bool usesEnvironmentChain() const {
+        return usesEnvironmentChain_;
     }
 
     bool hasTryFinally() const {

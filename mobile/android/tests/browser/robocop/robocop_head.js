@@ -512,7 +512,10 @@ function pattern_matcher(pattern) {
   if (typeof pattern == "function") {
     return pattern;
   } else if (typeof pattern == "object" && pattern) {
-    var matchers = [[p, pattern_matcher(pattern[p])] for (p in pattern)];
+    var matchers = [];
+    for (let p in pattern) {
+      matchers.push([p, pattern_matcher(pattern[p])]);
+    }
     // Kludge: include 'length', if not enumerable. (If it is enumerable,
     // we picked it up in the array comprehension, above.
     ld = Object.getOwnPropertyDescriptor(pattern, 'length');
@@ -619,43 +622,6 @@ function do_load_manifest(path) {
   const nsIComponentRegistrar = Components.interfaces.nsIComponentRegistrar;
   do_check_true(Components.manager instanceof nsIComponentRegistrar);
   Components.manager.autoRegister(lf);
-}
-
-/**
- * Parse a DOM document.
- *
- * @param aPath File path to the document.
- * @param aType Content type to use in DOMParser.
- *
- * @return nsIDOMDocument from the file.
- */
-function do_parse_document(aPath, aType) {
-  switch (aType) {
-    case "application/xhtml+xml":
-    case "application/xml":
-    case "text/xml":
-      break;
-
-    default:
-      do_throw("type: expected application/xhtml+xml, application/xml or text/xml," +
-                 " got '" + aType + "'",
-               Components.stack.caller);
-  }
-
-  var lf = do_get_file(aPath);
-  const C_i = Components.interfaces;
-  const parserClass = "@mozilla.org/xmlextras/domparser;1";
-  const streamClass = "@mozilla.org/network/file-input-stream;1";
-  var stream = Components.classes[streamClass]
-                         .createInstance(C_i.nsIFileInputStream);
-  stream.init(lf, -1, -1, C_i.nsIFileInputStream.CLOSE_ON_EOF);
-  var parser = Components.classes[parserClass]
-                         .createInstance(C_i.nsIDOMParser);
-  var doc = parser.parseFromStream(stream, null, lf.fileSize, aType);
-  parser = null;
-  stream = null;
-  lf = null;
-  return doc;
 }
 
 /**

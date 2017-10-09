@@ -32,8 +32,8 @@ class VideoStreamTrack;
  *  All the functions in ImageCapture are run in main thread.
  *
  *  There are two ways to capture image, MediaEngineSource and MediaStreamGraph.
- *  When the implementation of MediaEngineSource supports TakePhoto() in platform
- *  like B2G, it uses the platform camera to grab image. Otherwise, it falls back
+ *  When the implementation of MediaEngineSource supports TakePhoto(),
+ *  it uses the platform camera to grab image. Otherwise, it falls back
  *  to the MediaStreamGraph way.
  */
 
@@ -53,19 +53,20 @@ public:
   VideoStreamTrack* GetVideoStreamTrack() const;
 
   // nsWrapperCache member
-  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override
+  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override
   {
     return ImageCaptureBinding::Wrap(aCx, this, aGivenProto);
   }
 
   // ImageCapture class members
-  nsPIDOMWindow* GetParentObject() { return GetOwner(); }
+  nsPIDOMWindowInner* GetParentObject() { return GetOwner(); }
 
   static already_AddRefed<ImageCapture> Constructor(const GlobalObject& aGlobal,
                                                     VideoStreamTrack& aTrack,
                                                     ErrorResult& aRv);
 
-  ImageCapture(VideoStreamTrack* aVideoStreamTrack, nsPIDOMWindow* aOwnerWindow);
+  ImageCapture(VideoStreamTrack* aVideoStreamTrack,
+               nsPIDOMWindowInner* aOwnerWindow);
 
   // Post a Blob event to script.
   nsresult PostBlobEvent(Blob* aBlob);

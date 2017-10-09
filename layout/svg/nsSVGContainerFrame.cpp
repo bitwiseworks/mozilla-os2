@@ -7,19 +7,20 @@
 #include "nsSVGContainerFrame.h"
 
 // Keep others in (case-insensitive) order:
+#include "mozilla/RestyleManagerHandle.h"
+#include "mozilla/RestyleManagerHandleInlines.h"
 #include "nsCSSFrameConstructor.h"
 #include "nsSVGEffects.h"
 #include "nsSVGElement.h"
 #include "nsSVGUtils.h"
 #include "nsSVGAnimatedTransformList.h"
 #include "SVGTextFrame.h"
-#include "RestyleManager.h"
 
 using namespace mozilla;
 
 NS_QUERYFRAME_HEAD(nsSVGContainerFrame)
   NS_QUERYFRAME_ENTRY(nsSVGContainerFrame)
-NS_QUERYFRAME_TAIL_INHERITING(nsSVGContainerFrameBase)
+NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 NS_QUERYFRAME_HEAD(nsSVGDisplayContainerFrame)
   NS_QUERYFRAME_ENTRY(nsSVGDisplayContainerFrame)
@@ -70,14 +71,14 @@ nsSVGContainerFrame::RemoveFrame(ChildListID aListID,
 }
 
 bool
-nsSVGContainerFrame::UpdateOverflow()
+nsSVGContainerFrame::ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas)
 {
   if (mState & NS_FRAME_IS_NONDISPLAY) {
     // We don't maintain overflow rects.
     // XXX It would have be better if the restyle request hadn't even happened.
     return false;
   }
-  return nsSVGContainerFrameBase::UpdateOverflow();
+  return nsContainerFrame::ComputeCustomOverflow(aOverflowAreas);
 }
 
 /**
@@ -112,8 +113,7 @@ nsSVGContainerFrame::ReflowSVGNonDisplayText(nsIFrame* aContainer)
                !aContainer->IsFrameOfType(nsIFrame::eSVG),
                "it is wasteful to call ReflowSVGNonDisplayText on a container "
                "frame that is not NS_FRAME_IS_NONDISPLAY");
-  for (nsIFrame* kid = aContainer->GetFirstPrincipalChild(); kid;
-       kid = kid->GetNextSibling()) {
+  for (nsIFrame* kid : aContainer->PrincipalChildList()) {
     nsIAtom* type = kid->GetType();
     if (type == nsGkAtoms::svgTextFrame) {
       static_cast<SVGTextFrame*>(kid)->ReflowSVGNonDisplayText();
@@ -148,6 +148,7 @@ nsSVGDisplayContainerFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       !static_cast<const nsSVGElement*>(mContent)->HasValidDimensions()) {
     return;
   }
+  DisplayOutline(aBuilder, aLists);
   return BuildDisplayListForNonBlockChildren(aBuilder, aDirtyRect, aLists);
 }
 
@@ -248,7 +249,7 @@ nsSVGDisplayContainerFrame::IsSVGTransformed(gfx::Matrix *aOwnTransform,
 //----------------------------------------------------------------------
 // nsISVGChildFrame methods
 
-nsresult
+DrawResult
 nsSVGDisplayContainerFrame::PaintSVG(gfxContext& aContext,
                                      const gfxMatrix& aTransform,
                                      const nsIntRect *aDirtyRect)
@@ -259,9 +260,8 @@ nsSVGDisplayContainerFrame::PaintSVG(gfxContext& aContext,
                "If display lists are enabled, only painting of non-display "
                "SVG should take this code path");
 
-  const nsStyleDisplay *display = StyleDisplay();
-  if (display->mOpacity == 0.0) {
-    return NS_OK;
+  if (StyleEffects()->mOpacity == 0.0) {
+    return DrawResult::SUCCESS;
   }
 
   gfxMatrix matrix = aTransform;
@@ -269,10 +269,11 @@ nsSVGDisplayContainerFrame::PaintSVG(gfxContext& aContext,
     matrix = static_cast<const nsSVGElement*>(GetContent())->
                PrependLocalTransformsTo(matrix, eChildToUserSpace);
     if (matrix.IsSingular()) {
-      return NS_OK;
+      return DrawResult::SUCCESS;
     }
   }
 
+  DrawResult result = DrawResult::SUCCESS;
   for (nsIFrame* kid = mFrames.FirstChild(); kid;
        kid = kid->GetNextSibling()) {
     gfxMatrix m = matrix;
@@ -289,10 +290,13 @@ nsSVGDisplayContainerFrame::PaintSVG(gfxContext& aContext,
         continue;
       }
     }
-    nsSVGUtils::PaintFrameWithEffects(kid, aContext, m, aDirtyRect);
+    result = nsSVGUtils::PaintFrameWithEffects(kid, aContext, m, aDirtyRect);
+    if (result != DrawResult::SUCCESS) {
+      return result;
+    }
   }
 
-  return NS_OK;
+  return result;
 }
 
 nsIFrame*

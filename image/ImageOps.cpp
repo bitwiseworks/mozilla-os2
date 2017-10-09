@@ -12,6 +12,7 @@
 #include "DecoderFactory.h"
 #include "DynamicImage.h"
 #include "FrozenImage.h"
+#include "IDecodingTask.h"
 #include "Image.h"
 #include "imgIContainer.h"
 #include "mozilla/gfx/2D.h"
@@ -40,17 +41,19 @@ ImageOps::Freeze(imgIContainer* aImage)
 }
 
 /* static */ already_AddRefed<Image>
-ImageOps::Clip(Image* aImage, nsIntRect aClip)
+ImageOps::Clip(Image* aImage, nsIntRect aClip,
+               const Maybe<nsSize>& aSVGViewportSize)
 {
-  RefPtr<Image> clippedImage = new ClippedImage(aImage, aClip);
+  RefPtr<Image> clippedImage = new ClippedImage(aImage, aClip, aSVGViewportSize);
   return clippedImage.forget();
 }
 
 /* static */ already_AddRefed<imgIContainer>
-ImageOps::Clip(imgIContainer* aImage, nsIntRect aClip)
+ImageOps::Clip(imgIContainer* aImage, nsIntRect aClip,
+               const Maybe<nsSize>& aSVGViewportSize)
 {
   nsCOMPtr<imgIContainer> clippedImage =
-    new ClippedImage(static_cast<Image*>(aImage), aClip);
+    new ClippedImage(static_cast<Image*>(aImage), aClip, aSVGViewportSize);
   return clippedImage.forget();
 }
 
@@ -104,7 +107,7 @@ ImageOps::DecodeToSurface(nsIInputStream* aInputStream,
   }
 
   // Write the data into a SourceBuffer.
-  RefPtr<SourceBuffer> sourceBuffer = new SourceBuffer();
+  NotNull<RefPtr<SourceBuffer>> sourceBuffer = WrapNotNull(new SourceBuffer());
   sourceBuffer->ExpectLength(length);
   rv = sourceBuffer->AppendFromInputStream(inputStream, length);
   if (NS_FAILED(rv)) {
@@ -116,15 +119,15 @@ ImageOps::DecodeToSurface(nsIInputStream* aInputStream,
   DecoderType decoderType =
     DecoderFactory::GetDecoderType(PromiseFlatCString(aMimeType).get());
   RefPtr<Decoder> decoder =
-    DecoderFactory::CreateAnonymousDecoder(decoderType,
-                                           sourceBuffer,
-                                           ToSurfaceFlags(aFlags));
+    DecoderFactory::CreateAnonymousDecoder(decoderType, sourceBuffer,
+                                           Nothing(), ToSurfaceFlags(aFlags));
   if (!decoder) {
     return nullptr;
   }
 
   // Run the decoder synchronously.
-  decoder->Decode();
+  RefPtr<IDecodingTask> task = new AnonymousDecodingTask(WrapNotNull(decoder));
+  task->Run();
   if (!decoder->GetDecodeDone() || decoder->HasError()) {
     return nullptr;
   }
@@ -135,7 +138,7 @@ ImageOps::DecodeToSurface(nsIInputStream* aInputStream,
     return nullptr;
   }
 
-  RefPtr<SourceSurface> surface = frame->GetSurface();
+  RefPtr<SourceSurface> surface = frame->GetSourceSurface();
   if (!surface) {
     return nullptr;
   }

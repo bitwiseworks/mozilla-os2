@@ -51,7 +51,7 @@
 
   To turn on logging for this module, set
 
-    NSPR_LOG_MODULES=nsRDFXMLDataSource:5
+    MOZ_LOG=nsRDFXMLDataSource:5
 
  */
 
@@ -135,7 +135,7 @@ protected:
     static int32_t gRefCnt;
     static nsIRDFService* gRDFService;
 
-    static PRLogModuleInfo* gLog;
+    static mozilla::LazyLogModule gLog;
 
     nsresult Init();
     RDFXMLDataSourceImpl(void);
@@ -249,19 +249,17 @@ public:
         return mInner->GetAllCmds(source, commands);
     }
 
-    NS_IMETHOD IsCommandEnabled(nsISupportsArray/*<nsIRDFResource>*/* aSources,
+    NS_IMETHOD IsCommandEnabled(nsISupports* aSources,
                                 nsIRDFResource*   aCommand,
-                                nsISupportsArray/*<nsIRDFResource>*/* aArguments,
+                                nsISupports* aArguments,
                                 bool* aResult) override {
-        return mInner->IsCommandEnabled(aSources, aCommand, aArguments, aResult);
+        return NS_ERROR_NOT_IMPLEMENTED;
     }
 
-    NS_IMETHOD DoCommand(nsISupportsArray/*<nsIRDFResource>*/* aSources,
+    NS_IMETHOD DoCommand(nsISupports* aSources,
                          nsIRDFResource*   aCommand,
-                         nsISupportsArray/*<nsIRDFResource>*/* aArguments) override {
-        // XXX Uh oh, this could cause problems wrt. the "dirty" flag
-        // if it changes the in-memory store's internal state.
-        return mInner->DoCommand(aSources, aCommand, aArguments);
+                         nsISupports* aArguments) override {
+        return NS_ERROR_NOT_IMPLEMENTED;
     }
 
     NS_IMETHOD BeginUpdateBatch() override {
@@ -359,7 +357,7 @@ protected:
 int32_t         RDFXMLDataSourceImpl::gRefCnt = 0;
 nsIRDFService*  RDFXMLDataSourceImpl::gRDFService;
 
-PRLogModuleInfo* RDFXMLDataSourceImpl::gLog;
+mozilla::LazyLogModule RDFXMLDataSourceImpl::gLog("nsRDFXMLDataSource");
 
 static const char kFileURIPrefix[] = "file:";
 static const char kResourceURIPrefix[] = "resource:";
@@ -397,8 +395,6 @@ RDFXMLDataSourceImpl::RDFXMLDataSourceImpl(void)
       mIsDirty(false),
       mLoadState(eLoadState_Unloaded)
 {
-    if (! gLog)
-        gLog = PR_NewLogModule("nsRDFXMLDataSource");
 }
 
 
@@ -477,7 +473,6 @@ RDFXMLDataSourceImpl::BlockingParse(nsIURI* aURL, nsIStreamListener* aConsumer)
     // should be able to do by itself.
     
     nsCOMPtr<nsIChannel> channel;
-    nsCOMPtr<nsIRequest> request;
 
     // Null LoadGroup ?
     rv = NS_NewChannel(getter_AddRefs(channel),
@@ -607,14 +602,15 @@ RDFXMLDataSourceImpl::GetURI(char* *aURI)
     if (!mURL) {
         return NS_OK;
     }
-    
+
     nsAutoCString spec;
-    mURL->GetSpec(spec);
+    nsresult rv = mURL->GetSpec(spec);
+    NS_ENSURE_SUCCESS(rv, rv);
     *aURI = ToNewCString(spec);
     if (!*aURI) {
         return NS_ERROR_OUT_OF_MEMORY;
     }
-    
+
     return NS_OK;
 }
 
@@ -829,10 +825,8 @@ RDFXMLDataSourceImpl::Flush(void)
         return NS_ERROR_NOT_INITIALIZED;
 
     if (MOZ_LOG_TEST(gLog, LogLevel::Debug)) {
-      nsAutoCString spec;
-      mURL->GetSpec(spec);
       MOZ_LOG(gLog, LogLevel::Debug,
-             ("rdfxml[%p] flush(%s)", this, spec.get()));
+              ("rdfxml[%p] flush(%s)", this, mURL->GetSpecOrDefault().get()));
     }
 
     nsresult rv;
@@ -910,11 +904,11 @@ RDFXMLDataSourceImpl::Refresh(bool aBlocking)
 {
     nsAutoCString spec;
     if (mURL) {
-        mURL->GetSpec(spec);
+        spec = mURL->GetSpecOrDefault();
     }
     MOZ_LOG(gLog, LogLevel::Debug,
            ("rdfxml[%p] refresh(%s) %sblocking", this, spec.get(), (aBlocking ? "" : "non")));
-    
+
     // If an asynchronous load is already pending, then just let it do
     // the honors.
     if (IsLoading()) {
@@ -971,14 +965,11 @@ NS_IMETHODIMP
 RDFXMLDataSourceImpl::BeginLoad(void)
 {
     if (MOZ_LOG_TEST(gLog, LogLevel::Debug)) {
-      nsAutoCString spec;
-      if (mURL) {
-          mURL->GetSpec(spec);
-      }
       MOZ_LOG(gLog, LogLevel::Debug,
-             ("rdfxml[%p] begin-load(%s)", this, spec.get()));
+              ("rdfxml[%p] begin-load(%s)", this,
+               mURL ? mURL->GetSpecOrDefault().get() : ""));
     }
-    
+
     mLoadState = eLoadState_Loading;
     for (int32_t i = mObservers.Count() - 1; i >= 0; --i) {
         // Make sure to hold a strong reference to the observer so
@@ -997,12 +988,9 @@ NS_IMETHODIMP
 RDFXMLDataSourceImpl::Interrupt(void)
 {
     if (MOZ_LOG_TEST(gLog, LogLevel::Debug)) {
-      nsAutoCString spec;
-      if (mURL) {
-          mURL->GetSpec(spec);
-      }
       MOZ_LOG(gLog, LogLevel::Debug,
-             ("rdfxml[%p] interrupt(%s)", this, spec.get()));
+              ("rdfxml[%p] interrupt(%s)", this,
+               mURL ? mURL->GetSpecOrDefault().get() : ""));
     }
 
     for (int32_t i = mObservers.Count() - 1; i >= 0; --i) {
@@ -1022,14 +1010,11 @@ NS_IMETHODIMP
 RDFXMLDataSourceImpl::Resume(void)
 {
     if (MOZ_LOG_TEST(gLog, LogLevel::Debug)) {
-      nsAutoCString spec;
-      if (mURL) {
-          mURL->GetSpec(spec);
-      }
       MOZ_LOG(gLog, LogLevel::Debug,
-             ("rdfxml[%p] resume(%s)", this, spec.get()));
+             ("rdfxml[%p] resume(%s)", this,
+              mURL ? mURL->GetSpecOrDefault().get() : ""));
     }
-    
+
     for (int32_t i = mObservers.Count() - 1; i >= 0; --i) {
         // Make sure to hold a strong reference to the observer so
         // that it doesn't go away in this call if it removes itself
@@ -1047,14 +1032,11 @@ NS_IMETHODIMP
 RDFXMLDataSourceImpl::EndLoad(void)
 {
     if (MOZ_LOG_TEST(gLog, LogLevel::Debug)) {
-      nsAutoCString spec;
-      if (mURL) {
-          mURL->GetSpec(spec);
-      }
       MOZ_LOG(gLog, LogLevel::Debug,
-             ("rdfxml[%p] end-load(%s)", this, spec.get()));
+              ("rdfxml[%p] end-load(%s)", this,
+               mURL ? mURL->GetSpecOrDefault().get() : ""));
     }
-    
+
     mLoadState = eLoadState_Loaded;
 
     // Clear out any unmarked assertions from the datasource.

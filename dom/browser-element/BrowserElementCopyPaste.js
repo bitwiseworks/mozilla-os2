@@ -6,7 +6,11 @@
 
 "use strict";
 
-dump("###################################### BrowserElementCopyPaste.js loaded\n");
+function debug(msg) {
+  // dump("BrowserElementCopyPaste - " + msg + "\n");
+}
+
+debug("loaded");
 
 var { classes: Cc, interfaces: Ci, results: Cr, utils: Cu }  = Components;
 
@@ -19,18 +23,38 @@ var CopyPasteAssistent = {
   },
 
   init: function() {
-    addEventListener('mozcaretstatechanged',
-                     this._caretStateChangedHandler.bind(this),
-                     /* useCapture = */ true,
-                     /* wantsUntrusted = */ false);
-    addMessageListener('browser-element-api:call', this._browserAPIHandler.bind(this));
+    addEventListener("mozcaretstatechanged", this,
+                     /* useCapture = */ true, /* wantsUntrusted = */ false);
+    addMessageListener("browser-element-api:call", this);
+  },
+
+  destroy: function() {
+    removeEventListener("mozcaretstatechanged", this,
+                        /* useCapture = */ true, /* wantsUntrusted = */ false);
+    removeMessageListener("browser-element-api:call", this);
+  },
+
+  handleEvent: function(event) {
+    switch (event.type) {
+      case "mozcaretstatechanged":
+        this._caretStateChangedHandler(event);
+        break;
+    }
+  },
+
+  receiveMessage: function(message) {
+    switch (message.name) {
+      case "browser-element-api:call":
+        this._browserAPIHandler(message);
+        break;
+    }
   },
 
   _browserAPIHandler: function(e) {
     switch (e.data.msg_name) {
       case 'copypaste-do-command':
         if (this._isCommandEnabled(e.data.command)) {
-          docShell.doCommand(COMMAND_MAP[e.data.command]);
+          docShell.doCommand(this.COMMAND_MAP[e.data.command]);
         }
         break;
     }
@@ -89,7 +113,7 @@ var CopyPasteAssistent = {
       let targetDocShell = currentWindow
           .QueryInterface(Ci.nsIInterfaceRequestor)
           .getInterface(Ci.nsIWebNavigation);
-      if(targetDocShell.isBrowserOrApp) {
+      if(targetDocShell.isMozBrowserOrApp) {
         break;
       }
     }

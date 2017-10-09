@@ -9,6 +9,7 @@
 #include "MediaData.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/Logging.h"
+#include "mozilla/Sprintf.h"
 
 extern mozilla::LogModule* GetSourceBufferResourceLog();
 
@@ -35,7 +36,7 @@ ResourceItem::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 }
 
 class ResourceQueueDeallocator : public nsDequeFunctor {
-  virtual void* operator() (void* aObject) {
+  void* operator() (void* aObject) override {
     delete static_cast<ResourceItem*>(aObject);
     return nullptr;
   }
@@ -164,7 +165,7 @@ ResourceQueue::Dump(const char* aPath)
     ResourceItem* item = ResourceAt(i);
 
     char buf[255];
-    PR_snprintf(buf, sizeof(buf), "%s/%08u.bin", aPath, i);
+    SprintfLiteral(buf, "%s/%08u.bin", aPath, i);
     FILE* fp = fopen(buf, "wb");
     if (!fp) {
       return;

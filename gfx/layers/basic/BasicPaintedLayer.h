@@ -30,9 +30,10 @@ public:
   typedef RotatedContentBuffer::PaintState PaintState;
   typedef RotatedContentBuffer::ContentType ContentType;
 
-  explicit BasicPaintedLayer(BasicLayerManager* aLayerManager) :
+  explicit BasicPaintedLayer(BasicLayerManager* aLayerManager, gfx::BackendType aBackend) :
     PaintedLayer(aLayerManager, static_cast<BasicImplData*>(this)),
     mContentClient(nullptr)
+    , mBackend(aBackend)
   {
     MOZ_COUNT_CTOR(BasicPaintedLayer);
   }
@@ -54,9 +55,8 @@ public:
   {
     NS_ASSERTION(BasicManager()->InConstruction(),
                  "Can only set properties in construction phase");
-    mInvalidRegion.Or(mInvalidRegion, aRegion);
-    mInvalidRegion.SimplifyOutward(20);
-    mValidRegion.Sub(mValidRegion, mInvalidRegion);
+    mInvalidRegion.Add(aRegion);
+    mValidRegion.Sub(mValidRegion, mInvalidRegion.GetRegion());
   }
 
   virtual void PaintThebes(gfxContext* aContext,
@@ -124,6 +124,7 @@ protected:
   }
 
   RefPtr<ContentClientBasic> mContentClient;
+  gfx::BackendType mBackend;
 };
 
 } // namespace layers

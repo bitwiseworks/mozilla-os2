@@ -8,6 +8,7 @@
 #include "SandboxFilterUtil.h"
 
 #include "SandboxBrokerClient.h"
+#include "SandboxInfo.h"
 #include "SandboxInternal.h"
 #include "SandboxLogging.h"
 
@@ -19,6 +20,7 @@
 #include <linux/net.h>
 #include <linux/prctl.h>
 #include <linux/sched.h>
+#include <string.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
@@ -26,8 +28,8 @@
 #include <unistd.h>
 
 #include "sandbox/linux/bpf_dsl/bpf_dsl.h"
-#include "sandbox/linux/seccomp-bpf/linux_seccomp.h"
-#include "sandbox/linux/services/linux_syscalls.h"
+#include "sandbox/linux/system_headers/linux_seccomp.h"
+#include "sandbox/linux/system_headers/linux_syscalls.h"
 
 using namespace sandbox::bpf_dsl;
 #define CASES SANDBOX_BPF_DSL_CASES
@@ -39,6 +41,15 @@ using namespace sandbox::bpf_dsl;
 #endif
 #ifndef MADV_DONTDUMP
 #define MADV_DONTDUMP 16
+#endif
+
+// Added in Linux 4.5; see bug 1303813.
+#ifndef MADV_FREE
+#define MADV_FREE 8
+#endif
+
+#ifndef PR_SET_PTRACER
+#define PR_SET_PTRACER 0x59616d61
 #endif
 
 // To avoid visual confusion between "ifdef ANDROID" and "ifndef ANDROID":
@@ -82,12 +93,22 @@ private:
   }
 #endif
 
+  static intptr_t SetNoNewPrivsTrap(ArgsRef& aArgs, void* aux) {
+    if (gSetSandboxFilter == nullptr) {
+      // Called after BroadcastSetThreadSandbox finished, therefore
+      // not our doing and not expected.
+      return BlockedSyscallTrap(aArgs, nullptr);
+    }
+    // Signal that the filter is already in place.
+    return -ETXTBSY;
+  }
+
 public:
   virtual ResultExpr InvalidSyscall() const override {
     return Trap(BlockedSyscallTrap, nullptr);
   }
 
-  virtual ResultExpr ClonePolicy() const {
+  virtual ResultExpr ClonePolicy(ResultExpr failPolicy) const {
     // Allow use for simple thread creation (pthread_create) only.
 
     // WARNING: s390 and cris pass the flags in the second arg -- see
@@ -113,7 +134,7 @@ public:
       .Case(flags_common, Allow()) // JB 4.3 or KK 4.4
 #endif
       .Case(flags_modern, Allow()) // Android L or glibc
-      .Default(InvalidSyscall());
+      .Default(failPolicy);
   }
 
   virtual ResultExpr PrctlPolicy() const {
@@ -124,7 +145,8 @@ public:
     return Switch(op)
       .CASES((PR_GET_SECCOMP, // BroadcastSetThreadSandbox, etc.
               PR_SET_NAME,    // Thread creation
-              PR_SET_DUMPABLE), // Crash reporting
+              PR_SET_DUMPABLE, // Crash reporting
+              PR_SET_PTRACER), // Debug-mode crash handling
              Allow())
       .Default(InvalidSyscall());
   }
@@ -145,7 +167,15 @@ public:
     case __NR_clock_gettime: {
       Arg<clockid_t> clk_id(0);
       return If(clk_id == CLOCK_MONOTONIC, Allow())
+#ifdef CLOCK_MONOTONIC_COARSE
+        .ElseIf(clk_id == CLOCK_MONOTONIC_COARSE, Allow())
+#endif
+        .ElseIf(clk_id == CLOCK_PROCESS_CPUTIME_ID, Allow())
         .ElseIf(clk_id == CLOCK_REALTIME, Allow())
+#ifdef CLOCK_REALTIME_COARSE
+        .ElseIf(clk_id == CLOCK_REALTIME_COARSE, Allow())
+#endif
+        .ElseIf(clk_id == CLOCK_THREAD_CPUTIME_ID, Allow())
         .Else(InvalidSyscall());
     }
     case __NR_gettimeofday:
@@ -179,7 +209,9 @@ public:
       // Simple I/O
     case __NR_write:
     case __NR_read:
+    case __NR_readv:
     case __NR_writev: // see SandboxLogging.cpp
+    CASES_FOR_lseek:
       return Allow();
 
       // Memory mapping
@@ -215,7 +247,7 @@ public:
 
       // Thread creation.
     case __NR_clone:
-      return ClonePolicy();
+      return ClonePolicy(InvalidSyscall());
 
       // More thread creation.
 #ifdef __NR_set_robust_list
@@ -228,8 +260,16 @@ public:
 #endif
 
       // prctl
-    case __NR_prctl:
-      return PrctlPolicy();
+    case __NR_prctl: {
+      if (SandboxInfo::Get().Test(SandboxInfo::kHasSeccompTSync)) {
+        return PrctlPolicy();
+      }
+
+      Arg<int> option(0);
+      return If(option == PR_SET_NO_NEW_PRIVS,
+                Trap(SetNoNewPrivsTrap, nullptr))
+        .Else(PrctlPolicy());
+    }
 
       // NSPR can call this when creating a thread, but it will accept a
       // polite "no".
@@ -362,14 +402,14 @@ class ContentSandboxPolicy : public SandboxPolicyCommon {
   static intptr_t StatTrap(ArgsRef aArgs, void* aux) {
     auto broker = static_cast<SandboxBrokerClient*>(aux);
     auto path = reinterpret_cast<const char*>(aArgs.args[0]);
-    auto buf = reinterpret_cast<struct stat*>(aArgs.args[1]);
+    auto buf = reinterpret_cast<statstruct*>(aArgs.args[1]);
     return broker->Stat(path, buf);
   }
 
   static intptr_t LStatTrap(ArgsRef aArgs, void* aux) {
     auto broker = static_cast<SandboxBrokerClient*>(aux);
     auto path = reinterpret_cast<const char*>(aArgs.args[0]);
-    auto buf = reinterpret_cast<struct stat*>(aArgs.args[1]);
+    auto buf = reinterpret_cast<statstruct*>(aArgs.args[1]);
     return broker->LStat(path, buf);
   }
 
@@ -377,7 +417,7 @@ class ContentSandboxPolicy : public SandboxPolicyCommon {
     auto broker = static_cast<SandboxBrokerClient*>(aux);
     auto fd = static_cast<int>(aArgs.args[0]);
     auto path = reinterpret_cast<const char*>(aArgs.args[1]);
-    auto buf = reinterpret_cast<struct stat*>(aArgs.args[2]);
+    auto buf = reinterpret_cast<statstruct*>(aArgs.args[2]);
     auto flags = static_cast<int>(aArgs.args[3]);
     if (fd != AT_FDCWD && path[0] != '/') {
       SANDBOX_LOG_ERROR("unsupported fd-relative fstatat(%d, \"%s\", %p, %d)",
@@ -394,8 +434,70 @@ class ContentSandboxPolicy : public SandboxPolicyCommon {
       : broker->LStat(path, buf);
   }
 
+  static intptr_t ChmodTrap(ArgsRef aArgs, void* aux) {
+    auto broker = static_cast<SandboxBrokerClient*>(aux);
+    auto path = reinterpret_cast<const char*>(aArgs.args[0]);
+    auto mode = static_cast<mode_t>(aArgs.args[1]);
+    return broker->Chmod(path, mode);
+  }
+
+  static intptr_t LinkTrap(ArgsRef aArgs, void *aux) {
+    auto broker = static_cast<SandboxBrokerClient*>(aux);
+    auto path = reinterpret_cast<const char*>(aArgs.args[0]);
+    auto path2 = reinterpret_cast<const char*>(aArgs.args[1]);
+    return broker->Link(path, path2);
+  }
+
+  static intptr_t SymlinkTrap(ArgsRef aArgs, void *aux) {
+    auto broker = static_cast<SandboxBrokerClient*>(aux);
+    auto path = reinterpret_cast<const char*>(aArgs.args[0]);
+    auto path2 = reinterpret_cast<const char*>(aArgs.args[1]);
+    return broker->Symlink(path, path2);
+  }
+
+  static intptr_t RenameTrap(ArgsRef aArgs, void *aux) {
+    auto broker = static_cast<SandboxBrokerClient*>(aux);
+    auto path = reinterpret_cast<const char*>(aArgs.args[0]);
+    auto path2 = reinterpret_cast<const char*>(aArgs.args[1]);
+    return broker->Rename(path, path2);
+  }
+
+  static intptr_t MkdirTrap(ArgsRef aArgs, void* aux) {
+    auto broker = static_cast<SandboxBrokerClient*>(aux);
+    auto path = reinterpret_cast<const char*>(aArgs.args[0]);
+    auto mode = static_cast<mode_t>(aArgs.args[1]);
+    return broker->Mkdir(path, mode);
+  }
+
+  static intptr_t RmdirTrap(ArgsRef aArgs, void* aux) {
+    auto broker = static_cast<SandboxBrokerClient*>(aux);
+    auto path = reinterpret_cast<const char*>(aArgs.args[0]);
+    return broker->Rmdir(path);
+  }
+
+  static intptr_t UnlinkTrap(ArgsRef aArgs, void* aux) {
+    auto broker = static_cast<SandboxBrokerClient*>(aux);
+    auto path = reinterpret_cast<const char*>(aArgs.args[0]);
+    return broker->Unlink(path);
+  }
+
+  static intptr_t ReadlinkTrap(ArgsRef aArgs, void* aux) {
+    auto broker = static_cast<SandboxBrokerClient*>(aux);
+    auto path = reinterpret_cast<const char*>(aArgs.args[0]);
+    auto buf = reinterpret_cast<char*>(aArgs.args[1]);
+    auto size = static_cast<size_t>(aArgs.args[2]);
+    return broker->Readlink(path, buf, size);
+  }
+
+  static intptr_t GetPPidTrap(ArgsRef aArgs, void* aux) {
+    // In a pid namespace, getppid() will return 0. We will return 0 instead
+    // of the real parent pid to see what breaks when we introduce the
+    // pid namespace (Bug 1151624).
+    return 0;
+  }
+
 public:
-  ContentSandboxPolicy(SandboxBrokerClient* aBroker):mBroker(aBroker) { }
+  explicit ContentSandboxPolicy(SandboxBrokerClient* aBroker):mBroker(aBroker) { }
   virtual ~ContentSandboxPolicy() { }
   virtual ResultExpr PrctlPolicy() const override {
     // Ideally this should be restricted to a whitelist, but content
@@ -415,8 +517,9 @@ public:
         return Some(Allow());
       }
       Arg<int> domain(0), type(1);
-      return Some(If(domain == AF_UNIX &&
-                     (type == SOCK_STREAM || type == SOCK_SEQPACKET), Allow())
+      return Some(If(AllOf(domain == AF_UNIX,
+                           AnyOf(type == SOCK_STREAM, type == SOCK_SEQPACKET)),
+                     Allow())
                   .Else(InvalidSyscall()));
     }
 
@@ -428,6 +531,11 @@ public:
     case SYS_SEND:
     case SYS_SOCKET: // DANGEROUS
     case SYS_CONNECT: // DANGEROUS
+    case SYS_ACCEPT:
+    case SYS_ACCEPT4:
+    case SYS_BIND:
+    case SYS_LISTEN:
+    case SYS_GETSOCKOPT:
     case SYS_SETSOCKOPT:
     case SYS_GETSOCKNAME:
     case SYS_GETPEERNAME:
@@ -450,6 +558,10 @@ public:
     case SHMCTL:
     case SHMAT:
     case SHMDT:
+    case SEMGET:
+    case SEMCTL:
+    case SEMOP:
+    case MSGGET:
       return Some(Allow());
     default:
       return SandboxPolicyCommon::EvaluateIpcCall(aCall);
@@ -475,6 +587,22 @@ public:
         return Trap(LStatTrap, mBroker);
       CASES_FOR_fstatat:
         return Trap(StatAtTrap, mBroker);
+      case __NR_chmod:
+        return Trap(ChmodTrap, mBroker);
+      case __NR_link:
+        return Trap(LinkTrap, mBroker);
+      case __NR_mkdir:
+        return Trap(MkdirTrap, mBroker);
+      case __NR_symlink:
+        return Trap(SymlinkTrap, mBroker);
+      case __NR_rename:
+        return Trap(RenameTrap, mBroker);
+      case __NR_rmdir:
+        return Trap(RmdirTrap, mBroker);
+      case __NR_unlink:
+        return Trap(UnlinkTrap, mBroker);
+      case __NR_readlink:
+        return Trap(ReadlinkTrap, mBroker);
       }
     } else {
       // No broker; allow the syscalls directly.  )-:
@@ -486,41 +614,54 @@ public:
       CASES_FOR_stat:
       CASES_FOR_lstat:
       CASES_FOR_fstatat:
+      case __NR_chmod:
+      case __NR_link:
+      case __NR_mkdir:
+      case __NR_symlink:
+      case __NR_rename:
+      case __NR_rmdir:
+      case __NR_unlink:
+      case __NR_readlink:
         return Allow();
       }
     }
 
     switch (sysno) {
 #ifdef DESKTOP
+    case __NR_getppid:
+      return Trap(GetPPidTrap, nullptr);
+
       // Filesystem syscalls that need more work to determine who's
       // using them, if they need to be, and what we intend to about it.
-    case __NR_mkdir:
-    case __NR_rmdir:
     case __NR_getcwd:
     CASES_FOR_statfs:
-    case __NR_chmod:
-    case __NR_rename:
-    case __NR_symlink:
+    CASES_FOR_fstatfs:
     case __NR_quotactl:
-    case __NR_utimes:
+    CASES_FOR_fchown:
+    case __NR_fchmod:
+    case __NR_flock:
 #endif
       return Allow();
 
-    case __NR_readlink:
     case __NR_readlinkat:
+#ifdef DESKTOP
+      // Bug 1290896
+      return Allow();
+#else
       // Workaround for bug 964455:
       return Error(EINVAL);
+#endif
 
     CASES_FOR_select:
     case __NR_pselect6:
       return Allow();
 
     CASES_FOR_getdents:
-    CASES_FOR_lseek:
     CASES_FOR_ftruncate:
     case __NR_writev:
     case __NR_pread64:
 #ifdef DESKTOP
+    case __NR_pwrite64:
     case __NR_readahead:
 #endif
       return Allow();
@@ -540,8 +681,8 @@ public:
     case __NR_mprotect:
     case __NR_brk:
     case __NR_madvise:
-#if defined(ANDROID) && !defined(MOZ_MEMORY)
-      // Android's libc's realloc uses mremap.
+#if !defined(MOZ_MEMORY)
+      // libc's realloc uses mremap (Bug 1286119).
     case __NR_mremap:
 #endif
       return Allow();
@@ -590,13 +731,16 @@ public:
 
     CASES_FOR_getrlimit:
     case __NR_clock_getres:
-    case __NR_getresuid:
-    case __NR_getresgid:
+    CASES_FOR_getresuid:
+    CASES_FOR_getresgid:
       return Allow();
 
     case __NR_umask:
     case __NR_kill:
     case __NR_wait4:
+#ifdef __NR_waitpid
+    case __NR_waitpid:
+#endif
 #ifdef __NR_arch_prctl
     case __NR_arch_prctl:
 #endif
@@ -605,6 +749,56 @@ public:
     case __NR_eventfd2:
     case __NR_inotify_init1:
     case __NR_inotify_add_watch:
+    case __NR_inotify_rm_watch:
+      return Allow();
+
+#ifdef __NR_memfd_create
+    case __NR_memfd_create:
+      return Allow();
+#endif
+
+#ifdef __NR_rt_tgsigqueueinfo
+      // Only allow to send signals within the process.
+    case __NR_rt_tgsigqueueinfo: {
+      Arg<pid_t> tgid(0);
+      return If(tgid == getpid(), Allow())
+        .Else(InvalidSyscall());
+    }
+#endif
+
+    case __NR_mlock:
+    case __NR_munlock:
+      return Allow();
+
+      // We can't usefully allow fork+exec, even on a temporary basis;
+      // the child would inherit the seccomp-bpf policy and almost
+      // certainly die from an unexpected SIGSYS.  We also can't have
+      // fork() crash, currently, because there are too many system
+      // libraries/plugins that try to run commands.  But they can
+      // usually do something reasonable on error.
+    case __NR_clone:
+      return ClonePolicy(Error(EPERM));
+
+#ifdef __NR_fadvise64
+    case __NR_fadvise64:
+      return Allow();
+#endif
+
+#ifdef __NR_fadvise64_64
+    case __NR_fadvise64_64:
+      return Allow();
+#endif
+
+    case __NR_fallocate:
+      return Allow();
+
+    case __NR_get_mempolicy:
+      return Allow();
+
+#endif // DESKTOP
+
+#ifdef __NR_getrandom
+    case __NR_getrandom:
       return Allow();
 #endif
 
@@ -615,6 +809,11 @@ public:
     case __NR_sysinfo:
 #endif
       return Allow();
+
+#ifdef MOZ_JPROF
+    case __NR_setitimer:
+      return Allow();
+#endif // MOZ_JPROF
 
     default:
       return SandboxPolicyCommon::EvaluateSyscall(sysno);
@@ -661,15 +860,15 @@ class GMPSandboxPolicy : public SandboxPolicyCommon {
       MOZ_CRASH("unexpected syscall number");
     }
 
+    if (strcmp(path, plugin->mPath) != 0) {
+      SANDBOX_LOG_ERROR("attempt to open file %s (flags=0%o) which is not the"
+                        " media plugin %s", path, flags, plugin->mPath);
+      return -EPERM;
+    }
     if ((flags & O_ACCMODE) != O_RDONLY) {
       SANDBOX_LOG_ERROR("non-read-only open of file %s attempted (flags=0%o)",
                         path, flags);
-      return -ENOSYS;
-    }
-    if (strcmp(path, plugin->mPath) != 0) {
-      SANDBOX_LOG_ERROR("attempt to open file %s which is not the media plugin"
-                        " %s", path, plugin->mPath);
-      return -ENOSYS;
+      return -EPERM;
     }
     int fd = plugin->mFd.exchange(-1);
     if (fd < 0) {
@@ -677,6 +876,23 @@ class GMPSandboxPolicy : public SandboxPolicyCommon {
       return -ENOSYS;
     }
     return fd;
+  }
+
+  static intptr_t SchedTrap(const sandbox::arch_seccomp_data& aArgs,
+                            void* aux)
+  {
+    const pid_t tid = syscall(__NR_gettid);
+    if (aArgs.args[0] == static_cast<uint64_t>(tid)) {
+      return syscall(aArgs.nr,
+                     0,
+                     aArgs.args[1],
+                     aArgs.args[2],
+                     aArgs.args[3],
+                     aArgs.args[4],
+                     aArgs.args[5]);
+    }
+    SANDBOX_LOG_ERROR("unsupported tid in SchedTrap");
+    return BlockedSyscallTrap(aArgs, nullptr);
   }
 
   SandboxOpenedFile* mPlugin;
@@ -704,12 +920,29 @@ public:
     case __NR_madvise: {
       Arg<int> advice(2);
       return If(advice == MADV_DONTNEED, Allow())
+        .ElseIf(advice == MADV_FREE, Allow())
 #ifdef MOZ_ASAN
         .ElseIf(advice == MADV_NOHUGEPAGE, Allow())
         .ElseIf(advice == MADV_DONTDUMP, Allow())
 #endif
         .Else(InvalidSyscall());
     }
+    case __NR_brk:
+    CASES_FOR_geteuid:
+      return Allow();
+    case __NR_sched_getparam:
+    case __NR_sched_getscheduler:
+    case __NR_sched_get_priority_min:
+    case __NR_sched_get_priority_max:
+    case __NR_sched_setscheduler: {
+      Arg<pid_t> pid(0);
+      return If(pid == 0, Allow())
+        .Else(Trap(SchedTrap, nullptr));
+    }
+
+    // For clock(3) on older glibcs; bug 1304220.
+    case __NR_times:
+      return Allow();
 
     default:
       return SandboxPolicyCommon::EvaluateSyscall(sysno);

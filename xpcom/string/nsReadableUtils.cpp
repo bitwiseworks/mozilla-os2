@@ -5,11 +5,78 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsReadableUtils.h"
+#include "nsReadableUtilsImpl.h"
 
+#include <algorithm>
+
+#include "mozilla/CheckedInt.h"
+
+#include "nscore.h"
 #include "nsMemory.h"
 #include "nsString.h"
 #include "nsTArray.h"
 #include "nsUTF8Utils.h"
+
+using mozilla::IsASCII;
+
+/**
+ * Fallback implementation for finding the first non-ASCII character in a
+ * UTF-16 string.
+ */
+static inline int32_t
+FirstNonASCIIUnvectorized(const char16_t* aBegin, const char16_t* aEnd)
+{
+  typedef mozilla::NonASCIIParameters<sizeof(size_t)> p;
+  const size_t kMask = p::mask();
+  const uintptr_t kAlignMask = p::alignMask();
+  const size_t kNumUnicharsPerWord = p::numUnicharsPerWord();
+
+  const char16_t* idx = aBegin;
+
+  // Align ourselves to a word boundary.
+  for (; idx != aEnd && ((uintptr_t(idx) & kAlignMask) != 0); idx++) {
+    if (!IsASCII(*idx)) {
+      return idx - aBegin;
+    }
+  }
+
+  // Check one word at a time.
+  const char16_t* wordWalkEnd = mozilla::aligned(aEnd, kAlignMask);
+  for (; idx != wordWalkEnd; idx += kNumUnicharsPerWord) {
+    const size_t word = *reinterpret_cast<const size_t*>(idx);
+    if (word & kMask) {
+      return idx - aBegin;
+    }
+  }
+
+  // Take care of the remainder one character at a time.
+  for (; idx != aEnd; idx++) {
+    if (!IsASCII(*idx)) {
+      return idx - aBegin;
+    }
+  }
+
+  return -1;
+}
+
+/*
+ * This function returns -1 if all characters in str are ASCII characters.
+ * Otherwise, it returns a value less than or equal to the index of the first
+ * ASCII character in str. For example, if first non-ASCII character is at
+ * position 25, it may return 25, 24, or 16. But it guarantees
+ * there are only ASCII characters before returned value.
+ */
+static inline int32_t
+FirstNonASCII(const char16_t* aBegin, const char16_t* aEnd)
+{
+#ifdef MOZILLA_MAY_SUPPORT_SSE2
+  if (mozilla::supports_sse2()) {
+    return mozilla::SSE2::FirstNonASCII(aBegin, aEnd);
+  }
+#endif
+
+  return FirstNonASCIIUnvectorized(aBegin, aEnd);
+}
 
 void
 LossyCopyUTF16toASCII(const nsAString& aSource, nsACString& aDest)
@@ -178,28 +245,81 @@ bool
 AppendUTF16toUTF8(const nsAString& aSource, nsACString& aDest,
                   const mozilla::fallible_t& aFallible)
 {
+  // At 16 characters analysis showed better performance of both the all ASCII
+  // and non-ASCII cases, so we limit calling |FirstNonASCII| to strings of
+  // that length.
+  const nsAString::size_type kFastPathMinLength = 16;
+
+  int32_t firstNonASCII = 0;
+  if (aSource.Length() >= kFastPathMinLength) {
+    firstNonASCII = FirstNonASCII(aSource.BeginReading(), aSource.EndReading());
+  }
+
+  if (firstNonASCII == -1) {
+    // This is all ASCII, we can use the more efficient lossy append.
+    mozilla::CheckedInt<nsACString::size_type> new_length(aSource.Length());
+    new_length += aDest.Length();
+
+    if (!new_length.isValid() ||
+        !aDest.SetCapacity(new_length.value(), aFallible)) {
+      return false;
+    }
+
+    LossyAppendUTF16toASCII(aSource, aDest);
+    return true;
+  }
+
   nsAString::const_iterator source_start, source_end;
   CalculateUTF8Size calculator;
-  copy_string(aSource.BeginReading(source_start),
-              aSource.EndReading(source_end), calculator);
+  aSource.BeginReading(source_start);
+  aSource.EndReading(source_end);
 
-  uint32_t count = calculator.Size();
+  // Skip the characters that we know are single byte.
+  source_start.advance(firstNonASCII);
+
+  copy_string(source_start,
+              source_end, calculator);
+
+  // Include the ASCII characters that were skipped in the count.
+  size_t count = calculator.Size() + firstNonASCII;
 
   if (count) {
-    uint32_t old_dest_length = aDest.Length();
-
+    auto old_dest_length = aDest.Length();
     // Grow the buffer if we need to.
-    if (!aDest.SetLength(old_dest_length + count, aFallible)) {
+    mozilla::CheckedInt<nsACString::size_type> new_length(count);
+    new_length += old_dest_length;
+
+    if (!new_length.isValid() ||
+        !aDest.SetLength(new_length.value(), aFallible)) {
       return false;
     }
 
     // All ready? Time to convert
 
-    ConvertUTF16toUTF8 converter(aDest.BeginWriting() + old_dest_length);
-    copy_string(aSource.BeginReading(source_start),
+    nsAString::const_iterator ascii_end;
+    aSource.BeginReading(ascii_end);
+
+    if (firstNonASCII >= static_cast<int32_t>(kFastPathMinLength)) {
+      // Use the more efficient lossy converter for the ASCII portion.
+      LossyConvertEncoding16to8 lossy_converter(
+          aDest.BeginWriting() + old_dest_length);
+      nsAString::const_iterator ascii_start;
+      aSource.BeginReading(ascii_start);
+      ascii_end.advance(firstNonASCII);
+
+      copy_string(ascii_start, ascii_end, lossy_converter);
+    } else {
+      // Not using the lossy shortcut, we need to include the leading ASCII
+      // chars.
+      firstNonASCII = 0;
+    }
+
+    ConvertUTF16toUTF8 converter(
+        aDest.BeginWriting() + old_dest_length + firstNonASCII);
+    copy_string(ascii_end,
                 aSource.EndReading(source_end), converter);
 
-    NS_ASSERTION(converter.Size() == count,
+    NS_ASSERTION(converter.Size() == count - firstNonASCII,
                  "Unexpected disparity between CalculateUTF8Size and "
                  "ConvertUTF16toUTF8");
   }
@@ -440,13 +560,12 @@ CopyUnicodeTo(const nsAString::const_iterator& aSrcStart,
               const nsAString::const_iterator& aSrcEnd,
               nsAString& aDest)
 {
-  nsAString::iterator writer;
   aDest.SetLength(Distance(aSrcStart, aSrcEnd));
 
-  aDest.BeginWriting(writer);
+  nsAString::char_iterator dest = aDest.BeginWriting();
   nsAString::const_iterator fromBegin(aSrcStart);
 
-  copy_string(fromBegin, aSrcEnd, writer);
+  copy_string(fromBegin, aSrcEnd, dest);
 }
 
 void
@@ -454,14 +573,13 @@ AppendUnicodeTo(const nsAString::const_iterator& aSrcStart,
                 const nsAString::const_iterator& aSrcEnd,
                 nsAString& aDest)
 {
-  nsAString::iterator writer;
   uint32_t oldLength = aDest.Length();
   aDest.SetLength(oldLength + Distance(aSrcStart, aSrcEnd));
 
-  aDest.BeginWriting(writer).advance(oldLength);
+  nsAString::char_iterator dest = aDest.BeginWriting() + oldLength;
   nsAString::const_iterator fromBegin(aSrcStart);
 
-  copy_string(fromBegin, aSrcEnd, writer);
+  copy_string(fromBegin, aSrcEnd, dest);
 }
 
 bool
@@ -638,15 +756,17 @@ class CopyToUpperCase
 public:
   typedef char value_type;
 
-  explicit CopyToUpperCase(nsACString::iterator& aDestIter)
+  explicit CopyToUpperCase(nsACString::iterator& aDestIter,
+                           const nsACString::iterator& aEndIter)
     : mIter(aDestIter)
+    , mEnd(aEndIter)
   {
   }
 
   uint32_t
   write(const char* aSource, uint32_t aSourceLength)
   {
-    uint32_t len = XPCOM_MIN(uint32_t(mIter.size_forward()), aSourceLength);
+    uint32_t len = XPCOM_MIN(uint32_t(mEnd - mIter), aSourceLength);
     char* cp = mIter.get();
     const char* end = aSource + len;
     while (aSource != end) {
@@ -665,16 +785,17 @@ public:
 
 protected:
   nsACString::iterator& mIter;
+  const nsACString::iterator& mEnd;
 };
 
 void
 ToUpperCase(const nsACString& aSource, nsACString& aDest)
 {
   nsACString::const_iterator fromBegin, fromEnd;
-  nsACString::iterator toBegin;
+  nsACString::iterator toBegin, toEnd;
   aDest.SetLength(aSource.Length());
 
-  CopyToUpperCase converter(aDest.BeginWriting(toBegin));
+  CopyToUpperCase converter(aDest.BeginWriting(toBegin), aDest.EndWriting(toEnd));
   copy_string(aSource.BeginReading(fromBegin), aSource.EndReading(fromEnd),
               converter);
 }
@@ -719,15 +840,17 @@ class CopyToLowerCase
 public:
   typedef char value_type;
 
-  explicit CopyToLowerCase(nsACString::iterator& aDestIter)
+  explicit CopyToLowerCase(nsACString::iterator& aDestIter,
+                           const nsACString::iterator& aEndIter)
     : mIter(aDestIter)
+    , mEnd(aEndIter)
   {
   }
 
   uint32_t
   write(const char* aSource, uint32_t aSourceLength)
   {
-    uint32_t len = XPCOM_MIN(uint32_t(mIter.size_forward()), aSourceLength);
+    uint32_t len = XPCOM_MIN(uint32_t(mEnd - mIter), aSourceLength);
     char* cp = mIter.get();
     const char* end = aSource + len;
     while (aSource != end) {
@@ -746,16 +869,17 @@ public:
 
 protected:
   nsACString::iterator& mIter;
+  const nsACString::iterator& mEnd;
 };
 
 void
 ToLowerCase(const nsACString& aSource, nsACString& aDest)
 {
   nsACString::const_iterator fromBegin, fromEnd;
-  nsACString::iterator toBegin;
+  nsACString::iterator toBegin, toEnd;
   aDest.SetLength(aSource.Length());
 
-  CopyToLowerCase converter(aDest.BeginWriting(toBegin));
+  CopyToLowerCase converter(aDest.BeginWriting(toBegin), aDest.EndWriting(toEnd));
   copy_string(aSource.BeginReading(fromBegin), aSource.EndReading(fromEnd),
               converter);
 }
@@ -1027,6 +1151,17 @@ CountCharInReadable(const nsACString& aStr, char aChar)
 }
 
 bool
+StringBeginsWith(const nsAString& aSource, const nsAString& aSubstring)
+{
+  nsAString::size_type src_len = aSource.Length(),
+                       sub_len = aSubstring.Length();
+  if (sub_len > src_len) {
+    return false;
+  }
+  return Substring(aSource, 0, sub_len).Equals(aSubstring);
+}
+
+bool
 StringBeginsWith(const nsAString& aSource, const nsAString& aSubstring,
                  const nsStringComparator& aComparator)
 {
@@ -1036,6 +1171,17 @@ StringBeginsWith(const nsAString& aSource, const nsAString& aSubstring,
     return false;
   }
   return Substring(aSource, 0, sub_len).Equals(aSubstring, aComparator);
+}
+
+bool
+StringBeginsWith(const nsACString& aSource, const nsACString& aSubstring)
+{
+  nsACString::size_type src_len = aSource.Length(),
+                        sub_len = aSubstring.Length();
+  if (sub_len > src_len) {
+    return false;
+  }
+  return Substring(aSource, 0, sub_len).Equals(aSubstring);
 }
 
 bool
@@ -1051,6 +1197,17 @@ StringBeginsWith(const nsACString& aSource, const nsACString& aSubstring,
 }
 
 bool
+StringEndsWith(const nsAString& aSource, const nsAString& aSubstring)
+{
+  nsAString::size_type src_len = aSource.Length(),
+                       sub_len = aSubstring.Length();
+  if (sub_len > src_len) {
+    return false;
+  }
+  return Substring(aSource, src_len - sub_len, sub_len).Equals(aSubstring);
+}
+
+bool
 StringEndsWith(const nsAString& aSource, const nsAString& aSubstring,
                const nsStringComparator& aComparator)
 {
@@ -1061,6 +1218,17 @@ StringEndsWith(const nsAString& aSource, const nsAString& aSubstring,
   }
   return Substring(aSource, src_len - sub_len, sub_len).Equals(aSubstring,
                                                                aComparator);
+}
+
+bool
+StringEndsWith(const nsACString& aSource, const nsACString& aSubstring)
+{
+  nsACString::size_type src_len = aSource.Length(),
+                        sub_len = aSubstring.Length();
+  if (sub_len > src_len) {
+    return false;
+  }
+  return Substring(aSource, src_len - sub_len, sub_len).Equals(aSubstring);
 }
 
 bool
@@ -1198,4 +1366,18 @@ AppendUCS4ToUTF16(const uint32_t aSource, nsAString& aDest)
     aDest.Append(H_SURROGATE(aSource));
     aDest.Append(L_SURROGATE(aSource));
   }
+}
+
+extern "C" {
+
+void Gecko_AppendUTF16toCString(nsACString* aThis, const nsAString* aOther)
+{
+  AppendUTF16toUTF8(*aOther, *aThis);
+}
+
+void Gecko_AppendUTF8toString(nsAString* aThis, const nsACString* aOther)
+{
+  AppendUTF8toUTF16(*aOther, *aThis);
+}
+
 }

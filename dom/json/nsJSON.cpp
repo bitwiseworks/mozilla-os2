@@ -22,7 +22,6 @@
 #include "nsContentUtils.h"
 #include "nsIScriptError.h"
 #include "nsCRTGlue.h"
-#include "nsAutoPtr.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsNullPrincipal.h"
 #include "mozilla/Maybe.h"
@@ -71,7 +70,6 @@ nsJSON::Encode(JS::Handle<JS::Value> aValue, JSContext* cx, uint8_t aArgc,
     return rv;
 
   if (aArgc == 0) {
-    aJSON.Truncate();
     aJSON.SetIsVoid(true);
     return NS_OK;
   }
@@ -84,7 +82,6 @@ nsJSON::Encode(JS::Handle<JS::Value> aValue, JSContext* cx, uint8_t aArgc,
     rv = NS_OK;
     // if we didn't consume anything, it's not JSON, so return null
     if (!writer.DidWrite()) {
-      aJSON.Truncate();
       aJSON.SetIsVoid(true);
     } else {
       writer.FlushBuffer();
@@ -412,13 +409,15 @@ nsJSON::DecodeInternal(JSContext* cx,
 
   nsresult rv;
   nsCOMPtr<nsIPrincipal> nullPrincipal = nsNullPrincipal::Create();
-  NS_ENSURE_TRUE(nullPrincipal, NS_ERROR_FAILURE);
 
+  // The ::Decode function is deprecated [Bug 675797] and the following
+  // channel is never openend, so it does not matter what securityFlags
+  // we pass to NS_NewInputStreamChannel here.
   rv = NS_NewInputStreamChannel(getter_AddRefs(jsonChannel),
                                 mURI,
                                 aStream,
                                 nullPrincipal,
-                                nsILoadInfo::SEC_NORMAL,
+                                nsILoadInfo::SEC_REQUIRE_SAME_ORIGIN_DATA_IS_BLOCKED,
                                 nsIContentPolicy::TYPE_OTHER,
                                 NS_LITERAL_CSTRING("application/json"));
 
@@ -532,7 +531,7 @@ nsJSONListener::OnStopRequest(nsIRequest *aRequest, nsISupports *aContext,
 
   JS::ConstTwoByteChars chars(reinterpret_cast<const char16_t*>(mBufferedChars.Elements()),
                               mBufferedChars.Length());
-  bool ok = JS_ParseJSONWithReviver(mCx, chars.start().get(),
+  bool ok = JS_ParseJSONWithReviver(mCx, chars.begin().get(),
                                       uint32_t(mBufferedChars.Length()),
                                       reviver, &value);
 

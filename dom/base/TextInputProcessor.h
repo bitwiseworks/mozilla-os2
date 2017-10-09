@@ -11,7 +11,6 @@
 #include "mozilla/EventForwards.h"
 #include "mozilla/TextEventDispatcher.h"
 #include "mozilla/TextEventDispatcherListener.h"
-#include "nsAutoPtr.h"
 #include "nsITextInputProcessor.h"
 #include "nsITextInputProcessorCallback.h"
 #include "nsTArray.h"
@@ -36,13 +35,19 @@ public:
   NS_IMETHOD_(void)
     OnRemovedFrom(TextEventDispatcher* aTextEventDispatcher) override;
 
+  NS_IMETHOD_(void) WillDispatchKeyboardEvent(
+                      TextEventDispatcher* aTextEventDispatcher,
+                      WidgetKeyboardEvent& aKeyboardEvent,
+                      uint32_t aIndexOfKeypress,
+                      void* aData) override;
+
 protected:
   virtual ~TextInputProcessor();
 
 private:
   bool IsComposing() const;
   nsresult BeginInputTransactionInternal(
-             nsIDOMWindow* aWindow,
+             mozIDOMWindow* aWindow,
              nsITextInputProcessorCallback* aCallback,
              bool aForTests,
              bool& aSucceeded);
@@ -61,7 +66,6 @@ private:
   nsresult KeyupInternal(const WidgetKeyboardEvent& aKeyboardEvent,
                          uint32_t aKeyFlags,
                          bool& aDoDefault);
-  TextEventDispatcher::DispatchTo GetDispatchTo() const;
   nsresult IsValidStateForComposition();
   void UnlinkFromTextEventDispatcher();
   nsresult PrepareKeyboardEventToDispatch(WidgetKeyboardEvent& aKeyboardEvent,

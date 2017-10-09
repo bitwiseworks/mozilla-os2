@@ -7,12 +7,13 @@ import sys
 import mozfile
 import mozinstall
 
-import firefox_ui_tests
-from firefox_puppeteer.testcases import UpdateTestCase
 from firefox_ui_harness.runners import FirefoxUITestRunner
+from firefox_ui_harness.testcases import UpdateTestCase
 
 
 DEFAULT_PREFS = {
+    # Bug 1355026: Re-enable when support for the new simplified UI update is available
+    'app.update.doorhanger': False,
     'app.update.log': True,
     'startup.homepage_override_url': 'about:blank',
 }
@@ -21,7 +22,7 @@ DEFAULT_PREFS = {
 class UpdateTestRunner(FirefoxUITestRunner):
 
     def __init__(self, **kwargs):
-        FirefoxUITestRunner.__init__(self, **kwargs)
+        super(UpdateTestRunner, self).__init__(**kwargs)
 
         self.original_bin = self.bin
 
@@ -47,14 +48,18 @@ class UpdateTestRunner(FirefoxUITestRunner):
 
         results = {}
 
-        def _run_tests(manifest):
+        def _run_tests(tags):
             application_folder = None
 
             try:
+                # Backup current tags
+                test_tags = self.test_tags
+
                 application_folder = self.duplicate_application(source_folder)
                 self.bin = mozinstall.get_binary(application_folder, 'Firefox')
 
-                FirefoxUITestRunner.run_tests(self, [manifest])
+                self.test_tags = tags
+                super(UpdateTestRunner, self).run_tests(tests)
 
             except Exception:
                 self.exc_info = sys.exc_info()
@@ -62,6 +67,8 @@ class UpdateTestRunner(FirefoxUITestRunner):
                                   exc_info=self.exc_info)
 
             finally:
+                self.test_tags = test_tags
+
                 self.logger.info('Removing copy of the application at "%s"' % application_folder)
                 try:
                     mozfile.remove(application_folder)
@@ -70,13 +77,13 @@ class UpdateTestRunner(FirefoxUITestRunner):
 
         # Run direct update tests if wanted
         if self.run_direct_update:
-            _run_tests(manifest=firefox_ui_tests.manifest_update_direct)
+            _run_tests(tags=['direct'])
             failed += self.failed
             results['Direct'] = False if self.failed else True
 
         # Run fallback update tests if wanted
         if self.run_fallback_update:
-            _run_tests(manifest=firefox_ui_tests.manifest_update_fallback)
+            _run_tests(tags=['fallback'])
             failed += self.failed
             results['Fallback'] = False if self.failed else True
 

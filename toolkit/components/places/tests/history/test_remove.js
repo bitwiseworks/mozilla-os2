@@ -44,17 +44,17 @@ add_task(function* test_remove_single() {
       observer = {
         onBeginUpdateBatch: function() {},
         onEndUpdateBatch: function() {},
-        onVisit: function(uri) {
-          reject(new Error("Unexpected call to onVisit " + uri.spec));
+        onVisit: function(aUri) {
+          reject(new Error("Unexpected call to onVisit " + aUri.spec));
         },
-        onTitleChanged: function(uri) {
-          reject(new Error("Unexpected call to onTitleChanged " + uri.spec));
+        onTitleChanged: function(aUri) {
+          reject(new Error("Unexpected call to onTitleChanged " + aUri.spec));
         },
         onClearHistory: function() {
           reject("Unexpected call to onClearHistory");
         },
-        onPageChanged: function(uri) {
-          reject(new Error("Unexpected call to onPageChanged " + uri.spec));
+        onPageChanged: function(aUri) {
+          reject(new Error("Unexpected call to onPageChanged " + aUri.spec));
         },
         onFrecencyChanged: function(aURI) {
           try {
@@ -144,7 +144,7 @@ add_task(function* test_remove_many() {
   yield PlacesUtils.bookmarks.eraseEverything();
 
   do_print("Adding a witness page");
-  let WITNESS_URI = NetUtil.newURI("http://mozilla.com/test_browserhistory/test_remove/" + Math.random());;
+  let WITNESS_URI = NetUtil.newURI("http://mozilla.com/test_browserhistory/test_remove/" + Math.random());
   yield PlacesTestUtils.addVisits(WITNESS_URI);
   Assert.ok(page_in_database(WITNESS_URI), "Witness page added");
 
@@ -154,7 +154,6 @@ add_task(function* test_remove_many() {
     let uri = NetUtil.newURI("http://mozilla.com/test_browserhistory/test_remove?sample=" + i + "&salt=" + Math.random());
     let title = "Visit " + i + ", " + Math.random();
     let hasBookmark = i % 3 == 0;
-    let resolve;
     let page = {
       uri: uri,
       title: title,
@@ -274,7 +273,7 @@ add_task(function* test_remove_many() {
 
 add_task(function* cleanup() {
   yield PlacesTestUtils.clearHistory();
-  yield PlacesUtils.bookmarks.eraseEverything();  
+  yield PlacesUtils.bookmarks.eraseEverything();
 });
 
 // Test the various error cases
@@ -320,7 +319,7 @@ add_task(function* test_error_cases() {
     "History.remove with an array containing an ill-formed guid/url argument should throw a TypeError"
   );
   Assert.throws(
-    () => PlacesUtils.history.remove(["0123456789ab"/*valid guid*/, null]),
+    () => PlacesUtils.history.remove(["0123456789ab"/* valid guid*/, null]),
     /TypeError: Invalid url or guid: null/,
     "History.remove with an array containing a guid and a second argument that is null should throw a TypeError"
   );
@@ -342,6 +341,20 @@ add_task(function* test_error_cases() {
   }
 });
 
-function run_test() {
-  run_next_test();
-}
+add_task(function* test_orphans() {
+  let uri = NetUtil.newURI("http://moz.org/");
+  yield PlacesTestUtils.addVisits({ uri });
+
+  PlacesUtils.favicons.setAndFetchFaviconForPage(
+    uri, SMALLPNG_DATA_URI, true,  PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE,
+    null, Services.scriptSecurityManager.getSystemPrincipal());
+  PlacesUtils.annotations.setPageAnnotation(uri, "test", "restval", 0,
+                                            PlacesUtils.annotations.EXPIRE_NEVER);
+
+  yield PlacesUtils.history.remove(uri);
+  Assert.ok(!(yield PlacesTestUtils.isPageInDB(uri)), "Page should have been removed");
+  let db = yield PlacesUtils.promiseDBConnection();
+  let rows = yield db.execute(`SELECT (SELECT count(*) FROM moz_annos) +
+                                      (SELECT count(*) FROM moz_favicons) AS count`);
+  Assert.equal(rows[0].getResultByName("count"), 0, "Should not find orphans");
+});

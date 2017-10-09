@@ -12,7 +12,6 @@
 
 #include "mozilla/StaticPtr.h"
 #include "nsCOMPtr.h"
-#include "nsAutoPtr.h"
 #include "nsTArray.h"
 #include "nsITimer.h"
 #include "nsIObserver.h"
@@ -33,7 +32,6 @@
 
 #include "nsIGeolocationProvider.h"
 #include "nsIContentPermissionPrompt.h"
-#include "nsIDOMWindow.h"
 #include "mozilla/Attributes.h"
 
 class nsGeolocationService;
@@ -72,9 +70,6 @@ public:
   }
 
   nsresult Init();
-
-  void HandleMozsettingChanged(nsISupports* aSubject);
-  void HandleMozsettingValue(const bool aValue);
 
   // Management of the Geolocation objects
   void AddLocator(mozilla::dom::Geolocation* locator);
@@ -140,9 +135,9 @@ public:
 
   Geolocation();
 
-  nsresult Init(nsIDOMWindow* contentDom=nullptr);
+  nsresult Init(nsPIDOMWindowInner* aContentDom = nullptr);
 
-  nsIDOMWindow* GetParentObject() const;
+  nsPIDOMWindowInner* GetParentObject() const;
   virtual JSObject* WrapObject(JSContext *aCtx, JS::Handle<JSObject*> aGivenProto) override;
 
   int32_t WatchPosition(PositionCallback& aCallback, PositionErrorCallback* aErrorCallback, const PositionOptions& aOptions, ErrorResult& aRv);
@@ -170,27 +165,24 @@ public:
   // Getter for the window that this Geolocation is owned by
   nsIWeakReference* GetOwner() { return mOwner; }
 
-  // Check to see if the widnow still exists
+  // Check to see if the window still exists
   bool WindowOwnerStillExists();
 
   // Check to see if any active request requires high accuracy
   bool HighAccuracyRequested();
 
-  // Notification from the service:
-  void ServiceReady();
-
 private:
 
   ~Geolocation();
 
-  nsresult GetCurrentPosition(GeoPositionCallback& aCallback, GeoPositionErrorCallback& aErrorCallback, PositionOptions* aOptions);
-  nsresult WatchPosition(GeoPositionCallback& aCallback, GeoPositionErrorCallback& aErrorCallback, PositionOptions* aOptions, int32_t* aRv);
+  nsresult GetCurrentPosition(GeoPositionCallback aCallback,
+                              GeoPositionErrorCallback aErrorCallback,
+                              UniquePtr<PositionOptions>&& aOptions);
+  nsresult WatchPosition(GeoPositionCallback aCallback,
+                         GeoPositionErrorCallback aErrorCallback,
+                         UniquePtr<PositionOptions>&& aOptions, int32_t* aRv);
 
   bool RegisterRequestWithPrompt(nsGeolocationRequest* request);
-
-  // Methods for the service when it's ready to process requests:
-  nsresult GetCurrentPositionReady(nsGeolocationRequest* aRequest);
-  nsresult WatchPositionReady(nsGeolocationRequest* aRequest);
 
   // Check if clearWatch is already called
   bool IsAlreadyCleared(nsGeolocationRequest* aRequest);

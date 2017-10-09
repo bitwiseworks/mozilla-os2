@@ -75,7 +75,7 @@ function ensure_results(expected, searchTerm)
 
   // Make an AutoCompleteInput that uses our searches
   // and confirms results on search complete.
-  let input = new AutoCompleteInput(["history"]);
+  let input = new AutoCompleteInput(["unifiedcomplete"]);
 
   controller.input = input;
 
@@ -379,14 +379,12 @@ var deferEnsureResults;
 /**
  * Test adaptive autocomplete.
  */
-function run_test()
-{
-  run_next_test();
-}
-
 add_task(function* test_adaptive()
 {
-  for (let [, test] in Iterator(tests)) {
+  // Disable autoFill for this test.
+  Services.prefs.setBoolPref("browser.urlbar.autoFill", false);
+  do_register_cleanup(() => Services.prefs.clearUserPref("browser.urlbar.autoFill"));
+  for (let test of tests) {
     // Cleanup.
     PlacesUtils.bookmarks.removeFolderChildren(PlacesUtils.unfiledBookmarksFolderId);
     PlacesUtils.bookmarks.removeFolderChildren(PlacesUtils.tagsFolderId);

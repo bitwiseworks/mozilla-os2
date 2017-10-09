@@ -2708,6 +2708,22 @@
       ReadRegStr $R5 SHCTX "$R6\$R7" "InstallLocation"
       IfErrors loop
       ${${_MOZFUNC_UN}RemoveQuotesFromPath} "$R5" $R9
+
+      ; Detect when the path is just a drive letter without a trailing
+      ; backslash (e.g., "C:"), and add a backslash. If we don't, the Win32
+      ; calls in GetLongPath will interpret that syntax as a shorthand
+      ; for the working directory, because that's the DOS 2.0 convention,
+      ; and will return the path to that directory instead of just the drive.
+      ; Back here, we would then successfully match that with our $INSTDIR,
+      ; and end up deleting a registry key that isn't really ours.
+      StrLen $R5 "$R9"
+      ${If} $R5 == 2
+        StrCpy $R5 "$R9" 1 1
+        ${If} "$R5" == ":"
+          StrCpy $R9 "$R9\"
+        ${EndIf}
+      ${EndIf}
+
       ${${_MOZFUNC_UN}GetLongPath} "$R9" $R9
       StrCmp "$R9" "$R4" +1 loop
       ClearErrors
@@ -2985,10 +3001,18 @@
       Exch $R8
       Push $R7
 
+      DeleteRegValue HKCU "Software\Classes\$R9\OpenWithProgids" $R8
+      EnumRegValue $R7 HKCU "Software\Classes\$R9\OpenWithProgids" 0
+      StrCmp "$R7" "" +1 +2
+      DeleteRegKey HKCU "Software\Classes\$R9\OpenWithProgids"
       ReadRegStr $R7 HKCU "Software\Classes\$R9" ""
       StrCmp "$R7" "$R8" +1 +2
       DeleteRegKey HKCU "Software\Classes\$R9"
 
+      DeleteRegValue HKLM "Software\Classes\$R9\OpenWithProgids" $R8
+      EnumRegValue $R7 HKLM "Software\Classes\$R9\OpenWithProgids" 0
+      StrCmp "$R7" "" +1 +2
+      DeleteRegKey HKLM "Software\Classes\$R9\OpenWithProgids"
       ReadRegStr $R7 HKLM "Software\Classes\$R9" ""
       StrCmp "$R7" "$R8" +1 +2
       DeleteRegValue HKLM "Software\Classes\$R9" ""
@@ -5073,10 +5097,20 @@
       Push $R6
       Push $R5
 
+      ; Don't install on systems that don't support SSE2. The parameter value of
+      ; 10 is for PF_XMMI64_INSTRUCTIONS_AVAILABLE which will check whether the
+      ; SSE2 instruction set is available.
+      System::Call "kernel32::IsProcessorFeaturePresent(i 10)i .R8"
+      ${If} "$R8" == "0"
+        MessageBox MB_OK|MB_ICONSTOP "$R9"
+        ; Nothing initialized so no need to call OnEndCommon
+        Quit
+      ${EndIf}
+
       !ifdef HAVE_64BIT_BUILD
         ${Unless} ${RunningX64}
         ${OrUnless} ${AtLeastWin7}
-          MessageBox MB_OK|MB_ICONSTOP "$R9" IDOK
+          MessageBox MB_OK|MB_ICONSTOP "$R9"
           ; Nothing initialized so no need to call OnEndCommon
           Quit
         ${EndUnless}
@@ -5108,7 +5142,7 @@
           ${OrIf} "$R8" == "3"
           ${OrIf} "$R8" == "4"
           ${OrIf} "$R8" == "5"
-            MessageBox MB_OK|MB_ICONSTOP "$R9" IDOK
+            MessageBox MB_OK|MB_ICONSTOP "$R9"
             ; Nothing initialized so no need to call OnEndCommon
             Quit
           ${EndIf}
@@ -5116,9 +5150,6 @@
       !endif
 
       ${GetParameters} $R8
-
-      ; Require elevation if the user can elevate
-      ${ElevateUAC}
 
       ${If} $R8 != ""
         ; Default install type
@@ -5172,14 +5203,28 @@
               FileClose $R5
               Delete $R6
               ${If} ${Errors}
-                ; Nothing initialized so no need to call OnEndCommon
-                Quit
+                ; Attempt to elevate and then try again.
+                ${ElevateUAC}
+                GetTempFileName $R6 "$INSTDIR"
+                FileOpen $R5 "$R6" w
+                FileWrite $R5 "Write Access Test"
+                FileClose $R5
+                Delete $R6
+                ${If} ${Errors}
+                  ; Nothing initialized so no need to call OnEndCommon
+                  Quit
+                ${EndIf}
               ${EndIf}
             ${Else}
               CreateDirectory "$INSTDIR"
               ${If} ${Errors}
-                ; Nothing initialized so no need to call OnEndCommon
-                Quit
+                ; Attempt to elevate and then try again.
+                ${ElevateUAC}
+                CreateDirectory "$INSTDIR"
+                ${If} ${Errors}
+                  ; Nothing initialized so no need to call OnEndCommon
+                  Quit
+                ${EndIf}
               ${EndIf}
             ${EndIf}
 
@@ -5204,9 +5249,19 @@
               StrCpy $AddStartMenuSC "1"
             ${EndIf}
 
+            ReadINIStr $R8 $R7 "Install" "TaskbarShortcut"
+            ${If} $R8 == "false"
+              StrCpy $AddTaskbarSC "0"
+            ${Else}
+              StrCpy $AddTaskbarSC "1"
+            ${EndIf}
+
             ReadINIStr $R8 $R7 "Install" "MaintenanceService"
             ${If} $R8 == "false"
               StrCpy $InstallMaintenanceService "0"
+            ${Else}
+              ; Installing the service always requires elevation.
+              ${ElevateUAC}
             ${EndIf}
 
             !ifndef NO_STARTMENU_DIR
@@ -5216,9 +5271,19 @@
               ${EndIf}
             !endif
           ${EndIf}
+        ${Else}
+          ; If this isn't an INI install, we need to try to elevate now.
+          ; We'll check the user's permission level later on to determine the
+          ; default install path (which will be the real install path for /S).
+          ; If an INI file is used, we try to elevate down that path when needed.
+          ${ElevateUAC}
         ${EndUnless}
       ${EndIf}
       ClearErrors
+
+      ${IfNot} ${Silent}
+        ${ElevateUAC}
+      ${EndIf}
 
       Pop $R5
       Pop $R6
@@ -5531,6 +5596,27 @@
 
       SetShellVarContext current  ; Set SHCTX to HKCU
       ${GetSingleInstallPath} "Software\Mozilla\${BrandFullNameInternal}" $R9
+
+      ${If} ${RunningX64}
+        ; In HKCU there is no WOW64 redirection, which means we may have gotten
+        ; the path to a 32-bit install even though we're 64-bit, or vice-versa.
+        ; In that case, just use the default path instead of offering an upgrade.
+        ; But only do that override if the existing install is in Program Files,
+        ; because that's the only place we can be sure is specific
+        ; to either 32 or 64 bit applications.
+        ; The WordFind syntax below searches for the first occurence of the
+        ; "delimiter" (the Program Files path) in the install path and returns
+        ; anything that appears before that. If nothing appears before that,
+        ; then the install is under Program Files (32 or 64).
+!ifdef HAVE_64BIT_BUILD
+        ${WordFind} $R9 $PROGRAMFILES32 "+1{" $0
+!else
+        ${WordFind} $R9 $PROGRAMFILES64 "+1{" $0
+!endif
+        ${If} $0 == ""
+          StrCpy $R9 "false"
+        ${EndIf}
+      ${EndIf}
 
       finish_get_install_dir:
       StrCmp "$R9" "false" +2 +1
@@ -6097,8 +6183,10 @@
         ${LogMsg} "OS Name    : Windows 8"
       ${ElseIf} ${IsWin8.1}
         ${LogMsg} "OS Name    : Windows 8.1"
-      ${ElseIf} ${AtLeastWin8.1}
-        ${LogMsg} "OS Name    : Above Windows 8.1"
+      ${ElseIf} ${IsWin10}
+        ${LogMsg} "OS Name    : Windows 10"
+      ${ElseIf} ${AtLeastWin10}
+        ${LogMsg} "OS Name    : Above Windows 10"
       ${Else}
         ${LogMsg} "OS Name    : Unable to detect"
       ${EndIf}

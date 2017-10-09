@@ -45,12 +45,12 @@ function run_test()
 function init()
 {
   gClient = new DebuggerClient(DebuggerServer.connectPipe());
-  gClient.connect(function onConnect() {
-    gClient.listTabs(function onListTabs(aResponse) {
+  gClient.connect()
+    .then(() => gClient.listTabs())
+    .then(aResponse => {
       gActorId = aResponse.test;
       run_next_test();
     });
-  });
 }
 
 function checkStack(expectedName) {
@@ -153,14 +153,14 @@ function test_close_client_while_sending_requests() {
     type: "hello"
   });
 
-  let expectReply = promise.defer()
-  gClient.expectReply("root", function(response) {
+  let expectReply = promise.defer();
+  gClient.expectReply("root", function (response) {
     do_check_eq(response.error, "connectionClosed");
-    do_check_eq(response.message, "server side packet from 'root' can't be received as the connection just closed.");
+    do_check_eq(response.message, "server side packet can't be received as the connection just closed.");
     expectReply.resolve();
   });
 
-  gClient.close(() => {
+  gClient.close().then(() => {
     activeRequest.then(() => {
       ok(false, "First request unexpectedly succeed while closing the connection");
     }, response => {
@@ -175,7 +175,7 @@ function test_close_client_while_sending_requests() {
       do_check_eq(response.message, "'hello' pending request packet to '" + gActorId + "' can't be sent as the connection just closed.");
     })
     .then(() => expectReply.promise)
-    .then(run_next_test)
+    .then(run_next_test);
   });
 }
 

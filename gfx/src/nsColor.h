@@ -9,6 +9,7 @@
 #include <stddef.h>                     // for size_t
 #include <stdint.h>                     // for uint8_t, uint32_t
 #include "nscore.h"                     // for nsAString
+#include "nsCoord.h"                    // for NSToIntRound
 
 class nsAString;
 class nsString;
@@ -33,6 +34,22 @@ typedef uint32_t nscolor;
 #define NS_GET_B(_rgba) ((uint8_t) (((_rgba) >> 16) & 0xff))
 #define NS_GET_A(_rgba) ((uint8_t) (((_rgba) >> 24) & 0xff))
 
+namespace mozilla {
+
+template<typename T>
+inline uint8_t ClampColor(T aColor)
+{
+  if (aColor >= 255) {
+    return 255;
+  }
+  if (aColor <= 0) {
+    return 0;
+  }
+  return NSToIntRound(aColor);
+}
+
+} // namespace mozilla
+
 // Fast approximate division by 255. It has the property that
 // for all 0 <= n <= 255*255, FAST_DIVIDE_BY_255(n) == n/255.
 // But it only uses two adds and two shifts instead of an 
@@ -45,14 +62,36 @@ typedef uint32_t nscolor;
     target = ((tmp_ << 8) + tmp_ + 255) >> 16;     \
   PR_END_MACRO
 
+enum class nsHexColorType : uint8_t {
+  NoAlpha, // 3 or 6 digit hex colors only
+  AllowAlpha, // 3, 4, 6, or 8 digit hex colors
+};
+
 // Translate a hex string to a color. Return true if it parses ok,
 // otherwise return false.
-// This accepts only 3 or 6 digits
-bool NS_HexToRGB(const nsAString& aBuf, nscolor* aResult);
+// This accepts the number of digits specified by aType.
+bool
+NS_HexToRGBA(const nsAString& aBuf, nsHexColorType aType, nscolor* aResult);
 
 // Compose one NS_RGB color onto another. The result is what
 // you get if you draw aFG on top of aBG with operator OVER.
 nscolor NS_ComposeColors(nscolor aBG, nscolor aFG);
+
+namespace mozilla {
+
+inline uint32_t RoundingDivideBy255(uint32_t n)
+{
+  // There is an approximate alternative: ((n << 8) + n + 32896) >> 16
+  // But that is actually slower than this simple expression on a modern
+  // machine with a modern compiler.
+  return (n + 127) / 255;
+}
+
+// Blend one RGBA color with another based on a given ratio.
+// It is a linear interpolation on each channel with alpha premultipled.
+nscolor LinearBlendColors(nscolor aBg, nscolor aFg, uint_fast8_t aFgRatio);
+
+} // namespace mozilla
 
 // Translate a hex string to a color. Return true if it parses ok,
 // otherwise return false.

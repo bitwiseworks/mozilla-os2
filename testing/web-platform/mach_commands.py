@@ -39,13 +39,17 @@ class WebPlatformTestsRunner(MozbuildObject):
             kwargs["config"] = os.path.join(self.topsrcdir, 'testing', 'web-platform', 'wptrunner.ini')
 
         if kwargs["binary"] is None:
-            kwargs["binary"] = self.get_binary_path('app')
+            kwargs["binary"] = self.get_binary_path()
 
         if kwargs["prefs_root"] is None:
             kwargs["prefs_root"] = os.path.join(self.topobjdir, '_tests', 'web-platform', "prefs")
 
         if kwargs["certutil_binary"] is None:
             kwargs["certutil_binary"] = self.get_binary_path('certutil')
+
+        if kwargs["stackfix_dir"] is None:
+            kwargs["stackfix_dir"] = os.path.split(
+                self.get_binary_path(validate_exists=False))[0]
 
         here = os.path.split(__file__)[0]
 
@@ -88,16 +92,19 @@ class WebPlatformTestsUpdater(MozbuildObject):
 
         if kwargs["config"] is None:
             kwargs["config"] = os.path.join(self.topsrcdir, 'testing', 'web-platform', 'wptrunner.ini')
+        if kwargs["product"] is None:
+            kwargs["product"] = "firefox"
+
         updatecommandline.check_args(kwargs)
         logger = update.setup_logging(kwargs, {"mach": sys.stdout})
 
         try:
             update.run_update(logger, **kwargs)
-        except:
+        except Exception:
             import pdb
             import traceback
             traceback.print_exc()
-            pdb.post_mortem()
+#            pdb.post_mortem()
 
 class WebPlatformTestsReduce(WebPlatformTestsRunner):
 
@@ -202,6 +209,10 @@ testing/web-platform/tests for tests that may be shared
                 template += self.template_body_reftest_wait
         else:
             template += self.template_body_th
+        try:
+            os.makedirs(os.path.dirname(path))
+        except OSError:
+            pass
         with open(path, "w") as f:
             f.write(template)
 
@@ -216,6 +227,7 @@ testing/web-platform/tests for tests that may be shared
         else:
             editor = None
 
+        proc = None
         if editor:
             proc = subprocess.Popen("%s %s" % (editor, path), shell=True)
 
@@ -224,7 +236,19 @@ testing/web-platform/tests for tests that may be shared
             wpt_kwargs = vars(p.parse_args(["--manifest-update", path]))
             context.commands.dispatch("web-platform-tests", context, **wpt_kwargs)
 
-        proc.wait()
+        if proc:
+            proc.wait()
+
+
+class WPTManifestUpdater(MozbuildObject):
+    def run_update(self, check_clean=False, **kwargs):
+        import manifestupdate
+        from wptrunner import wptlogging
+
+        logger = wptlogging.setup(kwargs, {"mach": sys.stdout})
+        wpt_dir = os.path.abspath(os.path.join(self.topsrcdir, 'testing', 'web-platform'))
+        manifestupdate.update(logger, wpt_dir, check_clean)
+
 
 def create_parser_wpt():
     from wptrunner import wptcommandline
@@ -261,8 +285,16 @@ def create_parser_create():
     return p
 
 
+def create_parser_manifest_update():
+    import manifestupdate
+    return manifestupdate.create_parser()
+
+
 @CommandProvider
 class MachCommands(MachCommandBase):
+    def setup(self):
+        self._activate_virtualenv()
+
     @Command("web-platform-tests",
              category="testing",
              conditions=[conditions.is_firefox],
@@ -282,6 +314,13 @@ class MachCommands(MachCommandBase):
         else:
             return wpt_runner.run_tests(**params)
 
+    @Command("wpt",
+             category="testing",
+             conditions=[conditions.is_firefox],
+             parser=create_parser_wpt)
+    def run_wpt(self, **params):
+        return self.run_web_platform_tests(**params)
+
     @Command("web-platform-tests-update",
              category="testing",
              parser=create_parser_update)
@@ -292,8 +331,11 @@ class MachCommands(MachCommandBase):
         wpt_updater = self._spawn(WebPlatformTestsUpdater)
         return wpt_updater.run_update(**params)
 
-    def setup(self):
-        self._activate_virtualenv()
+    @Command("wpt-update",
+             category="testing",
+             parser=create_parser_update)
+    def update_wpt(self, **params):
+        return self.update_web_platform_tests(**params)
 
     @Command("web-platform-tests-reduce",
              category="testing",
@@ -304,6 +346,13 @@ class MachCommands(MachCommandBase):
         wpt_reduce = self._spawn(WebPlatformTestsReduce)
         return wpt_reduce.run_reduce(**params)
 
+    @Command("wpt-reduce",
+             category="testing",
+             conditions=[conditions.is_firefox],
+             parser=create_parser_reduce)
+    def unstable_wpt(self, **params):
+        return self.unstable_web_platform_tests(**params)
+
     @Command("web-platform-tests-create",
              category="testing",
              conditions=[conditions.is_firefox],
@@ -312,3 +361,18 @@ class MachCommands(MachCommandBase):
         self.setup()
         wpt_creator = self._spawn(WebPlatformTestsCreator)
         wpt_creator.run_create(self._mach_context, **params)
+
+    @Command("wpt-create",
+             category="testing",
+             conditions=[conditions.is_firefox],
+             parser=create_parser_create)
+    def create_wpt(self, **params):
+        return self.create_web_platform_test(**params)
+
+    @Command("wpt-manifest-update",
+             category="testing",
+             parser=create_parser_manifest_update)
+    def wpt_manifest_update(self, **params):
+        self.setup()
+        wpt_manifest_updater = self._spawn(WPTManifestUpdater)
+        return wpt_manifest_updater.run_update(**params)

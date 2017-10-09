@@ -1,6 +1,8 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 const TEST_URI = "data:text/html;charset=utf-8," +
   "<p>browser_telemetry_button_scratchpad.js</p>";
 
@@ -8,7 +10,7 @@ const TEST_URI = "data:text/html;charset=utf-8," +
 // opened we make use of setTimeout() to create tool active times.
 const TOOL_DELAY = 200;
 
-add_task(function*() {
+add_task(function* () {
   yield addTab(TEST_URI);
   let Telemetry = loadTelemetryAndRecordLogs();
 
@@ -43,12 +45,13 @@ function trackScratchpadWindows() {
 
           if (win.Scratchpad) {
             win.Scratchpad.addObserver({
-              onReady: function() {
+              onReady: function () {
                 win.Scratchpad.removeObserver(this);
                 numScratchpads++;
                 win.close();
 
-                info("another scratchpad was opened and closed, count is now " + numScratchpads);
+                info("another scratchpad was opened and closed, " +
+                     `count is now ${numScratchpads}`);
 
                 if (numScratchpads === 4) {
                   Services.ww.unregisterNotification(observer);
@@ -94,7 +97,7 @@ function delayedClicks(node, clicks) {
 function checkResults(histIdFocus, Telemetry) {
   let result = Telemetry.prototype.telemetryInfo;
 
-  for (let [histId, value] of Iterator(result)) {
+  for (let [histId, value] of Object.entries(result)) {
     if (histId.startsWith("DEVTOOLS_INSPECTOR_") ||
         !histId.includes(histIdFocus)) {
       // Inspector stats are tested in
@@ -103,13 +106,10 @@ function checkResults(histIdFocus, Telemetry) {
       continue;
     }
 
-    if (histId.endsWith("OPENED_PER_USER_FLAG")) {
-      ok(value.length === 1 && value[0] === true,
-         "Per user value " + histId + " has a single value of true");
-    } else if (histId.endsWith("OPENED_BOOLEAN")) {
+    if (histId.endsWith("OPENED_COUNT")) {
       ok(value.length > 1, histId + " has more than one entry");
 
-      let okay = value.every(function(element) {
+      let okay = value.every(function (element) {
         return element === true;
       });
 
@@ -117,7 +117,7 @@ function checkResults(histIdFocus, Telemetry) {
     } else if (histId.endsWith("TIME_ACTIVE_SECONDS")) {
       ok(value.length > 1, histId + " has more than one entry");
 
-      let okay = value.every(function(element) {
+      let okay = value.every(function (element) {
         return element > 0;
       });
 

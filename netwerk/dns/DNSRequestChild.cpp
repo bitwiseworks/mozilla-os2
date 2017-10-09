@@ -7,7 +7,7 @@
 #include "mozilla/net/ChildDNSService.h"
 #include "mozilla/net/DNSRequestChild.h"
 #include "mozilla/net/NeckoChild.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsIDNSRecord.h"
 #include "nsHostResolver.h"
 #include "nsTArray.h"
@@ -159,7 +159,7 @@ ChildDNSRecord::ReportUnusable(uint16_t aPort)
 // CancelDNSRequestEvent
 //-----------------------------------------------------------------------------
 
-class CancelDNSRequestEvent : public nsRunnable
+class CancelDNSRequestEvent : public Runnable
 {
 public:
   CancelDNSRequestEvent(DNSRequestChild* aDnsReq, nsresult aReason)
@@ -167,7 +167,7 @@ public:
     , mReasonForCancel(aReason)
   {}
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     if (mDnsRequest->mIPCOpen) {
       // Send request to Parent process.
@@ -207,7 +207,7 @@ DNSRequestChild::StartRequest()
   // we can only do IPDL on the main thread
   if (!NS_IsMainThread()) {
     NS_DispatchToMainThread(
-      NS_NewRunnableMethod(this, &DNSRequestChild::StartRequest));
+      NewRunnableMethod(this, &DNSRequestChild::StartRequest));
     return;
   }
 
@@ -260,7 +260,7 @@ DNSRequestChild::RecvLookupCompleted(const DNSRequestResponse& reply)
     CallOnLookupComplete();
   } else {
     nsCOMPtr<nsIRunnable> event =
-      NS_NewRunnableMethod(this, &DNSRequestChild::CallOnLookupComplete);
+      NewRunnableMethod(this, &DNSRequestChild::CallOnLookupComplete);
     mTarget->Dispatch(event, NS_DISPATCH_NORMAL);
   }
 

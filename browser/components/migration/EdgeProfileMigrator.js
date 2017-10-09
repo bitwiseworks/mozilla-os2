@@ -2,13 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+"use strict";
+
 const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/AppConstants.jsm");
+Cu.import("resource://gre/modules/osfile.jsm"); /* globals OS */
+Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/Task.jsm");
-Cu.import("resource:///modules/MigrationUtils.jsm");
+Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+Cu.import("resource:///modules/MigrationUtils.jsm"); /* globals MigratorPrototype */
 Cu.import("resource:///modules/MSMigrationUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
                                   "resource://gre/modules/PlacesUtils.jsm");
@@ -52,15 +55,17 @@ XPCOMUtils.defineLazyGetter(this, "gEdgeDatabase", function() {
  * @param {function}          filterFn  a function that is called for each row.
  *                                      Only rows for which it returns a truthy
  *                                      value are included in the result.
+ * @param {nsIFile}           dbFile    the database file to use. Defaults to
+ *                                      the main Edge database.
  * @returns {Array} An array of row objects.
  */
-function readTableFromEdgeDB(tableName, columns, filterFn) {
+function readTableFromEdgeDB(tableName, columns, filterFn, dbFile = gEdgeDatabase) {
   let database;
   let rows = [];
   try {
-    let logFile = gEdgeDatabase.parent;
+    let logFile = dbFile.parent;
     logFile.append("LogFiles");
-    database = ESEDBReader.openDB(gEdgeDatabase.parent, gEdgeDatabase, logFile);
+    database = ESEDBReader.openDB(dbFile.parent, dbFile, logFile);
 
     if (typeof columns == "function") {
       columns = columns(database);
@@ -74,7 +79,7 @@ function readTableFromEdgeDB(tableName, columns, filterFn) {
     }
   } catch (ex) {
     Cu.reportError("Failed to extract items from table " + tableName + " in Edge database at " +
-                   gEdgeDatabase.path + " due to the following error: " + ex);
+                   dbFile.path + " due to the following error: " + ex);
     // Deliberately make this fail so we expose failure in the UI:
     throw ex;
   } finally {
@@ -103,7 +108,6 @@ EdgeTypedURLMigrator.prototype = {
   },
 
   migrate: function(aCallback) {
-    let rv = true;
     let typedURLs = this._typedURLs;
     let places = [];
     for (let [urlString, time] of typedURLs) {
@@ -134,7 +138,7 @@ EdgeTypedURLMigrator.prototype = {
       return;
     }
 
-    PlacesUtils.asyncHistory.updatePlaces(places, {
+    MigrationUtils.insertVisitsWrapper(places, {
       _success: false,
       handleResult: function() {
         // Importing any entry is considered a successful import.
@@ -146,7 +150,7 @@ EdgeTypedURLMigrator.prototype = {
       }
     });
   },
-}
+};
 
 function EdgeReadingListMigrator() {
 }
@@ -197,7 +201,7 @@ EdgeReadingListMigrator.prototype = {
     let exceptionThrown;
     for (let item of readingListItems) {
       let dateAdded = item.AddedDate || new Date();
-      yield PlacesUtils.bookmarks.insert({
+      yield MigrationUtils.insertBookmarkWrapper({
         parentGuid: destFolderGuid, url: item.URL, title: item.Title, dateAdded
       }).catch(ex => {
         if (!exceptionThrown) {
@@ -215,46 +219,28 @@ EdgeReadingListMigrator.prototype = {
     if (!this.__readingListFolderGuid) {
       let folderTitle = MigrationUtils.getLocalizedString("importedEdgeReadingList");
       let folderSpec = {type: PlacesUtils.bookmarks.TYPE_FOLDER, parentGuid, title: folderTitle};
-      this.__readingListFolderGuid = (yield PlacesUtils.bookmarks.insert(folderSpec)).guid;
+      this.__readingListFolderGuid = (yield MigrationUtils.insertBookmarkWrapper(folderSpec)).guid;
     }
     return this.__readingListFolderGuid;
   }),
 };
 
-function EdgeBookmarksMigrator() {
+function EdgeBookmarksMigrator(dbOverride) {
+  this.dbOverride = dbOverride;
 }
 
 EdgeBookmarksMigrator.prototype = {
   type: MigrationUtils.resourceTypes.BOOKMARKS,
 
+  get db() { return this.dbOverride || gEdgeDatabase },
+
   get TABLE_NAME() { return "Favorites" },
 
   get exists() {
-    if ("_exists" in this) {
-      return this._exists;
+    if (!("_exists" in this)) {
+      this._exists = !!this.db;
     }
-    return this._exists = (!!gEdgeDatabase && this._checkTableExists());
-  },
-
-  _checkTableExists() {
-    let database;
-    let rv;
-    try {
-      let logFile = gEdgeDatabase.parent;
-      logFile.append("LogFiles");
-      database = ESEDBReader.openDB(gEdgeDatabase.parent, gEdgeDatabase, logFile);
-
-      rv = database.tableExists(this.TABLE_NAME);
-    } catch (ex) {
-      Cu.reportError("Failed to check for table " + tableName + " in Edge database at " +
-                     gEdgeDatabase.path + " due to the following error: " + ex);
-      return false;
-    } finally {
-      if (database) {
-        ESEDBReader.closeDB(database);
-      }
-    }
-    return rv;
+    return this._exists;
   },
 
   migrate(callback) {
@@ -313,9 +299,9 @@ EdgeBookmarksMigrator.prototype = {
         url: bookmark.URL,
         dateAdded: bookmark.DateUpdated || new Date(),
         title: bookmark.Title,
-      }
+      };
 
-      yield PlacesUtils.bookmarks.insert(placesInfo).catch(ex => {
+      yield MigrationUtils.insertBookmarkWrapper(placesInfo).catch(ex => {
         if (!exceptionThrown) {
           exceptionThrown = ex;
         }
@@ -347,8 +333,8 @@ EdgeBookmarksMigrator.prototype = {
         folderMap.set(row.ItemId, row);
       }
       return true;
-    }
-    let bookmarks = readTableFromEdgeDB(this.TABLE_NAME, columns, filterFn);
+    };
+    let bookmarks = readTableFromEdgeDB(this.TABLE_NAME, columns, filterFn, this.db);
     return {bookmarks, folderMap};
   },
 
@@ -371,7 +357,8 @@ EdgeBookmarksMigrator.prototype = {
         toolbarGuid =
           yield MigrationUtils.createImportedBookmarksFolder("Edge", toolbarGuid);
       }
-      return folder._guid = toolbarGuid;
+      folder._guid = toolbarGuid;
+      return folder._guid;
     }
     // Otherwise, get the right parent guid recursively:
     let parentGuid = yield this._getGuidForFolder(folder.ParentId, folderMap, rootGuid);
@@ -382,23 +369,25 @@ EdgeBookmarksMigrator.prototype = {
       parentGuid,
     };
     // and add ourselves as a kid, and return the guid we got.
-    let parentBM = yield PlacesUtils.bookmarks.insert(folderInfo);
-    return folder._guid = parentBM.guid;
+    let parentBM = yield MigrationUtils.insertBookmarkWrapper(folderInfo);
+    folder._guid = parentBM.guid;
+    return folder._guid;
   }),
-}
+};
 
 function EdgeProfileMigrator() {
+  this.wrappedJSObject = this;
 }
 
 EdgeProfileMigrator.prototype = Object.create(MigratorPrototype);
 
+EdgeProfileMigrator.prototype.getESEMigratorForTesting = function(dbOverride) {
+  return new EdgeBookmarksMigrator(dbOverride);
+};
+
 EdgeProfileMigrator.prototype.getResources = function() {
-  let bookmarksMigrator = new EdgeBookmarksMigrator();
-  if (!bookmarksMigrator.exists) {
-    bookmarksMigrator = MSMigrationUtils.getBookmarksMigrator(MSMigrationUtils.MIGRATION_TYPE_EDGE);
-  }
   let resources = [
-    bookmarksMigrator,
+    new EdgeBookmarksMigrator(),
     MSMigrationUtils.getCookiesMigrator(MSMigrationUtils.MIGRATION_TYPE_EDGE),
     new EdgeTypedURLMigrator(),
     new EdgeReadingListMigrator(),
@@ -408,6 +397,34 @@ EdgeProfileMigrator.prototype.getResources = function() {
   windowsVaultFormPasswordsMigrator.name = "EdgeVaultFormPasswords";
   resources.push(windowsVaultFormPasswordsMigrator);
   return resources.filter(r => r.exists);
+};
+
+EdgeProfileMigrator.prototype.getLastUsedDate = function() {
+  // Don't do this if we don't have a single profile (see the comment for
+  // sourceProfiles) or if we can't find the database file:
+  if (this.sourceProfiles !== null || !gEdgeDatabase) {
+    return Promise.resolve(new Date(0));
+  }
+  let logFilePath = OS.Path.join(gEdgeDatabase.parent.path, "LogFiles", "edb.log");
+  let dbPath = gEdgeDatabase.path;
+  let cookieMigrator = MSMigrationUtils.getCookiesMigrator(MSMigrationUtils.MIGRATION_TYPE_EDGE);
+  let cookiePaths = cookieMigrator._cookiesFolders.map(f => f.path);
+  let datePromises = [logFilePath, dbPath, ... cookiePaths].map(path => {
+    return OS.File.stat(path).catch(() => null).then(info => {
+      return info ? info.lastModificationDate : 0;
+    });
+  });
+  datePromises.push(new Promise(resolve => {
+    let typedURLs = new Map();
+    try {
+      typedURLs = MSMigrationUtils.getTypedURLs(kEdgeRegistryRoot);
+    } catch (ex) {}
+    let times = [0, ... typedURLs.values()];
+    resolve(Math.max.apply(Math, times));
+  }));
+  return Promise.all(datePromises).then(dates => {
+    return new Date(Math.max.apply(Math, dates));
+  });
 };
 
 /* Somewhat counterintuitively, this returns:
@@ -421,8 +438,8 @@ EdgeProfileMigrator.prototype.__defineGetter__("sourceProfiles", function() {
 });
 
 EdgeProfileMigrator.prototype.__defineGetter__("sourceLocked", function() {
-    // There is an exclusive lock on some databases. Assume they are locked for now.
-    return true;
+  // There is an exclusive lock on some databases. Assume they are locked for now.
+  return true;
 });
 
 

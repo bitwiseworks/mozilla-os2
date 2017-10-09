@@ -42,17 +42,17 @@ public:
   virtual nsRect VisualBorderRectRelativeToSelf() const override;
 
   virtual void Reflow(nsPresContext*           aPresContext,
-                      nsHTMLReflowMetrics&     aDesiredSize,
-                      const nsHTMLReflowState& aReflowState,
+                      ReflowOutput&     aDesiredSize,
+                      const ReflowInput& aReflowInput,
                       nsReflowStatus&          aStatus) override;
                                
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                 const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) override;
 
-  DrawResult PaintBorderBackground(nsDisplayListBuilder* aBuilder,
-                                   nsRenderingContext& aRenderingContext,
-                                   nsPoint aPt, const nsRect& aDirtyRect);
+  DrawResult PaintBorder(nsDisplayListBuilder* aBuilder,
+                         nsRenderingContext& aRenderingContext,
+                         nsPoint aPt, const nsRect& aDirtyRect);
 
 #ifdef DEBUG
   virtual void SetInitialChildList(ChildListID    aListID,

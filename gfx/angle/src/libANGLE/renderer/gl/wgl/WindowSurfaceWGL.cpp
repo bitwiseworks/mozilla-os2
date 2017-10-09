@@ -16,12 +16,14 @@
 namespace rx
 {
 
-WindowSurfaceWGL::WindowSurfaceWGL(RendererGL *renderer,
+WindowSurfaceWGL::WindowSurfaceWGL(const egl::SurfaceState &state,
+                                   RendererGL *renderer,
                                    EGLNativeWindowType window,
                                    int pixelFormat,
                                    HGLRC wglContext,
-                                   const FunctionsWGL *functions)
-    : SurfaceGL(renderer),
+                                   const FunctionsWGL *functions,
+                                   EGLint orientation)
+    : SurfaceGL(state, renderer),
       mPixelFormat(pixelFormat),
       mWGLContext(wglContext),
       mWindow(window),
@@ -29,6 +31,8 @@ WindowSurfaceWGL::WindowSurfaceWGL(RendererGL *renderer,
       mFunctionsWGL(functions),
       mSwapBehavior(0)
 {
+    // EGL_ANGLE_surface_orientation is not supported for regular WGL window surfaces
+    ASSERT(orientation == 0);
 }
 
 WindowSurfaceWGL::~WindowSurfaceWGL()
@@ -119,7 +123,7 @@ egl::Error WindowSurfaceWGL::querySurfacePointerANGLE(EGLint attribute, void **v
     return egl::Error(EGL_SUCCESS);
 }
 
-egl::Error WindowSurfaceWGL::bindTexImage(EGLint buffer)
+egl::Error WindowSurfaceWGL::bindTexImage(gl::Texture *texture, EGLint buffer)
 {
     UNIMPLEMENTED();
     return egl::Error(EGL_SUCCESS);

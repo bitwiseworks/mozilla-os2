@@ -26,7 +26,7 @@ NS_IMPL_ISUPPORTS_INHERITED0(AnalyserNode, AudioNode)
 
 class AnalyserNodeEngine final : public AudioNodeEngine
 {
-  class TransferBuffer final : public nsRunnable
+  class TransferBuffer final : public Runnable
   {
   public:
     TransferBuffer(AudioNodeStream* aStream,
@@ -36,7 +36,7 @@ class AnalyserNodeEngine final : public AudioNodeEngine
     {
     }
 
-    NS_IMETHOD Run()
+    NS_IMETHOD Run() override
     {
       RefPtr<AnalyserNode> node =
         static_cast<AnalyserNode*>(mStream->Engine()->NodeMainThread());
@@ -113,7 +113,8 @@ AnalyserNode::AnalyserNode(AudioContext* aContext)
 {
   mStream = AudioNodeStream::Create(aContext,
                                     new AnalyserNodeEngine(this),
-                                    AudioNodeStream::NO_STREAM_FLAGS);
+                                    AudioNodeStream::NO_STREAM_FLAGS,
+                                    aContext->Graph());
 
   // Enough chunks must be recorded to handle the case of fftSize being
   // increased to maximum immediately before getFloatTimeDomainData() is

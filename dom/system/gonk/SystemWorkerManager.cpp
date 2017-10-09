@@ -28,9 +28,6 @@
 #include "TimeZoneSettingObserver.h"
 #include "AudioManager.h"
 #include "mozilla/dom/ScriptSettings.h"
-#ifdef MOZ_B2G_RIL
-#include "mozilla/ipc/Ril.h"
-#endif
 #include "mozilla/ipc/KeyStore.h"
 #include "nsIObserverService.h"
 #include "nsServiceManagerUtils.h"
@@ -78,15 +75,13 @@ SystemWorkerManager::Init()
   NS_ASSERTION(NS_IsMainThread(), "We can only initialize on the main thread");
   NS_ASSERTION(!mShutdown, "Already shutdown!");
 
-  mozilla::AutoSafeJSContext cx;
-
-  nsresult rv = InitWifi(cx);
+  nsresult rv = InitWifi();
   if (NS_FAILED(rv)) {
     NS_WARNING("Failed to initialize WiFi Networking!");
     return rv;
   }
 
-  InitKeyStore(cx);
+  InitKeyStore();
 
   InitAutoMounter();
   InitializeTimeZoneSettingObserver();
@@ -116,10 +111,6 @@ SystemWorkerManager::Shutdown()
   mShutdown = true;
 
   ShutdownAutoMounter();
-
-#ifdef MOZ_B2G_RIL
-  RilWorker::Shutdown();
-#endif
 
   nsCOMPtr<nsIWifi> wifi(do_QueryInterface(mWifiWorker));
   if (wifi) {
@@ -186,26 +177,11 @@ SystemWorkerManager::RegisterRilWorker(unsigned int aClientId,
                                        JS::Handle<JS::Value> aWorker,
                                        JSContext *aCx)
 {
-#ifndef MOZ_B2G_RIL
   return NS_ERROR_NOT_IMPLEMENTED;
-#else
-  NS_ENSURE_TRUE(aWorker.isObject(), NS_ERROR_UNEXPECTED);
-
-  JSAutoCompartment ac(aCx, &aWorker.toObject());
-
-  WorkerCrossThreadDispatcher *wctd =
-    GetWorkerCrossThreadDispatcher(aCx, aWorker);
-  if (!wctd) {
-    NS_WARNING("Failed to GetWorkerCrossThreadDispatcher for ril");
-    return NS_ERROR_FAILURE;
-  }
-
-  return RilWorker::Register(aClientId, wctd);
-#endif // MOZ_B2G_RIL
 }
 
 nsresult
-SystemWorkerManager::InitWifi(JSContext *cx)
+SystemWorkerManager::InitWifi()
 {
   nsCOMPtr<nsIWorkerHolder> worker = do_CreateInstance(kWifiWorkerCID);
   NS_ENSURE_TRUE(worker, NS_ERROR_FAILURE);
@@ -215,7 +191,7 @@ SystemWorkerManager::InitWifi(JSContext *cx)
 }
 
 nsresult
-SystemWorkerManager::InitKeyStore(JSContext *cx)
+SystemWorkerManager::InitKeyStore()
 {
   mKeyStore = new KeyStore();
   return NS_OK;

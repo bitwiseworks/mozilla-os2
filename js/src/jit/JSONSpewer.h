@@ -7,6 +7,8 @@
 #ifndef jit_JSONSpewer_h
 #define jit_JSONSpewer_h
 
+#ifdef JS_JITSPEW
+
 #include <stdio.h>
 
 #include "js/TypeDecls.h"
@@ -34,8 +36,8 @@ class JSONSpewer
     void beginObject();
     void beginObjectProperty(const char* name);
     void beginListProperty(const char* name);
-    void stringValue(const char* format, ...);
-    void stringProperty(const char* name, const char* format, ...);
+    void stringValue(const char* format, ...) MOZ_FORMAT_PRINTF(2, 3);
+    void stringProperty(const char* name, const char* format, ...) MOZ_FORMAT_PRINTF(3, 4);
     void beginStringProperty(const char* name);
     void endStringProperty();
     void integerValue(int value);
@@ -60,11 +62,11 @@ class JSONSpewer
     void spewRanges(BacktrackingAllocator* regalloc);
     void endPass();
     void endFunction();
-
-    void spewDebuggerGraph(MIRGraph* mir);
 };
 
 } // namespace jit
 } // namespace js
+
+#endif /* JS_JITSPEW */
 
 #endif /* jit_JSONSpewer_h */

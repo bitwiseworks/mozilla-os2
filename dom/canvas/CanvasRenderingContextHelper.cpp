@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "CanvasRenderingContextHelper.h"
+#include "ImageBitmapRenderingContext.h"
 #include "ImageEncoder.h"
 #include "mozilla/dom/CanvasRenderingContext2D.h"
 #include "mozilla/Telemetry.h"
@@ -21,7 +22,59 @@ namespace dom {
 void
 CanvasRenderingContextHelper::ToBlob(JSContext* aCx,
                                      nsIGlobalObject* aGlobal,
-                                     FileCallback& aCallback,
+                                     BlobCallback& aCallback,
+                                     const nsAString& aType,
+                                     JS::Handle<JS::Value> aParams,
+                                     ErrorResult& aRv)
+{
+  // Encoder callback when encoding is complete.
+  class EncodeCallback : public EncodeCompleteCallback
+  {
+  public:
+    EncodeCallback(nsIGlobalObject* aGlobal, BlobCallback* aCallback)
+      : mGlobal(aGlobal)
+      , mBlobCallback(aCallback) {}
+
+    // This is called on main thread.
+    nsresult ReceiveBlob(already_AddRefed<Blob> aBlob)
+    {
+      RefPtr<Blob> blob = aBlob;
+
+      ErrorResult rv;
+      uint64_t size = blob->GetSize(rv);
+      if (rv.Failed()) {
+        rv.SuppressException();
+      } else {
+        AutoJSAPI jsapi;
+        if (jsapi.Init(mGlobal)) {
+          JS_updateMallocCounter(jsapi.cx(), size);
+        }
+      }
+
+      RefPtr<Blob> newBlob = Blob::Create(mGlobal, blob->Impl());
+
+      mBlobCallback->Call(*newBlob, rv);
+
+      mGlobal = nullptr;
+      mBlobCallback = nullptr;
+
+      return rv.StealNSResult();
+    }
+
+    nsCOMPtr<nsIGlobalObject> mGlobal;
+    RefPtr<BlobCallback> mBlobCallback;
+  };
+
+  RefPtr<EncodeCompleteCallback> callback =
+    new EncodeCallback(aGlobal, &aCallback);
+
+  ToBlob(aCx, aGlobal, callback, aType, aParams, aRv);
+}
+
+void
+CanvasRenderingContextHelper::ToBlob(JSContext* aCx,
+                                     nsIGlobalObject* aGlobal,
+                                     EncodeCompleteCallback* aCallback,
                                      const nsAString& aType,
                                      JS::Handle<JS::Value> aParams,
                                      ErrorResult& aRv)
@@ -56,46 +109,7 @@ CanvasRenderingContextHelper::ToBlob(JSContext* aCx,
     imageBuffer = mCurrentContext->GetImageBuffer(&format);
   }
 
-  // Encoder callback when encoding is complete.
-  class EncodeCallback : public EncodeCompleteCallback
-  {
-  public:
-    EncodeCallback(nsIGlobalObject* aGlobal, FileCallback* aCallback)
-      : mGlobal(aGlobal)
-      , mFileCallback(aCallback) {}
-
-    // This is called on main thread.
-    nsresult ReceiveBlob(already_AddRefed<Blob> aBlob)
-    {
-      RefPtr<Blob> blob = aBlob;
-
-      ErrorResult rv;
-      uint64_t size = blob->GetSize(rv);
-      if (rv.Failed()) {
-        rv.SuppressException();
-      } else {
-        AutoJSAPI jsapi;
-        if (jsapi.Init(mGlobal)) {
-          JS_updateMallocCounter(jsapi.cx(), size);
-        }
-      }
-
-      RefPtr<Blob> newBlob = Blob::Create(mGlobal, blob->Impl());
-
-      mFileCallback->Call(*newBlob, rv);
-
-      mGlobal = nullptr;
-      mFileCallback = nullptr;
-
-      return rv.StealNSResult();
-    }
-
-    nsCOMPtr<nsIGlobalObject> mGlobal;
-    RefPtr<FileCallback> mFileCallback;
-  };
-
-  RefPtr<EncodeCompleteCallback> callback =
-    new EncodeCallback(aGlobal, &aCallback);
+  RefPtr<EncodeCompleteCallback> callback = aCallback;
 
   aRv = ImageEncoder::ExtractDataAsync(type,
                                        params,
@@ -109,6 +123,13 @@ CanvasRenderingContextHelper::ToBlob(JSContext* aCx,
 already_AddRefed<nsICanvasRenderingContextInternal>
 CanvasRenderingContextHelper::CreateContext(CanvasContextType aContextType)
 {
+  return CreateContextHelper(aContextType, layers::LayersBackend::LAYERS_NONE);
+}
+
+already_AddRefed<nsICanvasRenderingContextInternal>
+CanvasRenderingContextHelper::CreateContextHelper(CanvasContextType aContextType,
+                                                  layers::LayersBackend aCompositorBackend)
+{
   MOZ_ASSERT(aContextType != CanvasContextType::NoContext);
   RefPtr<nsICanvasRenderingContextInternal> ret;
 
@@ -118,7 +139,7 @@ CanvasRenderingContextHelper::CreateContext(CanvasContextType aContextType)
 
   case CanvasContextType::Canvas2D:
     Telemetry::Accumulate(Telemetry::CANVAS_2D_USED, 1);
-    ret = new CanvasRenderingContext2D();
+    ret = new CanvasRenderingContext2D(aCompositorBackend);
     break;
 
   case CanvasContextType::WebGL1:
@@ -136,6 +157,11 @@ CanvasRenderingContextHelper::CreateContext(CanvasContextType aContextType)
     ret = WebGL2Context::Create();
     if (!ret)
       return nullptr;
+
+    break;
+
+  case CanvasContextType::ImageBitmap:
+    ret = new ImageBitmapRenderingContext();
 
     break;
   }
@@ -179,8 +205,16 @@ CanvasRenderingContextHelper::GetContext(JSContext* aCx,
       // See bug 645792 and bug 1215072.
       // We want to throw only if dictionary initialization fails,
       // so only in case aRv has been set to some error value.
+      if (contextType == CanvasContextType::WebGL1)
+        Telemetry::Accumulate(Telemetry::CANVAS_WEBGL_SUCCESS, 0);
+      else if (contextType == CanvasContextType::WebGL2)
+        Telemetry::Accumulate(Telemetry::CANVAS_WEBGL2_SUCCESS, 0);
       return nullptr;
     }
+    if (contextType == CanvasContextType::WebGL1)
+      Telemetry::Accumulate(Telemetry::CANVAS_WEBGL_SUCCESS, 1);
+    else if (contextType == CanvasContextType::WebGL2)
+      Telemetry::Accumulate(Telemetry::CANVAS_WEBGL2_SUCCESS, 1);
   } else {
     // We already have a context of some type.
     if (contextType != mCurrentContextType)

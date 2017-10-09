@@ -15,6 +15,8 @@ const TELEMETRY_HISTOGRAM_ID_PREFIX = "FX_THUMBNAILS_BG_";
 const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 
+const ABOUT_NEWTAB_SEGREGATION_PREF = "privacy.usercontext.about_newtab_segregation.enabled";
+
 const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm", this);
@@ -35,6 +37,8 @@ XPCOMUtils.defineConstant(this, "TEL_CAPTURE_DONE_TIMEOUT", TEL_CAPTURE_DONE_TIM
 XPCOMUtils.defineConstant(this, "TEL_CAPTURE_DONE_CRASHED", TEL_CAPTURE_DONE_CRASHED);
 XPCOMUtils.defineConstant(this, "TEL_CAPTURE_DONE_BAD_URI", TEL_CAPTURE_DONE_BAD_URI);
 
+XPCOMUtils.defineLazyModuleGetter(this, "ContextualIdentityService",
+                                  "resource://gre/modules/ContextualIdentityService.jsm");
 const global = this;
 
 const BackgroundPageThumbs = {
@@ -88,7 +92,7 @@ const BackgroundPageThumbs = {
    * @param url      The URL to capture.
    * @param options  An optional object that configures the capture.  See
    *                 capture() for description.
-   * @return {Promise} Promise;
+   * @return {Promise} A Promise that resolves when this task completes
    */
   captureIfMissing: Task.async(function* (url, options={}) {
     // The fileExistsForURL call is an optimization, potentially but unlikely
@@ -96,19 +100,48 @@ const BackgroundPageThumbs = {
     // atomically test whether the file exists before writing it.
     let exists = yield PageThumbsStorage.fileExistsForURL(url);
     if (exists) {
-      if(options.onDone){
+      if (options.onDone) {
         options.onDone(url);
       }
       return url;
     }
-    try{
+    let thumbPromise = new Promise((resolve, reject) => {
+      function observe(subject, topic, data) { // jshint ignore:line
+        if (data === url) {
+          switch (topic) {
+            case "page-thumbnail:create":
+              resolve();
+              break;
+            case "page-thumbnail:error":
+              reject(new Error("page-thumbnail:error"));
+              break;
+          }
+          Services.obs.removeObserver(observe, "page-thumbnail:create");
+          Services.obs.removeObserver(observe, "page-thumbnail:error");
+        }
+      }
+      Services.obs.addObserver(observe, "page-thumbnail:create", false);
+      Services.obs.addObserver(observe, "page-thumbnail:error", false);
+    });
+    try {
       this.capture(url, options);
+      yield thumbPromise;
     } catch (err) {
-      options.onDone(url);
+      if (options.onDone) {
+        options.onDone(url);
+      }
       throw err;
     }
     return url;
   }),
+
+  /**
+   * Tell the service that the thumbnail browser should be recreated at next
+   * call of _ensureBrowser().
+   */
+  renewThumbnailBrowser: function() {
+    this._renewThumbBrowser = true;
+  },
 
   /**
    * Ensures that initialization of the thumbnail browser's parent window has
@@ -165,12 +198,23 @@ const BackgroundPageThumbs = {
    * Creates the thumbnail browser if it doesn't already exist.
    */
   _ensureBrowser: function () {
-    if (this._thumbBrowser)
+    if (this._thumbBrowser && !this._renewThumbBrowser)
       return;
+
+    this._destroyBrowser();
+    this._renewThumbBrowser = false;
 
     let browser = this._parentWin.document.createElementNS(XUL_NS, "browser");
     browser.setAttribute("type", "content");
     browser.setAttribute("remote", "true");
+    browser.setAttribute("disableglobalhistory", "true");
+
+    if (Services.prefs.getBoolPref(ABOUT_NEWTAB_SEGREGATION_PREF)) {
+      // Use the private container for thumbnails.
+      let privateIdentity =
+        ContextualIdentityService.getPrivateIdentity("userContextIdInternal.thumbnail");
+      browser.setAttribute("usercontextid", privateIdentity.userContextId);
+    }
 
     // Size the browser.  Make its aspect ratio the same as the canvases' that
     // the thumbnails are drawn into; the canvases' aspect ratio is the same as
@@ -200,8 +244,16 @@ const BackgroundPageThumbs = {
       // "resetting" the capture requires more work - so for now, we just
       // discard it.
       if (curCapture && curCapture.pending) {
-        curCapture._done(null, TEL_CAPTURE_DONE_CRASHED);
-        // _done automatically continues queue processing.
+        // Continue queue processing by calling curCapture._done().  Do it after
+        // this crashed listener returns, though.  A new browser will be created
+        // immediately (on the same stack as the _done call stack) if there are
+        // any more queued-up captures, and that seems to mess up the new
+        // browser's message manager if it happens on the same stack as the
+        // listener.  Trying to send a message to the manager in that case
+        // throws NS_ERROR_NOT_INITIALIZED.
+        Services.tm.currentThread.dispatch(() => {
+          curCapture._done(null, TEL_CAPTURE_DONE_CRASHED);
+        }, Ci.nsIEventTarget.DISPATCH_NORMAL);
       }
       // else: we must have been idle and not currently doing a capture (eg,
       // maybe a GC or similar crashed) - so there's no need to attempt a
@@ -249,6 +301,9 @@ const BackgroundPageThumbs = {
       throw new Error("The capture should be at the head of the queue.");
     this._captureQueue.shift();
     this._capturesByURL.delete(capture.url);
+    if (capture.doneReason != TEL_CAPTURE_DONE_OK) {
+      Services.obs.notifyObservers(null, "page-thumbnail:error", capture.url);
+    }
 
     // Start the destroy-browser timer *before* processing the capture queue.
     let timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
@@ -262,6 +317,14 @@ const BackgroundPageThumbs = {
 
   _destroyBrowserTimeout: DESTROY_BROWSER_TIMEOUT,
 };
+
+Services.prefs.addObserver(ABOUT_NEWTAB_SEGREGATION_PREF,
+  function(aSubject, aTopic, aData) {
+    if (aTopic == "nsPref:changed" && aData == ABOUT_NEWTAB_SEGREGATION_PREF) {
+      BackgroundPageThumbs.renewThumbnailBrowser();
+    }
+  },
+  false);
 
 Object.defineProperty(this, "BackgroundPageThumbs", {
   value: BackgroundPageThumbs,
@@ -284,6 +347,7 @@ function Capture(url, captureCallback, options) {
   this.id = Capture.nextID++;
   this.creationDate = new Date();
   this.doneCallbacks = [];
+  this.doneReason;
   if (options.onDone)
     this.doneCallbacks.push(options.onDone);
 }
@@ -370,6 +434,7 @@ Capture.prototype = {
     // removes the didCapture message listener.
     let { captureCallback, doneCallbacks, options } = this;
     this.destroy();
+    this.doneReason = reason;
 
     if (typeof(reason) != "number") {
       throw new Error("A done reason must be given.");
@@ -391,6 +456,14 @@ Capture.prototype = {
         catch (err) {
           Cu.reportError(err);
         }
+      }
+
+      if (Services.prefs.getBoolPref(ABOUT_NEWTAB_SEGREGATION_PREF)) {
+        // Clear the data in the private container for thumbnails.
+        let privateIdentity =
+          ContextualIdentityService.getPrivateIdentity("userContextIdInternal.thumbnail");
+        Services.obs.notifyObservers(null, "clear-origin-attributes-data",
+          JSON.stringify({ userContextId: privateIdentity.userContextId }));
       }
     };
 

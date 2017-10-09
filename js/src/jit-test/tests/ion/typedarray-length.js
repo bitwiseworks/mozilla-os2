@@ -1,4 +1,4 @@
-function neuterEventually(arr, i, variant)
+function detachArrayBufferEventually(arr, i)
 {
   with (arr)
   {
@@ -6,20 +6,19 @@ function neuterEventually(arr, i, variant)
   }
 
   if (i === 2000)
-    neuter(arr.buffer, variant);
+    detachArrayBuffer(arr.buffer);
 }
 
-function test(variant)
+function test()
 {
   var buf = new ArrayBuffer(1000);
   var ta = new Int8Array(buf);
 
   for (var i = 0; i < 2500; i++)
   {
-    neuterEventually(ta, i, variant);
+    detachArrayBufferEventually(ta, i);
     assertEq(ta.length, i >= 2000 ? 0 : 1000);
   }
 }
 
-test("change-data");
-test("same-data");
+test();

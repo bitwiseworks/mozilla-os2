@@ -111,17 +111,15 @@ AutoCompleteInput.prototype = {
 // A helper for check_autocomplete to check a specific match against data from
 // the controller.
 function _check_autocomplete_matches(match, result) {
-  let { uri, title, tags, searchEngine, style } = match;
+  let { uri, title, tags, style } = match;
   if (tags)
     title += " \u2013 " + tags.sort().join(", ");
-  if (searchEngine)
-    title += TITLE_SEARCH_ENGINE_SEPARATOR + searchEngine;
   if (style)
     style = style.sort();
   else
     style = ["favicon"];
 
-  do_print("Checking against expected '" + uri.spec + "', '" + title + "'...");
+  do_print(`Checking against expected "${uri.spec}", "${title}"`);
   // Got a match on both uri and title?
   if (stripPrefix(uri.spec) != stripPrefix(result.value) || title != result.comment) {
     return false;
@@ -169,20 +167,21 @@ function* check_autocomplete(test) {
     do_print("onSearchBegin received");
     numSearchesStarted++;
   };
-  let deferred = Promise.defer();
-  input.onSearchComplete = () => {
-    do_print("onSearchComplete received");
-    deferred.resolve();
-  }
-
+  let searchCompletePromise = new Promise(resolve => {
+    input.onSearchComplete = () => {
+      do_print("onSearchComplete received");
+      resolve();
+    }
+  });
   let expectedSearches = 1;
   if (test.incompleteSearch) {
     controller.startSearch(test.incompleteSearch);
     expectedSearches++;
   }
+
   do_print("Searching for: '" + test.search + "'");
   controller.startSearch(test.search);
-  yield deferred.promise;
+  yield searchCompletePromise;
 
   Assert.equal(numSearchesStarted, expectedSearches, "All searches started");
 
@@ -195,47 +194,49 @@ function* check_autocomplete(test) {
     // Do not modify the test original matches.
     let matches = test.matches.slice();
 
-    let firstIndexToCheck = 0;
-    if (test.searchParam && test.searchParam == "enable-actions") {
-      firstIndexToCheck = 1;
-      do_print("Checking first match is first autocomplete entry")
-      let result = {
-        value: controller.getValueAt(0),
-        comment: controller.getCommentAt(0),
-        style: controller.getStyleAt(0),
-        image: controller.getImageAt(0),
-      }
-      do_print(`First match is "${result.value}", " ${result.comment}"`);
-      Assert.ok(_check_autocomplete_matches(matches[0], result), "first item is correct");
-      do_print("Checking rest of the matches");
-    }
-
-    for (let i = firstIndexToCheck; i < controller.matchCount; i++) {
-      let result = {
-        value: controller.getValueAt(i),
-        comment: controller.getCommentAt(i),
-        style: controller.getStyleAt(i),
-        image: controller.getImageAt(i),
-      }
-      do_print(`Looking for "${result.value}", "${result.comment}" in expected results...`);
-      let lowerBound = test.checkSorting ? i : firstIndexToCheck;
-      let upperBound = test.checkSorting ? i + 1 : matches.length;
-      let found = false;
-      for (let j = lowerBound; j < upperBound; ++j) {
-        // Skip processed expected results
-        if (matches[j] == undefined)
-          continue;
-        if (_check_autocomplete_matches(matches[j], result)) {
-          do_print("Got a match at index " + j + "!");
-          // Make it undefined so we don't process it again
-          matches[j] = undefined;
-          found = true;
-          break;
+    if (matches.length) {
+      let firstIndexToCheck = 0;
+      if (test.searchParam && test.searchParam.includes("enable-actions")) {
+        firstIndexToCheck = 1;
+        do_print("Checking first match is first autocomplete entry")
+        let result = {
+          value: controller.getValueAt(0),
+          comment: controller.getCommentAt(0),
+          style: controller.getStyleAt(0),
+          image: controller.getImageAt(0),
         }
+        do_print(`First match is "${result.value}", "${result.comment}"`);
+        Assert.ok(_check_autocomplete_matches(matches[0], result), "first item is correct");
+        do_print("Checking rest of the matches");
       }
 
-      if (!found)
-        do_throw(`Didn't find the current result ("${result.value}", "${result.comment}") in matches`); //' (Emacs syntax highlighting fix)
+      for (let i = firstIndexToCheck; i < controller.matchCount; i++) {
+        let result = {
+          value: controller.getValueAt(i),
+          comment: controller.getCommentAt(i),
+          style: controller.getStyleAt(i),
+          image: controller.getImageAt(i),
+        }
+        do_print(`Looking for "${result.value}", "${result.comment}" in expected results...`);
+        let lowerBound = test.checkSorting ? i : firstIndexToCheck;
+        let upperBound = test.checkSorting ? i + 1 : matches.length;
+        let found = false;
+        for (let j = lowerBound; j < upperBound; ++j) {
+          // Skip processed expected results
+          if (matches[j] == undefined)
+            continue;
+          if (_check_autocomplete_matches(matches[j], result)) {
+            do_print("Got a match at index " + j + "!");
+            // Make it undefined so we don't process it again
+            matches[j] = undefined;
+            found = true;
+            break;
+          }
+        }
+
+        if (!found)
+          do_throw(`Didn't find the current result ("${result.value}", "${result.comment}") in matches`); // ' (Emacs syntax highlighting fix)
+      }
     }
 
     Assert.equal(controller.matchCount, matches.length,
@@ -271,11 +272,13 @@ var addBookmark = Task.async(function* (aBookmarkObj) {
     title: aBookmarkObj.title || "A bookmark",
     url: aBookmarkObj.uri
   });
-  let itemId = yield PlacesUtils.promiseItemId(bm.guid);
+  yield PlacesUtils.promiseItemId(bm.guid);
 
   if (aBookmarkObj.keyword) {
     yield PlacesUtils.keywords.insert({ keyword: aBookmarkObj.keyword,
-                                        url: aBookmarkObj.uri.spec });
+                                        url: aBookmarkObj.uri.spec,
+                                        postData: aBookmarkObj.postData
+                                      });
   }
 
   if (aBookmarkObj.tags) {
@@ -283,19 +286,19 @@ var addBookmark = Task.async(function* (aBookmarkObj) {
   }
 });
 
-function addOpenPages(aUri, aCount=1) {
+function addOpenPages(aUri, aCount=1, aUserContextId=0) {
   let ac = Cc["@mozilla.org/autocomplete/search;1?name=unifiedcomplete"]
              .getService(Ci.mozIPlacesAutoComplete);
   for (let i = 0; i < aCount; i++) {
-    ac.registerOpenPage(aUri);
+    ac.registerOpenPage(aUri, aUserContextId);
   }
 }
 
-function removeOpenPages(aUri, aCount=1) {
+function removeOpenPages(aUri, aCount=1, aUserContextId=0) {
   let ac = Cc["@mozilla.org/autocomplete/search;1?name=unifiedcomplete"]
              .getService(Ci.mozIPlacesAutoComplete);
   for (let i = 0; i < aCount; i++) {
-    ac.unregisterOpenPage(aUri);
+    ac.unregisterOpenPage(aUri, aUserContextId);
   }
 }
 
@@ -346,7 +349,11 @@ function stripPrefix(spec)
 }
 
 function makeActionURI(action, params) {
-  let url = "moz-action:" + action + "," + JSON.stringify(params);
+  let encodedParams = {};
+  for (let key in params) {
+    encodedParams[key] = encodeURIComponent(params[key]);
+  }
+  let url = "moz-action:" + action + "," + JSON.stringify(encodedParams);
   return NetUtil.newURI(url);
 }
 
@@ -360,9 +367,16 @@ function makeSearchMatch(input, extra = {}) {
     engineName: extra.engineName || "MozSearch",
     input,
     searchQuery: "searchQuery" in extra ? extra.searchQuery : input,
-    alias: extra.alias, // may be undefined which is expected.
+  };
+  if ("alias" in extra) {
+    // May be undefined, which is expected, but in that case make sure it's not
+    // included in the params of the moz-action URL.
+    params.alias = extra.alias;
   }
   let style = [ "action", "searchengine" ];
+  if (Array.isArray(extra.style)) {
+    style.push(...extra.style);
+  }
   if (extra.heuristic) {
     style.push("heuristic");
   }
@@ -400,6 +414,22 @@ function makeSwitchToTabMatch(url, extra = {}) {
     title: extra.title || url,
     style: [ "action", "switchtab" ],
   }
+}
+
+function makeExtensionMatch(extra = {}) {
+  let style = [ "action", "extension" ];
+  if (extra.heuristic) {
+    style.push("heuristic");
+  }
+
+  return {
+    uri: makeActionURI("extension", {
+      content: extra.content,
+      keyword: extra.keyword,
+    }),
+    title: extra.description,
+    style,
+  };
 }
 
 function setFaviconForHref(href, iconHref) {
@@ -449,7 +479,7 @@ function* addTestEngine(basename, httpServer=undefined) {
 
 // Ensure we have a default search engine and the keyword.enabled preference
 // set.
-add_task(function ensure_search_engine() {
+add_task(function* ensure_search_engine() {
   // keyword.enabled is necessary for the tests to see keyword searches.
   Services.prefs.setBoolPref("keyword.enabled", true);
 

@@ -9,7 +9,7 @@ import org.mozilla.gecko.AppConstants;
 import android.widget.Spinner;
 import android.view.View;
 
-import com.jayway.android.robotium.solo.Condition;
+import com.robotium.solo.Condition;
 
 import android.hardware.Camera;
 import android.os.Build;
@@ -32,7 +32,7 @@ public class testGetUserMedia extends BaseTest {
 
     public void testGetUserMedia() {
         // TabShare.js is disabled on release builds.
-        if (AppConstants.RELEASE_BUILD) {
+        if (AppConstants.RELEASE_OR_BETA) {
             mAsserter.dumpLog(LOGTAG + " is disabled on release builds: returning");
             return;
         }

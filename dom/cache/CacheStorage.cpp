@@ -6,7 +6,7 @@
 
 #include "mozilla/dom/cache/CacheStorage.h"
 
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/dom/CacheStorageBinding.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/Response.h"
@@ -14,7 +14,7 @@
 #include "mozilla/dom/cache/Cache.h"
 #include "mozilla/dom/cache/CacheChild.h"
 #include "mozilla/dom/cache/CacheStorageChild.h"
-#include "mozilla/dom/cache/Feature.h"
+#include "mozilla/dom/cache/CacheWorkerHolder.h"
 #include "mozilla/dom/cache/PCacheChild.h"
 #include "mozilla/dom/cache/ReadStream.h"
 #include "mozilla/dom/cache/TypeUtils.h"
@@ -119,7 +119,6 @@ IsTrusted(const PrincipalInfo& aPrincipalInfo, bool aTestingPrefEnabled)
 
   nsAutoCString scheme(Substring(flatURL, schemePos, schemeLen));
   if (scheme.LowerCaseEqualsLiteral("https") ||
-      scheme.LowerCaseEqualsLiteral("app") ||
       scheme.LowerCaseEqualsLiteral("file")) {
     return true;
   }
@@ -149,8 +148,8 @@ CacheStorage::CreateOnMainThread(Namespace aNamespace, nsIGlobalObject* aGlobal,
                                  nsIPrincipal* aPrincipal, bool aStorageDisabled,
                                  bool aForceTrustedOrigin, ErrorResult& aRv)
 {
-  MOZ_ASSERT(aGlobal);
-  MOZ_ASSERT(aPrincipal);
+  MOZ_DIAGNOSTIC_ASSERT(aGlobal);
+  MOZ_DIAGNOSTIC_ASSERT(aPrincipal);
   MOZ_ASSERT(NS_IsMainThread());
 
   if (aStorageDisabled) {
@@ -186,8 +185,8 @@ already_AddRefed<CacheStorage>
 CacheStorage::CreateOnWorker(Namespace aNamespace, nsIGlobalObject* aGlobal,
                              WorkerPrivate* aWorkerPrivate, ErrorResult& aRv)
 {
-  MOZ_ASSERT(aGlobal);
-  MOZ_ASSERT(aWorkerPrivate);
+  MOZ_DIAGNOSTIC_ASSERT(aGlobal);
+  MOZ_DIAGNOSTIC_ASSERT(aWorkerPrivate);
   aWorkerPrivate->AssertIsOnWorkerThread();
 
   if (!aWorkerPrivate->IsStorageAllowed()) {
@@ -196,14 +195,15 @@ CacheStorage::CreateOnWorker(Namespace aNamespace, nsIGlobalObject* aGlobal,
     return ref.forget();
   }
 
-  if (aWorkerPrivate->IsInPrivateBrowsing()) {
+  if (aWorkerPrivate->GetOriginAttributes().mPrivateBrowsingId > 0) {
     NS_WARNING("CacheStorage not supported during private browsing.");
     RefPtr<CacheStorage> ref = new CacheStorage(NS_ERROR_DOM_SECURITY_ERR);
     return ref.forget();
   }
 
-  RefPtr<Feature> feature = Feature::Create(aWorkerPrivate);
-  if (!feature) {
+  RefPtr<CacheWorkerHolder> workerHolder =
+    CacheWorkerHolder::Create(aWorkerPrivate);
+  if (!workerHolder) {
     NS_WARNING("Worker thread is shutting down.");
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;
@@ -236,7 +236,7 @@ CacheStorage::CreateOnWorker(Namespace aNamespace, nsIGlobalObject* aGlobal,
   }
 
   RefPtr<CacheStorage> ref = new CacheStorage(aNamespace, aGlobal,
-                                                principalInfo, feature);
+                                              principalInfo, workerHolder);
   return ref.forget();
 }
 
@@ -245,16 +245,17 @@ bool
 CacheStorage::DefineCaches(JSContext* aCx, JS::Handle<JSObject*> aGlobal)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(js::GetObjectClass(aGlobal)->flags & JSCLASS_DOM_GLOBAL,
-             "Passed object is not a global object!");
+  MOZ_DIAGNOSTIC_ASSERT(js::GetObjectClass(aGlobal)->flags & JSCLASS_DOM_GLOBAL,
+                                           "Passed object is not a global object!");
+  js::AssertSameCompartment(aCx, aGlobal);
 
-  if (NS_WARN_IF(!CacheStorageBinding::GetConstructorObject(aCx, aGlobal) ||
-                 !CacheBinding::GetConstructorObject(aCx, aGlobal))) {
+  if (NS_WARN_IF(!CacheStorageBinding::GetConstructorObject(aCx) ||
+                 !CacheBinding::GetConstructorObject(aCx))) {
     return false;
   }
 
   nsIPrincipal* principal = nsContentUtils::ObjectPrincipal(aGlobal);
-  MOZ_ASSERT(principal);
+  MOZ_DIAGNOSTIC_ASSERT(principal);
 
   ErrorResult rv;
   RefPtr<CacheStorage> storage =
@@ -267,7 +268,6 @@ CacheStorage::DefineCaches(JSContext* aCx, JS::Handle<JSObject*> aGlobal)
   }
 
   JS::Rooted<JS::Value> caches(aCx);
-  js::AssertSameCompartment(aCx, aGlobal);
   if (NS_WARN_IF(!ToJSValue(aCx, storage, &caches))) {
     return false;
   }
@@ -276,15 +276,16 @@ CacheStorage::DefineCaches(JSContext* aCx, JS::Handle<JSObject*> aGlobal)
 }
 
 CacheStorage::CacheStorage(Namespace aNamespace, nsIGlobalObject* aGlobal,
-                           const PrincipalInfo& aPrincipalInfo, Feature* aFeature)
+                           const PrincipalInfo& aPrincipalInfo,
+                           CacheWorkerHolder* aWorkerHolder)
   : mNamespace(aNamespace)
   , mGlobal(aGlobal)
   , mPrincipalInfo(MakeUnique<PrincipalInfo>(aPrincipalInfo))
-  , mFeature(aFeature)
+  , mWorkerHolder(aWorkerHolder)
   , mActor(nullptr)
   , mStatus(NS_OK)
 {
-  MOZ_ASSERT(mGlobal);
+  MOZ_DIAGNOSTIC_ASSERT(mGlobal);
 
   // If the PBackground actor is already initialized then we can
   // immediately use it
@@ -308,7 +309,7 @@ CacheStorage::CacheStorage(nsresult aFailureResult)
   , mActor(nullptr)
   , mStatus(aFailureResult)
 {
-  MOZ_ASSERT(NS_FAILED(mStatus));
+  MOZ_DIAGNOSTIC_ASSERT(NS_FAILED(mStatus));
 }
 
 already_AddRefed<Promise>
@@ -477,8 +478,7 @@ CacheStorage::Constructor(const GlobalObject& aGlobal,
   nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(aGlobal.GetAsSupports());
 
   bool privateBrowsing = false;
-  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(global);
-  if (window) {
+  if (nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(global)) {
     nsCOMPtr<nsIDocument> doc = window->GetExtantDoc();
     if (doc) {
       nsCOMPtr<nsILoadContext> loadContext = doc->GetLoadContext();
@@ -508,17 +508,17 @@ void
 CacheStorage::ActorCreated(PBackgroundChild* aActor)
 {
   NS_ASSERT_OWNINGTHREAD(CacheStorage);
-  MOZ_ASSERT(aActor);
+  MOZ_DIAGNOSTIC_ASSERT(aActor);
 
-  if (NS_WARN_IF(mFeature && mFeature->Notified())) {
+  if (NS_WARN_IF(mWorkerHolder && mWorkerHolder->Notified())) {
     ActorFailed();
     return;
   }
 
-  // Feature ownership is passed to the CacheStorageChild actor and any actors
-  // it may create.  The Feature will keep the worker thread alive until the
-  // actors can gracefully shutdown.
-  CacheStorageChild* newActor = new CacheStorageChild(this, mFeature);
+  // WorkerHolder ownership is passed to the CacheStorageChild actor and any
+  // actors it may create.  The WorkerHolder will keep the worker thread alive
+  // until the actors can gracefully shutdown.
+  CacheStorageChild* newActor = new CacheStorageChild(this, mWorkerHolder);
   PCacheStorageChild* constructedActor =
     aActor->SendPCacheStorageConstructor(newActor, mNamespace, *mPrincipalInfo);
 
@@ -527,23 +527,23 @@ CacheStorage::ActorCreated(PBackgroundChild* aActor)
     return;
   }
 
-  mFeature = nullptr;
+  mWorkerHolder = nullptr;
 
-  MOZ_ASSERT(constructedActor == newActor);
+  MOZ_DIAGNOSTIC_ASSERT(constructedActor == newActor);
   mActor = newActor;
 
   MaybeRunPendingRequests();
-  MOZ_ASSERT(mPendingRequests.IsEmpty());
+  MOZ_DIAGNOSTIC_ASSERT(mPendingRequests.IsEmpty());
 }
 
 void
 CacheStorage::ActorFailed()
 {
   NS_ASSERT_OWNINGTHREAD(CacheStorage);
-  MOZ_ASSERT(!NS_FAILED(mStatus));
+  MOZ_DIAGNOSTIC_ASSERT(!NS_FAILED(mStatus));
 
   mStatus = NS_ERROR_UNEXPECTED;
-  mFeature = nullptr;
+  mWorkerHolder = nullptr;
 
   for (uint32_t i = 0; i < mPendingRequests.Length(); ++i) {
     nsAutoPtr<Entry> entry(mPendingRequests[i].forget());
@@ -556,8 +556,8 @@ void
 CacheStorage::DestroyInternal(CacheStorageChild* aActor)
 {
   NS_ASSERT_OWNINGTHREAD(CacheStorage);
-  MOZ_ASSERT(mActor);
-  MOZ_ASSERT(mActor == aActor);
+  MOZ_DIAGNOSTIC_ASSERT(mActor);
+  MOZ_DIAGNOSTIC_ASSERT(mActor == aActor);
   mActor->ClearListener();
   mActor = nullptr;
 
@@ -580,11 +580,13 @@ CacheStorage::AssertOwningThread() const
 }
 #endif
 
-CachePushStreamChild*
-CacheStorage::CreatePushStream(nsIAsyncInputStream* aStream)
+PBackgroundChild*
+CacheStorage::GetIPCManager()
 {
   // This is true because CacheStorage always uses IgnoreBody for requests.
-  MOZ_CRASH("CacheStorage should never create a push stream.");
+  // So we should never need to get the IPC manager during Request or
+  // Response serialization.
+  MOZ_CRASH("CacheStorage does not implement TypeUtils::GetIPCManager()");
 }
 
 CacheStorage::~CacheStorage()
@@ -594,7 +596,7 @@ CacheStorage::~CacheStorage()
     mActor->StartDestroyFromListener();
     // DestroyInternal() is called synchronously by StartDestroyFromListener().
     // So we should have already cleared the mActor.
-    MOZ_ASSERT(!mActor);
+    MOZ_DIAGNOSTIC_ASSERT(!mActor);
   }
 }
 
@@ -608,7 +610,7 @@ CacheStorage::MaybeRunPendingRequests()
   for (uint32_t i = 0; i < mPendingRequests.Length(); ++i) {
     ErrorResult rv;
     nsAutoPtr<Entry> entry(mPendingRequests[i].forget());
-    AutoChildOpArgs args(this, entry->mArgs);
+    AutoChildOpArgs args(this, entry->mArgs, 1);
     if (entry->mRequest) {
       args.Add(entry->mRequest, IgnoreBody, IgnoreInvalidScheme, rv);
     }

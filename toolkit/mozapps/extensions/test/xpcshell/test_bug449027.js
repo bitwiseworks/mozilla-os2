@@ -258,7 +258,7 @@ var WindowWatcher = {
     do_check_eq(url, URI_EXTENSION_BLOCKLIST_DIALOG);
     do_check_neq(gCallback, null);
 
-    var args = args.wrappedJSObject;
+    args = args.wrappedJSObject;
 
     gNewBlocks = [];
     var list = args.list;
@@ -392,7 +392,7 @@ function check_test_pt1() {
         do_throw("Addon " + (i + 1) + " did not get installed correctly");
     }
 
-    do_execute_soon(function checkstate1() {check_state("start", null, run_test_pt2);});
+    do_execute_soon(function checkstate1() { check_state("start", null, run_test_pt2); });
   });
 }
 

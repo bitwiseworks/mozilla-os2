@@ -11,6 +11,24 @@ const TEST_CONTENT_SCRIPT_BASENAME = "contentSearch.js";
 const SUGGESTIONS_TIMEOUT = 10000;
 
 var gMsgMan;
+/* eslint no-undef:"error" */
+/* import-globals-from ../../components/search/test/head.js */
+Services.scriptloader.loadSubScript(
+  "chrome://mochitests/content/browser/browser/components/search/test/head.js",
+  this);
+
+let originalEngine = Services.search.currentEngine;
+
+add_task(function* setup() {
+  yield promiseNewEngine("testEngine.xml", {
+    setAsCurrent: true,
+    testPath: "chrome://mochitests/content/browser/browser/components/search/test/",
+  });
+
+  registerCleanupFunction(() => {
+    Services.search.currentEngine = originalEngine;
+  });
+});
 
 add_task(function* GetState() {
   yield addTab();
@@ -97,13 +115,15 @@ add_task(function* search() {
     healthReportKey: "ContentSearchTest",
     searchPurpose: "ContentSearchTest",
   };
+  let submissionURL =
+    engine.getSubmission(data.searchString, "", data.whence).uri.spec;
   gMsgMan.sendAsyncMessage(TEST_MSG, {
     type: "Search",
     data: data,
+    expectedURL: submissionURL,
   });
-  let submissionURL =
-    engine.getSubmission(data.searchString, "", data.whence).uri.spec;
-  yield waitForLoadAndStopIt(gBrowser.selectedBrowser, submissionURL);
+  let msg = yield waitForTestMsg("loadStopped");
+  Assert.equal(msg.data.url, submissionURL, "Correct search page loaded");
 });
 
 add_task(function* searchInBackgroundTab() {
@@ -112,7 +132,6 @@ add_task(function* searchInBackgroundTab() {
   // search page should be loaded in the same tab that performed the search, in
   // the background tab.
   yield addTab();
-  let searchBrowser = gBrowser.selectedBrowser;
   let engine = Services.search.currentEngine;
   let data = {
     engineName: engine.name,
@@ -120,18 +139,20 @@ add_task(function* searchInBackgroundTab() {
     healthReportKey: "ContentSearchTest",
     searchPurpose: "ContentSearchTest",
   };
+  let submissionURL =
+    engine.getSubmission(data.searchString, "", data.whence).uri.spec;
   gMsgMan.sendAsyncMessage(TEST_MSG, {
     type: "Search",
     data: data,
+    expectedURL: submissionURL,
   });
 
   let newTab = gBrowser.addTab();
   gBrowser.selectedTab = newTab;
   registerCleanupFunction(() => gBrowser.removeTab(newTab));
 
-  let submissionURL =
-    engine.getSubmission(data.searchString, "", data.whence).uri.spec;
-  yield waitForLoadAndStopIt(searchBrowser, submissionURL);
+  let msg = yield waitForTestMsg("loadStopped");
+  Assert.equal(msg.data.url, submissionURL, "Correct search page loaded");
 });
 
 add_task(function* badImage() {
@@ -331,33 +352,6 @@ function waitForNewEngine(basename, numImages) {
   return Promise.all([addDeferred.promise].concat(eventPromises));
 }
 
-function waitForLoadAndStopIt(browser, expectedURL) {
-  let deferred = Promise.defer();
-  let listener = {
-    onStateChange: function (webProg, req, flags, status) {
-      if (req instanceof Ci.nsIChannel) {
-        let url = req.originalURI.spec;
-        info("onStateChange " + url);
-        let docStart = Ci.nsIWebProgressListener.STATE_IS_DOCUMENT |
-                       Ci.nsIWebProgressListener.STATE_START;
-        if ((flags & docStart) && webProg.isTopLevel && url == expectedURL) {
-          browser.removeProgressListener(listener);
-          ok(true, "Expected URL loaded");
-          req.cancel(Components.results.NS_ERROR_FAILURE);
-          deferred.resolve();
-        }
-      }
-    },
-    QueryInterface: XPCOMUtils.generateQI([
-      Ci.nsIWebProgressListener,
-      Ci.nsISupportsWeakReference,
-    ]),
-  };
-  browser.addProgressListener(listener);
-  info("Waiting for URL to load: " + expectedURL);
-  return deferred.promise;
-}
-
 function addTab() {
   let deferred = Promise.defer();
   let tab = gBrowser.addTab();
@@ -389,6 +383,7 @@ var currentStateObj = Task.async(function* () {
     state.engines.push({
       name: engine.name,
       iconBuffer: yield arrayBufferFromDataURI(uri),
+      hidden: false,
     });
   }
   return state;
@@ -414,7 +409,10 @@ function arrayBufferFromDataURI(uri) {
             createInstance(Ci.nsIXMLHttpRequest);
   xhr.open("GET", uri, true);
   xhr.responseType = "arraybuffer";
-  xhr.onloadend = () => {
+  xhr.onerror = () => {
+    deferred.resolve(null);
+  };
+  xhr.onload = () => {
     deferred.resolve(xhr.response);
   };
   try {

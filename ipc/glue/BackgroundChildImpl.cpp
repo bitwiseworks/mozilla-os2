@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -14,15 +16,21 @@
 #include "mozilla/media/MediaChild.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/dom/PBlobChild.h"
+#include "mozilla/dom/PFileSystemRequestChild.h"
+#include "mozilla/dom/FileSystemTaskBase.h"
 #include "mozilla/dom/asmjscache/AsmJSCache.h"
 #include "mozilla/dom/cache/ActorUtils.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBFactoryChild.h"
 #include "mozilla/dom/indexedDB/PBackgroundIndexedDBUtilsChild.h"
 #include "mozilla/dom/ipc/BlobChild.h"
 #include "mozilla/dom/quota/PQuotaChild.h"
+#ifdef MOZ_GAMEPAD
+#include "mozilla/dom/GamepadEventChannelChild.h"
+#include "mozilla/dom/GamepadTestChannelChild.h"
+#endif
 #include "mozilla/dom/MessagePortChild.h"
-#include "mozilla/dom/NuwaChild.h"
 #include "mozilla/ipc/PBackgroundTestChild.h"
+#include "mozilla/ipc/PSendStreamChild.h"
 #include "mozilla/layout/VsyncChild.h"
 #include "mozilla/net/PUDPSocketChild.h"
 #include "mozilla/dom/network/UDPSocketChild.h"
@@ -66,7 +74,6 @@ using mozilla::dom::asmjscache::PAsmJSCacheEntryChild;
 using mozilla::dom::cache::PCacheChild;
 using mozilla::dom::cache::PCacheStorageChild;
 using mozilla::dom::cache::PCacheStreamControlChild;
-using mozilla::dom::PNuwaChild;
 
 // -----------------------------------------------------------------------------
 // BackgroundChildImpl::ThreadLocal
@@ -131,9 +138,7 @@ BackgroundChildImpl::ProcessingError(Result aCode, const char* aReason)
       MOZ_CRASH("Unknown error code!");
   }
 
-  // This is just MOZ_CRASH() un-inlined so that we can pass the result code as
-  // a string. MOZ_CRASH() only supports string literals at the moment.
-  MOZ_ReportCrash(abortMessage.get(), __FILE__, __LINE__); MOZ_REALLY_CRASH();
+  MOZ_CRASH_UNSAFE_PRINTF("%s: %s", abortMessage.get(), aReason);
 }
 
 void
@@ -271,8 +276,7 @@ BackgroundChildImpl::DeallocPUDPSocketChild(PUDPSocketChild* child)
 dom::PBroadcastChannelChild*
 BackgroundChildImpl::AllocPBroadcastChannelChild(const PrincipalInfo& aPrincipalInfo,
                                                  const nsCString& aOrigin,
-                                                 const nsString& aChannel,
-                                                 const bool& aPrivateBrowsing)
+                                                 const nsString& aChannel)
 {
   RefPtr<dom::BroadcastChannelChild> agent =
     new dom::BroadcastChannelChild(aOrigin);
@@ -401,17 +405,15 @@ BackgroundChildImpl::DeallocPMessagePortChild(PMessagePortChild* aActor)
   return true;
 }
 
-PNuwaChild*
-BackgroundChildImpl::AllocPNuwaChild()
+PSendStreamChild*
+BackgroundChildImpl::AllocPSendStreamChild()
 {
-  return new mozilla::dom::NuwaChild();
+  MOZ_CRASH("PSendStreamChild actors should be manually constructed!");
 }
 
 bool
-BackgroundChildImpl::DeallocPNuwaChild(PNuwaChild* aActor)
+BackgroundChildImpl::DeallocPSendStreamChild(PSendStreamChild* aActor)
 {
-  MOZ_ASSERT(aActor);
-
   delete aActor;
   return true;
 }
@@ -446,6 +448,60 @@ BackgroundChildImpl::DeallocPQuotaChild(PQuotaChild* aActor)
   MOZ_ASSERT(aActor);
 
   delete aActor;
+  return true;
+}
+
+dom::PFileSystemRequestChild*
+BackgroundChildImpl::AllocPFileSystemRequestChild(const FileSystemParams& aParams)
+{
+  MOZ_CRASH("Should never get here!");
+  return nullptr;
+}
+
+bool
+BackgroundChildImpl::DeallocPFileSystemRequestChild(PFileSystemRequestChild* aActor)
+{
+  // The reference is increased in FileSystemTaskBase::Start of
+  // FileSystemTaskBase.cpp. We should decrease it after IPC.
+  RefPtr<dom::FileSystemTaskChildBase> child =
+    dont_AddRef(static_cast<dom::FileSystemTaskChildBase*>(aActor));
+  return true;
+}
+
+// Gamepad API Background IPC
+dom::PGamepadEventChannelChild*
+BackgroundChildImpl::AllocPGamepadEventChannelChild()
+{
+  MOZ_CRASH("PGamepadEventChannelChild actor should be manually constructed!");
+  return nullptr;
+}
+
+bool
+BackgroundChildImpl::DeallocPGamepadEventChannelChild(PGamepadEventChannelChild* aActor)
+{
+#ifdef MOZ_GAMEPAD
+  MOZ_ASSERT(aActor);
+  delete static_cast<dom::GamepadEventChannelChild*>(aActor);
+#endif
+  return true;
+}
+
+dom::PGamepadTestChannelChild*
+BackgroundChildImpl::AllocPGamepadTestChannelChild()
+{
+#ifdef MOZ_GAMEPAD
+  MOZ_CRASH("PGamepadTestChannelChild actor should be manually constructed!");
+#endif
+  return nullptr;
+}
+
+bool
+BackgroundChildImpl::DeallocPGamepadTestChannelChild(PGamepadTestChannelChild* aActor)
+{
+#ifdef MOZ_GAMEPAD
+  MOZ_ASSERT(aActor);
+  delete static_cast<dom::GamepadTestChannelChild*>(aActor);
+#endif
   return true;
 }
 

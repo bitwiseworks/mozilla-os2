@@ -18,16 +18,17 @@
 namespace rx
 {
 
-PbufferSurfaceCGL::PbufferSurfaceCGL(RendererGL *renderer,
+PbufferSurfaceCGL::PbufferSurfaceCGL(const egl::SurfaceState &state,
+                                     RendererGL *renderer,
                                      EGLint width,
                                      EGLint height,
                                      const FunctionsGL *functions)
-    : SurfaceGL(renderer),
+    : SurfaceGL(state, renderer),
       mWidth(width),
       mHeight(height),
       mFunctions(functions),
       mStateManager(renderer->getStateManager()),
-      mWorkarounds(renderer->getWorkarounds()),
+      mRenderer(renderer),
       mFramebuffer(0),
       mColorRenderbuffer(0),
       mDSRenderbuffer(0)
@@ -95,7 +96,7 @@ egl::Error PbufferSurfaceCGL::querySurfacePointerANGLE(EGLint attribute, void **
     return egl::Error(EGL_SUCCESS);
 }
 
-egl::Error PbufferSurfaceCGL::bindTexImage(EGLint buffer)
+egl::Error PbufferSurfaceCGL::bindTexImage(gl::Texture *texture, EGLint buffer)
 {
     UNIMPLEMENTED();
     return egl::Error(EGL_SUCCESS);
@@ -132,10 +133,11 @@ EGLint PbufferSurfaceCGL::getSwapBehavior() const
     return EGL_BUFFER_PRESERVED;
 }
 
-FramebufferImpl *PbufferSurfaceCGL::createDefaultFramebuffer(const gl::Framebuffer::Data &data)
+FramebufferImpl *PbufferSurfaceCGL::createDefaultFramebuffer(const gl::FramebufferState &state)
 {
     // TODO(cwallez) assert it happens only once?
-    return new FramebufferGL(mFramebuffer, data, mFunctions, mWorkarounds, mStateManager);
+    return new FramebufferGL(mFramebuffer, state, mFunctions, mRenderer->getWorkarounds(),
+                             mRenderer->getBlitter(), mStateManager);
 }
 
 }

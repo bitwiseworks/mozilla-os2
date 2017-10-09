@@ -1,6 +1,6 @@
 "use strict";
 
-var { classes: Cc, interfaces: Ci, utils: Cu } = Components;
+var {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
@@ -9,11 +9,10 @@ XPCOMUtils.defineLazyModuleGetter(this, "MatchPattern",
 XPCOMUtils.defineLazyModuleGetter(this, "WebRequest",
                                   "resource://gre/modules/WebRequest.jsm");
 
+Cu.import("resource://gre/modules/ExtensionManagement.jsm");
 Cu.import("resource://gre/modules/ExtensionUtils.jsm");
 var {
   SingletonEventManager,
-  runSafeSync,
-  ignoreEvent,
 } = ExtensionUtils;
 
 // EventManager-like class specifically for WebRequest. Inherits from
@@ -23,39 +22,43 @@ function WebRequestEventManager(context, eventName) {
   let name = `webRequest.${eventName}`;
   let register = (callback, filter, info) => {
     let listener = data => {
-      if (!data.browser) {
-        return;
-      }
-
-      let tabId = TabManager.getBrowserId(data.browser);
-      if (tabId == -1) {
+      // Prevent listening in on requests originating from system principal to
+      // prevent tinkering with OCSP, app and addon updates, etc.
+      if (data.isSystemPrincipal) {
         return;
       }
 
       let data2 = {
+        requestId: data.requestId,
         url: data.url,
+        originUrl: data.originUrl,
         method: data.method,
         type: data.type,
         timeStamp: Date.now(),
-        frameId: ExtensionManagement.getFrameId(data.windowId),
+        frameId: data.type == "main_frame" ? 0 : ExtensionManagement.getFrameId(data.windowId),
         parentFrameId: ExtensionManagement.getParentFrameId(data.parentWindowId, data.windowId),
       };
 
-      // Fills in tabId typically.
-      let result = {};
-      extensions.emit("fill-browser-data", data.browser, data2, result);
-      if (result.cancel) {
-        return;
+      const maybeCached = ["onResponseStarted", "onBeforeRedirect", "onCompleted", "onErrorOccurred"];
+      if (maybeCached.includes(eventName)) {
+        data2.fromCache = !!data.fromCache;
       }
 
-      let optional = ["requestHeaders", "responseHeaders", "statusCode"];
+      if ("ip" in data) {
+        data2.ip = data.ip;
+      }
+
+      extensions.emit("fill-browser-data", data.browser, data2);
+
+      let optional = ["requestHeaders", "responseHeaders", "statusCode", "statusLine", "error", "redirectUrl",
+                      "requestBody"];
       for (let opt of optional) {
         if (opt in data) {
           data2[opt] = data[opt];
         }
       }
 
-      return runSafeSync(context, callback, data2);
+      return context.runSafe(callback, data2);
     };
 
     let filter2 = {};
@@ -93,22 +96,20 @@ function WebRequestEventManager(context, eventName) {
 
 WebRequestEventManager.prototype = Object.create(SingletonEventManager.prototype);
 
-extensions.registerSchemaAPI("webRequest", "webRequest", (extension, context) => {
+extensions.registerSchemaAPI("webRequest", "addon_parent", context => {
   return {
     webRequest: {
       onBeforeRequest: new WebRequestEventManager(context, "onBeforeRequest").api(),
       onBeforeSendHeaders: new WebRequestEventManager(context, "onBeforeSendHeaders").api(),
       onSendHeaders: new WebRequestEventManager(context, "onSendHeaders").api(),
       onHeadersReceived: new WebRequestEventManager(context, "onHeadersReceived").api(),
+      onBeforeRedirect: new WebRequestEventManager(context, "onBeforeRedirect").api(),
       onResponseStarted: new WebRequestEventManager(context, "onResponseStarted").api(),
+      onErrorOccurred: new WebRequestEventManager(context, "onErrorOccurred").api(),
       onCompleted: new WebRequestEventManager(context, "onCompleted").api(),
       handlerBehaviorChanged: function() {
         // TODO: Flush all caches.
       },
-
-      // TODO
-      onBeforeRedirect: ignoreEvent(context, "webRequest.onBeforeRedirect"),
-      onErrorOccurred: ignoreEvent(context, "webRequest.onErrorOccurred"),
     },
   };
 });

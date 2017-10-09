@@ -10,7 +10,6 @@
 #include "SharedSurface.h"
 #include "SurfaceTypes.h"
 #include "GLContextTypes.h"
-#include "nsAutoPtr.h"
 #include "gfxTypes.h"
 #include "mozilla/Mutex.h"
 
@@ -66,16 +65,15 @@ public:
     virtual void LockProdImpl() override {}
     virtual void UnlockProdImpl() override {}
 
-    virtual void Fence() override {}
-    virtual bool WaitSync() override { return true; }
-    virtual bool PollSync() override { return true; }
+    virtual void ProducerAcquireImpl() override {}
+    virtual void ProducerReleaseImpl() override {}
 
     virtual GLuint ProdTexture() override {
         return mTex;
     }
 
     virtual bool ToSurfaceDescriptor(layers::SurfaceDescriptor* const out_descriptor) override {
-        MOZ_CRASH("don't do this");
+        MOZ_CRASH("GFX: ToSurfaceDescriptor");
         return false;
     }
 };
@@ -134,11 +132,8 @@ public:
     virtual void LockProdImpl() override {}
     virtual void UnlockProdImpl() override {}
 
+    virtual void ProducerAcquireImpl() override {}
     virtual void ProducerReleaseImpl() override;
-
-    virtual void Fence() override {}
-    virtual bool WaitSync() override { MOZ_CRASH("should not be called"); }
-    virtual bool PollSync() override { MOZ_CRASH("should not be called"); }
 
     virtual GLuint ProdTexture() override {
         return mTex;
@@ -153,7 +148,7 @@ class SurfaceFactory_GLTexture
 public:
     SurfaceFactory_GLTexture(GLContext* prodGL,
                              const SurfaceCaps& caps,
-                             const RefPtr<layers::ISurfaceAllocator>& allocator,
+                             const RefPtr<layers::LayersIPCChannel>& allocator,
                              const layers::TextureFlags& flags)
         : SurfaceFactory(SharedSurfaceType::SharedGLTexture, prodGL, caps, allocator, flags)
     {

@@ -36,8 +36,6 @@ public:
 
   static bool
   RequestContextEnabled(JSContext* aCx, JSObject* aObj);
-  static bool
-  RequestCacheEnabled(JSContext* aCx, JSObject* aObj);
 
   JSObject*
   WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override
@@ -48,7 +46,9 @@ public:
   void
   GetUrl(nsAString& aUrl) const
   {
-    CopyUTF8toUTF16(mRequest->mURL, aUrl);
+    nsAutoCString url;
+    mRequest->GetURL(url);
+    CopyUTF8toUTF16(url, aUrl);
   }
 
   void
@@ -81,6 +81,12 @@ public:
     return mRequest->GetRedirectMode();
   }
 
+  void
+  GetIntegrity(nsAString& aIntegrity) const
+  {
+    aIntegrity = mRequest->GetIntegrity();
+  }
+
   RequestContext
   Context() const
   {
@@ -88,15 +94,27 @@ public:
   }
 
   void
-  SetContentPolicyType(nsContentPolicyType aContentPolicyType)
+  OverrideContentPolicyType(nsContentPolicyType aContentPolicyType)
   {
-    mRequest->SetContentPolicyType(aContentPolicyType);
+    mRequest->OverrideContentPolicyType(aContentPolicyType);
+  }
+
+  bool
+  IsContentPolicyTypeOverridden() const
+  {
+    return mRequest->IsContentPolicyTypeOverridden();
   }
 
   void
   GetReferrer(nsAString& aReferrer) const
   {
     mRequest->GetReferrer(aReferrer);
+  }
+
+  ReferrerPolicy
+  ReferrerPolicy_() const
+  {
+    return mRequest->ReferrerPolicy_();
   }
 
   InternalHeaders*
@@ -127,6 +145,13 @@ public:
 
   already_AddRefed<InternalRequest>
   GetInternalRequest();
+
+  const UniquePtr<mozilla::ipc::PrincipalInfo>&
+  GetPrincipalInfo() const
+  {
+    return mRequest->GetPrincipalInfo();
+  }
+
 private:
   ~Request();
 

@@ -131,7 +131,7 @@ function summarizeObject(obj) {
       if (obj.length > 32) {
         return {"Long array": obj.length};
       }
-      return [summarizeObject(k) for (k of obj)];
+      return obj.map(summarizeObject);
     }
     if ("byteLength" in obj) {
       // Assume TypedArray or ArrayBuffer
@@ -1525,10 +1525,9 @@ function setupShutdown(phaseName) {
   );
 }
 
-
-if (isContent) {
-  setupShutdown("contentChildShutdown");
-} else {
+// profile-before-change only exists in the parent, and OS.File should
+// not be used in the child process anyways.
+if (!isContent) {
   setupShutdown("profileBeforeChange")
 }
 File.shutdown = Barriers.shutdown.client;

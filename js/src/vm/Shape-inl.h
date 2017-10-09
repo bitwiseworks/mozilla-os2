@@ -15,7 +15,6 @@
 
 #include "gc/Allocator.h"
 #include "vm/Interpreter.h"
-#include "vm/ScopeObject.h"
 #include "vm/TypedArrayCommon.h"
 
 #include "jsatominlines.h"
@@ -24,58 +23,83 @@
 namespace js {
 
 inline
+AutoKeepShapeTables::AutoKeepShapeTables(ExclusiveContext* cx)
+  : cx_(cx),
+    prev_(cx->zone()->keepShapeTables())
+{
+    cx->zone()->setKeepShapeTables(true);
+}
+
+inline
+AutoKeepShapeTables::~AutoKeepShapeTables()
+{
+    cx_->zone()->setKeepShapeTables(prev_);
+}
+
+inline
 StackBaseShape::StackBaseShape(ExclusiveContext* cx, const Class* clasp, uint32_t objectFlags)
   : flags(objectFlags),
-    clasp(clasp),
-    compartment(cx->compartment_)
+    clasp(clasp)
 {}
 
 inline Shape*
 Shape::search(ExclusiveContext* cx, jsid id)
 {
-    ShapeTable::Entry* _;
-    return search(cx, this, id, &_);
+    return search(cx, this, id);
 }
 
-/* static */ inline Shape*
-Shape::search(ExclusiveContext* cx, Shape* start, jsid id, ShapeTable::Entry** pentry, bool adding)
+MOZ_ALWAYS_INLINE bool
+Shape::maybeCreateTableForLookup(ExclusiveContext* cx)
+{
+    if (hasTable())
+        return true;
+
+    if (!inDictionary() && numLinearSearches() < LINEAR_SEARCHES_MAX) {
+        incrementNumLinearSearches();
+        return true;
+    }
+
+    if (!isBigEnoughForAShapeTable())
+        return true;
+
+    return Shape::hashify(cx, this);
+}
+
+template<MaybeAdding Adding>
+/* static */ inline bool
+Shape::search(ExclusiveContext* cx, Shape* start, jsid id, const AutoKeepShapeTables& keep,
+              Shape** pshape, ShapeTable::Entry** pentry)
 {
     if (start->inDictionary()) {
-        *pentry = &start->table().search(id, adding);
-        return (*pentry)->shape();
+        ShapeTable* table = start->ensureTableForDictionary(cx, keep);
+        if (!table)
+            return false;
+        *pentry = &table->search<Adding>(id, keep);
+        *pshape = (*pentry)->shape();
+        return true;
     }
 
     *pentry = nullptr;
+    *pshape = Shape::search<Adding>(cx, start, id);
+    return true;
+}
 
-    if (start->hasTable()) {
-        ShapeTable::Entry& entry = start->table().search(id, adding);
-        return entry.shape();
-    }
-
-    if (start->numLinearSearches() == LINEAR_SEARCHES_MAX) {
-        if (start->isBigEnoughForAShapeTable()) {
-            if (Shape::hashify(cx, start)) {
-                ShapeTable::Entry& entry = start->table().search(id, adding);
-                return entry.shape();
-            } else {
-                cx->recoverFromOutOfMemory();
-            }
+template<MaybeAdding Adding>
+/* static */ inline Shape*
+Shape::search(ExclusiveContext* cx, Shape* start, jsid id)
+{
+    if (start->maybeCreateTableForLookup(cx)) {
+        JS::AutoCheckCannotGC nogc;
+        if (ShapeTable* table = start->maybeTable(nogc)) {
+            ShapeTable::Entry& entry = table->search<Adding>(id, nogc);
+            return entry.shape();
         }
-        /*
-         * No table built -- there weren't enough entries, or OOM occurred.
-         * Don't increment numLinearSearches, to keep hasTable() false.
-         */
-        MOZ_ASSERT(!start->hasTable());
     } else {
-        start->incrementNumLinearSearches();
+        // Just do a linear search.
+        cx->recoverFromOutOfMemory();
     }
 
-    for (Shape* shape = start; shape; shape = shape->parent) {
-        if (shape->propidRef() == id)
-            return shape;
-    }
-
-    return nullptr;
+    return start->searchLinear(id);
 }
 
 inline Shape*
@@ -95,6 +119,14 @@ Shape::new_(ExclusiveContext* cx, Handle<StackShape> other, uint32_t nfixed)
         new (shape) Shape(other, nfixed);
 
     return shape;
+}
+
+inline void
+Shape::updateBaseShapeAfterMovingGC()
+{
+    BaseShape* base = base_.unbarrieredGet();
+    if (IsForwarded(base))
+        base_.unsafeSet(Forwarded(base));
 }
 
 template<class ObjectSubclass>
@@ -125,7 +157,7 @@ EmptyShape::ensureInitialCustomShape(ExclusiveContext* cx, Handle<ObjectSubclass
 
     // Cache the initial shape for non-prototype objects, however, so that
     // future instances will begin life with that shape.
-    RootedObject proto(cx, obj->getProto());
+    RootedObject proto(cx, obj->staticPrototype());
     EmptyShape::insertInitialShape(cx, shape, proto);
     return true;
 }
@@ -165,9 +197,9 @@ GetShapeAttributes(JSObject* obj, Shape* shape)
     MOZ_ASSERT(obj->isNative());
 
     if (IsImplicitDenseOrTypedArrayElement(shape)) {
-        if (IsAnyTypedArray(obj))
+        if (obj->is<TypedArrayObject>())
             return JSPROP_ENUMERATE | JSPROP_PERMANENT;
-        return JSPROP_ENUMERATE;
+        return obj->as<NativeObject>().getElementsHeader()->elementAttributes();
     }
 
     return shape->attributes();

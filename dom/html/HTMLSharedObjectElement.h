@@ -43,6 +43,9 @@ public:
   // Can't use macro for nsIDOMHTMLEmbedElement because it has conflicts with
   // NS_DECL_NSIDOMHTMLAPPLETELEMENT.
 
+  // EventTarget
+  virtual void AsyncEventRunning(AsyncEventDispatcher* aEvent) override;
+
   // nsIDOMHTMLEmbedElement
   NS_IMETHOD GetSrc(nsAString &aSrc) override;
   NS_IMETHOD SetSrc(const nsAString &aSrc) override;
@@ -80,7 +83,7 @@ public:
 
   nsresult CopyInnerTo(Element* aDest);
 
-  void StartObjectLoad() { StartObjectLoad(true); }
+  void StartObjectLoad() { StartObjectLoad(true, false); }
 
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED_NO_UNLINK(HTMLSharedObjectElement,
                                                      nsGenericHTMLElement)
@@ -137,7 +140,7 @@ public:
   }
   void SetHspace(uint32_t aValue, ErrorResult& aRv)
   {
-    SetUnsignedIntAttr(nsGkAtoms::hspace, aValue, aRv);
+    SetUnsignedIntAttr(nsGkAtoms::hspace, aValue, 0, aRv);
   }
   void GetName(DOMString& aValue)
   {
@@ -158,7 +161,7 @@ public:
   }
   void SetVspace(uint32_t aValue, ErrorResult& aRv)
   {
-    SetUnsignedIntAttr(nsGkAtoms::vspace, aValue, aRv);
+    SetUnsignedIntAttr(nsGkAtoms::vspace, aValue, 0, aRv);
   }
   void GetWidth(DOMString& aValue)
   {
@@ -187,18 +190,18 @@ public:
   // height covered by <applet>
   // align covered by <applet>
   // name covered by <applet>
-  nsIDocument* GetSVGDocument()
+  nsIDocument*
+  GetSVGDocument(nsIPrincipal& aSubjectPrincipal)
   {
-    return GetContentDocument();
+    return GetContentDocument(aSubjectPrincipal);
   }
-
-private:
-  virtual ~HTMLSharedObjectElement();
 
   /**
    * Calls LoadObject with the correct arguments to start the plugin load.
    */
-  void StartObjectLoad(bool aNotify);
+  void StartObjectLoad(bool aNotify, bool aForceLoad);
+private:
+  virtual ~HTMLSharedObjectElement();
 
   nsIAtom *URIAttrName() const
   {
@@ -213,13 +216,25 @@ private:
   // always true for <embed>, per the documentation in nsIContent.h.
   bool mIsDoneAddingChildren;
 
-  virtual void GetItemValueText(DOMString& text) override;
-  virtual void SetItemValueText(const nsAString& text) override;
-
   virtual JSObject* WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   static void MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
                                     nsRuleData* aData);
+
+  /**
+   * Decides whether we should load embed node content.
+   *
+   * If this is an embed node there are cases in which we should not try to load
+   * the content:
+   *
+   * - If the embed node is the child of a media element
+   * - If the embed node is the child of an object node that already has
+   *   content being loaded.
+   *
+   * In these cases, this function will return false, which will cause
+   * us to skip calling LoadObject.
+   */
+  bool BlockEmbedContentLoading();
 };
 
 } // namespace dom

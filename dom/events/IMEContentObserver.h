@@ -29,6 +29,7 @@ class nsPresContext;
 namespace mozilla {
 
 class EventStateManager;
+class TextComposition;
 
 // IMEContentObserver notifies widget of any text and selection changes
 // in the currently focused editor
@@ -74,6 +75,8 @@ public:
   void Init(nsIWidget* aWidget, nsPresContext* aPresContext,
             nsIContent* aContent, nsIEditor* aEditor);
   void Destroy();
+  bool Destroyed() const;
+
   /**
    * IMEContentObserver is stored by EventStateManager during observing.
    * DisconnectFromEventStateManager() is called when EventStateManager stops
@@ -91,7 +94,9 @@ public:
                          nsPresContext* aPresContext,
                          nsIContent* aContent,
                          nsIEditor* aEditor);
-  bool IsManaging(nsPresContext* aPresContext, nsIContent* aContent);
+  bool IsManaging(nsPresContext* aPresContext, nsIContent* aContent) const;
+  bool IsManaging(const TextComposition* aTextComposition) const;
+  bool WasInitializedWithPlugin() const;
   bool IsEditorHandlingEventForComposition() const;
   bool KeepAliveDuringDeactive() const
   {
@@ -110,6 +115,12 @@ public:
    * should be flushed.  This tries to run the queued IMENotificationSender.
    */
   void TryToFlushPendingNotifications();
+
+  /**
+   * MaybeNotifyCompositionEventHandled() posts composition event handled
+   * notification into the pseudo queue.
+   */
+  void MaybeNotifyCompositionEventHandled();
 
 private:
   ~IMEContentObserver() {}
@@ -143,6 +154,7 @@ private:
                                        bool aOccurredDuringComposition);
   void PostPositionChangeNotification();
   void MaybeNotifyIMEOfPositionChange();
+  void PostCompositionEventHandledNotification();
 
   void NotifyContentAdded(nsINode* aContainer, int32_t aStart, int32_t aEnd);
   void ObserveEditableNode();
@@ -161,6 +173,7 @@ private:
     mNeedsToNotifyIMEOfTextChange = false;
     mNeedsToNotifyIMEOfSelectionChange = false;
     mNeedsToNotifyIMEOfPositionChange = false;
+    mNeedsToNotifyIMEOfCompositionEventHandled = false;
     mTextChangeData.Clear();
   }
   bool NeedsToNotifyIMEOfSomething() const
@@ -168,15 +181,15 @@ private:
     return mNeedsToNotifyIMEOfFocusSet ||
            mNeedsToNotifyIMEOfTextChange ||
            mNeedsToNotifyIMEOfSelectionChange ||
-           mNeedsToNotifyIMEOfPositionChange;
+           mNeedsToNotifyIMEOfPositionChange ||
+           mNeedsToNotifyIMEOfCompositionEventHandled;
   }
 
   /**
    * UpdateSelectionCache() updates mSelectionData with the latest selection.
    * This should be called only when IsSafeToNotifyIME() returns true.
    *
-   * Note that this does nothing if mUpdatePreference.WantSelectionChange()
-   * returns false.
+   * Note that this does nothing if WasInitializedWithPlugin() returns true.
    */
   bool UpdateSelectionCache();
 
@@ -195,7 +208,7 @@ private:
    * Helper classes to notify IME.
    */
 
-  class AChangeEvent: public nsRunnable
+  class AChangeEvent: public Runnable
   {
   protected:
     enum ChangeEventType
@@ -204,7 +217,7 @@ private:
       eChangeEventType_Selection,
       eChangeEventType_Text,
       eChangeEventType_Position,
-      eChangeEventType_FlushPendingEvents
+      eChangeEventType_CompositionEventHandled
     };
 
     explicit AChangeEvent(IMEContentObserver* aIMEContentObserver)
@@ -241,6 +254,7 @@ private:
     void SendSelectionChange();
     void SendTextChange();
     void SendPositionChange();
+    void SendCompositionEventHandled();
 
     bool mIsRunning;
   };
@@ -327,6 +341,7 @@ private:
   bool mNeedsToNotifyIMEOfTextChange;
   bool mNeedsToNotifyIMEOfSelectionChange;
   bool mNeedsToNotifyIMEOfPositionChange;
+  bool mNeedsToNotifyIMEOfCompositionEventHandled;
   // mIsHandlingQueryContentEvent is true when IMEContentObserver is handling
   // WidgetQueryContentEvent with ContentEventHandler.
   bool mIsHandlingQueryContentEvent;

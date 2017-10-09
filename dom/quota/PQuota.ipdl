@@ -20,6 +20,7 @@ namespace quota {
 struct UsageParams
 {
   PrincipalInfo principalInfo;
+  bool getGroupUsage;
 };
 
 union UsageRequestParams
@@ -32,12 +33,12 @@ struct ClearOriginParams
   PrincipalInfo principalInfo;
   PersistenceType persistenceType;
   bool persistenceTypeIsExplicit;
+  bool clearAll;
 };
 
-struct ClearAppParams
+struct ClearOriginsParams
 {
-  uint32_t appId;
-  bool browserOnly;
+  nsString pattern;
 };
 
 struct ClearAllParams
@@ -51,7 +52,7 @@ struct ResetAllParams
 union RequestParams
 {
   ClearOriginParams;
-  ClearAppParams;
+  ClearOriginsParams;
   ClearAllParams;
   ResetAllParams;
 };
@@ -64,15 +65,15 @@ protocol PQuota
   manages PQuotaUsageRequest;
 
 parent:
-  __delete__();
+  async __delete__();
 
-  PQuotaUsageRequest(UsageRequestParams params);
+  async PQuotaUsageRequest(UsageRequestParams params);
 
-  PQuotaRequest(RequestParams params);
+  async PQuotaRequest(RequestParams params);
 
-  StartIdleMaintenance();
+  async StartIdleMaintenance();
 
-  StopIdleMaintenance();
+  async StopIdleMaintenance();
 };
 
 } // namespace quota

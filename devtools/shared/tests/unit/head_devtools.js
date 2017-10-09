@@ -1,11 +1,20 @@
+/* Any copyright is dedicated to the Public Domain.
+   http://creativecommons.org/publicdomain/zero/1.0/ */
+
 "use strict";
 var Cc = Components.classes;
 var Ci = Components.interfaces;
 var Cu = Components.utils;
 var Cr = Components.results;
 
-var {require} = Cu.import("resource://devtools/shared/Loader.jsm");
+const {require, DevToolsLoader, devtools} = Cu.import("resource://devtools/shared/Loader.jsm", {});
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
+const flags = require("devtools/shared/flags");
+
+flags.testing = true;
+do_register_cleanup(() => {
+  flags.testing = false;
+});
 
 // Register a console listener, so console messages don't just disappear
 // into the ether.

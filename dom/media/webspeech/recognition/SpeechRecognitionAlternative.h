@@ -10,7 +10,6 @@
 #include "nsCycleCollectionParticipant.h"
 #include "nsString.h"
 #include "nsWrapperCache.h"
-#include "nsAutoPtr.h"
 #include "js/TypeDecls.h"
 
 #include "mozilla/Attributes.h"
@@ -31,7 +30,7 @@ public:
 
   nsISupports* GetParentObject() const;
 
-  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   void GetTranscript(nsString& aRetVal) const;
 

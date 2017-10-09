@@ -13,26 +13,28 @@ import android.support.v4.view.ViewPager;
 import android.util.AttributeSet;
 import android.view.View;
 import android.view.ViewGroup;
-import com.nineoldandroids.animation.Animator;
-import com.nineoldandroids.animation.AnimatorSet;
-import com.nineoldandroids.animation.ObjectAnimator;
-import com.nineoldandroids.view.ViewHelper;
+import android.animation.Animator;
+import android.animation.AnimatorSet;
+import android.animation.ObjectAnimator;
 
-import org.mozilla.gecko.Restrictions;
 import org.mozilla.gecko.Telemetry;
 import org.mozilla.gecko.TelemetryContract;
-import org.mozilla.gecko.animation.TransitionsTracker;
 import org.mozilla.gecko.home.HomePager.Decor;
 import org.mozilla.gecko.home.TabMenuStrip;
+import org.mozilla.gecko.restrictions.Restrictions;
 
 import java.util.List;
 
+/**
+ * ViewPager containing for our first run pages.
+ *
+ * @see FirstrunPanel for the first run pages that are used in this pager.
+ */
 public class FirstrunPager extends ViewPager {
 
     private Context context;
     protected FirstrunPanel.PagerNavigation pagerNavigation;
     private Decor mDecor;
-    private View mTabStrip;
 
     public FirstrunPager(Context context) {
         this(context, null);
@@ -48,8 +50,6 @@ public class FirstrunPager extends ViewPager {
         if (child instanceof Decor) {
             ((ViewPager.LayoutParams) params).isDecor = true;
             mDecor = (Decor) child;
-            mTabStrip = child;
-
             mDecor.setOnTitleClickListener(new TabMenuStrip.OnTitleClickListener() {
                 @Override
                 public void onTitleClicked(int index) {
@@ -61,10 +61,10 @@ public class FirstrunPager extends ViewPager {
         super.addView(child, index, params);
     }
 
-    public void load(Context appContext, FragmentManager fm, final FirstrunPane.OnFinishListener onFinishListener) {
+    public void load(Context appContext, FragmentManager fm, final FirstrunAnimationContainer.OnFinishListener onFinishListener) {
         final List<FirstrunPagerConfig.FirstrunPanelConfig> panels;
 
-        if (Restrictions.isUserRestricted(context)) {
+        if (Restrictions.isRestrictedProfile(context)) {
             panels = FirstrunPagerConfig.getRestricted();
         } else {
             panels = FirstrunPagerConfig.getDefault(appContext);
@@ -75,7 +75,7 @@ public class FirstrunPager extends ViewPager {
             @Override
             public void next() {
                 final int currentPage = FirstrunPager.this.getCurrentItem();
-                if (currentPage < FirstrunPager.this.getChildCount() - 1) {
+                if (currentPage < FirstrunPager.this.getAdapter().getCount() - 1) {
                     FirstrunPager.this.setCurrentItem(currentPage + 1);
                 }
             }
@@ -104,6 +104,9 @@ public class FirstrunPager extends ViewPager {
         });
 
         animateLoad();
+
+        // Record telemetry for first onboarding panel, for baseline.
+        Telemetry.sendUIEvent(TelemetryContract.Event.SHOW, TelemetryContract.Method.PANEL, "onboarding.0");
     }
 
     public void cleanup() {
@@ -111,8 +114,8 @@ public class FirstrunPager extends ViewPager {
     }
 
     private void animateLoad() {
-        ViewHelper.setTranslationY(this, 500);
-        ViewHelper.setAlpha(this, 0);
+        setTranslationY(500);
+        setAlpha(0);
 
         final Animator translateAnimator = ObjectAnimator.ofFloat(this, "translationY", 0);
         translateAnimator.setDuration(400);
@@ -124,7 +127,6 @@ public class FirstrunPager extends ViewPager {
         final AnimatorSet set = new AnimatorSet();
         set.playTogether(alphaAnimator, translateAnimator);
         set.setStartDelay(400);
-        TransitionsTracker.track(set);
 
         set.start();
     }
@@ -150,7 +152,8 @@ public class FirstrunPager extends ViewPager {
         public Fragment getItem(int i) {
             Fragment fragment = this.fragments[i];
             if (fragment == null) {
-                fragment = Fragment.instantiate(context, panels.get(i).getClassname());
+                FirstrunPagerConfig.FirstrunPanelConfig panelConfig = panels.get(i);
+                fragment = Fragment.instantiate(context, panelConfig.getClassname(), panelConfig.getArgs());
                 ((FirstrunPanel) fragment).setPagerNavigation(pagerNavigation);
                 fragments[i] = fragment;
             }

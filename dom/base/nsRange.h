@@ -25,6 +25,7 @@
 namespace mozilla {
 class ErrorResult;
 namespace dom {
+struct ClientRectsAndTexts;
 class DocumentFragment;
 class DOMRect;
 class DOMRectList;
@@ -212,6 +213,9 @@ public:
                                                   bool aFlushLayout = true);
   already_AddRefed<DOMRectList> GetClientRects(bool aClampToEdge = true,
                                                bool aFlushLayout = true);
+  void GetClientRectsAndTexts(
+    mozilla::dom::ClientRectsAndTexts& aResult,
+    ErrorResult& aErr);
   static void GetInnerTextNoFlush(mozilla::dom::DOMString& aValue,
                                   mozilla::ErrorResult& aError,
                                   nsIContent* aStartParent,
@@ -252,14 +256,27 @@ public:
                                      bool *outNodeBefore,
                                      bool *outNodeAfter);
 
+  /**
+   * Return true if any part of (aNode, aStartOffset) .. (aNode, aEndOffset)
+   * overlaps any nsRange in aNode's GetNextRangeCommonAncestor ranges (i.e.
+   * where aNode is a descendant of a range's common ancestor node).
+   * If a nsRange starts in (aNode, aEndOffset) or if it ends in
+   * (aNode, aStartOffset) then it is non-overlapping and the result is false
+   * for that nsRange.  Collapsed ranges always counts as non-overlapping.
+   */
   static bool IsNodeSelected(nsINode* aNode, uint32_t aStartOffset,
                              uint32_t aEndOffset);
 
-  static void CollectClientRects(nsLayoutUtils::RectCallback* aCollector,
-                                 nsRange* aRange,
-                                 nsINode* aStartParent, int32_t aStartOffset,
-                                 nsINode* aEndParent, int32_t aEndOffset,
-                                 bool aClampToEdge, bool aFlushLayout);
+  /**
+   * This helper function gets rects and correlated text for the given range.
+   * @param aTextList optional where nullptr = don't retrieve text
+   */
+  static void CollectClientRectsAndText(nsLayoutUtils::RectCallback* aCollector,
+                                        mozilla::dom::DOMStringList* aTextList,
+                                        nsRange* aRange,
+                                        nsINode* aStartParent, int32_t aStartOffset,
+                                        nsINode* aEndParent, int32_t aEndOffset,
+                                        bool aClampToEdge, bool aFlushLayout);
 
   /**
    * Scan this range for -moz-user-select:none nodes and split it up into
@@ -298,6 +315,14 @@ protected:
    */
   nsINode* GetRegisteredCommonAncestor();
 
+  // Helper to IsNodeSelected.
+  static bool IsNodeInSortedRanges(nsINode* aNode,
+                                   uint32_t aStartOffset,
+                                   uint32_t aEndOffset,
+                                   const nsTArray<const nsRange*>& aRanges,
+                                   size_t aRangeStart,
+                                   size_t aRangeEnd);
+
   struct MOZ_STACK_CLASS AutoInvalidateSelection
   {
     explicit AutoInvalidateSelection(nsRange* aRange) : mRange(aRange)
@@ -329,7 +354,6 @@ protected:
   int32_t mEndOffset;
 
   bool mIsPositioned : 1;
-  bool mIsDetached : 1;
   bool mMaySpanAnonymousSubtrees : 1;
   bool mIsGenerated : 1;
   bool mStartOffsetWasIncremented : 1;

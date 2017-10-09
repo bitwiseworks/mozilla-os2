@@ -12,7 +12,6 @@ add_task(function*() {
   let navbar = document.getElementById(CustomizableUI.AREA_NAVBAR);
   ok(!navbar.hasAttribute("overflowing"), "Should start with a non-overflowing toolbar.");
   ok(CustomizableUI.inDefaultState, "Should start in default state.");
-  let oldChildCount = navbar.customizationTarget.childElementCount;
   window.resizeTo(400, window.outerHeight);
   yield waitForCondition(() => navbar.hasAttribute("overflowing"));
   ok(navbar.hasAttribute("overflowing"), "Should have an overflowing toolbar.");
@@ -31,12 +30,12 @@ add_task(function*() {
 
   ds.startDragSession();
   try {
-    var [result, dataTransfer] = ChromeUtils.synthesizeDragOver(identityBox, overflowChevron);
+    var [result, dataTransfer] = EventUtils.synthesizeDragOver(identityBox, overflowChevron);
 
     // Wait for showing panel before ending drag session.
     yield panelShownPromise;
 
-    ChromeUtils.synthesizeDropAfterDragOver(result, dataTransfer, overflowChevron);
+    EventUtils.synthesizeDropAfterDragOver(result, dataTransfer, overflowChevron);
   } finally {
     ds.endDragSession(true);
   }

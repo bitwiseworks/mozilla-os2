@@ -20,9 +20,7 @@
 
 #include "nsDebug.h"
 #include "nsXPCOM.h"
-#ifndef XPCOM_GLUE
 #include "mozilla/Atomics.h"
-#endif
 #include "mozilla/Attributes.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/Compiler.h"
@@ -31,60 +29,10 @@
 #include "mozilla/MacroForEach.h"
 #include "mozilla/TypeTraits.h"
 
-#if defined(__clang__)
-   // bug 1028428 shows that at least in FreeBSD 10.0 with Clang 3.4 and libc++ 3.4,
-   // std::is_destructible is buggy in that it returns false when it should return true
-   // on ipc::SharedMemory. On the other hand, all Clang versions currently in use
-   // seem to handle the fallback just fine.
-#  define MOZ_CAN_USE_IS_DESTRUCTIBLE_FALLBACK
-#elif defined(__GNUC__)
-   // GCC 4.7 is has buggy std::is_destructible
-#  if MOZ_USING_LIBSTDCXX && MOZ_GCC_VERSION_AT_LEAST(4, 8, 0)
-#    define MOZ_HAVE_STD_IS_DESTRUCTIBLE
-   // Some GCC versions have an ICE when using destructors in decltype().
-   // Works on GCC 4.8 at least.
-#  elif MOZ_GCC_VERSION_AT_LEAST(4, 8, 0)
-#    define MOZ_CAN_USE_IS_DESTRUCTIBLE_FALLBACK
-#  endif
-#endif
-
-#ifdef MOZ_HAVE_STD_IS_DESTRUCTIBLE
-#  include <type_traits>
-#  define MOZ_IS_DESTRUCTIBLE(X) (std::is_destructible<X>::value)
-#elif defined MOZ_CAN_USE_IS_DESTRUCTIBLE_FALLBACK
-  namespace mozilla {
-    struct IsDestructibleFallbackImpl
-    {
-      template<typename T, typename = decltype(DeclVal<T>().~T())>
-      static TrueType Test(int);
-
-      template<typename>
-      static FalseType Test(...);
-
-      template<typename T>
-      struct Selector
-      {
-        typedef decltype(Test<T>(0)) type;
-      };
-    };
-
-    template<typename T>
-    struct IsDestructibleFallback
-      : IsDestructibleFallbackImpl::Selector<T>::type
-    {
-    };
-  } // namespace mozilla
-#  define MOZ_IS_DESTRUCTIBLE(X) (mozilla::IsDestructibleFallback<X>::value)
-#endif
-
-#ifdef MOZ_IS_DESTRUCTIBLE
 #define MOZ_ASSERT_TYPE_OK_FOR_REFCOUNTING(X) \
-  static_assert(!MOZ_IS_DESTRUCTIBLE(X), \
+  static_assert(!mozilla::IsDestructible<X>::value, \
                 "Reference-counted class " #X " should not have a public destructor. " \
                 "Make this class's destructor non-public");
-#else
-#define MOZ_ASSERT_TYPE_OK_FOR_REFCOUNTING(X)
-#endif
 
 inline nsISupports*
 ToSupports(nsISupports* aSupports)
@@ -101,7 +49,7 @@ ToCanonicalSupports(nsISupports* aSupports)
 ////////////////////////////////////////////////////////////////////////////////
 // Macros to help detect thread-safety:
 
-#if (defined(DEBUG) || (defined(NIGHTLY_BUILD) && !defined(MOZ_PROFILING))) && !defined(XPCOM_GLUE_AVOID_NSPR)
+#ifdef MOZ_THREAD_SAFETY_OWNERSHIP_CHECKS_SUPPORTED
 
 class nsAutoOwningThread
 {
@@ -128,7 +76,7 @@ private:
 
 // Macros for reference-count and constructor logging
 
-#if defined(NS_BUILD_REFCNT_LOGGING) && !defined(MOZILLA_XPCOMRT_API)
+#if defined(NS_BUILD_REFCNT_LOGGING)
 
 #define NS_LOG_ADDREF(_p, _rc, _type, _size) \
   NS_LogAddRef((_p), (_rc), (_type), (uint32_t) (_size))
@@ -140,14 +88,6 @@ private:
 #define MOZ_ASSERT_CLASSNAME(_type)                         \
   static_assert(mozilla::IsClass<_type>::value,             \
                 "Token '" #_type "' is not a class type.")
-// Older versions of gcc can't instantiate local classes in templates.
-// GCC 4.7 doesn't have this problem.
-#if MOZ_IS_GCC
-# if !MOZ_GCC_VERSION_AT_LEAST(4, 7, 0)
-#  undef MOZ_ASSERT_CLASSNAME
-#  define MOZ_ASSERT_CLASSNAME(_type)
-# endif
-#endif
 
 // Note that the following constructor/destructor logging macros are redundant
 // for refcounted objects that log via the NS_LOG_ADDREF/NS_LOG_RELEASE macros.
@@ -190,9 +130,11 @@ do {                                     \
 
 /* nsCOMPtr.h allows these macros to be defined by clients
  * These logging functions require dynamic_cast<void*>, so they don't
- * do anything useful if we don't have dynamic_cast<void*>. */
+ * do anything useful if we don't have dynamic_cast<void*>.
+ * Note: The explicit comparison to nullptr is needed to avoid warnings
+ *       when _p is a nullptr itself. */
 #define NSCAP_LOG_ASSIGNMENT(_c, _p)                                \
-  if (_p)                                                           \
+  if (_p != nullptr)                                                \
     NS_LogCOMPtrAddRef((_c),static_cast<nsISupports*>(_p))
 
 #define NSCAP_LOG_RELEASE(_c, _p)                                   \
@@ -230,6 +172,9 @@ public:
     : mRefCntAndFlags(aValue << NS_NUMBER_OF_FLAGS_IN_REFCNT)
   {
   }
+
+  nsCycleCollectingAutoRefCnt(const nsCycleCollectingAutoRefCnt&) = delete;
+  void operator=(const nsCycleCollectingAutoRefCnt&) = delete;
 
   MOZ_ALWAYS_INLINE uintptr_t incr(nsISupports* aOwner)
   {
@@ -325,6 +270,9 @@ public:
   nsAutoRefCnt() : mValue(0) {}
   explicit nsAutoRefCnt(nsrefcnt aValue) : mValue(aValue) {}
 
+  nsAutoRefCnt(const nsAutoRefCnt&) = delete;
+  void operator=(const nsAutoRefCnt&) = delete;
+
   // only support prefix increment/decrement
   nsrefcnt operator++() { return ++mValue; }
   nsrefcnt operator--() { return --mValue; }
@@ -340,13 +288,15 @@ private:
   nsrefcnt mValue;
 };
 
-#ifndef XPCOM_GLUE
 namespace mozilla {
 class ThreadSafeAutoRefCnt
 {
 public:
   ThreadSafeAutoRefCnt() : mValue(0) {}
   explicit ThreadSafeAutoRefCnt(nsrefcnt aValue) : mValue(aValue) {}
+
+  ThreadSafeAutoRefCnt(const ThreadSafeAutoRefCnt&) = delete;
+  void operator=(const ThreadSafeAutoRefCnt&) = delete;
 
   // only support prefix increment/decrement
   MOZ_ALWAYS_INLINE nsrefcnt operator++() { return ++mValue; }
@@ -369,7 +319,6 @@ private:
   Atomic<nsrefcnt> mValue;
 };
 } // namespace mozilla
-#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -384,6 +333,7 @@ public:                                                                       \
                             void** aInstancePtr) override;                    \
   NS_IMETHOD_(MozExternalRefCountType) AddRef(void) override;                 \
   NS_IMETHOD_(MozExternalRefCountType) Release(void) override;                \
+  typedef mozilla::FalseType HasThreadSafeRefCnt;                             \
 protected:                                                                    \
   nsAutoRefCnt mRefCnt;                                                       \
   NS_DECL_OWNINGTHREAD                                                        \
@@ -395,6 +345,7 @@ public:                                                                       \
                             void** aInstancePtr) override;                    \
   NS_IMETHOD_(MozExternalRefCountType) AddRef(void) override;                 \
   NS_IMETHOD_(MozExternalRefCountType) Release(void) override;                \
+  typedef mozilla::TrueType HasThreadSafeRefCnt;                              \
 protected:                                                                    \
   ::mozilla::ThreadSafeAutoRefCnt mRefCnt;                                    \
   NS_DECL_OWNINGTHREAD                                                        \
@@ -407,6 +358,7 @@ public:                                                                       \
   NS_IMETHOD_(MozExternalRefCountType) AddRef(void) override;                 \
   NS_IMETHOD_(MozExternalRefCountType) Release(void) override;                \
   NS_IMETHOD_(void) DeleteCycleCollectable(void);                             \
+  typedef mozilla::FalseType HasThreadSafeRefCnt;                             \
 protected:                                                                    \
   nsCycleCollectingAutoRefCnt mRefCnt;                                        \
   NS_DECL_OWNINGTHREAD                                                        \
@@ -484,6 +436,7 @@ public:                                                                       \
   NS_METHOD_(MozExternalRefCountType) Release(void) {                         \
     NS_IMPL_CC_NATIVE_RELEASE_BODY(_class)                                    \
   }                                                                           \
+  typedef mozilla::FalseType HasThreadSafeRefCnt;                             \
 protected:                                                                    \
   nsCycleCollectingAutoRefCnt mRefCnt;                                        \
   NS_DECL_OWNINGTHREAD                                                        \
@@ -497,9 +450,11 @@ public:
  * given non-XPCOM <i>_class</i>.
  *
  * @param _class The name of the class implementing the method
+ * @param _destroy A statement that is executed when the object's
+ *   refcount drops to zero.
  * @param optional override Mark the AddRef & Release methods as overrides.
  */
-#define NS_INLINE_DECL_REFCOUNTING(_class, ...)                               \
+#define NS_INLINE_DECL_REFCOUNTING_WITH_DESTROY(_class, _destroy, ...)        \
 public:                                                                       \
   NS_METHOD_(MozExternalRefCountType) AddRef(void) __VA_ARGS__ {              \
     MOZ_ASSERT_TYPE_OK_FOR_REFCOUNTING(_class)                                \
@@ -515,16 +470,50 @@ public:                                                                       \
     --mRefCnt;                                                                \
     NS_LOG_RELEASE(this, mRefCnt, #_class);                                   \
     if (mRefCnt == 0) {                                                       \
-      NS_ASSERT_OWNINGTHREAD(_class);                                         \
       mRefCnt = 1; /* stabilize */                                            \
-      delete this;                                                            \
+      _destroy;                                                               \
       return 0;                                                               \
     }                                                                         \
     return mRefCnt;                                                           \
   }                                                                           \
+  typedef mozilla::FalseType HasThreadSafeRefCnt;                             \
 protected:                                                                    \
   nsAutoRefCnt mRefCnt;                                                       \
   NS_DECL_OWNINGTHREAD                                                        \
+public:
+
+/**
+ * Use this macro to declare and implement the AddRef & Release methods for a
+ * given non-XPCOM <i>_class</i>.
+ *
+ * @param _class The name of the class implementing the method
+ * @param optional override Mark the AddRef & Release methods as overrides.
+ */
+#define NS_INLINE_DECL_REFCOUNTING(_class, ...)                               \
+  NS_INLINE_DECL_REFCOUNTING_WITH_DESTROY(_class, delete(this), __VA_ARGS__)
+
+#define NS_INLINE_DECL_THREADSAFE_REFCOUNTING_META(_class, _decl, ...)        \
+public:                                                                       \
+  _decl(MozExternalRefCountType) AddRef(void) __VA_ARGS__ {                   \
+    MOZ_ASSERT_TYPE_OK_FOR_REFCOUNTING(_class)                                \
+    MOZ_ASSERT(int32_t(mRefCnt) >= 0, "illegal refcnt");                      \
+    nsrefcnt count = ++mRefCnt;                                               \
+    NS_LOG_ADDREF(this, count, #_class, sizeof(*this));                       \
+    return (nsrefcnt) count;                                                  \
+  }                                                                           \
+  _decl(MozExternalRefCountType) Release(void) __VA_ARGS__ {                  \
+    MOZ_ASSERT(int32_t(mRefCnt) > 0, "dup release");                          \
+    nsrefcnt count = --mRefCnt;                                               \
+    NS_LOG_RELEASE(this, count, #_class);                                     \
+    if (count == 0) {                                                         \
+      delete (this);                                                          \
+      return 0;                                                               \
+    }                                                                         \
+    return count;                                                             \
+  }                                                                           \
+  typedef mozilla::TrueType HasThreadSafeRefCnt;                              \
+protected:                                                                    \
+  ::mozilla::ThreadSafeAutoRefCnt mRefCnt;                                    \
 public:
 
 /**
@@ -536,27 +525,14 @@ public:
  * @param _class The name of the class implementing the method
  */
 #define NS_INLINE_DECL_THREADSAFE_REFCOUNTING(_class, ...)                    \
-public:                                                                       \
-  NS_METHOD_(MozExternalRefCountType) AddRef(void) __VA_ARGS__ {              \
-    MOZ_ASSERT_TYPE_OK_FOR_REFCOUNTING(_class)                                \
-    MOZ_ASSERT(int32_t(mRefCnt) >= 0, "illegal refcnt");                      \
-    nsrefcnt count = ++mRefCnt;                                               \
-    NS_LOG_ADDREF(this, count, #_class, sizeof(*this));                       \
-    return (nsrefcnt) count;                                                  \
-  }                                                                           \
-  NS_METHOD_(MozExternalRefCountType) Release(void) __VA_ARGS__ {             \
-    MOZ_ASSERT(int32_t(mRefCnt) > 0, "dup release");                          \
-    nsrefcnt count = --mRefCnt;                                               \
-    NS_LOG_RELEASE(this, count, #_class);                                     \
-    if (count == 0) {                                                         \
-      delete (this);                                                          \
-      return 0;                                                               \
-    }                                                                         \
-    return count;                                                             \
-  }                                                                           \
-protected:                                                                    \
-  ::mozilla::ThreadSafeAutoRefCnt mRefCnt;                                    \
-public:
+NS_INLINE_DECL_THREADSAFE_REFCOUNTING_META(_class, NS_METHOD_, __VA_ARGS__)
+
+/**
+ * Like NS_INLINE_DECL_THREADSAFE_REFCOUNTING with AddRef & Release declared
+ * virtual.
+ */
+#define NS_INLINE_DECL_THREADSAFE_VIRTUAL_REFCOUNTING(_class, ...)            \
+NS_INLINE_DECL_THREADSAFE_REFCOUNTING_META(_class, NS_IMETHOD_, __VA_ARGS__)
 
 /**
  * Use this macro to implement the AddRef method for a given <i>_class</i>
@@ -617,8 +593,6 @@ NS_IMETHODIMP_(MozExternalRefCountType) _class::Release(void)                 \
   nsrefcnt count = --mRefCnt;                                                 \
   NS_LOG_RELEASE(this, count, #_class);                                       \
   if (count == 0) {                                                           \
-    if (!mRefCnt.isThreadSafe)                                                \
-      NS_ASSERT_OWNINGTHREAD(_class);                                         \
     mRefCnt = 1; /* stabilize */                                              \
     _destroy;                                                                 \
     return 0;                                                                 \

@@ -1,7 +1,7 @@
-/* vim:set ts=2 sw=2 sts=2 et: */
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
+/* Any copyright is dedicated to the Public Domain.
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 "use strict";
 
@@ -35,12 +35,12 @@ function consoleOpened(HUD) {
 
   is(result + 1, container.gen1.next(), "gen1.next() did not execute");
 
-  result = container.gen2.next();
+  result = container.gen2.next().value;
 
   completion = JSPropertyProvider(dbgWindow, null, "_container.gen2.");
   isnot(completion.matches.length, 0, "Got matches for gen2");
 
-  is((result / 2 + 1) * 2, container.gen2.next(),
+  is((result / 2 + 1) * 2, container.gen2.next().value,
      "gen2.next() did not execute");
 
   result = container.iter1.next();
@@ -78,7 +78,7 @@ function testVariablesView(aWebconsole, aEvent, aView) {
     { name: "gen2", isGenerator: true },
     { name: "iter1", isIterator: true },
     { name: "iter2", isIterator: true },
-  ], { webconsole: aWebconsole }).then(function() {
+  ], { webconsole: aWebconsole }).then(function () {
     executeSoon(finishTest);
   });
 }

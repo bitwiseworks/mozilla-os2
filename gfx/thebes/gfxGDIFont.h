@@ -26,15 +26,7 @@ public:
 
     virtual ~gfxGDIFont();
 
-    HFONT GetHFONT() { if (!mMetrics) Initialize(); return mFont; }
-
-    virtual gfxFloat GetAdjustedSize()
-    {
-        if (!mMetrics) {
-            Initialize();
-        }
-        return mAdjustedSize;
-    }
+    HFONT GetHFONT() { return mFont; }
 
     cairo_font_face_t   *CairoFontFace() { return mFontFace; }
     cairo_scaled_font_t *CairoScaledFont() { return mScaledFont; }
@@ -42,13 +34,13 @@ public:
     /* overrides for the pure virtual methods in gfxFont */
     virtual uint32_t GetSpaceGlyph() override;
 
-    virtual bool SetupCairoFont(gfxContext *aContext) override;
+    virtual bool SetupCairoFont(DrawTarget* aDrawTarget) override;
 
     /* override Measure to add padding for antialiasing */
-    virtual RunMetrics Measure(gfxTextRun *aTextRun,
+    virtual RunMetrics Measure(const gfxTextRun *aTextRun,
                                uint32_t aStart, uint32_t aEnd,
                                BoundingBoxType aBoundingBoxType,
-                               gfxContext *aContextForTightBoundingBox,
+                               DrawTarget *aDrawTargetForTightBoundingBox,
                                Spacing *aSpacing,
                                uint16_t aOrientation) override;
 
@@ -82,11 +74,11 @@ protected:
     virtual const Metrics& GetHorizontalMetrics() override;
 
     /* override to ensure the cairo font is set up properly */
-    virtual bool ShapeText(gfxContext     *aContext,
+    virtual bool ShapeText(DrawTarget     *aDrawTarget,
                            const char16_t *aText,
                            uint32_t        aOffset,
                            uint32_t        aLength,
-                           int32_t         aScript,
+                           Script          aScript,
                            bool            aVertical,
                            gfxShapedText  *aShapedText) override;
 
@@ -106,11 +98,11 @@ protected:
     bool                  mNeedsBold;
 
     // cache of glyph IDs (used for non-sfnt fonts only)
-    nsAutoPtr<nsDataHashtable<nsUint32HashKey,uint32_t> > mGlyphIDs;
+    mozilla::UniquePtr<nsDataHashtable<nsUint32HashKey,uint32_t> > mGlyphIDs;
     SCRIPT_CACHE          mScriptCache;
 
     // cache of glyph widths in 16.16 fixed-point pixels
-    nsAutoPtr<nsDataHashtable<nsUint32HashKey,int32_t> > mGlyphWidths;
+    mozilla::UniquePtr<nsDataHashtable<nsUint32HashKey,int32_t> > mGlyphWidths;
 };
 
 #endif /* GFX_GDIFONT_H */

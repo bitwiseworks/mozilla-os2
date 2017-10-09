@@ -120,7 +120,7 @@ ViewSourceChrome.prototype = {
   receiveMessage(message) {
     let data = message.data;
 
-    switch(message.name) {
+    switch (message.name) {
       // Begin messages from super class
       case "ViewSource:PromptAndGoToLine":
         this.promptAndGoToLine();
@@ -167,7 +167,7 @@ ViewSourceChrome.prototype = {
    * a specific function for the event type.
    */
   handleEvent(event) {
-    switch(event.type) {
+    switch (event.type) {
       case "unload":
         this.uninit();
         break;
@@ -301,7 +301,7 @@ ViewSourceChrome.prototype = {
     // We require the first argument to do any loading of source.
     // otherwise, we're done.
     if (!window.arguments[0]) {
-      return;
+      return undefined;
     }
 
     if (typeof window.arguments[0] == "string") {
@@ -317,6 +317,8 @@ ViewSourceChrome.prototype = {
     if (!args.partial) {
       this.loadViewSource(args);
     }
+
+    return undefined;
   },
 
   /**
@@ -513,7 +515,7 @@ ViewSourceChrome.prototype = {
     // set the dropEffect to 'none'. This prevents the drop even if some
     // other listener cancelled the event.
     let types = event.dataTransfer.types;
-    if (types.contains("text/x-moz-text-internal") && !types.contains("text/plain")) {
+    if (types.includes("text/x-moz-text-internal") && !types.includes("text/plain")) {
         event.dataTransfer.dropEffect = "none";
         event.stopPropagation();
         event.preventDefault();
@@ -673,12 +675,22 @@ ViewSourceChrome.prototype = {
     let parentNode = this.browser.parentNode;
     let nextSibling = this.browser.nextSibling;
 
+    // XX Removing and re-adding the browser from and to the DOM strips its
+    // XBL properties. Save and restore relatedBrowser. Note that when we
+    // restore relatedBrowser, there won't yet be a binding or setter. This
+    // works in conjunction with the hack in <xul:browser>'s constructor to
+    // re-get the weak reference to it.
+    let relatedBrowser = this.browser.relatedBrowser;
+
     this.browser.remove();
     if (shouldBeRemote) {
       this.browser.setAttribute("remote", "true");
     } else {
       this.browser.removeAttribute("remote");
     }
+
+    this.browser.relatedBrowser = relatedBrowser;
+
     // If nextSibling was null, this will put the browser at
     // the end of the list.
     parentNode.insertBefore(this.browser, nextSibling);
@@ -744,6 +756,10 @@ var PrintPreviewListener = {
     this._ppBrowser.remove();
     gBrowser.collapsed = false;
     document.getElementById("viewSource-toolbox").hidden = false;
+  },
+
+  activateBrowser(browser) {
+    browser.docShellIsActive = true;
   },
 };
 

@@ -9,7 +9,12 @@ this.EXPORTED_SYMBOLS = [ "BrowserUtils" ];
 
 const {interfaces: Ci, utils: Cu, classes: Cc} = Components;
 
+Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/Task.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
+  "resource://gre/modules/PlacesUtils.jsm");
+
 Cu.importGlobalProperties(['URL']);
 
 this.BrowserUtils = {
@@ -36,12 +41,13 @@ this.BrowserUtils = {
     if (cancelQuit.data) { // The quit request has been canceled.
       return false;
     }
-    //if already in safe mode restart in safe mode
+    // if already in safe mode restart in safe mode
     if (Services.appinfo.inSafeMode) {
       appStartup.restartInSafeMode(Ci.nsIAppStartup.eAttemptQuit | Ci.nsIAppStartup.eRestart);
-      return;
+      return undefined;
     }
     appStartup.quit(Ci.nsIAppStartup.eAttemptQuit | Ci.nsIAppStartup.eRestart);
+    return undefined;
   },
 
   /**
@@ -75,10 +81,46 @@ this.BrowserUtils = {
       try {
         principalStr = " from " + aPrincipal.URI.spec;
       }
-      catch(e2) { }
+      catch (e2) { }
 
       throw "Load of " + aURL + principalStr + " denied.";
     }
+  },
+
+  /**
+   * Return or create a principal with the codebase of one, and the originAttributes
+   * of an existing principal (e.g. on a docshell, where the originAttributes ought
+   * not to change, that is, we should keep the userContextId, privateBrowsingId,
+   * etc. the same when changing the principal).
+   *
+   * @param principal
+   *        The principal whose codebase/null/system-ness we want.
+   * @param existingPrincipal
+   *        The principal whose originAttributes we want, usually the current
+   *        principal of a docshell.
+   * @return an nsIPrincipal that matches the codebase/null/system-ness of the first
+   *         param, and the originAttributes of the second.
+   */
+  principalWithMatchingOA(principal, existingPrincipal) {
+    // Don't care about system principals:
+    if (principal.isSystemPrincipal) {
+      return principal;
+    }
+
+    // If the originAttributes already match, just return the principal as-is.
+    if (existingPrincipal.originSuffix == principal.originSuffix) {
+      return principal;
+    }
+
+    let secMan = Services.scriptSecurityManager;
+    if (principal.isCodebasePrincipal) {
+      return secMan.createCodebasePrincipal(principal.URI, existingPrincipal.originAttributes);
+    }
+
+    if (principal.isNullPrincipal) {
+      return secMan.createNullPrincipal(existingPrincipal.originAttributes);
+    }
+    throw new Error("Can't change the originAttributes of an expanded principal!");
   },
 
   /**
@@ -107,48 +149,49 @@ this.BrowserUtils = {
    * the coordinates are relative to the user's screen.
    */
   getElementBoundingScreenRect: function(aElement) {
+    return this.getElementBoundingRect(aElement, true);
+  },
+
+  /**
+   * For a given DOM element, returns its position as an offset from the topmost
+   * window. In a content process, the coordinates returned will be relative to
+   * the left/top of the topmost content area. If aInScreenCoords is true,
+   * screen coordinates will be returned instead.
+   */
+  getElementBoundingRect: function(aElement, aInScreenCoords) {
     let rect = aElement.getBoundingClientRect();
-    let window = aElement.ownerDocument.defaultView;
+    let win = aElement.ownerDocument.defaultView;
+
+    let x = rect.left, y = rect.top;
 
     // We need to compensate for any iframes that might shift things
     // over. We also need to compensate for zooming.
-    let fullZoom = window.getInterface(Ci.nsIDOMWindowUtils).fullZoom;
+    let parentFrame = win.frameElement;
+    while (parentFrame) {
+      win = parentFrame.ownerDocument.defaultView;
+      let cstyle = win.getComputedStyle(parentFrame, "");
+
+      let framerect = parentFrame.getBoundingClientRect();
+      x += framerect.left + parseFloat(cstyle.borderLeftWidth) + parseFloat(cstyle.paddingLeft);
+      y += framerect.top + parseFloat(cstyle.borderTopWidth) + parseFloat(cstyle.paddingTop);
+
+      parentFrame = win.frameElement;
+    }
+
+    if (aInScreenCoords) {
+      x += win.mozInnerScreenX;
+      y += win.mozInnerScreenY;
+    }
+
+    let fullZoom = win.getInterface(Ci.nsIDOMWindowUtils).fullZoom;
     rect = {
-      left: (rect.left + window.mozInnerScreenX) * fullZoom,
-      top: (rect.top + window.mozInnerScreenY) * fullZoom,
+      left: x * fullZoom,
+      top: y * fullZoom,
       width: rect.width * fullZoom,
       height: rect.height * fullZoom
     };
 
     return rect;
-  },
-
-  /**
-   * Given an element potentially within a subframe, calculate the offsets
-   * up to the top level browser.
-   *
-   * @param aTopLevelWindow content window to calculate offsets to.
-   * @param aElement The element in question.
-   * @return [targetWindow, offsetX, offsetY]
-   */
-  offsetToTopLevelWindow: function (aTopLevelWindow, aElement) {
-    let offsetX = 0;
-    let offsetY = 0;
-    let element = aElement;
-    while (element &&
-           element.ownerDocument &&
-           element.ownerDocument.defaultView != aTopLevelWindow) {
-      element = element.ownerDocument.defaultView.frameElement;
-      let rect = element.getBoundingClientRect();
-      offsetX += rect.left;
-      offsetY += rect.top;
-    }
-    let win = null;
-    if (element == aElement)
-      win = aTopLevelWindow;
-    else
-      win = element.contentDocument.defaultView;
-    return { targetWindow: win, offsetX: offsetX, offsetY: offsetY };
   },
 
   onBeforeLinkTraversal: function(originalTarget, linkURI, linkNode, isAppTab) {
@@ -164,7 +207,7 @@ this.BrowserUtils = {
     try {
       linkHost = linkURI.host;
       docHost = linkNode.ownerDocument.documentURIObject.host;
-    } catch(e) {
+    } catch (e) {
       // nsIURI.host can throw for non-nsStandardURL nsIURIs.
       // If we fail to get either host, just return originalTarget.
       return originalTarget;
@@ -247,7 +290,7 @@ this.BrowserUtils = {
   },
 
   /**
-   * Return true if we can/should FAYT for this node + window (could be CPOW):
+   * Return true if we should FAYT for this node + window (could be CPOW):
    *
    * @param elt
    *        The element that is focused
@@ -270,7 +313,21 @@ this.BrowserUtils = {
         return false;
     }
 
-    if (win && !this.mimeTypeIsTextBased(win.document.contentType))
+    return true;
+  },
+
+  /**
+   * Return true if we can FAYT for this window (could be CPOW):
+   *
+   * @param win
+   *        The top level window that is focused
+   *
+   */
+  canFastFind: function(win) {
+    if (!win)
+      return false;
+
+    if (!this.mimeTypeIsTextBased(win.document.contentType))
       return false;
 
     // disable FAYT in about:blank to prevent FAYT opening unexpectedly.
@@ -280,11 +337,67 @@ this.BrowserUtils = {
 
     // disable FAYT in documents that ask for it to be disabled.
     if ((loc.protocol == "about:" || loc.protocol == "chrome:") &&
-        (win && win.document.documentElement &&
+        (win.document.documentElement &&
          win.document.documentElement.getAttribute("disablefastfind") == "true"))
       return false;
 
     return true;
+  },
+
+  _visibleToolbarsMap: new WeakMap(),
+
+  /**
+   * Return true if any or a specific toolbar that interacts with the content
+   * document is visible.
+   *
+   * @param  {nsIDocShell} docShell The docShell instance that a toolbar should
+   *                                be interacting with
+   * @param  {String}      which    Identifier of a specific toolbar
+   * @return {Boolean}
+   */
+  isToolbarVisible(docShell, which) {
+    let window = this.getRootWindow(docShell);
+    if (!this._visibleToolbarsMap.has(window))
+      return false;
+    let toolbars = this._visibleToolbarsMap.get(window);
+    return !!toolbars && toolbars.has(which);
+  },
+
+  /**
+   * Track whether a toolbar is visible for a given a docShell.
+   *
+   * @param  {nsIDocShell} docShell  The docShell instance that a toolbar should
+   *                                 be interacting with
+   * @param  {String}      which     Identifier of a specific toolbar
+   * @param  {Boolean}     [visible] Whether the toolbar is visible. Optional,
+   *                                 defaults to `true`.
+   */
+  trackToolbarVisibility(docShell, which, visible = true) {
+    // We have to get the root window object, because XPConnect WrappedNatives
+    // can't be used as WeakMap keys.
+    let window = this.getRootWindow(docShell);
+    let toolbars = this._visibleToolbarsMap.get(window);
+    if (!toolbars) {
+      toolbars = new Set();
+      this._visibleToolbarsMap.set(window, toolbars);
+    }
+    if (!visible)
+      toolbars.delete(which);
+    else
+      toolbars.add(which);
+  },
+
+  /**
+   * Retrieve the root window object (i.e. the top-most content global) for a
+   * specific docShell object.
+   *
+   * @param  {nsIDocShell} docShell
+   * @return {nsIDOMWindow}
+   */
+  getRootWindow(docShell) {
+    return docShell.QueryInterface(Ci.nsIDocShellTreeItem)
+      .sameTypeRootTreeItem.QueryInterface(Ci.nsIInterfaceRequestor)
+      .getInterface(Ci.nsIDOMWindow);
   },
 
   getSelectionDetails: function(topWindow, aCharLen) {
@@ -404,4 +517,70 @@ this.BrowserUtils = {
 
     return true;
   },
+
+  /**
+   * Replaces %s or %S in the provided url or postData with the given parameter,
+   * acccording to the best charset for the given url.
+   *
+   * @return [url, postData]
+   * @throws if nor url nor postData accept a param, but a param was provided.
+   */
+  parseUrlAndPostData: Task.async(function* (url, postData, param) {
+    let hasGETParam = /%s/i.test(url)
+    let decodedPostData = postData ? unescape(postData) : "";
+    let hasPOSTParam = /%s/i.test(decodedPostData);
+
+    if (!hasGETParam && !hasPOSTParam) {
+      if (param) {
+        // If nor the url, nor postData contain parameters, but a parameter was
+        // provided, return the original input.
+        throw new Error("A param was provided but there's nothing to bind it to");
+      }
+      return [url, postData];
+    }
+
+    let charset = "";
+    const re = /^(.*)\&mozcharset=([a-zA-Z][_\-a-zA-Z0-9]+)\s*$/;
+    let matches = url.match(re);
+    if (matches) {
+      [, url, charset] = matches;
+    } else {
+      // Try to fetch a charset from History.
+      try {
+        // Will return an empty string if character-set is not found.
+        charset = yield PlacesUtils.getCharsetForURI(this.makeURI(url));
+      } catch (ex) {
+        // makeURI() throws if url is invalid.
+        Cu.reportError(ex);
+      }
+    }
+
+    // encodeURIComponent produces UTF-8, and cannot be used for other charsets.
+    // escape() works in those cases, but it doesn't uri-encode +, @, and /.
+    // Therefore we need to manually replace these ASCII characters by their
+    // encodeURIComponent result, to match the behavior of nsEscape() with
+    // url_XPAlphas.
+    let encodedParam = "";
+    if (charset && charset != "UTF-8") {
+      try {
+        let converter = Cc["@mozilla.org/intl/scriptableunicodeconverter"]
+                          .createInstance(Ci.nsIScriptableUnicodeConverter);
+        converter.charset = charset;
+        encodedParam = converter.ConvertFromUnicode(param) + converter.Finish();
+      } catch (ex) {
+        encodedParam = param;
+      }
+      encodedParam = escape(encodedParam).replace(/[+@\/]+/g, encodeURIComponent);
+    } else {
+      // Default charset is UTF-8
+      encodedParam = encodeURIComponent(param);
+    }
+
+    url = url.replace(/%s/g, encodedParam).replace(/%S/g, param);
+    if (hasPOSTParam) {
+      postData = decodedPostData.replace(/%s/g, encodedParam)
+                                .replace(/%S/g, param);
+    }
+    return [url, postData];
+  }),
 };

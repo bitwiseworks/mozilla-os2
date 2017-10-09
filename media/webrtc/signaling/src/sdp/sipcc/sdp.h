@@ -49,6 +49,9 @@
 #define SDP_SDESCRIPTIONS_KEY_SIZE_UNKNOWN      0
 #define SDP_SRTP_CRYPTO_SELECTION_FLAGS_UNKNOWN 0
 
+/* Max number of fmtp redundant encodings */
+#define SDP_FMTP_MAX_REDUNDANT_ENCODINGS 128
+
 /*
  * SRTP_CONTEXT_SET_*
  *  Set a SRTP Context field flag
@@ -413,6 +416,7 @@ typedef enum {
     SDP_MAX_CODED_AUDIO_BW,
     SDP_CBR,
     SDP_MAX_FR,
+    SDP_MAX_PLAYBACK_RATE,
     SDP_MAX_FMTP_PARAM,
     SDP_FMTP_PARAM_UNKNOWN
 } sdp_fmtp_codec_param_e;
@@ -533,6 +537,7 @@ typedef enum sdp_srtp_crypto_suite_t_ {
 
 /* SDP Defines */
 
+#define SDP_MAX_LONG_STRING_LEN 4096 /* Max len for long SDP strings */
 #define SDP_MAX_STRING_LEN      256  /* Max len for SDP string       */
 #define SDP_MAX_SHORT_STRING_LEN      12  /* Max len for a short SDP string  */
 #define SDP_MAX_PAYLOAD_TYPES   23  /* Max payload types in m= line */
@@ -641,6 +646,7 @@ typedef struct sdp_fmtp {
     uint32_t                       mode;
 
     /* some OPUS specific fmtp params */
+    uint32_t                       maxplaybackrate;
     uint32_t                       maxaveragebitrate;
     uint16_t                       usedtx;
     uint16_t                       stereo;
@@ -706,6 +712,18 @@ typedef struct sdp_fmtp {
     /* H.263 codec requires annex K,N and P to have values */
     uint16_t                       annex_k_val;
     uint16_t                       annex_n_val;
+
+    /* RFC 5109 Section 4.2 for specifying redundant encodings */
+    uint8_t              redundant_encodings[SDP_FMTP_MAX_REDUNDANT_ENCODINGS];
+
+    /* RFC 2833 Section 3.9 (4733) for specifying support DTMF tones:
+       The list of values consists of comma-separated elements, which
+       can be either a single decimal number or two decimal numbers
+       separated by a hyphen (dash), where the second number is larger
+       than the first. No whitespace is allowed between numbers or
+       hyphens. The list does not have to be sorted.
+     */
+    char                 dtmf_tones[SDP_MAX_STRING_LEN+1];
 
     /* Annex P can take one or more values in the range 1-4 . e.g P=1,3 */
     uint16_t                       annex_p_val_picture_resize; /* 1 = four; 2 = sixteenth */
@@ -998,6 +1016,7 @@ typedef struct sdp_attr {
         tinybool              boolean_val;
         uint32_t                   u32_val;
         char                  string_val[SDP_MAX_STRING_LEN+1];
+        char *stringp;
         char                  ice_attr[SDP_MAX_STRING_LEN+1];
         sdp_fmtp_t            fmtp;
         sdp_sctpmap_t         sctpmap;
@@ -1272,6 +1291,8 @@ extern tinybool sdp_attr_valid(sdp_t *sdp_p, sdp_attr_e attr_type,
 extern uint32_t sdp_attr_line_number(sdp_t *sdp_p, sdp_attr_e attr_type,
                                 uint16_t level, uint8_t cap_num, uint16_t inst_num);
 extern const char *sdp_attr_get_simple_string(sdp_t *sdp_p,
+                   sdp_attr_e attr_type, uint16_t level, uint8_t cap_num, uint16_t inst_num);
+extern const char *sdp_attr_get_long_string(sdp_t *sdp_p,
                    sdp_attr_e attr_type, uint16_t level, uint8_t cap_num, uint16_t inst_num);
 extern uint32_t sdp_attr_get_simple_u32(sdp_t *sdp_p, sdp_attr_e attr_type,
                                     uint16_t level, uint8_t cap_num, uint16_t inst_num);
@@ -1735,6 +1756,10 @@ uint32_t
 sdp_attr_get_rtcp_fb_trr_int(sdp_t *sdp_p, uint16_t level, uint16_t payload_type,
                              uint16_t inst);
 
+tinybool
+sdp_attr_get_rtcp_fb_remb_enabled(sdp_t *sdp_p, uint16_t level,
+                                  uint16_t payload_type);
+
 sdp_rtcp_fb_ccm_type_e
 sdp_attr_get_rtcp_fb_ccm(sdp_t *sdp_p, uint16_t level, uint16_t payload_type, uint16_t inst);
 
@@ -1749,6 +1774,11 @@ sdp_attr_set_rtcp_fb_nack(sdp_t *sdp_p, uint16_t level, uint16_t payload_type, u
 sdp_result_e
 sdp_attr_set_rtcp_fb_trr_int(sdp_t *sdp_p, uint16_t level, uint16_t payload_type,
                              uint16_t inst, uint32_t interval);
+
+sdp_result_e
+sdp_attr_set_rtcp_fb_remb(sdp_t *sdp_p, uint16_t level, uint16_t payload_type,
+                          uint16_t inst);
+
 sdp_result_e
 sdp_attr_set_rtcp_fb_ccm(sdp_t *sdp_p, uint16_t level, uint16_t payload_type, uint16_t inst,
                          sdp_rtcp_fb_ccm_type_e);

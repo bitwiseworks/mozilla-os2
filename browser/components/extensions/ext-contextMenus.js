@@ -9,130 +9,219 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 var {
   EventManager,
-  runSafe,
+  ExtensionError,
+  IconDetails,
 } = ExtensionUtils;
-
 
 // Map[Extension -> Map[ID -> MenuItem]]
 // Note: we want to enumerate all the menu items so
 // this cannot be a weak map.
-var contextMenuMap = new Map();
+var gContextMenuMap = new Map();
 
-// Not really used yet, will be used for event pages.
-var onClickedCallbacksMap = new WeakMap();
+// Map[Extension -> MenuItem]
+var gRootItems = new Map();
 
 // If id is not specified for an item we use an integer.
-var nextID = 0;
+var gNextMenuItemID = 0;
+
+// Used to assign unique names to radio groups.
+var gNextRadioGroupID = 0;
+
+// The max length of a menu item's label.
+var gMaxLabelLength = 64;
 
 // When a new contextMenu is opened, this function is called and
 // we populate the |xulMenu| with all the items from extensions
 // to be displayed. We always clear all the items again when
-// popuphidden fires. Since most of the info we need is already
-// calculated in nsContextMenu.jsm we simple reuse its flags here.
-// For remote processes there is a gContextMenuContentData where all
-// the important info is stored from the child process. We get
-// this data in |contextData|.
-var menuBuilder = {
+// popuphidden fires.
+var gMenuBuilder = {
   build: function(contextData) {
-    // TODO: icons should be set for items
     let xulMenu = contextData.menu;
     xulMenu.addEventListener("popuphidden", this);
-    let doc = xulMenu.ownerDocument;
-    for (let [ext, menuItemMap] of contextMenuMap) {
-      let parentMap = new Map();
-      let topLevelItems = new Set();
-      for (let entry of menuItemMap) {
-        // We need a closure over |item|, and we don't currently get a
-        // fresh binding per loop if we declare it in the loop head.
-        let [id, item] = entry;
-
-        if (item.enabledForContext(contextData)) {
-          let element;
-          if (item.isMenu) {
-            element = doc.createElement("menu");
-            // Menu elements need to have a menupopup child for
-            // its menu items.
-            let menupopup = doc.createElement("menupopup");
-            element.appendChild(menupopup);
-            // Storing the menupopup in a map, so we can find it for its
-            // menu item children later.
-            parentMap.set(id, menupopup);
-          } else {
-            element =
-             (item.type == "separator") ? doc.createElement("menuseparator")
-                                        : doc.createElement("menuitem");
-          }
-
-          // FIXME: handle %s in the title
-          element.setAttribute("label", item.title);
-
-          if (!item.enabled) {
-            element.setAttribute("disabled", true);
-          }
-
-          let parentId = item.parentId;
-          if (parentId && parentMap.has(parentId)) {
-            // If parentId is set we have to look up its parent
-            // and appened to its menupopup.
-            let parentElement = parentMap.get(parentId);
-            parentElement.appendChild(element);
-          } else {
-            topLevelItems.add(element);
-          }
-
-          element.addEventListener("command", event => { // eslint-disable-line mozilla/balanced-listeners
-            item.tabManager.addActiveTabPermission();
-            if (item.onclick) {
-              let clickData = item.getClickData(contextData, event);
-              runSafe(item.extContext, item.onclick, clickData);
-            }
-          });
-        }
+    this.xulMenu = xulMenu;
+    for (let [, root] of gRootItems) {
+      let rootElement = this.buildElementWithChildren(root, contextData);
+      if (!rootElement.firstChild || !rootElement.firstChild.childNodes.length) {
+        // If the root has no visible children, there is no reason to show
+        // the root menu item itself either.
+        continue;
       }
-      if (topLevelItems.size > 1) {
-        // If more than one top level items are visible, callopse them.
-        let top = doc.createElement("menu");
-        top.setAttribute("label", ext.name);
-        top.setAttribute("ext-type", "top-level-menu");
-        let menupopup = doc.createElement("menupopup");
-        top.appendChild(menupopup);
-        for (let i of topLevelItems) {
-          menupopup.appendChild(i);
+      rootElement.setAttribute("ext-type", "top-level-menu");
+      rootElement = this.removeTopLevelMenuIfNeeded(rootElement);
+
+      // Display the extension icon on the root element.
+      if (root.extension.manifest.icons) {
+        let parentWindow = contextData.menu.ownerGlobal;
+        let extension = root.extension;
+
+        let {icon} = IconDetails.getPreferredIcon(extension.manifest.icons, extension,
+                                                  16 * parentWindow.devicePixelRatio);
+
+        // The extension icons in the manifest are not pre-resolved, since
+        // they're sometimes used by the add-on manager when the extension is
+        // not enabled, and its URLs are not resolvable.
+        let resolvedURL = root.extension.baseURI.resolve(icon);
+
+        if (rootElement.localName == "menu") {
+          rootElement.setAttribute("class", "menu-iconic");
+        } else if (rootElement.localName == "menuitem") {
+          rootElement.setAttribute("class", "menuitem-iconic");
         }
-        xulMenu.appendChild(top);
-        this._itemsToCleanUp.add(top);
-      } else if (topLevelItems.size == 1) {
-        // If there is only one visible item, we can just append it.
-        let singleItem = topLevelItems.values().next().value;
-        xulMenu.appendChild(singleItem);
-        this._itemsToCleanUp.add(singleItem);
+        rootElement.setAttribute("image", resolvedURL);
+      }
+
+      xulMenu.appendChild(rootElement);
+      this.itemsToCleanUp.add(rootElement);
+    }
+  },
+
+  buildElementWithChildren(item, contextData) {
+    let element = this.buildSingleElement(item, contextData);
+    let groupName;
+    for (let child of item.children) {
+      if (child.type == "radio" && !child.groupName) {
+        if (!groupName) {
+          groupName = `webext-radio-group-${gNextRadioGroupID++}`;
+        }
+        child.groupName = groupName;
+      } else {
+        groupName = null;
+      }
+
+      if (child.enabledForContext(contextData)) {
+        let childElement = this.buildElementWithChildren(child, contextData);
+        // Here element must be a menu element and its first child
+        // is a menupopup, we have to append its children to this
+        // menupopup.
+        element.firstChild.appendChild(childElement);
       }
     }
+
+    return element;
+  },
+
+  removeTopLevelMenuIfNeeded(element) {
+    // If there is only one visible top level element we don't need the
+    // root menu element for the extension.
+    let menuPopup = element.firstChild;
+    if (menuPopup && menuPopup.childNodes.length == 1) {
+      let onlyChild = menuPopup.firstChild;
+      onlyChild.remove();
+      return onlyChild;
+    }
+
+    return element;
+  },
+
+  buildSingleElement(item, contextData) {
+    let doc = contextData.menu.ownerDocument;
+    let element;
+    if (item.children.length > 0) {
+      element = this.createMenuElement(doc, item);
+    } else if (item.type == "separator") {
+      element = doc.createElement("menuseparator");
+    } else {
+      element = doc.createElement("menuitem");
+    }
+
+    return this.customizeElement(element, item, contextData);
+  },
+
+  createMenuElement(doc, item) {
+    let element = doc.createElement("menu");
+    // Menu elements need to have a menupopup child for its menu items.
+    let menupopup = doc.createElement("menupopup");
+    element.appendChild(menupopup);
+    return element;
+  },
+
+  customizeElement(element, item, contextData) {
+    let label = item.title;
+    if (label) {
+      if (contextData.isTextSelected && label.indexOf("%s") > -1) {
+        let selection = contextData.selectionText;
+        // The rendering engine will truncate the title if it's longer than 64 characters.
+        // But if it makes sense let's try truncate selection text only, to handle cases like
+        // 'look up "%s" in MyDictionary' more elegantly.
+        let maxSelectionLength = gMaxLabelLength - label.length + 2;
+        if (maxSelectionLength > 4) {
+          selection = selection.substring(0, maxSelectionLength - 3) + "...";
+        }
+        label = label.replace(/%s/g, selection);
+      }
+
+      element.setAttribute("label", label);
+    }
+
+    if (item.type == "checkbox") {
+      element.setAttribute("type", "checkbox");
+      if (item.checked) {
+        element.setAttribute("checked", "true");
+      }
+    } else if (item.type == "radio") {
+      element.setAttribute("type", "radio");
+      element.setAttribute("name", item.groupName);
+      if (item.checked) {
+        element.setAttribute("checked", "true");
+      }
+    }
+
+    if (!item.enabled) {
+      element.setAttribute("disabled", "true");
+    }
+
+    element.addEventListener("command", event => {  // eslint-disable-line mozilla/balanced-listeners
+      if (event.target !== event.currentTarget) {
+        return;
+      }
+      const wasChecked = item.checked;
+      if (item.type == "checkbox") {
+        item.checked = !item.checked;
+      } else if (item.type == "radio") {
+        // Deselect all radio items in the current radio group.
+        for (let child of item.parent.children) {
+          if (child.type == "radio" && child.groupName == item.groupName) {
+            child.checked = false;
+          }
+        }
+        // Select the clicked radio item.
+        item.checked = true;
+      }
+
+      item.tabManager.addActiveTabPermission();
+
+      let tab = item.tabManager.convert(contextData.tab);
+      let info = item.getClickInfo(contextData, wasChecked);
+      item.extension.emit("webext-contextmenu-menuitem-click", info, tab);
+    });
+
+    return element;
   },
 
   handleEvent: function(event) {
-    let target = event.target;
-
-    target.removeEventListener("popuphidden", this);
-    for (let item of this._itemsToCleanUp) {
-      target.removeChild(item);
+    if (this.xulMenu != event.target || event.type != "popuphidden") {
+      return;
     }
-    // Let's detach the top level items.
-    this._itemsToCleanUp.clear();
+
+    delete this.xulMenu;
+    let target = event.target;
+    target.removeEventListener("popuphidden", this);
+    for (let item of this.itemsToCleanUp) {
+      item.remove();
+    }
+    this.itemsToCleanUp.clear();
   },
 
-  _itemsToCleanUp: new Set(),
+  itemsToCleanUp: new Set(),
 };
 
 function contextMenuObserver(subject, topic, data) {
   subject = subject.wrappedJSObject;
-  menuBuilder.build(subject);
+  gMenuBuilder.build(subject);
 }
 
 function getContexts(contextData) {
   let contexts = new Set(["all"]);
-
-  contexts.add("page");
 
   if (contextData.inFrame) {
     contexts.add("frame");
@@ -162,122 +251,154 @@ function getContexts(contextData) {
     contexts.add("audio");
   }
 
+  if (contexts.size == 1) {
+    contexts.add("page");
+  }
+
   return contexts;
 }
 
-function MenuItem(extension, extContext, createProperties) {
+function MenuItem(extension, createProperties, isRoot = false) {
   this.extension = extension;
-  this.extContext = extContext;
-
+  this.children = [];
+  this.parent = null;
   this.tabManager = TabManager.for(extension);
 
-  this.init(createProperties);
+  this.setDefaults();
+  this.setProps(createProperties);
+  if (!this.hasOwnProperty("_id")) {
+    this.id = gNextMenuItemID++;
+  }
+  // If the item is not the root and has no parent
+  // it must be a child of the root.
+  if (!isRoot && !this.parent) {
+    this.root.addChild(this);
+  }
 }
 
 MenuItem.prototype = {
-  // init is called from the MenuItem ctor and from update. The |update|
-  // flag is for the later case.
-  init(createProperties, update = false) {
-    let item = this;
-    // return true if the prop was set on |this|
-    function parseProp(propName, defaultValue = null) {
-      if (propName in createProperties) {
-        item[propName] = createProperties[propName];
-        return true;
-      } else if (!update && defaultValue !== null) {
-        item[propName] = defaultValue;
-        return true;
+  setProps(createProperties) {
+    for (let propName in createProperties) {
+      if (createProperties[propName] === null) {
+        // Omitted optional argument.
+        continue;
       }
-      return false;
+      this[propName] = createProperties[propName];
     }
 
-    if (update && "id" in createProperties) {
-      throw new Error("Id of a MenuItem cannot be changed");
-    } else if (!update) {
-      let isIdUsed = contextMenuMap.get(this.extension).has(createProperties.id);
-      if (createProperties.id && isIdUsed) {
-        throw new Error("Id already exists");
-      }
-      this.id = createProperties.id ? createProperties.id : nextID++;
-    }
-
-    parseProp("type", "normal");
-    parseProp("title");
-    parseProp("checked", false);
-    parseProp("contexts", ["all"]);
-
-    // It's a bit wacky... but we shouldn't be too scared to use wrappedJSObject here.
-    // Later on we will do proper argument validation anyway.
-    if ("onclick" in createProperties.wrappedJSObject) {
-      this.onclick = createProperties.wrappedJSObject.onclick;
-    }
-
-    if (parseProp("parentId")) {
-      let found = false;
-      let menuMap = contextMenuMap.get(this.extension);
-      if (menuMap.has(this.parentId)) {
-        found = true;
-        menuMap.get(this.parentId).isMenu = true;
-      }
-      if (!found) {
-        throw new Error("MenuItem with this parentId not found");
-      }
-    } else {
-      this.parentId = undefined;
-    }
-
-    if (parseProp("documentUrlPatterns")) {
+    if (createProperties.documentUrlPatterns != null) {
       this.documentUrlMatchPattern = new MatchPattern(this.documentUrlPatterns);
     }
 
-    if (parseProp("targetUrlPatterns")) {
-      this.targetUrlPatterns = new MatchPattern(this.targetUrlPatterns);
+    if (createProperties.targetUrlPatterns != null) {
+      this.targetUrlMatchPattern = new MatchPattern(this.targetUrlPatterns);
+    }
+  },
+
+  setDefaults() {
+    this.setProps({
+      type: "normal",
+      checked: false,
+      contexts: ["all"],
+      enabled: true,
+    });
+  },
+
+  set id(id) {
+    if (this.hasOwnProperty("_id")) {
+      throw new Error("Id of a MenuItem cannot be changed");
+    }
+    let isIdUsed = gContextMenuMap.get(this.extension).has(id);
+    if (isIdUsed) {
+      throw new Error("Id already exists");
+    }
+    this._id = id;
+  },
+
+  get id() {
+    return this._id;
+  },
+
+  ensureValidParentId(parentId) {
+    if (parentId === undefined) {
+      return;
+    }
+    let menuMap = gContextMenuMap.get(this.extension);
+    if (!menuMap.has(parentId)) {
+      throw new Error("Could not find any MenuItem with id: " + parentId);
+    }
+    for (let item = menuMap.get(parentId); item; item = item.parent) {
+      if (item === this) {
+        throw new ExtensionError("MenuItem cannot be an ancestor (or self) of its new parent.");
+      }
+    }
+  },
+
+  set parentId(parentId) {
+    this.ensureValidParentId(parentId);
+
+    if (this.parent) {
+      this.parent.detachChild(this);
     }
 
-    parseProp("enabled", true);
+    if (parentId === undefined) {
+      this.root.addChild(this);
+    } else {
+      let menuMap = gContextMenuMap.get(this.extension);
+      menuMap.get(parentId).addChild(this);
+    }
+  },
+
+  get parentId() {
+    return this.parent ? this.parent.id : undefined;
+  },
+
+  addChild(child) {
+    if (child.parent) {
+      throw new Error("Child MenuItem already has a parent.");
+    }
+    this.children.push(child);
+    child.parent = this;
+  },
+
+  detachChild(child) {
+    let idx = this.children.indexOf(child);
+    if (idx < 0) {
+      throw new Error("Child MenuItem not found, it cannot be removed.");
+    }
+    this.children.splice(idx, 1);
+    child.parent = null;
+  },
+
+  get root() {
+    let extension = this.extension;
+    if (!gRootItems.has(extension)) {
+      let root = new MenuItem(extension,
+                              {title: extension.name},
+                              /* isRoot = */ true);
+      gRootItems.set(extension, root);
+    }
+
+    return gRootItems.get(extension);
   },
 
   remove() {
-    let menuMap = contextMenuMap.get(this.extension);
-    // We want to remove all the items that has |this| in its parent chain.
-    // The |checked| map is only an optimisation to avoid checking any item
-    // twice in the algorithm.
-    let checked = new Map();
-    function hasAncestorWithId(item, id) {
-      if (checked.has(item)) {
-        return checked.get(item);
-      }
-      if (item.parentId === undefined) {
-        checked.set(item, false);
-        return false;
-      }
-      let parent = menuMap.get(item.parentId);
-      if (!parent) {
-        checked.set(item, false);
-        return false;
-      }
-      if (parent.id === id) {
-        checked.set(item, true);
-        return true;
-      }
-      let rv = hasAncestorWithId(parent, id);
-      checked.set(item, rv);
-      return rv;
+    if (this.parent) {
+      this.parent.detachChild(this);
+    }
+    let children = this.children.slice(0);
+    for (let child of children) {
+      child.remove();
     }
 
-    let toRemove = new Set();
-    toRemove.add(this.id);
-    for (let [, item] of menuMap) {
-      if (hasAncestorWithId(item, this.id)) {
-        toRemove.add(item.id);
-      }
-    }
-    for (let id of toRemove) {
-      menuMap.delete(id);
+    let menuMap = gContextMenuMap.get(this.extension);
+    menuMap.delete(this.id);
+    if (this.root == this) {
+      gRootItems.delete(this.extension);
     }
   },
 
-  getClickData(contextData, event) {
+  getClickInfo(contextData, wasChecked) {
     let mediaType;
     if (contextData.onVideo) {
       mediaType = "video";
@@ -289,17 +410,16 @@ MenuItem.prototype = {
       mediaType = "image";
     }
 
-    let clickData = {
+    let info = {
       menuItemId: this.id,
+      editable: contextData.onEditableArea,
     };
 
     function setIfDefined(argName, value) {
-      if (value) {
-        clickData[argName] = value;
+      if (value !== undefined) {
+        info[argName] = value;
       }
     }
-
-    let tab = contextData.tab ? TabManager.convert(this.extension, contextData.tab) : undefined;
 
     setIfDefined("parentMenuItemId", this.parentId);
     setIfDefined("mediaType", mediaType);
@@ -308,46 +428,51 @@ MenuItem.prototype = {
     setIfDefined("pageUrl", contextData.pageUrl);
     setIfDefined("frameUrl", contextData.frameUrl);
     setIfDefined("selectionText", contextData.selectionText);
-    setIfDefined("editable", contextData.onEditableArea);
-    setIfDefined("tab", tab);
 
-    return clickData;
+    if ((this.type === "checkbox") || (this.type === "radio")) {
+      info.checked = this.checked;
+      info.wasChecked = wasChecked;
+    }
+
+    return info;
   },
 
   enabledForContext(contextData) {
-    let enabled = false;
     let contexts = getContexts(contextData);
-    for (let c of this.contexts) {
-      if (contexts.has(c)) {
-        enabled = true;
-        break;
+    if (!this.contexts.some(n => contexts.has(n))) {
+      return false;
+    }
+
+    let docPattern = this.documentUrlMatchPattern;
+    let pageURI = Services.io.newURI(contextData.pageUrl, null, null);
+    if (docPattern && !docPattern.matches(pageURI)) {
+      return false;
+    }
+
+    let targetPattern = this.targetUrlMatchPattern;
+    if (targetPattern) {
+      let targetUrls = [];
+      if (contextData.onImage || contextData.onAudio || contextData.onVideo) {
+        // TODO: double check if srcUrl is always set when we need it
+        targetUrls.push(contextData.srcUrl);
       }
-    }
-    if (!enabled) {
-      return false;
-    }
-
-    if (this.documentUrlMatchPattern &&
-        !this.documentUrlMatchPattern.matches(contextData.documentURIObject)) {
-      return false;
-    }
-
-    if (this.targetUrlPatterns &&
-        (contextData.onImage || contextData.onAudio || contextData.onVideo) &&
-        !this.targetUrlPatterns.matches(contextData.mediaURL)) {
-      // TODO: double check if mediaURL is always set when we need it
-      return false;
+      if (contextData.onLink) {
+        targetUrls.push(contextData.linkUrl);
+      }
+      if (!targetUrls.some(targetUrl => targetPattern.matches(NetUtil.newURI(targetUrl)))) {
+        return false;
+      }
     }
 
     return true;
   },
 };
 
-var extCount = 0;
+var gExtensionCount = 0;
 /* eslint-disable mozilla/balanced-listeners */
 extensions.on("startup", (type, extension) => {
-  contextMenuMap.set(extension, new Map());
-  if (++extCount == 1) {
+  gContextMenuMap.set(extension, new Map());
+  if (++gExtensionCount == 1) {
     Services.obs.addObserver(contextMenuObserver,
                              "on-build-contextmenu",
                              false);
@@ -355,64 +480,56 @@ extensions.on("startup", (type, extension) => {
 });
 
 extensions.on("shutdown", (type, extension) => {
-  contextMenuMap.delete(extension);
-  if (--extCount == 0) {
+  gContextMenuMap.delete(extension);
+  gRootItems.delete(extension);
+  if (--gExtensionCount == 0) {
     Services.obs.removeObserver(contextMenuObserver,
                                 "on-build-contextmenu");
   }
 });
 /* eslint-enable mozilla/balanced-listeners */
 
-extensions.registerPrivilegedAPI("contextMenus", (extension, context) => {
+extensions.registerSchemaAPI("contextMenus", "addon_parent", context => {
+  let {extension} = context;
   return {
     contextMenus: {
-      create: function(createProperties, callback) {
-        let menuItem = new MenuItem(extension, context, createProperties);
-        contextMenuMap.get(extension).set(menuItem.id, menuItem);
-        if (callback) {
-          runSafe(context, callback);
-        }
-        return menuItem.id;
+      createInternal: function(createProperties) {
+        // Note that the id is required by the schema. If the addon did not set
+        // it, the implementation of contextMenus.create in the child should
+        // have added it.
+        let menuItem = new MenuItem(extension, createProperties);
+        gContextMenuMap.get(extension).set(menuItem.id, menuItem);
       },
 
-      update: function(id, updateProperties, callback) {
-        let menuItem = contextMenuMap.get(extension).get(id);
+      update: function(id, updateProperties) {
+        let menuItem = gContextMenuMap.get(extension).get(id);
         if (menuItem) {
-          menuItem.init(updateProperties, true);
-        }
-        if (callback) {
-          runSafe(context, callback);
+          menuItem.setProps(updateProperties);
         }
       },
 
-      remove: function(id, callback) {
-        let menuItem = contextMenuMap.get(extension).get(id);
+      remove: function(id) {
+        let menuItem = gContextMenuMap.get(extension).get(id);
         if (menuItem) {
           menuItem.remove();
         }
-        if (callback) {
-          runSafe(context, callback);
+      },
+
+      removeAll: function() {
+        let root = gRootItems.get(extension);
+        if (root) {
+          root.remove();
         }
       },
 
-      removeAll: function(callback) {
-        for (let [, menuItem] of contextMenuMap.get(extension)) {
-          menuItem.remove();
-        }
-        if (callback) {
-          runSafe(context, callback);
-        }
-      },
-
-      // TODO: implement this once event pages are ready.
       onClicked: new EventManager(context, "contextMenus.onClicked", fire => {
-        let callback = menuItem => {
-          fire(menuItem.data);
+        let listener = (event, info, tab) => {
+          fire(info, tab);
         };
 
-        onClickedCallbacksMap.set(extension, callback);
+        extension.on("webext-contextmenu-menuitem-click", listener);
         return () => {
-          onClickedCallbacksMap.delete(extension);
+          extension.off("webext-contextmenu-menuitem-click", listener);
         };
       }).api(),
     },

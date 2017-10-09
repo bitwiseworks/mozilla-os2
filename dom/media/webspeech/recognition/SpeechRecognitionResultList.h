@@ -9,7 +9,6 @@
 
 #include "nsCycleCollectionParticipant.h"
 #include "nsWrapperCache.h"
-#include "nsAutoPtr.h"
 #include "nsTArray.h"
 #include "js/TypeDecls.h"
 
@@ -33,7 +32,7 @@ public:
 
   nsISupports* GetParentObject() const;
 
-  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   uint32_t Length() const;
 

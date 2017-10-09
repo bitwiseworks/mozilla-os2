@@ -62,17 +62,21 @@ nsBaseURLParser::ParseURL(const char *spec, int32_t specLen,
     const char *stop = nullptr;
     const char *colon = nullptr;
     const char *slash = nullptr;
-    const char *p;
+    const char *p = spec;
     uint32_t offset = 0;
     int32_t len = specLen;
-    for (p = spec; len && *p && !colon && !slash; ++p, --len) {
-        // skip leading whitespace
-        if (*p == ' ' || *p == '\n' || *p == '\r' || *p == '\t') {
-            spec++;
-            specLen--;
-            offset++;
-            continue;
-        }
+
+    // skip leading whitespace
+    while (*p == ' ' || *p == '\n' || *p == '\r' || *p == '\t') {
+        spec++;
+        specLen--;
+        offset++;
+
+        p++;
+        len--;
+    }
+
+    for (; len && *p && !colon && !slash; ++p, --len) {
         switch (*p) {
             case ':':
                 if (!colon)
@@ -493,6 +497,12 @@ nsAuthURLParser::ParseAuthority(const char *auth, int32_t authLen,
                              port);
         if (NS_FAILED(rv)) return rv;
         OFFSET_RESULT(hostname, p + 1 - auth);
+
+        // malformed if has a username or password
+        // but no host info, such as: http://u:p@/
+        if ((usernamePos || passwordPos) && (!hostnamePos || !*hostnameLen)) {
+            return NS_ERROR_MALFORMED_URI;
+        }
     }
     else {
         // auth = <server-info>
@@ -596,7 +606,7 @@ nsAuthURLParser::ParseServerInfo(const char *serverinfo, int32_t serverinfoLen,
 
                 nsresult err;
                 *port = buf.ToInteger(&err);
-                if (NS_FAILED(err) || *port < 0)
+                if (NS_FAILED(err) || *port < 0 || *port > std::numeric_limits<uint16_t>::max())
                     return NS_ERROR_MALFORMED_URI;
             }
         }

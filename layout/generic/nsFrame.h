@@ -15,7 +15,7 @@
 #include "mozilla/Logging.h"
 
 #include "nsIPresShell.h"
-#include "nsHTMLReflowState.h"
+#include "mozilla/ReflowInput.h"
 #include "nsHTMLParts.h"
 #include "nsISelectionDisplay.h"
 
@@ -169,6 +169,9 @@ public:
 
   virtual nsresult  GetPointFromOffset(int32_t  inOffset,
                                        nsPoint* outPoint) override;
+  virtual nsresult  GetCharacterRectsInRange(int32_t aInOffset,
+                                             int32_t aLength,
+                                             nsTArray<nsRect>& aOutRect) override;
 
   virtual nsresult  GetChildFrameContainingOffset(int32_t    inContentOffset,
                                                   bool       inHint,
@@ -197,7 +200,8 @@ public:
   virtual void SetNextInFlow(nsIFrame*) override;
   virtual nsIAtom* GetType() const override;
 
-  virtual nsresult  IsSelectable(bool* aIsSelectable, uint8_t* aSelectStyle) const override;
+  virtual nsresult IsSelectable(bool* aIsSelectable,
+                      mozilla::StyleUserSelect* aSelectStyle) const override;
 
   virtual nsresult  GetSelectionController(nsPresContext *aPresContext, nsISelectionController **aSelCon) override;
 
@@ -262,18 +266,34 @@ public:
   virtual nsSize GetIntrinsicRatio() override;
 
   virtual mozilla::LogicalSize
-  ComputeSize(nsRenderingContext *aRenderingContext,
-              mozilla::WritingMode aWritingMode,
+  ComputeSize(nsRenderingContext*         aRenderingContext,
+              mozilla::WritingMode        aWM,
               const mozilla::LogicalSize& aCBSize,
-              nscoord aAvailableISize,
+              nscoord                     aAvailableISize,
               const mozilla::LogicalSize& aMargin,
               const mozilla::LogicalSize& aBorder,
               const mozilla::LogicalSize& aPadding,
-              ComputeSizeFlags aFlags) override;
+              ComputeSizeFlags            aFlags) override;
+
+  /**
+   * Calculate the used values for 'width' and 'height' for a replaced element.
+   *   http://www.w3.org/TR/CSS21/visudet.html#min-max-widths
+   */
+  mozilla::LogicalSize
+  ComputeSizeWithIntrinsicDimensions(
+              nsRenderingContext*           aRenderingContext,
+              mozilla::WritingMode          aWM,
+              const mozilla::IntrinsicSize& aIntrinsicSize,
+              nsSize                        aIntrinsicRatio,
+              const mozilla::LogicalSize&   aCBSize,
+              const mozilla::LogicalSize&   aMargin,
+              const mozilla::LogicalSize&   aBorder,
+              const mozilla::LogicalSize&   aPadding,
+              ComputeSizeFlags              aFlags);
 
   // Compute tight bounds assuming this frame honours its border, background
   // and outline, its children's tight bounds, and nothing else.
-  nsRect ComputeSimpleTightBounds(gfxContext* aContext) const;
+  nsRect ComputeSimpleTightBounds(mozilla::gfx::DrawTarget* aDrawTarget) const;
   
   /**
    * A helper, used by |nsFrame::ComputeSize| (for frames that need to
@@ -291,26 +311,27 @@ public:
    * to be unused.
    */
   virtual mozilla::LogicalSize
-  ComputeAutoSize(nsRenderingContext *aRenderingContext,
-                  mozilla::WritingMode aWritingMode,
+  ComputeAutoSize(nsRenderingContext*         aRenderingContext,
+                  mozilla::WritingMode        aWM,
                   const mozilla::LogicalSize& aCBSize,
-                  nscoord aAvailableISize,
+                  nscoord                     aAvailableISize,
                   const mozilla::LogicalSize& aMargin,
                   const mozilla::LogicalSize& aBorder,
                   const mozilla::LogicalSize& aPadding,
-                  bool aShrinkWrap);
+                  ComputeSizeFlags            aFlags);
 
   /**
    * Utility function for ComputeAutoSize implementations.  Return
-   * max(GetMinISize(), min(aWidthInCB, GetPrefISize()))
+   * max(GetMinISize(), min(aISizeInCB, GetPrefISize()))
    */
-  nscoord ShrinkWidthToFit(nsRenderingContext *aRenderingContext,
-                           nscoord aWidthInCB);
+  nscoord ShrinkWidthToFit(nsRenderingContext* aRenderingContext,
+                           nscoord             aISizeInCB,
+                           ComputeSizeFlags    aFlags);
 
   /**
    * Calculates the size of this frame after reflowing (calling Reflow on, and
    * updating the size and position of) its children, as necessary.  The
-   * calculated size is returned to the caller via the nsHTMLReflowMetrics
+   * calculated size is returned to the caller via the ReflowOutput
    * outparam.  (The caller is responsible for setting the actual size and
    * position of this frame.)
    *
@@ -322,7 +343,7 @@ public:
    * has changed.  For example, a change in the width of the frame may require
    * all of its children to be reflowed (even those without dirty bits set on
    * them), whereas a change in its height might not.
-   * (nsHTMLReflowState::ShouldReflowAllKids may be helpful in deciding whether
+   * (ReflowInput::ShouldReflowAllKids may be helpful in deciding whether
    * to reflow all the children, but for some frame types it might result in
    * over-reflow.)
    *
@@ -330,11 +351,11 @@ public:
    * updated, then UpdateOverflow should be called instead of Reflow.
    */
   virtual void Reflow(nsPresContext*           aPresContext,
-                      nsHTMLReflowMetrics&     aDesiredSize,
-                      const nsHTMLReflowState& aReflowState,
+                      ReflowOutput&     aDesiredSize,
+                      const ReflowInput& aReflowInput,
                       nsReflowStatus&          aStatus) override;
   virtual void DidReflow(nsPresContext*           aPresContext,
-                         const nsHTMLReflowState* aReflowState,
+                         const ReflowInput* aReflowInput,
                          nsDidReflowStatus        aStatus) override;
 
   /**
@@ -343,13 +364,13 @@ public:
    * that, this method won't modify aStatus.
    */
   void ReflowAbsoluteFrames(nsPresContext*           aPresContext,
-                            nsHTMLReflowMetrics&     aDesiredSize,
-                            const nsHTMLReflowState& aReflowState,
+                            ReflowOutput&     aDesiredSize,
+                            const ReflowInput& aReflowInput,
                             nsReflowStatus&          aStatus,
                             bool                     aConstrainBSize = true);
   void FinishReflowWithAbsoluteFrames(nsPresContext*           aPresContext,
-                                      nsHTMLReflowMetrics&     aDesiredSize,
-                                      const nsHTMLReflowState& aReflowState,
+                                      ReflowOutput&     aDesiredSize,
+                                      const ReflowInput& aReflowInput,
                                       nsReflowStatus&          aStatus,
                                       bool                     aConstrainBSize = true);
 
@@ -360,7 +381,7 @@ public:
    *
    * It's necessary to use PushDirtyBitToAbsoluteFrames() when you plan to
    * reflow this frame's absolutely-positioned children after the dirty bit on
-   * this frame has already been cleared, which prevents nsHTMLReflowState from
+   * this frame has already been cleared, which prevents ReflowInput from
    * propagating the dirty bit normally. This situation generally only arises
    * when a multipass layout algorithm is used.
    */
@@ -368,7 +389,9 @@ public:
 
   virtual bool CanContinueTextRun() const override;
 
-  virtual bool UpdateOverflow() override;
+  virtual bool ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas) override;
+
+  virtual void UnionChildOverflow(nsOverflowAreas& aOverflowAreas) override;
 
   // Selection Methods
 
@@ -408,11 +431,11 @@ public:
   virtual ContentOffsets CalcContentOffsetsFromFramePoint(nsPoint aPoint);
 
   // Box layout methods
-  virtual nsSize GetPrefSize(nsBoxLayoutState& aBoxLayoutState) override;
-  virtual nsSize GetMinSize(nsBoxLayoutState& aBoxLayoutState) override;
-  virtual nsSize GetMaxSize(nsBoxLayoutState& aBoxLayoutState) override;
-  virtual nscoord GetFlex(nsBoxLayoutState& aBoxLayoutState) override;
-  virtual nscoord GetBoxAscent(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nsSize GetXULPrefSize(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nsSize GetXULMinSize(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nsSize GetXULMaxSize(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nscoord GetXULFlex() override;
+  virtual nscoord GetXULBoxAscent(nsBoxLayoutState& aBoxLayoutState) override;
 
   // We compute and store the HTML content's overflow area. So don't
   // try to compute it in the box code.
@@ -426,8 +449,8 @@ public:
   // the reflow status, and returns true. Otherwise, the frame is
   // unmarked "unflowable" and the metrics and reflow status are not
   // touched and false is returned.
-  bool IsFrameTreeTooDeep(const nsHTMLReflowState& aReflowState,
-                            nsHTMLReflowMetrics& aMetrics,
+  bool IsFrameTreeTooDeep(const ReflowInput& aReflowInput,
+                            ReflowOutput& aMetrics,
                             nsReflowStatus& aStatus);
 
   // Incorporate the child overflow areas into aOverflowAreas.
@@ -438,8 +461,8 @@ public:
   /**
    * @return true if we should avoid a page/column break in this frame.
    */
-  bool ShouldAvoidBreakInside(const nsHTMLReflowState& aReflowState) const {
-    return !aReflowState.mFlags.mIsTopOfPage &&
+  bool ShouldAvoidBreakInside(const ReflowInput& aReflowInput) const {
+    return !aReflowInput.mFlags.mIsTopOfPage &&
            NS_STYLE_PAGE_BREAK_AVOID == StyleDisplay()->mBreakInside &&
            !GetPrevInFlow();
   }
@@ -475,7 +498,7 @@ public:
   // Display Reflow Debugging 
   static void* DisplayReflowEnter(nsPresContext*          aPresContext,
                                   nsIFrame*                aFrame,
-                                  const nsHTMLReflowState& aReflowState);
+                                  const ReflowInput& aReflowInput);
   static void* DisplayLayoutEnter(nsIFrame* aFrame);
   static void* DisplayIntrinsicISizeEnter(nsIFrame* aFrame,
                                           const char* aType);
@@ -483,7 +506,7 @@ public:
                                          const char* aType);
   static void  DisplayReflowExit(nsPresContext*      aPresContext,
                                  nsIFrame*            aFrame,
-                                 nsHTMLReflowMetrics& aMetrics,
+                                 ReflowOutput& aMetrics,
                                  uint32_t             aStatus,
                                  void*                aFrameTreeNode);
   static void  DisplayLayoutExit(nsIFrame* aFrame,
@@ -651,7 +674,7 @@ protected:
   // Fills aCursor with the appropriate information from ui
   static void FillCursorInformationFromStyle(const nsStyleUserInterface* ui,
                                              nsIFrame::Cursor& aCursor);
-  NS_IMETHOD DoLayout(nsBoxLayoutState& aBoxLayoutState) override;
+  NS_IMETHOD DoXULLayout(nsBoxLayoutState& aBoxLayoutState) override;
 
 #ifdef DEBUG_LAYOUT
   virtual void GetBoxName(nsAutoString& aName) override;
@@ -665,7 +688,7 @@ protected:
 private:
   void BoxReflow(nsBoxLayoutState& aState,
                  nsPresContext*    aPresContext,
-                 nsHTMLReflowMetrics&     aDesiredSize,
+                 ReflowOutput&     aDesiredSize,
                  nsRenderingContext* aRenderingContext,
                  nscoord aX,
                  nscoord aY,
@@ -677,6 +700,9 @@ private:
 
   // Returns true if this frame has any kind of CSS animations.
   bool HasCSSAnimations();
+
+  // Returns true if this frame has any kind of CSS transitions.
+  bool HasCSSTransitions();
 
 #ifdef DEBUG_FRAME_DUMP
 public:
@@ -711,7 +737,7 @@ public:
 
   /**
    * See if style tree verification is enabled. To enable style tree
-   * verification add "styleverifytree:1" to your NSPR_LOG_MODULES
+   * verification add "styleverifytree:1" to your MOZ_LOG
    * environment variable (any non-zero debug level will work). Or,
    * call SetVerifyStyleTreeEnable with true.
    */
@@ -761,16 +787,16 @@ public:
   struct DR_cookie {
     DR_cookie(nsPresContext*          aPresContext,
               nsIFrame*                aFrame, 
-              const nsHTMLReflowState& aReflowState,
-              nsHTMLReflowMetrics&     aMetrics,
+              const mozilla::ReflowInput& aReflowInput,
+              mozilla::ReflowOutput&     aMetrics,
               nsReflowStatus&          aStatus);     
     ~DR_cookie();
     void Change() const;
 
     nsPresContext*          mPresContext;
     nsIFrame*                mFrame;
-    const nsHTMLReflowState& mReflowState;
-    nsHTMLReflowMetrics&     mMetrics;
+    const mozilla::ReflowInput& mReflowInput;
+    mozilla::ReflowOutput&     mMetrics;
     nsReflowStatus&          mStatus;    
     void*                    mValue;
   };
@@ -806,35 +832,35 @@ public:
   };
 
   struct DR_init_constraints_cookie {
-    DR_init_constraints_cookie(nsIFrame* aFrame, nsHTMLReflowState* aState,
+    DR_init_constraints_cookie(nsIFrame* aFrame, mozilla::ReflowInput* aState,
                                nscoord aCBWidth, nscoord aCBHeight,
                                const nsMargin* aBorder,
                                const nsMargin* aPadding);
     ~DR_init_constraints_cookie();
 
     nsIFrame* mFrame;
-    nsHTMLReflowState* mState;
+    mozilla::ReflowInput* mState;
     void* mValue;
   };
 
   struct DR_init_offsets_cookie {
-    DR_init_offsets_cookie(nsIFrame* aFrame, nsCSSOffsetState* aState,
+    DR_init_offsets_cookie(nsIFrame* aFrame, mozilla::SizeComputationInput* aState,
                            const mozilla::LogicalSize& aPercentBasis,
                            const nsMargin* aBorder,
                            const nsMargin* aPadding);
     ~DR_init_offsets_cookie();
 
     nsIFrame* mFrame;
-    nsCSSOffsetState* mState;
+    mozilla::SizeComputationInput* mState;
     void* mValue;
   };
 
   struct DR_init_type_cookie {
-    DR_init_type_cookie(nsIFrame* aFrame, nsHTMLReflowState* aState);
+    DR_init_type_cookie(nsIFrame* aFrame, mozilla::ReflowInput* aState);
     ~DR_init_type_cookie();
 
     nsIFrame* mFrame;
-    nsHTMLReflowState* mState;
+    mozilla::ReflowInput* mState;
     void* mValue;
   };
 

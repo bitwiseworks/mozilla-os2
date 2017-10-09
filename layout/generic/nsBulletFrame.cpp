@@ -41,7 +41,7 @@ using namespace mozilla;
 using namespace mozilla::gfx;
 using namespace mozilla::image;
 
-NS_DECLARE_FRAME_PROPERTY(FontSizeInflationProperty, nullptr)
+NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(FontSizeInflationProperty, float)
 
 NS_IMPL_FRAMEARENA_HELPERS(nsBulletFrame)
 
@@ -188,8 +188,10 @@ public:
 
 class nsDisplayBullet final : public nsDisplayItem {
 public:
-  nsDisplayBullet(nsDisplayListBuilder* aBuilder, nsBulletFrame* aFrame) :
-    nsDisplayItem(aBuilder, aFrame) {
+  nsDisplayBullet(nsDisplayListBuilder* aBuilder, nsBulletFrame* aFrame)
+    : nsDisplayItem(aBuilder, aFrame)
+    , mDisableSubpixelAA(false)
+  {
     MOZ_COUNT_CTOR(nsDisplayBullet);
   }
 #ifdef NS_BUILD_REFCNT_LOGGING
@@ -219,6 +221,10 @@ public:
     return GetBounds(aBuilder, &snap);
   }
 
+  virtual void DisableComponentAlpha() override {
+    mDisableSubpixelAA = true;
+  }
+
   virtual nsDisplayItemGeometry* AllocateGeometry(nsDisplayListBuilder* aBuilder) override
   {
     return new nsDisplayBulletGeometry(this, aBuilder);
@@ -246,6 +252,9 @@ public:
 
     return nsDisplayItem::ComputeInvalidationRegion(aBuilder, aGeometry, aInvalidRegion);
   }
+
+protected:
+  bool mDisableSubpixelAA;
 };
 
 void nsDisplayBullet::Paint(nsDisplayListBuilder* aBuilder,
@@ -257,7 +266,8 @@ void nsDisplayBullet::Paint(nsDisplayListBuilder* aBuilder,
   }
 
   DrawResult result = static_cast<nsBulletFrame*>(mFrame)->
-    PaintBullet(*aCtx, ToReferenceFrame(), mVisibleRect, flags);
+    PaintBullet(*aCtx, ToReferenceFrame(), mVisibleRect, flags,
+                mDisableSubpixelAA);
 
   nsDisplayBulletGeometry::UpdateDrawResult(this, result);
 }
@@ -278,7 +288,8 @@ nsBulletFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 
 DrawResult
 nsBulletFrame::PaintBullet(nsRenderingContext& aRenderingContext, nsPoint aPt,
-                           const nsRect& aDirtyRect, uint32_t aFlags)
+                           const nsRect& aDirtyRect, uint32_t aFlags,
+                           bool aDisableSubpixelAA)
 {
   const nsStyleList* myList = StyleList();
   CounterStyle* listStyleType = myList->GetCounterStyle();
@@ -298,13 +309,12 @@ nsBulletFrame::PaintBullet(nsRenderingContext& aRenderingContext, nsPoint aPt,
         return
           nsLayoutUtils::DrawSingleImage(*aRenderingContext.ThebesContext(),
              PresContext(),
-             imageCon, nsLayoutUtils::GetGraphicsFilterForFrame(this),
+             imageCon, nsLayoutUtils::GetSamplingFilterForFrame(this),
              dest + aPt, aDirtyRect, nullptr, aFlags);
       }
     }
   }
 
-  RefPtr<nsFontMetrics> fm;
   ColorPattern color(ToDeviceColor(
                        nsLayoutUtils::GetColor(this, eCSSProperty_color)));
 
@@ -409,11 +419,14 @@ nsBulletFrame::PaintBullet(nsRenderingContext& aRenderingContext, nsPoint aPt,
 
   default:
     {
+      DrawTargetAutoDisableSubpixelAntialiasing
+        disable(aRenderingContext.GetDrawTarget(), aDisableSubpixelAA);
+
       aRenderingContext.ThebesContext()->SetColor(
         Color::FromABGR(nsLayoutUtils::GetColor(this, eCSSProperty_color)));
 
-      nsLayoutUtils::GetFontMetricsForFrame(this, getter_AddRefs(fm),
-                                            GetFontSizeInflation());
+      RefPtr<nsFontMetrics> fm =
+        nsLayoutUtils::GetFontMetricsForFrame(this, GetFontSizeInflation());
       nsAutoString text;
       GetListItemText(text);
       WritingMode wm = GetWritingMode();
@@ -524,7 +537,7 @@ nsBulletFrame::AppendSpacingToPadding(nsFontMetrics* aFontMetrics,
 void
 nsBulletFrame::GetDesiredSize(nsPresContext*  aCX,
                               nsRenderingContext *aRenderingContext,
-                              nsHTMLReflowMetrics& aMetrics,
+                              ReflowOutput& aMetrics,
                               float aFontSizeInflation,
                               LogicalMargin* aPadding)
 {
@@ -535,9 +548,8 @@ nsBulletFrame::GetDesiredSize(nsPresContext*  aCX,
 
   const nsStyleList* myList = StyleList();
   nscoord ascent;
-  RefPtr<nsFontMetrics> fm;
-  nsLayoutUtils::GetFontMetricsForFrame(this, getter_AddRefs(fm),
-                                        aFontSizeInflation);
+  RefPtr<nsFontMetrics> fm =
+    nsLayoutUtils::GetFontMetricsForFrame(this, aFontSizeInflation);
 
   RemoveStateBits(BULLET_FRAME_IMAGE_LOADING);
 
@@ -608,8 +620,7 @@ nsBulletFrame::GetDesiredSize(nsPresContext*  aCX,
       GetListItemText(text);
       finalSize.BSize(wm) = fm->MaxHeight();
       finalSize.ISize(wm) =
-        nsLayoutUtils::AppUnitWidthOfStringBidi(text, this, *fm,
-                                                *aRenderingContext);
+        nsLayoutUtils::AppUnitWidthOfStringBidi(text, this, *fm, *aRenderingContext);
       aMetrics.SetBlockStartAscent(wm.IsLineInverted()
                                      ? fm->MaxDescent() : fm->MaxAscent());
       break;
@@ -619,25 +630,25 @@ nsBulletFrame::GetDesiredSize(nsPresContext*  aCX,
 
 void
 nsBulletFrame::Reflow(nsPresContext* aPresContext,
-                      nsHTMLReflowMetrics& aMetrics,
-                      const nsHTMLReflowState& aReflowState,
+                      ReflowOutput& aMetrics,
+                      const ReflowInput& aReflowInput,
                       nsReflowStatus& aStatus)
 {
   MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("nsBulletFrame");
-  DISPLAY_REFLOW(aPresContext, this, aReflowState, aMetrics, aStatus);
+  DISPLAY_REFLOW(aPresContext, this, aReflowInput, aMetrics, aStatus);
 
   float inflation = nsLayoutUtils::FontSizeInflationFor(this);
   SetFontSizeInflation(inflation);
 
   // Get the base size
-  GetDesiredSize(aPresContext, aReflowState.rendContext,
-                 aMetrics, inflation, &mPadding);
+  GetDesiredSize(aPresContext, aReflowInput.mRenderingContext, aMetrics, inflation,
+                 &mPadding);
 
   // Add in the border and padding; split the top/bottom between the
   // ascent and descent to make things look nice
-  WritingMode wm = aReflowState.GetWritingMode();
-  const LogicalMargin& bp = aReflowState.ComputedLogicalBorderPadding();
+  WritingMode wm = aReflowInput.GetWritingMode();
+  const LogicalMargin& bp = aReflowInput.ComputedLogicalBorderPadding();
   mPadding.BStart(wm) += NSToCoordRound(bp.BStart(wm) * inflation);
   mPadding.IEnd(wm) += NSToCoordRound(bp.IEnd(wm) * inflation);
   mPadding.BEnd(wm) += NSToCoordRound(bp.BEnd(wm) * inflation);
@@ -657,31 +668,67 @@ nsBulletFrame::Reflow(nsPresContext* aPresContext,
   aMetrics.SetOverflowAreasToDesiredBounds();
 
   aStatus = NS_FRAME_COMPLETE;
-  NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aMetrics);
+  NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aMetrics);
 }
 
 /* virtual */ nscoord
 nsBulletFrame::GetMinISize(nsRenderingContext *aRenderingContext)
 {
   WritingMode wm = GetWritingMode();
-  nsHTMLReflowMetrics metrics(wm);
-  DISPLAY_MIN_WIDTH(this, metrics.ISize(wm));
+  ReflowOutput reflowOutput(wm);
+  DISPLAY_MIN_WIDTH(this, reflowOutput.ISize(wm));
   LogicalMargin padding(wm);
-  GetDesiredSize(PresContext(), aRenderingContext, metrics, 1.0f, &padding);
-  metrics.ISize(wm) += padding.IStartEnd(wm);
-  return metrics.ISize(wm);
+  GetDesiredSize(PresContext(), aRenderingContext, reflowOutput, 1.0f, &padding);
+  reflowOutput.ISize(wm) += padding.IStartEnd(wm);
+  return reflowOutput.ISize(wm);
 }
 
 /* virtual */ nscoord
 nsBulletFrame::GetPrefISize(nsRenderingContext *aRenderingContext)
 {
   WritingMode wm = GetWritingMode();
-  nsHTMLReflowMetrics metrics(wm);
+  ReflowOutput metrics(wm);
   DISPLAY_PREF_WIDTH(this, metrics.ISize(wm));
   LogicalMargin padding(wm);
   GetDesiredSize(PresContext(), aRenderingContext, metrics, 1.0f, &padding);
   metrics.ISize(wm) += padding.IStartEnd(wm);
   return metrics.ISize(wm);
+}
+
+// If a bullet has zero size and is "ignorable" from its styling, we behave
+// as if it doesn't exist, from a line-breaking/isize-computation perspective.
+// Otherwise, we use the default implementation, same as nsFrame.
+static inline bool
+IsIgnoreable(const nsIFrame* aFrame, nscoord aISize)
+{
+  if (aISize != nscoord(0)) {
+    return false;
+  }
+  auto listStyle = aFrame->StyleList();
+  return listStyle->GetCounterStyle()->IsNone() &&
+         !listStyle->GetListStyleImage();
+}
+
+/* virtual */ void
+nsBulletFrame::AddInlineMinISize(nsRenderingContext* aRenderingContext,
+                                 nsIFrame::InlineMinISizeData* aData)
+{
+  nscoord isize = nsLayoutUtils::IntrinsicForContainer(aRenderingContext,
+                    this, nsLayoutUtils::MIN_ISIZE);
+  if (MOZ_LIKELY(!::IsIgnoreable(this, isize))) {
+    aData->DefaultAddInlineMinISize(this, isize);
+  }
+}
+
+/* virtual */ void
+nsBulletFrame::AddInlinePrefISize(nsRenderingContext* aRenderingContext,
+                                  nsIFrame::InlinePrefISizeData* aData)
+{
+  nscoord isize = nsLayoutUtils::IntrinsicForContainer(aRenderingContext,
+                    this, nsLayoutUtils::PREF_ISIZE);
+  if (MOZ_LIKELY(!::IsIgnoreable(this, isize))) {
+    aData->DefaultAddInlinePrefISize(isize);
+  }
 }
 
 NS_IMETHODIMP
@@ -850,22 +897,13 @@ nsBulletFrame::GetLoadGroup(nsPresContext *aPresContext, nsILoadGroup **aLoadGro
   *aLoadGroup = doc->GetDocumentLoadGroup().take();
 }
 
-union VoidPtrOrFloat {
-  VoidPtrOrFloat() : p(nullptr) {}
-
-  void *p;
-  float f;
-};
-
 float
 nsBulletFrame::GetFontSizeInflation() const
 {
   if (!HasFontSizeInflation()) {
     return 1.0f;
   }
-  VoidPtrOrFloat u;
-  u.p = Properties().Get(FontSizeInflationProperty());
-  return u.f;
+  return Properties().Get(FontSizeInflationProperty());
 }
 
 void
@@ -880,9 +918,7 @@ nsBulletFrame::SetFontSizeInflation(float aInflation)
   }
 
   AddStateBits(BULLET_FRAME_HAS_FONT_INFLATION);
-  VoidPtrOrFloat u;
-  u.f = aInflation;
-  Properties().Set(FontSizeInflationProperty(), u.p);
+  Properties().Set(FontSizeInflationProperty(), aInflation);
 }
 
 already_AddRefed<imgIContainer>
@@ -904,9 +940,8 @@ nsBulletFrame::GetLogicalBaseline(WritingMode aWritingMode) const
   if (GetStateBits() & BULLET_FRAME_IMAGE_LOADING) {
     ascent = BSize(aWritingMode);
   } else {
-    RefPtr<nsFontMetrics> fm;
-    nsLayoutUtils::GetFontMetricsForFrame(this, getter_AddRefs(fm),
-                                          GetFontSizeInflation());
+    RefPtr<nsFontMetrics> fm =
+      nsLayoutUtils::GetFontMetricsForFrame(this, GetFontSizeInflation());
     CounterStyle* listStyleType = StyleList()->GetCounterStyle();
     switch (listStyleType->GetStyle()) {
       case NS_STYLE_LIST_STYLE_NONE:

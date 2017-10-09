@@ -9,6 +9,9 @@
 #include "nsThreadUtils.h"
 #include <algorithm>
 
+extern mozilla::LazyLogModule gMediaDemuxerLog;
+#define WEBM_DEBUG(arg, ...) MOZ_LOG(gMediaDemuxerLog, mozilla::LogLevel::Debug, ("WebMBufferedParser(%p)::%s: " arg, this, __func__, ##__VA_ARGS__))
+
 namespace mozilla {
 
 static uint32_t
@@ -30,7 +33,7 @@ VIntLength(unsigned char aFirstByte, uint32_t* aMask)
   return count;
 }
 
-void WebMBufferedParser::Append(const unsigned char* aBuffer, uint32_t aLength,
+bool WebMBufferedParser::Append(const unsigned char* aBuffer, uint32_t aLength,
                                 nsTArray<WebMTimeDataOffset>& aMapping,
                                 ReentrantMonitor& aReentrantMonitor)
 {
@@ -41,6 +44,7 @@ void WebMBufferedParser::Append(const unsigned char* aBuffer, uint32_t aLength,
   static const uint32_t CLUSTER_ID = 0x1f43b675;
   static const uint32_t TIMECODESCALE_ID = 0x2ad7b1;
   static const unsigned char TIMECODE_ID = 0xe7;
+  static const unsigned char BLOCKGROUP_ID = 0xa0;
   static const unsigned char BLOCK_ID = 0xa1;
   static const unsigned char SIMPLEBLOCK_ID = 0xa3;
   static const uint32_t BLOCK_TIMECODE_LENGTH = 2;
@@ -111,6 +115,9 @@ void WebMBufferedParser::Append(const unsigned char* aBuffer, uint32_t aLength,
         }
         mState = READ_ELEMENT_ID;
         break;
+      case BLOCKGROUP_ID:
+        mState = READ_ELEMENT_ID;
+        break;
       case SIMPLEBLOCK_ID:
         /* FALLTHROUGH */
       case BLOCK_ID:
@@ -129,7 +136,7 @@ void WebMBufferedParser::Append(const unsigned char* aBuffer, uint32_t aLength,
       case EBML_ID:
         mLastInitStartOffset = mCurrentOffset + (p - aBuffer) -
                             (mElement.mID.mLength + mElement.mSize.mLength);
-        /* FALLTHROUGH */
+        MOZ_FALLTHROUGH;
       default:
         mSkipBytes = mElement.mSize.mValue;
         mState = SKIP_DATA;
@@ -156,7 +163,9 @@ void WebMBufferedParser::Append(const unsigned char* aBuffer, uint32_t aLength,
       }
       break;
     case READ_TIMECODESCALE:
-      MOZ_ASSERT(mGotTimecodeScale);
+      if (!mGotTimecodeScale) {
+        return false;
+      }
       mTimecodeScale = mVInt.mValue;
       mState = READ_ELEMENT_ID;
       break;
@@ -180,12 +189,25 @@ void WebMBufferedParser::Append(const unsigned char* aBuffer, uint32_t aLength,
           if (idx == 0 || aMapping[idx - 1] != endOffset) {
             // Don't insert invalid negative timecodes.
             if (mBlockTimecode >= 0 || mClusterTimecode >= uint16_t(abs(mBlockTimecode))) {
-              MOZ_ASSERT(mGotTimecodeScale);
+              if (!mGotTimecodeScale) {
+                return false;
+              }
               uint64_t absTimecode = mClusterTimecode + mBlockTimecode;
               absTimecode *= mTimecodeScale;
-              WebMTimeDataOffset entry(endOffset, absTimecode, mLastInitStartOffset,
-                                       mClusterOffset, mClusterEndOffset);
-              aMapping.InsertElementAt(idx, entry);
+              // Avoid creating an entry if the timecode is out of order
+              // (invalid according to the WebM specification) so that
+              // ordering invariants of aMapping are not violated.
+              if (idx == 0 ||
+                  aMapping[idx - 1].mTimecode <= absTimecode ||
+                  (idx + 1 < aMapping.Length() &&
+                   aMapping[idx + 1].mTimecode >= absTimecode)) {
+                WebMTimeDataOffset entry(endOffset, absTimecode, mLastInitStartOffset,
+                                         mClusterOffset, mClusterEndOffset);
+                aMapping.InsertElementAt(idx, entry);
+              } else {
+                WEBM_DEBUG("Out of order timecode %llu in Cluster at %lld ignored",
+                           absTimecode, mClusterOffset);
+              }
             }
           }
         }
@@ -230,6 +252,8 @@ void WebMBufferedParser::Append(const unsigned char* aBuffer, uint32_t aLength,
 
   NS_ASSERTION(p == aBuffer + aLength, "Must have parsed to end of data.");
   mCurrentOffset += aLength;
+
+  return true;
 }
 
 int64_t
@@ -302,6 +326,7 @@ bool WebMBufferedState::CalculateBufferedForRange(int64_t aStartOffset, int64_t 
                  "Must have found greatest WebMTimeDataOffset for end");
   }
 
+  MOZ_ASSERT(mTimeMapping[end].mTimecode >= mTimeMapping[end - 1].mTimecode);
   uint64_t frameDuration = mTimeMapping[end].mTimecode - mTimeMapping[end - 1].mTimecode;
   *aStartTime = mTimeMapping[start].mTimecode;
   *aEndTime = mTimeMapping[end].mTimecode + frameDuration;
@@ -312,16 +337,22 @@ bool WebMBufferedState::GetOffsetForTime(uint64_t aTime, int64_t* aOffset)
 {
   ReentrantMonitorAutoEnter mon(mReentrantMonitor);
 
+  if(mTimeMapping.IsEmpty()) {
+    return false;
+  }
+
   uint64_t time = aTime;
   if (time > 0) {
     time = time - 1;
   }
   uint32_t idx = mTimeMapping.IndexOfFirstElementGt(time, TimeComparator());
   if (idx == mTimeMapping.Length()) {
-    return false;
+    // Clamp to end
+    *aOffset = mTimeMapping[mTimeMapping.Length() - 1].mSyncOffset;
+  } else {
+    // Idx is within array or has been clamped to start
+    *aOffset = mTimeMapping[idx].mSyncOffset;
   }
-
-  *aOffset = mTimeMapping[idx].mSyncOffset;
   return true;
 }
 
@@ -478,3 +509,6 @@ WebMBufferedState::GetNextKeyframeTime(uint64_t aTime, uint64_t* aKeyframeTime)
   return true;
 }
 } // namespace mozilla
+
+#undef WEBM_DEBUG
+

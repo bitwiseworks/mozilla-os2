@@ -6,23 +6,27 @@
 package org.mozilla.gecko.db;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.json.JSONException;
 import org.json.JSONObject;
-import org.mozilla.gecko.Telemetry;
+import org.mozilla.gecko.GeckoAppShell;
+import org.mozilla.gecko.icons.decoders.LoadFaviconResult;
 import org.mozilla.gecko.util.ThreadUtils;
 
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.database.Cursor;
 import android.net.Uri;
-import android.support.v4.util.LruCache;
 import android.util.Log;
+import android.util.LruCache;
 
 // Holds metadata info about URLs. Supports some helper functions for getting back a HashMap of key value data.
 public class LocalURLMetadata implements URLMetadata {
@@ -33,14 +37,15 @@ public class LocalURLMetadata implements URLMetadata {
         uriWithProfile = DBUtils.appendProfileWithDefault(mProfile, URLMetadataTable.CONTENT_URI);
     }
 
-    // This returns a list of columns in the table. It's used to simplify some loops for reading/writing data.
-    @SuppressWarnings("serial")
-    private final Set<String> getModel() {
-        return new HashSet<String>() {{
-            add(URLMetadataTable.URL_COLUMN);
-            add(URLMetadataTable.TILE_IMAGE_URL_COLUMN);
-            add(URLMetadataTable.TILE_COLOR_COLUMN);
-        }};
+    // A list of columns in the table. It's used to simplify some loops for reading/writing data.
+    private static final Set<String> COLUMNS;
+    static {
+        final HashSet<String> tempModel = new HashSet<>(4);
+        tempModel.add(URLMetadataTable.URL_COLUMN);
+        tempModel.add(URLMetadataTable.TILE_IMAGE_URL_COLUMN);
+        tempModel.add(URLMetadataTable.TILE_COLOR_COLUMN);
+        tempModel.add(URLMetadataTable.TOUCH_ICON_COLUMN);
+        COLUMNS = Collections.unmodifiableSet(tempModel);
     }
 
     // Store a cache of recent results. This number is chosen to match the max number of tiles on about:home
@@ -51,16 +56,42 @@ public class LocalURLMetadata implements URLMetadata {
     /**
      * Converts a JSON object into a unmodifiable Map of known metadata properties.
      * Will throw away any properties that aren't stored in the database.
+     *
+     * Incoming data can include a list like: {touchIconList:{56:"http://x.com/56.png", 76:"http://x.com/76.png"}}.
+     * This will then be filtered to find the most appropriate touchIcon, i.e. the closest icon size that is larger
+     * than (or equal to) the preferred homescreen launcher icon size, which is then stored in the "touchIcon" property.
      */
     @Override
     public Map<String, Object> fromJSON(JSONObject obj) {
         Map<String, Object> data = new HashMap<String, Object>();
 
-        Set<String> model = getModel();
-        for (String key : model) {
+        for (String key : COLUMNS) {
             if (obj.has(key)) {
                 data.put(key, obj.optString(key));
             }
+        }
+
+
+        try {
+            JSONObject icons;
+            if (obj.has("touchIconList") &&
+                    (icons = obj.getJSONObject("touchIconList")).length() > 0) {
+                int preferredSize = GeckoAppShell.getPreferredIconSize();
+
+                Iterator<String> keys = icons.keys();
+
+                ArrayList<Integer> sizes = new ArrayList<Integer>(icons.length());
+                while (keys.hasNext()) {
+                    sizes.add(new Integer(keys.next()));
+                }
+
+                final int bestSize = LoadFaviconResult.selectBestSizeFromList(sizes, preferredSize);
+                final String iconURL = icons.getString(Integer.toString(bestSize));
+
+                data.put(URLMetadataTable.TOUCH_ICON_COLUMN, iconURL);
+            }
+        } catch (JSONException e) {
+            Log.w(LOGTAG, "Exception processing touchIconList for LocalURLMetadata; ignoring.", e);
         }
 
         return Collections.unmodifiableMap(data);
@@ -74,10 +105,9 @@ public class LocalURLMetadata implements URLMetadata {
     private Map<String, Object> fromCursor(Cursor c) {
         Map<String, Object> data = new HashMap<String, Object>();
 
-        Set<String> model = getModel();
         String[] columns = c.getColumnNames();
         for (String column : columns) {
-            if (model.contains(column)) {
+            if (COLUMNS.contains(column)) {
                 try {
                     data.put(column, c.getString(c.getColumnIndexOrThrow(column)));
                 } catch (Exception ex) {
@@ -95,15 +125,15 @@ public class LocalURLMetadata implements URLMetadata {
      */
     @Override
     public Map<String, Map<String, Object>> getForURLs(final ContentResolver cr,
-                                                       final List<String> urls,
-                                                       final List<String> columns) {
+                                                       final Collection<String> urls,
+                                                       final List<String> requestedColumns) {
         ThreadUtils.assertNotOnUiThread();
         ThreadUtils.assertNotOnGeckoThread();
 
         final Map<String, Map<String, Object>> data = new HashMap<String, Map<String, Object>>();
 
         // Nothing to query for
-        if (urls.isEmpty() || columns.isEmpty()) {
+        if (urls.isEmpty() || requestedColumns.isEmpty()) {
             Log.e(LOGTAG, "Queried metadata for nothing");
             return data;
         }
@@ -113,14 +143,26 @@ public class LocalURLMetadata implements URLMetadata {
         for (String url : urls) {
             final Map<String, Object> hit = cache.get(url);
             if (hit != null) {
-                // Cache hit!
-                data.put(url, hit);
+                // Cache hit: we've found the URL in the cache, however we may not have cached the desired columns
+                // for that URL. Hence we need to check whether our cache hit contains those columns, and directly
+                // retrieve the desired data if not. (E.g. the top sites panel retrieves the tile, and tilecolor. If
+                // we later try to retrieve the touchIcon for a top-site the cache hit will only point to
+                // tile+tilecolor, and not the required touchIcon. In this case we don't want to use the cache.)
+                boolean useCache = true;
+                for (String c: requestedColumns) {
+                    if (!hit.containsKey(c)) {
+                        useCache = false;
+                    }
+                }
+                if (useCache) {
+                    data.put(url, hit);
+                } else {
+                    urlsToQuery.add(url);
+                }
             } else {
                 urlsToQuery.add(url);
             }
         }
-
-        Telemetry.addToHistogram("FENNEC_TILES_CACHE_HIT", data.size());
 
         // If everything was in the cache, we're done!
         if (urlsToQuery.size() == 0) {
@@ -128,8 +170,12 @@ public class LocalURLMetadata implements URLMetadata {
         }
 
         final String selection = DBUtils.computeSQLInClause(urlsToQuery.size(), URLMetadataTable.URL_COLUMN);
+        List<String> columns = requestedColumns;
         // We need the url to build our final HashMap, so we force it to be included in the query.
         if (!columns.contains(URLMetadataTable.URL_COLUMN)) {
+            // The requestedColumns may be immutable (e.g. if the caller used Collections.singletonList), hence
+            // we have to create a copy.
+            columns = new ArrayList<String>(columns);
             columns.add(URLMetadataTable.URL_COLUMN);
         }
 
@@ -149,7 +195,7 @@ public class LocalURLMetadata implements URLMetadata {
 
                 data.put(url, metadata);
                 cache.put(url, metadata);
-            } while(cursor.moveToNext());
+            } while (cursor.moveToNext());
 
         } finally {
             cursor.close();
@@ -164,15 +210,14 @@ public class LocalURLMetadata implements URLMetadata {
      * Must not be called from UI or Gecko threads.
      */
     @Override
-    public void save(final ContentResolver cr, final String url, final Map<String, Object> data) {
+    public void save(final ContentResolver cr, final Map<String, Object> data) {
         ThreadUtils.assertNotOnUiThread();
         ThreadUtils.assertNotOnGeckoThread();
 
         try {
             ContentValues values = new ContentValues();
 
-            Set<String> model = getModel();
-            for (String key : model) {
+            for (String key : COLUMNS) {
                 if (data.containsKey(key)) {
                     values.put(key, (String) data.get(key));
                 }

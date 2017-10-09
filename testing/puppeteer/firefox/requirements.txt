@@ -1,5 +1,0 @@
-# Can be removed once testcases are no longer part of the puppeteer module.
-marionette-client >= 2.0.0
-
-marionette-driver >= 1.1.1
-mozinfo >= 0.8

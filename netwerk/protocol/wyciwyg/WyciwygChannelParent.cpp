@@ -39,7 +39,9 @@ WyciwygChannelParent::ActorDestroy(ActorDestroyReason why)
   mIPCClosed = true;
 
   // We need to force the cycle to break here
-  mChannel->SetNotificationCallbacks(nullptr);
+  if (mChannel) {
+    mChannel->SetNotificationCallbacks(nullptr);
+  }
 }
 
 //-----------------------------------------------------------------------------
@@ -59,6 +61,7 @@ bool
 WyciwygChannelParent::RecvInit(const URIParams&          aURI,
                                const ipc::PrincipalInfo& aRequestingPrincipalInfo,
                                const ipc::PrincipalInfo& aTriggeringPrincipalInfo,
+                               const ipc::PrincipalInfo& aPrincipalToInheritInfo,
                                const uint32_t&           aSecurityFlags,
                                const uint32_t&           aContentPolicyType)
 {
@@ -68,10 +71,8 @@ WyciwygChannelParent::RecvInit(const URIParams&          aURI,
   if (!uri)
     return false;
 
-  nsCString uriSpec;
-  uri->GetSpec(uriSpec);
   LOG(("WyciwygChannelParent RecvInit [this=%p uri=%s]\n",
-       this, uriSpec.get()));
+       this, uri->GetSpecOrDefault().get()));
 
   nsCOMPtr<nsIIOService> ios(do_GetIOService(&rv));
   if (NS_FAILED(rv))
@@ -85,6 +86,12 @@ WyciwygChannelParent::RecvInit(const URIParams&          aURI,
 
   nsCOMPtr<nsIPrincipal> triggeringPrincipal =
     mozilla::ipc::PrincipalInfoToPrincipal(aTriggeringPrincipalInfo, &rv);
+  if (NS_FAILED(rv)) {
+    return SendCancelEarly(rv);
+  }
+
+  nsCOMPtr<nsIPrincipal> principalToInherit =
+    mozilla::ipc::PrincipalInfoToPrincipal(aPrincipalToInheritInfo, &rv);
   if (NS_FAILED(rv)) {
     return SendCancelEarly(rv);
   }
@@ -103,6 +110,12 @@ WyciwygChannelParent::RecvInit(const URIParams&          aURI,
 
   if (NS_FAILED(rv))
     return SendCancelEarly(rv);
+
+  nsCOMPtr<nsILoadInfo> loadInfo = chan->GetLoadInfo();
+  rv = loadInfo->SetPrincipalToInherit(principalToInherit);
+  if (NS_FAILED(rv)) {
+    return SendCancelEarly(rv);
+  }
 
   mChannel = do_QueryInterface(chan, &rv);
   if (NS_FAILED(rv))
@@ -134,6 +147,7 @@ WyciwygChannelParent::SetupAppData(const IPC::SerializedLoadContext& loadContext
   const char* error = NeckoParent::CreateChannelLoadContext(aParent,
                                                             Manager()->Manager(),
                                                             loadContext,
+                                                            nullptr,
                                                             mLoadContext);
   if (error) {
     printf_stderr("WyciwygChannelParent::SetupAppData: FATAL ERROR: %s\n",
@@ -144,7 +158,7 @@ WyciwygChannelParent::SetupAppData(const IPC::SerializedLoadContext& loadContext
   if (!mLoadContext && loadContext.IsPrivateBitValid()) {
     nsCOMPtr<nsIPrivateBrowsingChannel> pbChannel = do_QueryInterface(mChannel);
     if (pbChannel)
-      pbChannel->SetPrivate(loadContext.mUsePrivateBrowsing);
+      pbChannel->SetPrivate(loadContext.mOriginAttributes.mPrivateBrowsingId > 0);
   }
 
   mReceivedAppData = true;

@@ -1,3 +1,10 @@
+/*
+ * Copyright 2015 Google Inc.
+ *
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
+
 #ifndef SkXfermode_proccoeff_DEFINED
 #define SkXfermode_proccoeff_DEFINED
 
@@ -7,6 +14,7 @@
 
 struct ProcCoeff {
     SkXfermodeProc      fProc;
+    SkXfermodeProc4f    fProc4f;
     SkXfermode::Coeff   fSC;
     SkXfermode::Coeff   fDC;
 };
@@ -15,30 +23,6 @@ struct ProcCoeff {
 
 class SK_API SkProcCoeffXfermode : public SkXfermode {
 public:
-    static SkProcCoeffXfermode* Create(const ProcCoeff& rec, Mode mode) {
-        return SkNEW_ARGS(SkProcCoeffXfermode, (rec, mode));
-    }
-
-    virtual void xfer32(SkPMColor dst[], const SkPMColor src[], int count,
-                        const SkAlpha aa[]) const SK_OVERRIDE;
-    virtual void xfer16(uint16_t dst[], const SkPMColor src[], int count,
-                        const SkAlpha aa[]) const SK_OVERRIDE;
-    virtual void xferA8(SkAlpha dst[], const SkPMColor src[], int count,
-                        const SkAlpha aa[]) const SK_OVERRIDE;
-
-    virtual bool asMode(Mode* mode) const SK_OVERRIDE;
-
-    virtual bool asCoeff(Coeff* sc, Coeff* dc) const SK_OVERRIDE;
-
-#if SK_SUPPORT_GPU
-    virtual bool asNewEffect(GrEffect** effect,
-                             GrTexture* background) const SK_OVERRIDE;
-#endif
-
-    SK_TO_STRING_OVERRIDE()
-    SK_DECLARE_PUBLIC_FLATTENABLE_DESERIALIZATION_PROCS(SkProcCoeffXfermode)
-
-protected:
     SkProcCoeffXfermode(const ProcCoeff& rec, Mode mode) {
         fMode = mode;
         fProc = rec.fProc;
@@ -47,9 +31,32 @@ protected:
         fDstCoeff = rec.fDC;
     }
 
-    SkProcCoeffXfermode(SkReadBuffer& buffer);
+    void xfer32(SkPMColor dst[], const SkPMColor src[], int count,
+                const SkAlpha aa[]) const override;
+    void xfer16(uint16_t dst[], const SkPMColor src[], int count,
+                const SkAlpha aa[]) const override;
+    void xferA8(SkAlpha dst[], const SkPMColor src[], int count,
+                const SkAlpha aa[]) const override;
 
-    virtual void flatten(SkWriteBuffer& buffer) const SK_OVERRIDE;
+    bool asMode(Mode* mode) const override;
+
+    bool supportsCoverageAsAlpha() const override;
+
+    bool isOpaque(SkXfermode::SrcColorOpacity opacityType) const override;
+
+#if SK_SUPPORT_GPU
+    sk_sp<GrFragmentProcessor> makeFragmentProcessorForImageFilter(
+                                                        sk_sp<GrFragmentProcessor>) const override;
+    sk_sp<GrXPFactory> asXPFactory() const override;
+#endif
+
+    SK_TO_STRING_OVERRIDE()
+    SK_DECLARE_PUBLIC_FLATTENABLE_DESERIALIZATION_PROCS(SkProcCoeffXfermode)
+
+    bool onAppendStages(SkRasterPipeline*) const override;
+
+protected:
+    void flatten(SkWriteBuffer& buffer) const override;
 
     Mode getMode() const { return fMode; }
 
@@ -59,6 +66,8 @@ private:
     SkXfermodeProc  fProc;
     Mode            fMode;
     Coeff           fSrcCoeff, fDstCoeff;
+
+    friend class SkXfermode;
 
     typedef SkXfermode INHERITED;
 };

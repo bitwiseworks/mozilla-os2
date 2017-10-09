@@ -7,7 +7,7 @@
 #ifndef nsDragService_h__
 #define nsDragService_h__
 
-#include "nsAutoPtr.h"
+#include "mozilla/RefPtr.h"
 #include "nsBaseDragService.h"
 #include "nsIObserver.h"
 #include "nsAutoRef.h"
@@ -59,14 +59,15 @@ public:
     NS_DECL_NSIOBSERVER
 
     // nsBaseDragService
-    virtual nsresult InvokeDragSessionImpl(nsISupportsArray* anArrayTransferables,
+    virtual nsresult InvokeDragSessionImpl(nsIArray* anArrayTransferables,
                                            nsIScriptableRegion* aRegion,
                                            uint32_t aActionType) override;
     // nsIDragService
     NS_IMETHOD InvokeDragSession (nsIDOMNode *aDOMNode,
-                                  nsISupportsArray * anArrayTransferables,
+                                  nsIArray * anArrayTransferables,
                                   nsIScriptableRegion * aRegion,
-                                  uint32_t aActionType) override;
+                                  uint32_t aActionType,
+                                  nsContentPolicyType aContentPolicyType) override;
     NS_IMETHOD StartDragSession() override;
     NS_IMETHOD EndDragSession(bool aDoneDrag) override;
 
@@ -193,7 +194,7 @@ private:
     // the source of our drags
     GtkWidget     *mHiddenWidget;
     // our source data items
-    nsCOMPtr<nsISupportsArray> mSourceDataItems;
+    nsCOMPtr<nsIArray> mSourceDataItems;
 
     nsCOMPtr<nsIScriptableRegion> mSourceRegion;
 
@@ -206,7 +207,7 @@ private:
                         GdkDragContext  *aContext,
                         int32_t          aXOffset,
                         int32_t          aYOffset,
-                        const nsIntRect &dragRect);
+                        const mozilla::LayoutDeviceIntRect &dragRect);
 
     gboolean Schedule(DragTask aTask, nsWindow *aWindow,
                       GdkDragContext *aDragContext,

@@ -80,7 +80,7 @@ var testData = [
   }];
 // sets of indices of testData array by transition type
 var testDataTyped = [0, 5, 7, 9];
-var testDataDownload = [1, 2, 4, 6, 10]; 
+var testDataDownload = [1, 2, 4, 6, 10];
 var testDataBookmark = [3, 8, 11];
 
 /**
@@ -105,10 +105,10 @@ add_task(function* test_transitions()
     });
   }
 
-  //dump_table("moz_places");
-  //dump_table("moz_historyvisits");
+  // dump_table("moz_places");
+  // dump_table("moz_historyvisits");
 
-  var numSortFunc = function (a,b) { return (a - b); };
+  var numSortFunc = function (a, b) { return (a - b); };
   var arrs = testDataTyped.concat(testDataDownload).concat(testDataBookmark)
               .sort(numSortFunc);
 

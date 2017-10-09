@@ -41,9 +41,10 @@ namespace layout {
       kFloatList                    = 0x800,
       kBulletList                   = 0x1000,
       kPushedFloatsList             = 0x2000,
+      kBackdropList                 = 0x4000,
       // A special alias for kPrincipalList that suppress the reflow request that
       // is normally done when manipulating child lists.
-      kNoReflowPrincipalList        = 0x4000
+      kNoReflowPrincipalList        = 0x8000
   };
 } // namespace layout
 } // namespace mozilla
@@ -75,7 +76,7 @@ public:
   /**
    * Infallibly allocate a nsFrameList from the shell arena.
    */
-  void* operator new(size_t sz, nsIPresShell* aPresShell) CPP_THROW_NEW;
+  void* operator new(size_t sz, nsIPresShell* aPresShell);
 
   /**
    * Deallocate this list that was allocated from the shell arena.
@@ -244,6 +245,11 @@ public:
 
   bool ContainsFrame(const nsIFrame* aFrame) const;
 
+  /**
+   * Get the number of frames in this list. Note that currently the
+   * implementation has O(n) time complexity. Do not call it repeatedly in hot
+   * code.
+   */
   int32_t GetLength() const;
 
   /**

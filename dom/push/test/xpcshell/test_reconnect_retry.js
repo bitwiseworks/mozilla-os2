@@ -22,7 +22,6 @@ add_task(function* test_reconnect_retry() {
   let channelID;
   PushService.init({
     serverURI: "wss://push.example.org/",
-    networkInfo: new MockDesktopNetworkInfo(),
     db,
     makeWebSocket(uri) {
       return new MockWebSocket(uri, {
@@ -55,18 +54,20 @@ add_task(function* test_reconnect_retry() {
     }
   });
 
-  let registration = yield PushNotificationService.register(
-    'https://example.com/page/1',
-    ChromeUtils.originAttributesToSuffix({ appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inBrowser: false })
-  );
+  let registration = yield PushService.register({
+    scope: 'https://example.com/page/1',
+    originAttributes: ChromeUtils.originAttributesToSuffix(
+      { appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inIsolatedMozBrowser: false }),
+  });
   let retryEndpoint = 'https://example.org/push/' + channelID;
-  equal(registration.pushEndpoint, retryEndpoint, 'Wrong endpoint for retried request');
+  equal(registration.endpoint, retryEndpoint, 'Wrong endpoint for retried request');
 
-  registration = yield PushNotificationService.register(
-    'https://example.com/page/2',
-    ChromeUtils.originAttributesToSuffix({ appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inBrowser: false })
-  );
-  notEqual(registration.pushEndpoint, retryEndpoint, 'Wrong endpoint for new request')
+  registration = yield PushService.register({
+    scope: 'https://example.com/page/2',
+    originAttributes: ChromeUtils.originAttributesToSuffix(
+      { appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inIsolatedMozBrowser: false }),
+  });
+  notEqual(registration.endpoint, retryEndpoint, 'Wrong endpoint for new request');
 
   equal(registers, 3, 'Wrong registration count');
 });

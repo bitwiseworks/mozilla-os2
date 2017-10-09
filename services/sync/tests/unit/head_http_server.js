@@ -178,9 +178,13 @@ ServerCollection.prototype = {
    * @return an array of IDs.
    */
   keys: function keys(filter) {
-    return [id for ([id, wbo] in Iterator(this._wbos))
-               if (wbo.payload &&
-                   (!filter || filter(id, wbo)))];
+    let ids = [];
+    for (let [id, wbo] of Object.entries(this._wbos)) {
+      if (wbo.payload && (!filter || filter(id, wbo))) {
+        ids.push(id);
+      }
+    }
+    return ids;
   },
 
   /**
@@ -194,8 +198,13 @@ ServerCollection.prototype = {
    * @return an array of ServerWBOs.
    */
   wbos: function wbos(filter) {
-    let os = [wbo for ([id, wbo] in Iterator(this._wbos))
-              if (wbo.payload)];
+    let os = [];
+    for (let [id, wbo] of Object.entries(this._wbos)) {
+      if (wbo.payload) {
+        os.push(wbo);
+      }
+    }
+
     if (filter) {
       return os.filter(filter);
     }
@@ -267,7 +276,7 @@ ServerCollection.prototype = {
   count: function(options) {
     options = options || {};
     let c = 0;
-    for (let [id, wbo] in Iterator(this._wbos)) {
+    for (let [id, wbo] of Object.entries(this._wbos)) {
       if (wbo.modified && this._inResultSet(wbo, options)) {
         c++;
       }
@@ -278,12 +287,23 @@ ServerCollection.prototype = {
   get: function(options) {
     let result;
     if (options.full) {
-      let data = [wbo.get() for ([id, wbo] in Iterator(this._wbos))
-                            // Drop deleted.
-                            if (wbo.modified &&
-                                this._inResultSet(wbo, options))];
+      let data = [];
+      for (let [id, wbo] of Object.entries(this._wbos)) {
+        // Drop deleted.
+        if (wbo.modified && this._inResultSet(wbo, options)) {
+          data.push(wbo.get());
+        }
+      }
+      let start = options.offset || 0;
       if (options.limit) {
-        data = data.slice(0, options.limit);
+        let numItemsPastOffset = data.length - start;
+        data = data.slice(start, start + options.limit);
+        // use options as a backchannel to set x-weave-next-offset
+        if (numItemsPastOffset > options.limit) {
+          options.nextOffset = start + options.limit;
+        }
+      } else if (start) {
+        data = data.slice(start);
       }
       // Our implementation of application/newlines.
       result = data.join("\n") + "\n";
@@ -291,10 +311,18 @@ ServerCollection.prototype = {
       // Use options as a backchannel to report count.
       options.recordCount = data.length;
     } else {
-      let data = [id for ([id, wbo] in Iterator(this._wbos))
-                     if (this._inResultSet(wbo, options))];
+      let data = [];
+      for (let [id, wbo] of Object.entries(this._wbos)) {
+        if (this._inResultSet(wbo, options)) {
+          data.push(id);
+        }
+      }
+      let start = options.offset || 0;
       if (options.limit) {
-        data = data.slice(0, options.limit);
+        data = data.slice(start, start + options.limit);
+        options.nextOffset = start + options.limit;
+      } else if (start) {
+        data = data.slice(start);
       }
       result = JSON.stringify(data);
       options.recordCount = data.length;
@@ -333,7 +361,7 @@ ServerCollection.prototype = {
 
   delete: function(options) {
     let deleted = [];
-    for (let [id, wbo] in Iterator(this._wbos)) {
+    for (let [id, wbo] of Object.entries(this._wbos)) {
       if (this._inResultSet(wbo, options)) {
         this._log.debug("Deleting " + JSON.stringify(wbo));
         deleted.push(wbo.id);
@@ -375,29 +403,36 @@ ServerCollection.prototype = {
       if (options.limit) {
         options.limit = parseInt(options.limit, 10);
       }
+      if (options.offset) {
+        options.offset = parseInt(options.offset, 10);
+      }
 
       switch(request.method) {
         case "GET":
-          body = self.get(options);
-          // "If supported by the db, this header will return the number of
-          // records total in the request body of any multiple-record GET
-          // request."
-          let records = options.recordCount;
-          self._log.info("Records: " + records);
+          body = self.get(options, request);
+          // see http://moz-services-docs.readthedocs.io/en/latest/storage/apis-1.5.html
+          // for description of these headers.
+          let { recordCount: records, nextOffset } = options;
+
+          self._log.info("Records: " + records + ", nextOffset: " + nextOffset);
           if (records != null) {
             response.setHeader("X-Weave-Records", "" + records);
           }
+          if (nextOffset) {
+            response.setHeader("X-Weave-Next-Offset", "" + nextOffset);
+          }
+          response.setHeader("X-Last-Modified", "" + this.timestamp);
           break;
 
         case "POST":
-          let res = self.post(readBytesFromInputStream(request.bodyInputStream));
+          let res = self.post(readBytesFromInputStream(request.bodyInputStream), request);
           body = JSON.stringify(res);
           response.newModified = res.modified;
           break;
 
         case "DELETE":
           self._log.debug("Invoking ServerCollection.DELETE.");
-          let deleted = self.delete(options);
+          let deleted = self.delete(options, request);
           let ts = new_timestamp();
           body = JSON.stringify(ts);
           response.newModified = ts;
@@ -570,7 +605,7 @@ SyncServer.prototype = {
     } catch (ex) {
       _("==========================================");
       _("Got exception starting Sync HTTP server.");
-      _("Error: " + Utils.exceptionStr(ex));
+      _("Error: " + Log.exceptionStr(ex));
       _("Is there a process already listening on port " + port + "?");
       _("==========================================");
       do_throw(ex);
@@ -668,10 +703,10 @@ SyncServer.prototype = {
       throw new Error("Unknown user.");
     }
     let userCollections = this.users[username].collections;
-    for (let [id, contents] in Iterator(collections)) {
+    for (let [id, contents] of Object.entries(collections)) {
       let coll = userCollections[id] ||
                  this._insertCollection(userCollections, id);
-      for (let [wboID, payload] in Iterator(contents)) {
+      for (let [wboID, payload] of Object.entries(contents)) {
         coll.insert(wboID, payload);
       }
     }
@@ -1000,7 +1035,7 @@ SyncServer.prototype = {
  */
 function serverForUsers(users, contents, callback) {
   let server = new SyncServer(callback);
-  for (let [user, pass] in Iterator(users)) {
+  for (let [user, pass] of Object.entries(users)) {
     server.registerUser(user, pass);
     server.createContents(user, contents);
   }

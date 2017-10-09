@@ -119,6 +119,7 @@ NS_GENERIC_FACTORY_CONSTRUCTOR(nsTransferable)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsHTMLFormatConverter)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsDragService)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsBidiKeyboard)
+NS_GENERIC_FACTORY_CONSTRUCTOR(TaskbarPreviewCallback)
 #ifdef NS_PRINTING
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsPrintOptionsWin, Init)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsPrinterEnumeratorWin)
@@ -156,6 +157,7 @@ NS_DEFINE_NAMED_CID(NS_WIN_JUMPLISTSHORTCUT_CID);
 NS_DEFINE_NAMED_CID(NS_WINDOWS_UIUTILS_CID);
 NS_DEFINE_NAMED_CID(NS_DRAGSERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_BIDIKEYBOARD_CID);
+NS_DEFINE_NAMED_CID(NS_TASKBARPREVIEWCALLBACK_CID);
 #ifdef NS_PRINTING
 NS_DEFINE_NAMED_CID(NS_PRINTSETTINGSSERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_PRINTER_ENUMERATOR_CID);
@@ -169,7 +171,7 @@ static const mozilla::Module::CIDEntry kWidgetCIDs[] = {
   { &kNS_CHILD_CID, false, nullptr, ChildWindowConstructor },
   { &kNS_FILEPICKER_CID, false, nullptr, FilePickerConstructor, Module::MAIN_PROCESS_ONLY },
   { &kNS_COLORPICKER_CID, false, nullptr, ColorPickerConstructor, Module::MAIN_PROCESS_ONLY },
-  { &kNS_APPSHELL_CID, false, nullptr, nsAppShellConstructor },
+  { &kNS_APPSHELL_CID, false, nullptr, nsAppShellConstructor, Module::ALLOW_IN_GPU_PROCESS },
   { &kNS_SCREENMANAGER_CID, false, nullptr, nsScreenManagerWinConstructor,
     Module::MAIN_PROCESS_ONLY },
   { &kNS_GFXINFO_CID, false, nullptr, GfxInfoConstructor },
@@ -188,7 +190,8 @@ static const mozilla::Module::CIDEntry kWidgetCIDs[] = {
   { &kNS_WIN_JUMPLISTSHORTCUT_CID, false, nullptr, JumpListShortcutConstructor },
   { &kNS_WINDOWS_UIUTILS_CID, false, nullptr, WindowsUIUtilsConstructor },
   { &kNS_DRAGSERVICE_CID, false, nullptr, nsDragServiceConstructor, Module::MAIN_PROCESS_ONLY },
-  { &kNS_BIDIKEYBOARD_CID, false, nullptr, nsBidiKeyboardConstructor },
+  { &kNS_BIDIKEYBOARD_CID, false, nullptr, nsBidiKeyboardConstructor, Module::MAIN_PROCESS_ONLY },
+  { &kNS_TASKBARPREVIEWCALLBACK_CID, false, nullptr, TaskbarPreviewCallbackConstructor },
 #ifdef NS_PRINTING
   { &kNS_PRINTSETTINGSSERVICE_CID, false, nullptr, nsPrintOptionsWinConstructor },
   { &kNS_PRINTER_ENUMERATOR_CID, false, nullptr, nsPrinterEnumeratorWinConstructor },
@@ -203,7 +206,7 @@ static const mozilla::Module::ContractIDEntry kWidgetContracts[] = {
   { "@mozilla.org/widgets/child_window/win;1", &kNS_CHILD_CID },
   { "@mozilla.org/filepicker;1", &kNS_FILEPICKER_CID, Module::MAIN_PROCESS_ONLY },
   { "@mozilla.org/colorpicker;1", &kNS_COLORPICKER_CID, Module::MAIN_PROCESS_ONLY },
-  { "@mozilla.org/widget/appshell/win;1", &kNS_APPSHELL_CID },
+  { "@mozilla.org/widget/appshell/win;1", &kNS_APPSHELL_CID, Module::ALLOW_IN_GPU_PROCESS },
   { "@mozilla.org/gfx/screenmanager;1", &kNS_SCREENMANAGER_CID, Module::MAIN_PROCESS_ONLY },
   { "@mozilla.org/gfx/info;1", &kNS_GFXINFO_CID },
   { "@mozilla.org/chrome/chrome-native-theme;1", &kNS_THEMERENDERER_CID },
@@ -221,7 +224,8 @@ static const mozilla::Module::ContractIDEntry kWidgetContracts[] = {
   { "@mozilla.org/windows-jumplistshortcut;1", &kNS_WIN_JUMPLISTSHORTCUT_CID },
   { "@mozilla.org/windows-ui-utils;1", &kNS_WINDOWS_UIUTILS_CID },
   { "@mozilla.org/widget/dragservice;1", &kNS_DRAGSERVICE_CID, Module::MAIN_PROCESS_ONLY },
-  { "@mozilla.org/widget/bidikeyboard;1", &kNS_BIDIKEYBOARD_CID },
+  { "@mozilla.org/widget/bidikeyboard;1", &kNS_BIDIKEYBOARD_CID, Module::MAIN_PROCESS_ONLY },
+  { "@mozilla.org/widget/taskbar-preview-callback;1", &kNS_TASKBARPREVIEWCALLBACK_CID },
 #ifdef NS_PRINTING
   { "@mozilla.org/gfx/printsettings-service;1", &kNS_PRINTSETTINGSSERVICE_CID },
   { "@mozilla.org/gfx/printerenumerator;1", &kNS_PRINTER_ENUMERATOR_CID },
@@ -251,7 +255,8 @@ static const mozilla::Module kWidgetModule = {
   nullptr,
   nullptr,
   nsAppShellInit,
-  nsWidgetWindowsModuleDtor
+  nsWidgetWindowsModuleDtor,
+  Module::ALLOW_IN_GPU_PROCESS
 };
 
 NSMODULE_DEFN(nsWidgetModule) = &kWidgetModule;

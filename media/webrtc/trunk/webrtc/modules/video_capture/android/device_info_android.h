@@ -26,7 +26,7 @@ namespace videocapturemodule
 
 class DeviceInfoAndroid : public DeviceInfoImpl {
  public:
-  static void Initialize(JNIEnv* env);
+  static void Initialize(JavaVM* javaVM);
   static void DeInitialize();
 
   DeviceInfoAndroid(int32_t id);
@@ -38,6 +38,7 @@ class DeviceInfoAndroid : public DeviceInfoImpl {
 
   virtual int32_t Init();
   virtual uint32_t NumberOfDevices();
+  virtual int32_t Refresh();
   virtual int32_t GetDeviceName(
       uint32_t deviceNumber,
       char* deviceNameUTF8,
@@ -45,7 +46,8 @@ class DeviceInfoAndroid : public DeviceInfoImpl {
       char* deviceUniqueIdUTF8,
       uint32_t deviceUniqueIdUTF8Length,
       char* productUniqueIdUTF8 = 0,
-      uint32_t productUniqueIdUTF8Length = 0);
+      uint32_t productUniqueIdUTF8Length = 0,
+      pid_t* pid = 0);
   virtual int32_t CreateCapabilityMap(const char* deviceUniqueIdUTF8);
 
   virtual int32_t DisplayCaptureSettingsDialogBox(
@@ -66,6 +68,7 @@ class DeviceInfoAndroid : public DeviceInfoImpl {
 
  private:
   enum { kExpectedCaptureDelay = 190};
+  static void BuildDeviceList();  
 };
 
 }  // namespace videocapturemodule

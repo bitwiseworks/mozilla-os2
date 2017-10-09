@@ -9,6 +9,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/DOMEventTargetHelper.h"
+#include "nsAutoPtr.h"
 #include "nsIIPCBackgroundChildCreateCallback.h"
 #include "nsTArray.h"
 
@@ -16,12 +17,11 @@
 #undef PostMessage
 #endif
 
-class nsPIDOMWindow;
+class nsIGlobalObject;
 
 namespace mozilla {
 namespace dom {
 
-class DispatchEventRunnable;
 class MessagePortChild;
 class MessagePortIdentifier;
 class MessagePortMessage;
@@ -29,14 +29,13 @@ class PostMessageRunnable;
 class SharedMessagePortMessage;
 
 namespace workers {
-class WorkerFeature;
+class WorkerHolder;
 } // namespace workers
 
 class MessagePort final : public DOMEventTargetHelper
                         , public nsIIPCBackgroundChildCreateCallback
                         , public nsIObserver
 {
-  friend class DispatchEventRunnable;
   friend class PostMessageRunnable;
 
 public:
@@ -47,11 +46,12 @@ public:
                                            DOMEventTargetHelper)
 
   static already_AddRefed<MessagePort>
-  Create(nsPIDOMWindow* aWindow, const nsID& aUUID,
+  Create(nsIGlobalObject* aGlobal, const nsID& aUUID,
          const nsID& aDestinationUUID, ErrorResult& aRv);
 
   static already_AddRefed<MessagePort>
-  Create(nsPIDOMWindow* aWindow, const MessagePortIdentifier& aIdentifier,
+  Create(nsIGlobalObject* aGlobal,
+         const MessagePortIdentifier& aIdentifier,
          ErrorResult& aRv);
 
   // For IPC.
@@ -90,7 +90,7 @@ public:
   void Closed();
 
 private:
-  explicit MessagePort(nsPIDOMWindow* aWindow);
+  explicit MessagePort(nsIGlobalObject* aGlobal);
   ~MessagePort();
 
   enum State {
@@ -164,9 +164,9 @@ private:
     return mIsKeptAlive;
   }
 
-  nsAutoPtr<workers::WorkerFeature> mWorkerFeature;
+  nsAutoPtr<workers::WorkerHolder> mWorkerHolder;
 
-  RefPtr<DispatchEventRunnable> mDispatchRunnable;
+  RefPtr<PostMessageRunnable> mPostMessageRunnable;
 
   RefPtr<MessagePortChild> mActor;
 

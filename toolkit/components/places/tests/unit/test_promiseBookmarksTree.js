@@ -117,6 +117,9 @@ function* compareToNode(aItem, aNode, aIsRootItem, aExcludedGuids = []) {
       case PlacesUtils.unfiledBookmarksFolderId:
         compare_prop_to_value("root", "unfiledBookmarksFolder");
         break;
+      case PlacesUtils.mobileFolderId:
+        compare_prop_to_value("root", "mobileFolder");
+        break;
       default:
         check_unset("root");
       }
@@ -135,7 +138,7 @@ function* compareToNode(aItem, aNode, aIsRootItem, aExcludedGuids = []) {
         compare_prop_to_value("tags", aNode.tags.replace(/, /g, ","), false);
 
       if (aNode.icon) {
-        let nodeIconData = aNode.icon.replace("moz-anno:favicon:","");
+        let nodeIconData = aNode.icon.replace("moz-anno:favicon:", "");
         compare_prop_to_value("iconuri", nodeIconData);
       }
       else {
@@ -165,7 +168,7 @@ function* compareToNode(aItem, aNode, aIsRootItem, aExcludedGuids = []) {
 
 var itemsCount = 0;
 function* new_bookmark(aInfo) {
-  let currentItem = ++itemsCount;
+  ++itemsCount;
   if (!("url" in aInfo))
     aInfo.url = uri("http://test.item." + itemsCount);
 
@@ -211,17 +214,17 @@ function* test_promiseBookmarksTreeAgainstResult(aItemGuid = "",
 add_task(function* () {
   // Add some bookmarks to cover various use cases.
   yield new_bookmark({ parentGuid: PlacesUtils.bookmarks.toolbarGuid });
-  yield new_folder({ parentGuid: PlacesUtils.bookmarks.menuGuid
-                   , annotations: [{ name: "TestAnnoA", value: "TestVal"
-                                   , name: "TestAnnoB", value: 0 }]});
+  yield new_folder({ parentGuid: PlacesUtils.bookmarks.menuGuid,
+                     annotations: [{ name: "TestAnnoA", value: "TestVal" },
+                                   { name: "TestAnnoB", value: 0 }]});
   let sepInfo = { parentGuid: PlacesUtils.bookmarks.menuGuid };
   yield PlacesTransactions.NewSeparator(sepInfo).transact();
   let folderGuid = yield new_folder({ parentGuid: PlacesUtils.bookmarks.menuGuid });
-  yield new_bookmark({ title: null
-                     , parentGuid: folderGuid
-                     , keyword: "test_keyword"
-                     , tags: ["TestTagA", "TestTagB"]
-                     , annotations: [{ name: "TestAnnoA", value: "TestVal2"}]});
+  yield new_bookmark({ title: null,
+                       parentGuid: folderGuid,
+                       keyword: "test_keyword",
+                       tags: ["TestTagA", "TestTagB"],
+                       annotations: [{ name: "TestAnnoA", value: "TestVal2"}]});
   let urlWithCharsetAndFavicon = uri("http://charset.and.favicon");
   yield new_bookmark({ parentGuid: folderGuid, url: urlWithCharsetAndFavicon });
   yield PlacesUtils.setCharsetForURI(urlWithCharsetAndFavicon, "UTF-8");
@@ -248,6 +251,6 @@ add_task(function* () {
     },
     includeItemIds: true
   }, [PlacesUtils.bookmarks.menuGuid]);
-  do_check_eq(guidsPassedToExcludeCallback.size, 4);
-  do_check_eq(placesRootWithoutTheMenu.children.length, 2);
+  do_check_eq(guidsPassedToExcludeCallback.size, 5);
+  do_check_eq(placesRootWithoutTheMenu.children.length, 3);
 });

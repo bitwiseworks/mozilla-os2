@@ -8,13 +8,30 @@
 
 #include "libANGLE/State.h"
 
+#include <limits>
+#include <string.h>
+
+#include "common/BitSetIterator.h"
+#include "common/matrix_utils.h"
+#include "common/mathutil.h"
 #include "libANGLE/Context.h"
 #include "libANGLE/Caps.h"
+#include "libANGLE/Debug.h"
 #include "libANGLE/Framebuffer.h"
 #include "libANGLE/FramebufferAttachment.h"
 #include "libANGLE/Query.h"
 #include "libANGLE/VertexArray.h"
 #include "libANGLE/formatutils.h"
+
+namespace
+{
+
+GLenum ActiveQueryType(const GLenum type)
+{
+    return (type == GL_ANY_SAMPLES_PASSED_CONSERVATIVE) ? GL_ANY_SAMPLES_PASSED : type;
+}
+
+}  // anonymous namepace
 
 namespace gl
 {
@@ -33,6 +50,7 @@ State::State()
       mLineWidth(0),
       mGenerateMipmapHint(GL_NONE),
       mFragmentShaderDerivativeHint(GL_NONE),
+      mBindGeneratesResource(true),
       mNearZ(0),
       mFarZ(0),
       mReadFramebuffer(nullptr),
@@ -40,37 +58,11 @@ State::State()
       mProgram(nullptr),
       mVertexArray(nullptr),
       mActiveSampler(0),
-      mPrimitiveRestart(false)
+      mPrimitiveRestart(false),
+      mMultiSampling(false),
+      mSampleAlphaToOne(false),
+      mFramebufferSRGB(true)
 {
-    // Initialize dirty bit masks
-    // TODO(jmadill): additional ES3 state
-    mUnpackStateBitMask.set(DIRTY_BIT_UNPACK_ALIGNMENT);
-    mUnpackStateBitMask.set(DIRTY_BIT_UNPACK_ROW_LENGTH);
-    mUnpackStateBitMask.set(DIRTY_BIT_UNPACK_IMAGE_HEIGHT);
-    mUnpackStateBitMask.set(DIRTY_BIT_UNPACK_SKIP_IMAGES);
-    mUnpackStateBitMask.set(DIRTY_BIT_UNPACK_SKIP_ROWS);
-    mUnpackStateBitMask.set(DIRTY_BIT_UNPACK_SKIP_PIXELS);
-
-    mPackStateBitMask.set(DIRTY_BIT_PACK_ALIGNMENT);
-    mPackStateBitMask.set(DIRTY_BIT_PACK_REVERSE_ROW_ORDER);
-    mPackStateBitMask.set(DIRTY_BIT_PACK_ROW_LENGTH);
-    mPackStateBitMask.set(DIRTY_BIT_PACK_SKIP_ROWS);
-    mPackStateBitMask.set(DIRTY_BIT_PACK_SKIP_PIXELS);
-
-    mClearStateBitMask.set(DIRTY_BIT_RASTERIZER_DISCARD_ENABLED);
-    mClearStateBitMask.set(DIRTY_BIT_SCISSOR_TEST_ENABLED);
-    mClearStateBitMask.set(DIRTY_BIT_SCISSOR);
-    mClearStateBitMask.set(DIRTY_BIT_VIEWPORT);
-    mClearStateBitMask.set(DIRTY_BIT_CLEAR_COLOR);
-    mClearStateBitMask.set(DIRTY_BIT_CLEAR_DEPTH);
-    mClearStateBitMask.set(DIRTY_BIT_CLEAR_STENCIL);
-    mClearStateBitMask.set(DIRTY_BIT_COLOR_MASK);
-    mClearStateBitMask.set(DIRTY_BIT_DEPTH_MASK);
-    mClearStateBitMask.set(DIRTY_BIT_STENCIL_WRITEMASK_FRONT);
-    mClearStateBitMask.set(DIRTY_BIT_STENCIL_WRITEMASK_BACK);
-
-    mBlitStateBitMask.set(DIRTY_BIT_SCISSOR_TEST_ENABLED);
-    mBlitStateBitMask.set(DIRTY_BIT_SCISSOR);
 }
 
 State::~State()
@@ -78,7 +70,11 @@ State::~State()
     reset();
 }
 
-void State::initialize(const Caps &caps, GLuint clientVersion)
+void State::initialize(const Caps &caps,
+                       const Extensions &extensions,
+                       const Version &clientVersion,
+                       bool debug,
+                       bool bindGeneratesResource)
 {
     mMaxDrawBuffers = caps.maxDrawBuffers;
     mMaxCombinedTextureImageUnits = caps.maxCombinedTextureImageUnits;
@@ -144,6 +140,8 @@ void State::initialize(const Caps &caps, GLuint clientVersion)
     mGenerateMipmapHint = GL_DONT_CARE;
     mFragmentShaderDerivativeHint = GL_DONT_CARE;
 
+    mBindGeneratesResource = bindGeneratesResource;
+
     mLineWidth = 1.0f;
 
     mViewport.x = 0;
@@ -166,25 +164,48 @@ void State::initialize(const Caps &caps, GLuint clientVersion)
 
     mSamplerTextures[GL_TEXTURE_2D].resize(caps.maxCombinedTextureImageUnits);
     mSamplerTextures[GL_TEXTURE_CUBE_MAP].resize(caps.maxCombinedTextureImageUnits);
-    if (clientVersion >= 3)
+    if (clientVersion >= Version(3, 0))
     {
         // TODO: These could also be enabled via extension
         mSamplerTextures[GL_TEXTURE_2D_ARRAY].resize(caps.maxCombinedTextureImageUnits);
         mSamplerTextures[GL_TEXTURE_3D].resize(caps.maxCombinedTextureImageUnits);
     }
+    if (extensions.eglImageExternal || extensions.eglStreamConsumerExternal)
+    {
+        mSamplerTextures[GL_TEXTURE_EXTERNAL_OES].resize(caps.maxCombinedTextureImageUnits);
+    }
 
     mSamplers.resize(caps.maxCombinedTextureImageUnits);
 
-    mActiveQueries[GL_ANY_SAMPLES_PASSED].set(NULL);
-    mActiveQueries[GL_ANY_SAMPLES_PASSED_CONSERVATIVE].set(NULL);
-    mActiveQueries[GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN].set(NULL);
+    mActiveQueries[GL_ANY_SAMPLES_PASSED].set(nullptr);
+    mActiveQueries[GL_ANY_SAMPLES_PASSED_CONSERVATIVE].set(nullptr);
+    mActiveQueries[GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN].set(nullptr);
+    mActiveQueries[GL_TIME_ELAPSED_EXT].set(nullptr);
+    mActiveQueries[GL_COMMANDS_COMPLETED_CHROMIUM].set(nullptr);
 
-    mProgram = NULL;
+    mProgram = nullptr;
 
-    mReadFramebuffer = NULL;
-    mDrawFramebuffer = NULL;
+    mReadFramebuffer = nullptr;
+    mDrawFramebuffer = nullptr;
 
     mPrimitiveRestart = false;
+
+    mDebug.setOutputEnabled(debug);
+    mDebug.setMaxLoggedMessages(extensions.maxDebugLoggedMessages);
+
+    if (extensions.framebufferMultisample)
+    {
+        mMultiSampling = true;
+        mSampleAlphaToOne = false;
+    }
+
+    mCoverageModulation = GL_NONE;
+
+    angle::Matrix<GLfloat>::setToIdentity(mPathMatrixProj);
+    angle::Matrix<GLfloat>::setToIdentity(mPathMatrixMV);
+    mPathStencilFunc = GL_ALWAYS;
+    mPathStencilRef  = 0;
+    mPathStencilMask = std::numeric_limits<GLuint>::max();
 }
 
 void State::reset()
@@ -231,6 +252,12 @@ void State::reset()
     mUnpack.pixelBuffer.set(NULL);
 
     mProgram = NULL;
+
+    angle::Matrix<GLfloat>::setToIdentity(mPathMatrixProj);
+    angle::Matrix<GLfloat>::setToIdentity(mPathMatrixMV);
+    mPathStencilFunc = GL_ALWAYS;
+    mPathStencilRef  = 0;
+    mPathStencilMask = std::numeric_limits<GLuint>::max();
 
     // TODO(jmadill): Is this necessary?
     setAllDirtyBits();
@@ -519,6 +546,28 @@ bool State::getSampleCoverageInvert() const
     return mSampleCoverageInvert;
 }
 
+void State::setSampleAlphaToOne(bool enabled)
+{
+    mSampleAlphaToOne = enabled;
+    mDirtyBits.set(DIRTY_BIT_SAMPLE_ALPHA_TO_ONE);
+}
+
+bool State::isSampleAlphaToOneEnabled() const
+{
+    return mSampleAlphaToOne;
+}
+
+void State::setMultisampling(bool enabled)
+{
+    mMultiSampling = enabled;
+    mDirtyBits.set(DIRTY_BIT_MULTISAMPLING);
+}
+
+bool State::isMultisamplingEnabled() const
+{
+    return mMultiSampling;
+}
+
 bool State::isScissorTestEnabled() const
 {
     return mScissorTest;
@@ -570,6 +619,8 @@ void State::setEnableFeature(GLenum feature, bool enabled)
 {
     switch (feature)
     {
+      case GL_MULTISAMPLE_EXT:               setMultisampling(enabled);         break;
+      case GL_SAMPLE_ALPHA_TO_ONE_EXT:       setSampleAlphaToOne(enabled);      break;
       case GL_CULL_FACE:                     setCullFace(enabled);              break;
       case GL_POLYGON_OFFSET_FILL:           setPolygonOffsetFill(enabled);     break;
       case GL_SAMPLE_ALPHA_TO_COVERAGE:      setSampleAlphaToCoverage(enabled); break;
@@ -581,14 +632,25 @@ void State::setEnableFeature(GLenum feature, bool enabled)
       case GL_DITHER:                        setDither(enabled);                break;
       case GL_PRIMITIVE_RESTART_FIXED_INDEX: setPrimitiveRestart(enabled);      break;
       case GL_RASTERIZER_DISCARD:            setRasterizerDiscard(enabled);     break;
+      case GL_DEBUG_OUTPUT_SYNCHRONOUS:
+          mDebug.setOutputSynchronous(enabled);
+          break;
+      case GL_DEBUG_OUTPUT:
+          mDebug.setOutputEnabled(enabled);
+          break;
+      case GL_FRAMEBUFFER_SRGB_EXT:
+          setFramebufferSRGB(enabled);
+          break;
       default:                               UNREACHABLE();
     }
 }
 
-bool State::getEnableFeature(GLenum feature)
+bool State::getEnableFeature(GLenum feature) const
 {
     switch (feature)
     {
+      case GL_MULTISAMPLE_EXT:               return isMultisamplingEnabled();
+      case GL_SAMPLE_ALPHA_TO_ONE_EXT:       return isSampleAlphaToOneEnabled();
       case GL_CULL_FACE:                     return isCullFaceEnabled();
       case GL_POLYGON_OFFSET_FILL:           return isPolygonOffsetFillEnabled();
       case GL_SAMPLE_ALPHA_TO_COVERAGE:      return isSampleAlphaToCoverageEnabled();
@@ -600,6 +662,14 @@ bool State::getEnableFeature(GLenum feature)
       case GL_DITHER:                        return isDitherEnabled();
       case GL_PRIMITIVE_RESTART_FIXED_INDEX: return isPrimitiveRestartEnabled();
       case GL_RASTERIZER_DISCARD:            return isRasterizerDiscardEnabled();
+      case GL_DEBUG_OUTPUT_SYNCHRONOUS:
+          return mDebug.isOutputSynchronous();
+      case GL_DEBUG_OUTPUT:
+          return mDebug.isOutputEnabled();
+      case GL_BIND_GENERATES_RESOURCE_CHROMIUM:
+          return isBindGeneratesResourceEnabled();
+      case GL_FRAMEBUFFER_SRGB_EXT:
+          return getFramebufferSRGB();
       default:                               UNREACHABLE(); return false;
     }
 }
@@ -628,6 +698,11 @@ void State::setFragmentShaderDerivativeHint(GLenum hint)
     // TODO: Propagate the hint to shader translator so we can write
     // ddx, ddx_coarse, or ddx_fine depending on the hint.
     // Ignore for now. It is valid for implementations to ignore hint.
+}
+
+bool State::isBindGeneratesResourceEnabled() const
+{
+    return mBindGeneratesResource;
 }
 
 void State::setViewportParams(GLint x, GLint y, GLsizei width, GLsizei height)
@@ -659,6 +734,11 @@ void State::setSamplerTexture(GLenum type, Texture *texture)
     mSamplerTextures[type][mActiveSampler].set(texture);
 }
 
+Texture *State::getTargetTexture(GLenum target) const
+{
+    return getSamplerTexture(static_cast<unsigned int>(mActiveSampler), target);
+}
+
 Texture *State::getSamplerTexture(unsigned int sampler, GLenum type) const
 {
     const auto it = mSamplerTextures.find(type);
@@ -686,10 +766,10 @@ void State::detachTexture(const TextureMap &zeroTextures, GLuint texture)
     // If a texture object is deleted, it is as if all texture units which are bound to that texture object are
     // rebound to texture object zero
 
-    for (TextureBindingMap::iterator bindingVec = mSamplerTextures.begin(); bindingVec != mSamplerTextures.end(); bindingVec++)
+    for (auto &bindingVec : mSamplerTextures)
     {
-        GLenum textureType = bindingVec->first;
-        TextureBindingVector &textureVector = bindingVec->second;
+        GLenum textureType = bindingVec.first;
+        TextureBindingVector &textureVector = bindingVec.second;
         for (size_t textureIdx = 0; textureIdx < textureVector.size(); textureIdx++)
         {
             BindingPointer<Texture> &binding = textureVector[textureIdx];
@@ -774,7 +854,7 @@ GLuint State::getRenderbufferId() const
     return mRenderbuffer.id();
 }
 
-Renderbuffer *State::getCurrentRenderbuffer()
+Renderbuffer *State::getCurrentRenderbuffer() const
 {
     return mRenderbuffer.get();
 }
@@ -812,41 +892,53 @@ void State::detachRenderbuffer(GLuint renderbuffer)
 
 void State::setReadFramebufferBinding(Framebuffer *framebuffer)
 {
+    if (mReadFramebuffer == framebuffer)
+        return;
+
     mReadFramebuffer = framebuffer;
+    mDirtyBits.set(DIRTY_BIT_READ_FRAMEBUFFER_BINDING);
+
+    if (mReadFramebuffer && mReadFramebuffer->hasAnyDirtyBit())
+    {
+        mDirtyObjects.set(DIRTY_OBJECT_READ_FRAMEBUFFER);
+    }
 }
 
 void State::setDrawFramebufferBinding(Framebuffer *framebuffer)
 {
+    if (mDrawFramebuffer == framebuffer)
+        return;
+
     mDrawFramebuffer = framebuffer;
+    mDirtyBits.set(DIRTY_BIT_DRAW_FRAMEBUFFER_BINDING);
+
+    if (mDrawFramebuffer && mDrawFramebuffer->hasAnyDirtyBit())
+    {
+        mDirtyObjects.set(DIRTY_OBJECT_DRAW_FRAMEBUFFER);
+    }
 }
 
 Framebuffer *State::getTargetFramebuffer(GLenum target) const
 {
     switch (target)
     {
-    case GL_READ_FRAMEBUFFER_ANGLE:  return mReadFramebuffer;
-    case GL_DRAW_FRAMEBUFFER_ANGLE:
-    case GL_FRAMEBUFFER:             return mDrawFramebuffer;
-    default:                         UNREACHABLE(); return NULL;
+        case GL_READ_FRAMEBUFFER_ANGLE:
+            return mReadFramebuffer;
+        case GL_DRAW_FRAMEBUFFER_ANGLE:
+        case GL_FRAMEBUFFER:
+            return mDrawFramebuffer;
+        default:
+            UNREACHABLE();
+            return NULL;
     }
 }
 
-Framebuffer *State::getReadFramebuffer()
+Framebuffer *State::getReadFramebuffer() const
 {
     return mReadFramebuffer;
 }
 
-Framebuffer *State::getDrawFramebuffer()
-{
-    return mDrawFramebuffer;
-}
-
-const Framebuffer *State::getReadFramebuffer() const
-{
-    return mReadFramebuffer;
-}
-
-const Framebuffer *State::getDrawFramebuffer() const
+Framebuffer *State::getDrawFramebuffer() const
 {
     return mDrawFramebuffer;
 }
@@ -856,7 +948,7 @@ bool State::removeReadFramebufferBinding(GLuint framebuffer)
     if (mReadFramebuffer != nullptr &&
         mReadFramebuffer->id() == framebuffer)
     {
-        mReadFramebuffer = NULL;
+        setReadFramebufferBinding(nullptr);
         return true;
     }
 
@@ -868,7 +960,7 @@ bool State::removeDrawFramebufferBinding(GLuint framebuffer)
     if (mReadFramebuffer != nullptr &&
         mDrawFramebuffer->id() == framebuffer)
     {
-        mDrawFramebuffer = NULL;
+        setDrawFramebufferBinding(nullptr);
         return true;
     }
 
@@ -879,7 +971,11 @@ void State::setVertexArrayBinding(VertexArray *vertexArray)
 {
     mVertexArray = vertexArray;
     mDirtyBits.set(DIRTY_BIT_VERTEX_ARRAY_BINDING);
-    mDirtyBits.set(DIRTY_BIT_VERTEX_ARRAY_OBJECT);
+
+    if (mVertexArray && mVertexArray->hasAnyDirtyBit())
+    {
+        mDirtyObjects.set(DIRTY_OBJECT_VERTEX_ARRAY);
+    }
 }
 
 GLuint State::getVertexArrayId() const
@@ -900,7 +996,7 @@ bool State::removeVertexArrayBinding(GLuint vertexArray)
     {
         mVertexArray = NULL;
         mDirtyBits.set(DIRTY_BIT_VERTEX_ARRAY_BINDING);
-        mDirtyBits.set(DIRTY_BIT_VERTEX_ARRAY_OBJECT);
+        mDirtyObjects.set(DIRTY_OBJECT_VERTEX_ARRAY);
         return true;
     }
 
@@ -946,20 +1042,36 @@ bool State::isTransformFeedbackActiveUnpaused() const
     return curTransformFeedback && curTransformFeedback->isActive() && !curTransformFeedback->isPaused();
 }
 
-void State::detachTransformFeedback(GLuint transformFeedback)
+bool State::removeTransformFeedbackBinding(GLuint transformFeedback)
 {
     if (mTransformFeedback.id() == transformFeedback)
     {
-        mTransformFeedback.set(NULL);
+        mTransformFeedback.set(nullptr);
+        return true;
     }
+
+    return false;
 }
 
-bool State::isQueryActive() const
+bool State::isQueryActive(const GLenum type) const
 {
-    for (State::ActiveQueryMap::const_iterator i = mActiveQueries.begin();
-        i != mActiveQueries.end(); i++)
+    for (auto &iter : mActiveQueries)
     {
-        if (i->second.get() != NULL)
+        const Query *query = iter.second.get();
+        if (query != nullptr && ActiveQueryType(query->getType()) == ActiveQueryType(type))
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool State::isQueryActive(Query *query) const
+{
+    for (auto &iter : mActiveQueries)
+    {
+        if (iter.second.get() == query)
         {
             return true;
         }
@@ -999,17 +1111,6 @@ GLuint State::getArrayBufferId() const
     return mArrayBuffer.id();
 }
 
-bool State::removeArrayBufferBinding(GLuint buffer)
-{
-    if (mArrayBuffer.id() == buffer)
-    {
-        mArrayBuffer.set(NULL);
-        return true;
-    }
-
-    return false;
-}
-
 void State::setGenericUniformBufferBinding(Buffer *buffer)
 {
     mGenericUniformBuffer.set(buffer);
@@ -1039,11 +1140,13 @@ void State::setCopyWriteBufferBinding(Buffer *buffer)
 void State::setPixelPackBufferBinding(Buffer *buffer)
 {
     mPack.pixelBuffer.set(buffer);
+    mDirtyBits.set(DIRTY_BIT_PACK_BUFFER_BINDING);
 }
 
 void State::setPixelUnpackBufferBinding(Buffer *buffer)
 {
     mUnpack.pixelBuffer.set(buffer);
+    mDirtyBits.set(DIRTY_BIT_UNPACK_BUFFER_BINDING);
 }
 
 Buffer *State::getTargetBuffer(GLenum target) const
@@ -1062,10 +1165,32 @@ Buffer *State::getTargetBuffer(GLenum target) const
     }
 }
 
+void State::detachBuffer(GLuint bufferName)
+{
+    BindingPointer<Buffer> *buffers[] = {&mArrayBuffer,        &mCopyReadBuffer,
+                                         &mCopyWriteBuffer,    &mPack.pixelBuffer,
+                                         &mUnpack.pixelBuffer, &mGenericUniformBuffer};
+    for (auto buffer : buffers)
+    {
+        if (buffer->id() == bufferName)
+        {
+            buffer->set(nullptr);
+        }
+    }
+
+    TransformFeedback *curTransformFeedback = getCurrentTransformFeedback();
+    if (curTransformFeedback)
+    {
+        curTransformFeedback->detachBuffer(bufferName);
+    }
+
+    getVertexArray()->detachBuffer(bufferName);
+}
+
 void State::setEnableVertexAttribArray(unsigned int attribNum, bool enabled)
 {
     getVertexArray()->enableAttribute(attribNum, enabled);
-    mDirtyBits.set(DIRTY_BIT_VERTEX_ARRAY_OBJECT);
+    mDirtyObjects.set(DIRTY_OBJECT_VERTEX_ARRAY);
 }
 
 void State::setVertexAttribf(GLuint index, const GLfloat values[4])
@@ -1099,13 +1224,13 @@ void State::setVertexAttribState(unsigned int attribNum,
                                  const void *pointer)
 {
     getVertexArray()->setAttributeState(attribNum, boundBuffer, size, type, normalized, pureInteger, stride, pointer);
-    mDirtyBits.set(DIRTY_BIT_VERTEX_ARRAY_OBJECT);
+    mDirtyObjects.set(DIRTY_OBJECT_VERTEX_ARRAY);
 }
 
 void State::setVertexAttribDivisor(GLuint index, GLuint divisor)
 {
     getVertexArray()->setVertexAttribDivisor(index, divisor);
-    mDirtyBits.set(DIRTY_BIT_VERTEX_ARRAY_OBJECT);
+    mDirtyObjects.set(DIRTY_OBJECT_VERTEX_ARRAY);
 }
 
 const VertexAttribCurrentValueData &State::getVertexAttribCurrentValue(unsigned int attribNum) const
@@ -1260,6 +1385,94 @@ PixelUnpackState &State::getUnpackState()
     return mUnpack;
 }
 
+const Debug &State::getDebug() const
+{
+    return mDebug;
+}
+
+Debug &State::getDebug()
+{
+    return mDebug;
+}
+
+void State::setCoverageModulation(GLenum components)
+{
+    mCoverageModulation = components;
+    mDirtyBits.set(DIRTY_BIT_COVERAGE_MODULATION);
+}
+
+GLenum State::getCoverageModulation() const
+{
+    return mCoverageModulation;
+}
+
+void State::loadPathRenderingMatrix(GLenum matrixMode, const GLfloat *matrix)
+{
+    if (matrixMode == GL_PATH_MODELVIEW_CHROMIUM)
+    {
+        memcpy(mPathMatrixMV, matrix, 16 * sizeof(GLfloat));
+        mDirtyBits.set(DIRTY_BIT_PATH_RENDERING_MATRIX_MV);
+    }
+    else if (matrixMode == GL_PATH_PROJECTION_CHROMIUM)
+    {
+        memcpy(mPathMatrixProj, matrix, 16 * sizeof(GLfloat));
+        mDirtyBits.set(DIRTY_BIT_PATH_RENDERING_MATRIX_PROJ);
+    }
+    else
+    {
+        UNREACHABLE();
+    }
+}
+
+const GLfloat *State::getPathRenderingMatrix(GLenum which) const
+{
+    if (which == GL_PATH_MODELVIEW_MATRIX_CHROMIUM)
+    {
+        return mPathMatrixMV;
+    }
+    else if (which == GL_PATH_PROJECTION_MATRIX_CHROMIUM)
+    {
+        return mPathMatrixProj;
+    }
+
+    UNREACHABLE();
+    return nullptr;
+}
+
+void State::setPathStencilFunc(GLenum func, GLint ref, GLuint mask)
+{
+    mPathStencilFunc = func;
+    mPathStencilRef  = ref;
+    mPathStencilMask = mask;
+    mDirtyBits.set(DIRTY_BIT_PATH_RENDERING_STENCIL_STATE);
+}
+
+GLenum State::getPathStencilFunc() const
+{
+    return mPathStencilFunc;
+}
+
+GLint State::getPathStencilRef() const
+{
+    return mPathStencilRef;
+}
+
+GLuint State::getPathStencilMask() const
+{
+    return mPathStencilMask;
+}
+
+void State::setFramebufferSRGB(bool sRGB)
+{
+    mFramebufferSRGB = sRGB;
+    mDirtyBits.set(DIRTY_BIT_FRAMEBUFFER_SRGB);
+}
+
+bool State::getFramebufferSRGB() const
+{
+    return mFramebufferSRGB;
+}
+
 void State::getBooleanv(GLenum pname, GLboolean *params)
 {
     switch (pname)
@@ -1285,6 +1498,27 @@ void State::getBooleanv(GLenum pname, GLboolean *params)
       case GL_TRANSFORM_FEEDBACK_PAUSED: *params = getCurrentTransformFeedback()->isPaused() ? GL_TRUE : GL_FALSE; break;
       case GL_PRIMITIVE_RESTART_FIXED_INDEX:
           *params = mPrimitiveRestart;
+          break;
+      case GL_RASTERIZER_DISCARD:
+          *params = isRasterizerDiscardEnabled() ? GL_TRUE : GL_FALSE;
+          break;
+      case GL_DEBUG_OUTPUT_SYNCHRONOUS:
+          *params = mDebug.isOutputSynchronous() ? GL_TRUE : GL_FALSE;
+          break;
+      case GL_DEBUG_OUTPUT:
+          *params = mDebug.isOutputEnabled() ? GL_TRUE : GL_FALSE;
+          break;
+      case GL_MULTISAMPLE_EXT:
+          *params = mMultiSampling;
+          break;
+      case GL_SAMPLE_ALPHA_TO_ONE_EXT:
+          *params = mSampleAlphaToOne;
+          break;
+      case GL_BIND_GENERATES_RESOURCE_CHROMIUM:
+          *params = isBindGeneratesResourceEnabled() ? GL_TRUE : GL_FALSE;
+          break;
+      case GL_FRAMEBUFFER_SRGB_EXT:
+          *params = getFramebufferSRGB() ? GL_TRUE : GL_FALSE;
           break;
       default:
         UNREACHABLE();
@@ -1321,13 +1555,21 @@ void State::getFloatv(GLenum pname, GLfloat *params)
         params[2] = mBlendColor.blue;
         params[3] = mBlendColor.alpha;
         break;
+      case GL_MULTISAMPLE_EXT:
+        *params = static_cast<GLfloat>(mMultiSampling);
+        break;
+      case GL_SAMPLE_ALPHA_TO_ONE_EXT:
+        *params = static_cast<GLfloat>(mSampleAlphaToOne);
+      case GL_COVERAGE_MODULATION_CHROMIUM:
+          params[0] = static_cast<GLfloat>(mCoverageModulation);
+          break;
       default:
         UNREACHABLE();
         break;
     }
 }
 
-void State::getIntegerv(const gl::Data &data, GLenum pname, GLint *params)
+void State::getIntegerv(const ContextState &data, GLenum pname, GLint *params)
 {
     if (pname >= GL_DRAW_BUFFER0_EXT && pname <= GL_DRAW_BUFFER15_EXT)
     {
@@ -1522,11 +1764,16 @@ void State::getIntegerv(const gl::Data &data, GLenum pname, GLint *params)
         *params =
             getSamplerTextureId(static_cast<unsigned int>(mActiveSampler), GL_TEXTURE_2D_ARRAY);
         break;
+      case GL_TEXTURE_BINDING_EXTERNAL_OES:
+          ASSERT(mActiveSampler < mMaxCombinedTextureImageUnits);
+          *params = getSamplerTextureId(static_cast<unsigned int>(mActiveSampler),
+                                        GL_TEXTURE_EXTERNAL_OES);
+          break;
       case GL_UNIFORM_BUFFER_BINDING:
         *params = mGenericUniformBuffer.id();
         break;
       case GL_TRANSFORM_FEEDBACK_BINDING:
-        *params = mTransformFeedback->id();
+        *params = mTransformFeedback.id();
         break;
       case GL_TRANSFORM_FEEDBACK_BUFFER_BINDING:
         *params = mTransformFeedback->getGenericBuffer().id();
@@ -1543,13 +1790,53 @@ void State::getIntegerv(const gl::Data &data, GLenum pname, GLint *params)
       case GL_PIXEL_UNPACK_BUFFER_BINDING:
         *params = mUnpack.pixelBuffer.id();
         break;
+      case GL_READ_BUFFER:
+          *params = mReadFramebuffer->getReadBufferState();
+          break;
+      case GL_SAMPLER_BINDING:
+          ASSERT(mActiveSampler < mMaxCombinedTextureImageUnits);
+          *params = getSamplerId(static_cast<GLuint>(mActiveSampler));
+          break;
+      case GL_DEBUG_LOGGED_MESSAGES:
+          *params = static_cast<GLint>(mDebug.getMessageCount());
+          break;
+      case GL_DEBUG_NEXT_LOGGED_MESSAGE_LENGTH:
+          *params = static_cast<GLint>(mDebug.getNextMessageLength());
+          break;
+      case GL_DEBUG_GROUP_STACK_DEPTH:
+          *params = static_cast<GLint>(mDebug.getGroupStackDepth());
+          break;
+      case GL_MULTISAMPLE_EXT:
+          *params = static_cast<GLint>(mMultiSampling);
+          break;
+      case GL_SAMPLE_ALPHA_TO_ONE_EXT:
+          *params = static_cast<GLint>(mSampleAlphaToOne);
+      case GL_COVERAGE_MODULATION_CHROMIUM:
+          *params = static_cast<GLint>(mCoverageModulation);
+          break;
       default:
         UNREACHABLE();
         break;
     }
 }
 
-bool State::getIndexedIntegerv(GLenum target, GLuint index, GLint *data)
+void State::getPointerv(GLenum pname, void **params) const
+{
+    switch (pname)
+    {
+        case GL_DEBUG_CALLBACK_FUNCTION:
+            *params = reinterpret_cast<void *>(mDebug.getCallback());
+            break;
+        case GL_DEBUG_CALLBACK_USER_PARAM:
+            *params = const_cast<void *>(mDebug.getUserParam());
+            break;
+        default:
+            UNREACHABLE();
+            break;
+    }
+}
+
+void State::getIntegeri_v(GLenum target, GLuint index, GLint *data)
 {
     switch (target)
     {
@@ -1566,13 +1853,12 @@ bool State::getIndexedIntegerv(GLenum target, GLuint index, GLint *data)
         }
         break;
       default:
-        return false;
+          UNREACHABLE();
+          break;
     }
-
-    return true;
 }
 
-bool State::getIndexedInteger64v(GLenum target, GLuint index, GLint64 *data)
+void State::getInteger64i_v(GLenum target, GLuint index, GLint64 *data)
 {
     switch (target)
     {
@@ -1601,10 +1887,14 @@ bool State::getIndexedInteger64v(GLenum target, GLuint index, GLint64 *data)
         }
         break;
       default:
-        return false;
+          UNREACHABLE();
+          break;
     }
+}
 
-    return true;
+void State::getBooleani_v(GLenum target, GLuint index, GLboolean *data)
+{
+    UNREACHABLE();
 }
 
 bool State::hasMappedBuffer(GLenum target) const
@@ -1633,4 +1923,92 @@ bool State::hasMappedBuffer(GLenum target) const
     }
 }
 
+void State::syncDirtyObjects()
+{
+    if (!mDirtyObjects.any())
+        return;
+
+    syncDirtyObjects(mDirtyObjects);
 }
+
+void State::syncDirtyObjects(const DirtyObjects &bitset)
+{
+    for (auto dirtyObject : angle::IterateBitSet(bitset))
+    {
+        switch (dirtyObject)
+        {
+            case DIRTY_OBJECT_READ_FRAMEBUFFER:
+                ASSERT(mReadFramebuffer);
+                mReadFramebuffer->syncState();
+                break;
+            case DIRTY_OBJECT_DRAW_FRAMEBUFFER:
+                ASSERT(mDrawFramebuffer);
+                mDrawFramebuffer->syncState();
+                break;
+            case DIRTY_OBJECT_VERTEX_ARRAY:
+                ASSERT(mVertexArray);
+                mVertexArray->syncImplState();
+                break;
+            case DIRTY_OBJECT_PROGRAM:
+                // TODO(jmadill): implement this
+                break;
+            default:
+                UNREACHABLE();
+                break;
+        }
+    }
+
+    mDirtyObjects &= ~bitset;
+}
+
+void State::syncDirtyObject(GLenum target)
+{
+    DirtyObjects localSet;
+
+    switch (target)
+    {
+        case GL_READ_FRAMEBUFFER:
+            localSet.set(DIRTY_OBJECT_READ_FRAMEBUFFER);
+            break;
+        case GL_DRAW_FRAMEBUFFER:
+            localSet.set(DIRTY_OBJECT_DRAW_FRAMEBUFFER);
+            break;
+        case GL_FRAMEBUFFER:
+            localSet.set(DIRTY_OBJECT_READ_FRAMEBUFFER);
+            localSet.set(DIRTY_OBJECT_DRAW_FRAMEBUFFER);
+            break;
+        case GL_VERTEX_ARRAY:
+            localSet.set(DIRTY_OBJECT_VERTEX_ARRAY);
+            break;
+        case GL_PROGRAM:
+            localSet.set(DIRTY_OBJECT_PROGRAM);
+            break;
+    }
+
+    syncDirtyObjects(localSet);
+}
+
+void State::setObjectDirty(GLenum target)
+{
+    switch (target)
+    {
+        case GL_READ_FRAMEBUFFER:
+            mDirtyObjects.set(DIRTY_OBJECT_READ_FRAMEBUFFER);
+            break;
+        case GL_DRAW_FRAMEBUFFER:
+            mDirtyObjects.set(DIRTY_OBJECT_DRAW_FRAMEBUFFER);
+            break;
+        case GL_FRAMEBUFFER:
+            mDirtyObjects.set(DIRTY_OBJECT_READ_FRAMEBUFFER);
+            mDirtyObjects.set(DIRTY_OBJECT_DRAW_FRAMEBUFFER);
+            break;
+        case GL_VERTEX_ARRAY:
+            mDirtyObjects.set(DIRTY_OBJECT_VERTEX_ARRAY);
+            break;
+        case GL_PROGRAM:
+            mDirtyObjects.set(DIRTY_OBJECT_PROGRAM);
+            break;
+    }
+}
+
+}  // namespace gl

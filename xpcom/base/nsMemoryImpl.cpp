@@ -31,15 +31,7 @@ NS_IMPL_QUERY_INTERFACE(nsMemoryImpl, nsIMemory)
 NS_IMETHODIMP
 nsMemoryImpl::HeapMinimize(bool aImmediate)
 {
-  return FlushMemory(MOZ_UTF16("heap-minimize"), aImmediate);
-}
-
-NS_IMETHODIMP
-nsMemoryImpl::IsLowMemory(bool* aResult)
-{
-  NS_ERROR("IsLowMemory is deprecated.  See bug 592308.");
-  *aResult = false;
-  return NS_OK;
+  return FlushMemory(u"heap-minimize", aImmediate);
 }
 
 NS_IMETHODIMP

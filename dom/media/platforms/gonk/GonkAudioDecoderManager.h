@@ -32,6 +32,12 @@ public:
                           RefPtr<MediaData>& aOutput) override;
 
   void ProcessFlush() override;
+  virtual void ResetEOS() override;
+
+  const char* GetDescriptionName() const override
+  {
+    return "gonk audio decoder";
+  }
 
 private:
   bool InitMediaCodecProxy();

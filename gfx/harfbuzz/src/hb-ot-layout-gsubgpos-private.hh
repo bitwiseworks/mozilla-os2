@@ -319,7 +319,7 @@ struct hb_apply_context_t :
       if (!c->check_glyph_property (&info, lookup_props))
 	return SKIP_YES;
 
-      if (unlikely (_hb_glyph_info_is_default_ignorable (&info) &&
+      if (unlikely (_hb_glyph_info_is_default_ignorable_and_not_fvs (&info) &&
 		    (ignore_zwnj || !_hb_glyph_info_is_zwnj (&info)) &&
 		    (ignore_zwj || !_hb_glyph_info_is_zwj (&info))))
 	return SKIP_MAYBE;
@@ -469,6 +469,7 @@ struct hb_apply_context_t :
   unsigned int lookup_props;
   const GDEF &gdef;
   bool has_glyph_classes;
+  const VariationStore &var_store;
   skipping_iterator_t iter_input, iter_context;
   unsigned int lookup_index;
   unsigned int debug_depth;
@@ -487,6 +488,7 @@ struct hb_apply_context_t :
 			lookup_props (0),
 			gdef (*hb_ot_layout_from_face (face)->gdef),
 			has_glyph_classes (gdef.has_glyph_classes ()),
+			var_store (gdef.get_var_store ()),
 			iter_input (),
 			iter_context (),
 			lookup_index ((unsigned int) -1),
@@ -845,9 +847,12 @@ static inline bool ligate_input (hb_apply_context_t *c,
     while (buffer->idx < match_positions[i] && !buffer->in_error)
     {
       if (!is_mark_ligature) {
+        unsigned int this_comp = _hb_glyph_info_get_lig_comp (&buffer->cur());
+	if (this_comp == 0)
+	  this_comp = last_num_components;
 	unsigned int new_lig_comp = components_so_far - last_num_components +
-				    MIN (MAX (_hb_glyph_info_get_lig_comp (&buffer->cur()), 1u), last_num_components);
-	_hb_glyph_info_set_lig_props_for_mark (&buffer->cur(), lig_id, new_lig_comp);
+				    MIN (this_comp, last_num_components);
+	  _hb_glyph_info_set_lig_props_for_mark (&buffer->cur(), lig_id, new_lig_comp);
       }
       buffer->next_glyph ();
     }
@@ -864,8 +869,11 @@ static inline bool ligate_input (hb_apply_context_t *c,
     /* Re-adjust components for any marks following. */
     for (unsigned int i = buffer->idx; i < buffer->len; i++) {
       if (last_lig_id == _hb_glyph_info_get_lig_id (&buffer->info[i])) {
+        unsigned int this_comp = _hb_glyph_info_get_lig_comp (&buffer->info[i]);
+	if (!this_comp)
+	  break;
 	unsigned int new_lig_comp = components_so_far - last_num_components +
-				    MIN (MAX (_hb_glyph_info_get_lig_comp (&buffer->info[i]), 1u), last_num_components);
+				    MIN (this_comp, last_num_components);
 	_hb_glyph_info_set_lig_props_for_mark (&buffer->info[i], lig_id, new_lig_comp);
       } else
 	break;
@@ -951,7 +959,7 @@ static inline bool apply_lookup (hb_apply_context_t *c,
   TRACE_APPLY (NULL);
 
   hb_buffer_t *buffer = c->buffer;
-  unsigned int end;
+  int end;
 
   /* All positions are distance from beginning of *output* buffer.
    * Adjust. */
@@ -965,10 +973,15 @@ static inline bool apply_lookup (hb_apply_context_t *c,
       match_positions[j] += delta;
   }
 
-  for (unsigned int i = 0; i < lookupCount; i++)
+  for (unsigned int i = 0; i < lookupCount && !buffer->in_error; i++)
   {
     unsigned int idx = lookupRecord[i].sequenceIndex;
     if (idx >= count)
+      continue;
+
+    /* Don't recurse to ourself at same position.
+     * Note that this test is too naive, it doesn't catch longer loops. */
+    if (idx == 0 && lookupRecord[i].lookupListIndex == c->lookup_index)
       continue;
 
     buffer->move_to (match_positions[idx]);
@@ -985,10 +998,17 @@ static inline bool apply_lookup (hb_apply_context_t *c,
 
     /* Recursed lookup changed buffer len.  Adjust. */
 
-    /* end can't go back past the current match position.
-     * Note: this is only true because we do NOT allow MultipleSubst
-     * with zero sequence len. */
-    end = MAX (MIN((int) match_positions[idx] + 1, (int) new_len), int (end) + delta);
+    end += delta;
+    if (end <= int (match_positions[idx]))
+    {
+      /* End might end up being smaller than match_positions[idx] if the recursed
+       * lookup ended up removing many items, more than we have had matched.
+       * Just never rewind end back and get out of here.
+       * https://bugs.chromium.org/p/chromium/issues/detail?id=659496 */
+      end = match_positions[idx];
+      /* There can't be any further changes. */
+      break;
+    }
 
     unsigned int next = idx + 1; /* next now is the position after the recursed lookup. */
 
@@ -2255,6 +2275,24 @@ struct GSUBGPOS
   inline const Lookup& get_lookup (unsigned int i) const
   { return (this+lookupList)[i]; }
 
+  inline bool find_variations_index (const int *coords, unsigned int num_coords,
+				     unsigned int *index) const
+  { return (version.to_int () >= 0x00010001u ? this+featureVars : Null(FeatureVariations))
+	   .find_index (coords, num_coords, index); }
+  inline const Feature& get_feature_variation (unsigned int feature_index,
+					       unsigned int variations_index) const
+  {
+    if (FeatureVariations::NOT_FOUND_INDEX != variations_index &&
+	version.to_int () >= 0x00010001u)
+    {
+      const Feature *feature = (this+featureVars).find_substitute (variations_index,
+								   feature_index);
+      if (feature)
+        return *feature;
+    }
+    return get_feature (feature_index);
+  }
+
   inline bool sanitize (hb_sanitize_context_t *c) const
   {
     TRACE_SANITIZE (this);
@@ -2262,11 +2300,12 @@ struct GSUBGPOS
 		  likely (version.major == 1) &&
 		  scriptList.sanitize (c, this) &&
 		  featureList.sanitize (c, this) &&
-		  lookupList.sanitize (c, this));
+		  lookupList.sanitize (c, this) &&
+		  (version.to_int () < 0x00010001u || featureVars.sanitize (c, this)));
   }
 
   protected:
-  FixedVersion	version;	/* Version of the GSUB/GPOS table--initially set
+  FixedVersion<>version;	/* Version of the GSUB/GPOS table--initially set
 				 * to 0x00010000u */
   OffsetTo<ScriptList>
 		scriptList;  	/* ScriptList table */
@@ -2274,8 +2313,13 @@ struct GSUBGPOS
 		featureList; 	/* FeatureList table */
   OffsetTo<LookupList>
 		lookupList; 	/* LookupList table */
+  OffsetTo<FeatureVariations, ULONG>
+		featureVars;	/* Offset to Feature Variations
+				   table--from beginning of table
+				 * (may be NULL).  Introduced
+				 * in version 0x00010001. */
   public:
-  DEFINE_SIZE_STATIC (10);
+  DEFINE_SIZE_MIN (10);
 };
 
 

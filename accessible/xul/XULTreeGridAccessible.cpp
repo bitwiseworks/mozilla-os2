@@ -249,6 +249,7 @@ XULTreeGridRowAccessible::
   mAccessibleCache(kDefaultTreeCacheLength)
 {
   mGenericTypes |= eTableRow;
+  mStateFlags |= eNoKidsFromDOM;
 }
 
 XULTreeGridRowAccessible::~XULTreeGridRowAccessible()
@@ -276,7 +277,7 @@ NS_IMPL_RELEASE_INHERITED(XULTreeGridRowAccessible,
 void
 XULTreeGridRowAccessible::Shutdown()
 {
-  if (!mDoc->IsDefunct()) {
+  if (mDoc && !mDoc->IsDefunct()) {
     UnbindCacheEntriesFromDocument(mAccessibleCache);
   }
 
@@ -409,13 +410,6 @@ XULTreeGridRowAccessible::RowInvalidated(int32_t aStartColIdx,
 
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// XULTreeGridRowAccessible: Accessible protected implementation
-
-void
-XULTreeGridRowAccessible::CacheChildren()
-{
-}
 
 ////////////////////////////////////////////////////////////////////////////////
 // XULTreeGridCellAccessible

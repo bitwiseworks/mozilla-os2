@@ -56,12 +56,7 @@ WyciwygChannelChild::~WyciwygChannelChild()
 {
   LOG(("Destroying WyciwygChannelChild @%x\n", this));
   if (mLoadInfo) {
-    nsCOMPtr<nsIThread> mainThread;
-    NS_GetMainThread(getter_AddRefs(mainThread));
-
-    nsILoadInfo *forgetableLoadInfo;
-    mLoadInfo.forget(&forgetableLoadInfo);
-    NS_ProxyRelease(mainThread, forgetableLoadInfo, false);
+    NS_ReleaseOnMainThread(mLoadInfo.forget());
   }
 }
 
@@ -97,6 +92,7 @@ WyciwygChannelChild::Init(nsIURI* uri)
   // propagate loadInfo
   mozilla::ipc::PrincipalInfo requestingPrincipalInfo;
   mozilla::ipc::PrincipalInfo triggeringPrincipalInfo;
+  mozilla::ipc::PrincipalInfo principalToInheritInfo;
   uint32_t securityFlags;
   uint32_t policyType;
   if (mLoadInfo) {
@@ -104,6 +100,8 @@ WyciwygChannelChild::Init(nsIURI* uri)
                                            &requestingPrincipalInfo);
     mozilla::ipc::PrincipalToPrincipalInfo(mLoadInfo->TriggeringPrincipal(),
                                            &triggeringPrincipalInfo);
+    mozilla::ipc::PrincipalToPrincipalInfo(mLoadInfo->PrincipalToInherit(),
+                                           &principalToInheritInfo);
     securityFlags = mLoadInfo->GetSecurityFlags();
     policyType = mLoadInfo->InternalContentPolicyType();
   }
@@ -113,13 +111,16 @@ WyciwygChannelChild::Init(nsIURI* uri)
                                            &requestingPrincipalInfo);
     mozilla::ipc::PrincipalToPrincipalInfo(nsContentUtils::GetSystemPrincipal(),
                                            &triggeringPrincipalInfo);
-    securityFlags = nsILoadInfo::SEC_NORMAL;
+    mozilla::ipc::PrincipalToPrincipalInfo(nsContentUtils::GetSystemPrincipal(),
+                                           &principalToInheritInfo);
+    securityFlags = nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL;
     policyType = nsIContentPolicy::TYPE_OTHER;
   }
 
   SendInit(serializedUri,
            requestingPrincipalInfo,
            triggeringPrincipalInfo,
+           principalToInheritInfo,
            securityFlags,
            policyType);
   return NS_OK;
@@ -158,13 +159,9 @@ WyciwygChannelChild::RecvOnStartRequest(const nsresult& statusCode,
                                         const nsCString& charset,
                                         const nsCString& securityInfo)
 {
-  if (mEventQ->ShouldEnqueue()) {
-    mEventQ->Enqueue(new WyciwygStartRequestEvent(this, statusCode,
-                                                 contentLength, source,
-                                                 charset, securityInfo));
-  } else {
-    OnStartRequest(statusCode, contentLength, source, charset, securityInfo);
-  }
+  mEventQ->RunOrEnqueue(new WyciwygStartRequestEvent(this, statusCode,
+                                                     contentLength, source,
+                                                     charset, securityInfo));
   return true;
 }
 
@@ -213,11 +210,7 @@ bool
 WyciwygChannelChild::RecvOnDataAvailable(const nsCString& data,
                                          const uint64_t& offset)
 {
-  if (mEventQ->ShouldEnqueue()) {
-    mEventQ->Enqueue(new WyciwygDataAvailableEvent(this, data, offset));
-  } else {
-    OnDataAvailable(data, offset);
-  }
+  mEventQ->RunOrEnqueue(new WyciwygDataAvailableEvent(this, data, offset));
   return true;
 }
 
@@ -275,11 +268,7 @@ private:
 bool
 WyciwygChannelChild::RecvOnStopRequest(const nsresult& statusCode)
 {
-  if (mEventQ->ShouldEnqueue()) {
-    mEventQ->Enqueue(new WyciwygStopRequestEvent(this, statusCode));
-  } else {
-    OnStopRequest(statusCode);
-  }
+  mEventQ->RunOrEnqueue(new WyciwygStopRequestEvent(this, statusCode));
   return true;
 }
 
@@ -302,14 +291,14 @@ WyciwygChannelChild::OnStopRequest(const nsresult& statusCode)
 
     mListener->OnStopRequest(this, mListenerContext, statusCode);
 
-    mListener = 0;
-    mListenerContext = 0;
+    mListener = nullptr;
+    mListenerContext = nullptr;
 
     if (mLoadGroup)
       mLoadGroup->RemoveRequest(this, nullptr, mStatus);
 
-    mCallbacks = 0;
-    mProgressSink = 0;
+    mCallbacks = nullptr;
+    mProgressSink = nullptr;
   }
 
   if (mIPCOpen)
@@ -332,11 +321,7 @@ class WyciwygCancelEvent : public ChannelEvent
 bool
 WyciwygChannelChild::RecvCancelEarly(const nsresult& statusCode)
 {
-  if (mEventQ->ShouldEnqueue()) {
-    mEventQ->Enqueue(new WyciwygCancelEvent(this, statusCode));
-  } else {
-    CancelEarly(statusCode);
-  }
+  mEventQ->RunOrEnqueue(new WyciwygCancelEvent(this, statusCode));
   return true;
 }
 

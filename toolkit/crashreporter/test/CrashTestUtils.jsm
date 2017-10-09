@@ -30,6 +30,7 @@ Components.utils.import("resource://gre/modules/Services.jsm");
 Components.utils.import("resource://gre/modules/ctypes.jsm");
 var dir = Services.dirsvc.get("CurWorkD", Components.interfaces.nsILocalFile);
 var file = dir.clone();
+file = file.parent;
 file.append(ctypes.libraryName("testcrasher"));
 var lib = ctypes.open(file.path);
 CrashTestUtils.crash = lib.declare("Crash",
@@ -51,7 +52,7 @@ try {
                                                            ctypes.default_abi,
                                                            ctypes.void_t);
 }
-catch(ex) {}
+catch (ex) {}
 
 CrashTestUtils.dumpHasStream = lib.declare("DumpHasStream",
                                            ctypes.default_abi,

@@ -29,6 +29,10 @@ class nsIEventTarget;
 struct nsID;
 struct PRThread;
 
+namespace JS {
+struct WasmModule;
+} // namespace JS
+
 namespace mozilla {
 namespace ipc {
 
@@ -37,7 +41,6 @@ class BackgroundChildImpl;
 } // namespace ipc
 
 namespace dom {
-namespace indexedDB {
 
 class IDBCursor;
 class IDBDatabase;
@@ -46,6 +49,9 @@ class IDBMutableFile;
 class IDBOpenDBRequest;
 class IDBRequest;
 class IndexedDatabaseManager;
+
+namespace indexedDB {
+
 class Key;
 class PermissionRequestChild;
 class PermissionRequestParent;
@@ -54,7 +60,7 @@ class SerializedStructuredCloneReadInfo;
 class ThreadLocal
 {
   friend class nsAutoPtr<ThreadLocal>;
-  friend class IDBFactory;
+  friend IDBFactory;
 
   LoggingInfo mLoggingInfo;
   IDBTransaction* mCurrentTransaction;
@@ -149,7 +155,7 @@ class BackgroundFactoryChild final
   : public PBackgroundIDBFactoryChild
 {
   friend class mozilla::ipc::BackgroundChildImpl;
-  friend class IDBFactory;
+  friend IDBFactory;
 
   IDBFactory* mFactory;
 
@@ -242,7 +248,7 @@ class BackgroundFactoryRequestChild final
 {
   typedef mozilla::dom::quota::PersistenceType PersistenceType;
 
-  friend class IDBFactory;
+  friend IDBFactory;
   friend class BackgroundFactoryChild;
   friend class BackgroundDatabaseChild;
   friend class PermissionRequestChild;
@@ -294,7 +300,7 @@ class BackgroundDatabaseChild final
 {
   friend class BackgroundFactoryChild;
   friend class BackgroundFactoryRequestChild;
-  friend class IDBDatabase;
+  friend IDBDatabase;
 
   nsAutoPtr<DatabaseSpec> mSpec;
   RefPtr<IDBDatabase> mTemporaryStrongDatabase;
@@ -417,6 +423,9 @@ private:
   virtual bool
   RecvInvalidate() override;
 
+  virtual bool
+  RecvCloseAfterInvalidationComplete() override;
+
   bool
   SendDeleteMe() = delete;
 };
@@ -426,7 +435,7 @@ class BackgroundDatabaseRequestChild final
   , public PBackgroundIDBDatabaseRequestChild
 {
   friend class BackgroundDatabaseChild;
-  friend class IDBDatabase;
+  friend IDBDatabase;
 
   RefPtr<IDBDatabase> mDatabase;
 
@@ -506,7 +515,7 @@ class BackgroundTransactionChild final
   , public PBackgroundIDBTransactionChild
 {
   friend class BackgroundDatabaseChild;
-  friend class IDBDatabase;
+  friend IDBDatabase;
 
 public:
 #ifdef DEBUG
@@ -633,9 +642,17 @@ class BackgroundRequestChild final
 {
   friend class BackgroundTransactionChild;
   friend class BackgroundVersionChangeTransactionChild;
-  friend class IDBTransaction;
+  friend IDBTransaction;
+
+  class PreprocessHelper;
 
   RefPtr<IDBTransaction> mTransaction;
+  nsTArray<RefPtr<PreprocessHelper>> mPreprocessHelpers;
+  nsTArray<nsTArray<RefPtr<JS::WasmModule>>> mModuleSets;
+  uint32_t mRunningPreprocessHelpers;
+  uint32_t mCurrentModuleSetIndex;
+  nsresult mPreprocessResultCode;
+  bool mGetAll;
 
 private:
   // Only created by IDBTransaction.
@@ -645,6 +662,19 @@ private:
   // Only destroyed by BackgroundTransactionChild or
   // BackgroundVersionChangeTransactionChild.
   ~BackgroundRequestChild();
+
+  void
+  MaybeSendContinue();
+
+  void
+  OnPreprocessFinished(uint32_t aModuleSetIndex,
+                       nsTArray<RefPtr<JS::WasmModule>>& aModuleSet);
+
+  void
+  OnPreprocessFailed(uint32_t aModuleSetIndex, nsresult aErrorCode);
+
+  const nsTArray<RefPtr<JS::WasmModule>>*
+  GetNextModuleSet(const StructuredCloneReadInfo& aInfo);
 
   void
   HandleResponse(nsresult aResponse);
@@ -667,12 +697,21 @@ private:
   void
   HandleResponse(uint64_t aResponse);
 
+  nsresult
+  HandlePreprocess(const WasmModulePreprocessInfo& aPreprocessInfo);
+
+  nsresult
+  HandlePreprocess(const nsTArray<WasmModulePreprocessInfo>& aPreprocessInfos);
+
   // IPDL methods are only called by IPDL.
   virtual void
   ActorDestroy(ActorDestroyReason aWhy) override;
 
   virtual bool
   Recv__delete__(const RequestResponse& aResponse) override;
+
+  virtual bool
+  RecvPreprocess(const PreprocessParams& aParams) override;
 };
 
 class BackgroundCursorChild final
@@ -682,17 +721,6 @@ class BackgroundCursorChild final
   friend class BackgroundVersionChangeTransactionChild;
 
   class DelayedActionRunnable;
-
-  struct CachedResponse
-  {
-    CachedResponse();
-
-    CachedResponse(CachedResponse&& aOther);
-
-    Key mKey;
-    Key mObjectKey;
-    StructuredCloneReadInfo mCloneInfo;
-  };
 
   IDBRequest* mRequest;
   IDBTransaction* mTransaction;
@@ -709,8 +737,6 @@ class BackgroundCursorChild final
 #ifdef DEBUG
   PRThread* mOwningThread;
 #endif
-
-  nsTArray<CachedResponse> mCachedResponses;
 
 public:
   BackgroundCursorChild(IDBRequest* aRequest,
@@ -730,13 +756,10 @@ public:
 #endif
 
   void
-  SendContinueInternal(const CursorRequestParams& aParams, const Key& aKey);
+  SendContinueInternal(const CursorRequestParams& aParams);
 
   void
   SendDeleteMeInternal();
-
-  void
-  InvalidateCachedResponses();
 
   IDBRequest*
   GetRequest() const
@@ -776,9 +799,6 @@ private:
   ~BackgroundCursorChild();
 
   void
-  SendDelayedContinueInternal();
-
-  void
   HandleResponse(nsresult aResponse);
 
   void
@@ -805,7 +825,7 @@ private:
 
   // Force callers to use SendContinueInternal.
   bool
-  SendContinue(const CursorRequestParams& aParams, const Key& aKey) = delete;
+  SendContinue(const CursorRequestParams& aParams) = delete;
 
   bool
   SendDeleteMe() = delete;
@@ -815,7 +835,7 @@ class BackgroundUtilsChild final
   : public PBackgroundIndexedDBUtilsChild
 {
   friend class mozilla::ipc::BackgroundChildImpl;
-  friend class IndexedDatabaseManager;
+  friend IndexedDatabaseManager;
 
   IndexedDatabaseManager* mManager;
 

@@ -509,6 +509,13 @@ testCM("markClearBetween", function(cm) {
   eq(cm.findMarksAt(Pos(1, 1)).length, 0);
 });
 
+testCM("findMarksMiddle", function(cm) {
+  var mark = cm.markText(Pos(1, 1), Pos(3, 1));
+  var found = cm.findMarks(Pos(2, 1), Pos(2, 2));
+  eq(found.length, 1);
+  eq(found[0], mark);
+}, {value: "line 0\nline 1\nline 2\nline 3"});
+
 testCM("deleteSpanCollapsedInclusiveLeft", function(cm) {
   var from = Pos(1, 0), to = Pos(1, 1);
   var m = cm.markText(from, to, {collapsed: true, inclusiveLeft: true});
@@ -1479,7 +1486,7 @@ testCM("lineWidgetChanged", function(cm) {
     // Good:
     // | ------------- display width ------------- |
     // | ------- widget-width when measured ------ |
-    // | | -- under-half -- | | -- under-half -- | |
+    // | | -- under-half -- | | -- under-half -- | | 
     // | | --- over-half --- |                     |
     // | | --- over-half --- |                     |
     // Height: measured as 3 lines, same as it will be when actually displayed
@@ -1496,7 +1503,7 @@ testCM("lineWidgetChanged", function(cm) {
     // Bad (too wide):
     // | ------------- display width ------------- |
     // | -------- widget-width when measured ------- | < -- uh oh
-    // | | -- under-half -- | | -- under-half -- |   |
+    // | | -- under-half -- | | -- under-half -- |   | 
     // | | --- over-half --- | | --- over-half --- | | < -- when measured, combined on one line
     // Height: measured as 2 lines, less than expected. Will be displayed as 3 lines!
 
@@ -1656,6 +1663,8 @@ testCM("atomicMarker", function(cm) {
 
 testCM("selectionBias", function(cm) {
   cm.markText(Pos(0, 1), Pos(0, 3), {atomic: true});
+  cm.setCursor(Pos(0, 2));
+  eqPos(cm.getCursor(), Pos(0, 1));
   cm.setCursor(Pos(0, 2));
   eqPos(cm.getCursor(), Pos(0, 3));
   cm.setCursor(Pos(0, 2));

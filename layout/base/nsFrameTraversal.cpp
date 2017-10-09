@@ -119,15 +119,13 @@ protected:
 
 /************IMPLEMENTATIONS**************/
 
-nsresult NS_CreateFrameTraversal(nsIFrameTraversal** aResult)
+nsresult
+NS_CreateFrameTraversal(nsIFrameTraversal** aResult)
 {
   NS_ENSURE_ARG_POINTER(aResult);
-  *aResult = nullptr;
 
-  nsCOMPtr<nsIFrameTraversal> t(new nsFrameTraversal());
-
-  *aResult = t;
-  NS_ADDREF(*aResult);
+  nsCOMPtr<nsIFrameTraversal> t = new nsFrameTraversal();
+  t.forget(aResult);
 
   return NS_OK;
 }
@@ -466,7 +464,7 @@ nsFrameIterator::GetPrevSibling(nsIFrame* aFrame)
 
 nsIFrame*
 nsFrameIterator::GetFirstChildInner(nsIFrame* aFrame) {
-  return aFrame->GetFirstPrincipalChild();
+  return aFrame->PrincipalChildList().FirstChild();
 }
 
 nsIFrame*
@@ -511,7 +509,7 @@ nsFrameIterator::IsPopupFrame(nsIFrame* aFrame)
   }
 
   return (aFrame &&
-          aFrame->StyleDisplay()->mDisplay == NS_STYLE_DISPLAY_POPUP);
+          aFrame->StyleDisplay()->mDisplay == StyleDisplay::Popup);
 }
 
 // nsVisualIterator implementation

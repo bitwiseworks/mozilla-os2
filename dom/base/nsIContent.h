@@ -7,6 +7,7 @@
 #define nsIContent_h___
 
 #include "mozilla/Attributes.h"
+#include "mozilla/dom/BorrowedAttrInfo.h"
 #include "nsCaseTreatment.h" // for enum, cannot be forward-declared
 #include "nsINode.h"
 
@@ -35,7 +36,7 @@ struct IMEState;
 enum nsLinkState {
   eLinkState_Unvisited  = 1,
   eLinkState_Visited    = 2,
-  eLinkState_NotLink    = 3 
+  eLinkState_NotLink    = 3
 };
 
 // IID for the nsIContent interface
@@ -74,8 +75,8 @@ public:
    * @param aDocument The new document for the content node.  May not be null
    *                  if aParent is null.  Must match the current document of
    *                  aParent, if aParent is not null (note that
-   *                  aParent->GetCurrentDoc() can be null, in which case this
-   *                  must also be null).
+   *                  aParent->GetUncomposedDoc() can be null, in which case
+   *                  this must also be null).
    * @param aParent The new parent for the content node.  May be null if the
    *                node is being bound as a direct child of the document.
    * @param aBindingParent The new binding parent for the content node.
@@ -102,7 +103,7 @@ public:
    * and binding parent to null.  In the typical case of a node being removed
    * from a parent, this will be called after it has been removed from the
    * parent's child list and after the nsIDocumentObserver notifications for
-   * the removal have been dispatched.   
+   * the removal have been dispatched.
    * @param aDeep Whether to recursively unbind the entire subtree rooted at
    *        this node.  The only time false should be passed is when the
    *        parent node of the content is being destroyed.
@@ -229,7 +230,7 @@ public:
   bool IsInAnonymousSubtree() const
   {
     NS_ASSERTION(!IsInNativeAnonymousSubtree() || GetBindingParent() ||
-                 (!IsInDoc() &&
+                 (!IsInUncomposedDoc() &&
                   static_cast<nsIContent*>(SubtreeRoot())->IsInNativeAnonymousSubtree()),
                  "Must have binding parent when in native anonymous subtree which is in document.\n"
                  "Native anonymous subtree which is not in document must have native anonymous root.");
@@ -241,6 +242,12 @@ public:
    * the term, i.e. not in an XHTML/XML document).
    */
   inline bool IsInHTMLDocument() const;
+
+
+  /**
+   * Returns true if in a chrome document
+   */
+  virtual bool IsInChromeDocument() const;
 
   /**
    * Get the namespace that this element's tag is defined in
@@ -320,6 +327,18 @@ public:
            GetBindingParent();
   }
 
+  bool IsGeneratedContentContainerForBefore() const
+  {
+    return IsRootOfNativeAnonymousSubtree() &&
+           mNodeInfo->NameAtom() == nsGkAtoms::mozgeneratedcontentbefore;
+  }
+
+  bool IsGeneratedContentContainerForAfter() const
+  {
+    return IsRootOfNativeAnonymousSubtree() &&
+           mNodeInfo->NameAtom() == nsGkAtoms::mozgeneratedcontentafter;
+  }
+
   /**
    * Set attribute values. All attribute values are assumed to have a
    * canonical string representation that can be used for these
@@ -393,7 +412,7 @@ public:
                    nsIAtom* aName,
                    const nsAString& aValue,
                    nsCaseTreatment aCaseSensitive) const;
-  
+
   /**
    * Test whether this content node's given attribute has the given value.  If
    * the attribute is not set at all, this will return false.
@@ -408,7 +427,7 @@ public:
                    nsIAtom* aName,
                    nsIAtom* aValue,
                    nsCaseTreatment aCaseSensitive) const;
-  
+
   enum {
     ATTR_MISSING = -1,
     ATTR_VALUE_NO_MATCH = -2
@@ -420,7 +439,7 @@ public:
    * we return ATTR_MISSING. If there was an attribute but it didn't
    * match, we return ATTR_VALUE_NO_MATCH. A non-negative result always
    * indicates a match.
-   * 
+   *
    * @param aNameSpaceID The namespace ID of the attribute.  Must not
    *                     be kNameSpaceID_Unknown.
    * @param aName The name atom of the attribute.  Must not be null.
@@ -447,13 +466,13 @@ public:
    * @param aNotify specifies whether or not the document should be
    * notified of the attribute change
    */
-  virtual nsresult UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttr, 
+  virtual nsresult UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttr,
                              bool aNotify) = 0;
 
 
   /**
    * Get the namespace / name / prefix of a given attribute.
-   * 
+   *
    * @param   aIndex the index of the attribute name
    * @returns The name at the given index, or null if the index is
    *          out-of-bounds.
@@ -463,6 +482,11 @@ public:
    *          next call of either GetAttrNameAt or SetAttr on the element.
    */
   virtual const nsAttrName* GetAttrNameAt(uint32_t aIndex) const = 0;
+
+  /**
+   * Gets the attribute info (name and value) for this content at a given index.
+   */
+  virtual mozilla::dom::BorrowedAttrInfo GetAttrInfoAt(uint32_t aIndex) const = 0;
 
   /**
    * Get the number of all specified attributes.
@@ -484,13 +508,13 @@ public:
    */
   virtual uint32_t TextLength() const = 0;
 
-   /**
-    * Determines if an event attribute name (such as onclick) is valid for
-    * a given element type.
-    * @note calls nsContentUtils::IsEventAttributeName with right flag
-    * @note overridden by subclasses as needed
-    * @param aName the event name to look up
-    */
+  /**
+   * Determines if an event attribute name (such as onclick) is valid for
+   * a given element type.
+   * @note calls nsContentUtils::IsEventAttributeName with right flag
+   * @note overridden by subclasses as needed
+   * @param aName the event name to look up
+   */
   virtual bool IsEventAttributeName(nsIAtom* aName)
   {
     return false;
@@ -546,18 +570,18 @@ public:
    * Append the text content to aResult.
    * NOTE: This asserts and returns for elements
    */
-  MOZ_WARN_UNUSED_RESULT
+  MOZ_MUST_USE
   virtual bool AppendTextTo(nsAString& aResult, const mozilla::fallible_t&) = 0;
 
   /**
    * Check if this content is focusable and in the current tab order.
-   * Note: most callers should use nsIFrame::IsFocusable() instead as it 
+   * Note: most callers should use nsIFrame::IsFocusable() instead as it
    *       checks visibility and other layout factors as well.
    * Tabbable is indicated by a nonnegative tabindex & is a subset of focusable.
-   * For example, only the selected radio button in a group is in the 
+   * For example, only the selected radio button in a group is in the
    * tab order, unless the radio group has no selection in which case
-   * all of the visible, non-disabled radio buttons in the group are 
-   * in the tab order. On the other hand, all of the visible, non-disabled 
+   * all of the visible, non-disabled radio buttons in the group are
+   * in the tab order. On the other hand, all of the visible, non-disabled
    * radio buttons are always focusable via clicking or script.
    * Also, depending on either the accessibility.tabfocus pref or
    * a system setting (nowadays: Full keyboard access, mac only)
@@ -654,7 +678,7 @@ public:
    *
    * @return The ShadowRoot currently bound to this element.
    */
-  virtual mozilla::dom::ShadowRoot *GetShadowRoot() const = 0;
+  inline mozilla::dom::ShadowRoot *GetShadowRoot() const;
 
   /**
    * Gets the root of the node tree for this content if it is in a shadow tree.
@@ -695,13 +719,15 @@ public:
   virtual void SetXBLInsertionParent(nsIContent* aContent) = 0;
 
   /**
-   * Returns the content node that is the parent of this node in the flattened
-   * tree. For nodes that are not filtered into an insertion point, this
-   * simply returns their DOM parent in the original DOM tree.
-   *
-   * @return the flattened tree parent
+   * Same as GetFlattenedTreeParentNode, but returns null if the parent is
+   * non-nsIContent.
    */
-  nsIContent *GetFlattenedTreeParent() const;
+  inline nsIContent *GetFlattenedTreeParent() const;
+
+  /**
+   * Helper method, which we leave public so that it's accessible from nsINode.
+   */
+  nsINode *GetFlattenedTreeParentNodeInternal() const;
 
   /**
    * Gets the custom element data used by web components custom element.
@@ -778,7 +804,7 @@ public:
   }
 
   /**
-   * This method is called when the parser begins creating the element's 
+   * This method is called when the parser begins creating the element's
    * children, if any are present.
    *
    * This is only called for XTF elements currently.
@@ -865,7 +891,9 @@ public:
    * Destroy this node and its children. Ideally this shouldn't be needed
    * but for now we need to do it to break cycles.
    */
-  virtual void DestroyContent() = 0;
+  virtual void DestroyContent()
+  {
+  }
 
   /**
    * Saves the form state of this node and its children.
@@ -885,10 +913,10 @@ public:
    */
   nsIFrame* GetPrimaryFrame() const
   {
-    return (IsInDoc() || IsInShadowTree()) ? mPrimaryFrame : nullptr;
+    return (IsInUncomposedDoc() || IsInShadowTree()) ? mPrimaryFrame : nullptr;
   }
   void SetPrimaryFrame(nsIFrame* aFrame) {
-    MOZ_ASSERT(IsInDoc() || IsInShadowTree(), "This will end badly!");
+    MOZ_ASSERT(IsInUncomposedDoc() || IsInShadowTree(), "This will end badly!");
     NS_PRECONDITION(!aFrame || !mPrimaryFrame || aFrame == mPrimaryFrame,
                     "Losing track of existing primary frame");
     mPrimaryFrame = aFrame;
@@ -909,6 +937,14 @@ public:
    * element.  Also, when the content isn't editable, this returns null.
    */
   mozilla::dom::Element* GetEditingHost();
+
+
+  /**
+   * Set NODE_HAS_DIRTY_DESCENDANTS_FOR_SERVO all the way up the flattened
+   * parent chain to the document. If an ancestor is found with the bit already
+   * set, this method asserts that all of its ancestors also have the bit set.
+   */
+  void MarkAncestorsAsHavingDirtyDescendantsForServo();
 
   /**
    * Determining language. Look at the nearest ancestor element that has a lang
@@ -987,7 +1023,7 @@ public:
   }
 
   enum ETabFocusType {
-  //eTabFocus_textControlsMask = (1<<0),  // unused - textboxes always tabbable
+    eTabFocus_textControlsMask = (1<<0),  // textboxes and lists always tabbable
     eTabFocus_formElementsMask = (1<<1),  // non-text form elements
     eTabFocus_linksMask = (1<<2),         // links
     eTabFocus_any = 1 + (1<<1) + (1<<2)   // everything that can be focused

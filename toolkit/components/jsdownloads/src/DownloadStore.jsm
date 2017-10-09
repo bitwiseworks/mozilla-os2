@@ -34,8 +34,7 @@ this.EXPORTED_SYMBOLS = [
   "DownloadStore",
 ];
 
-////////////////////////////////////////////////////////////////////////////////
-//// Globals
+// Globals
 
 const Cc = Components.classes;
 const Ci = Components.interfaces;
@@ -59,8 +58,7 @@ XPCOMUtils.defineLazyGetter(this, "gTextEncoder", function () {
   return new TextEncoder();
 });
 
-////////////////////////////////////////////////////////////////////////////////
-//// DownloadStore
+// DownloadStore
 
 /**
  * Handles serialization of Download objects and persistence into a file, so
@@ -124,8 +122,8 @@ this.DownloadStore.prototype = {
           try {
             if (!download.succeeded && !download.canceled && !download.error) {
               // Try to restart the download if it was in progress during the
-              // previous session.
-              download.start();
+              // previous session.  Ignore errors.
+              download.start().catch(() => {});
             } else {
               // If the download was not in progress, try to update the current
               // progress from disk.  This is relevant in case we retained

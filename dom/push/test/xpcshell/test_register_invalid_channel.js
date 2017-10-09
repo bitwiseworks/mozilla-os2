@@ -11,9 +11,6 @@ const channelID = 'cafed00d';
 function run_test() {
   do_get_profile();
   setPrefs();
-  disableServiceWorkerEvents(
-    'https://example.com/invalid-channel'
-  );
   run_next_test();
 }
 
@@ -24,7 +21,6 @@ add_task(function* test_register_invalid_channel() {
   PushServiceWebSocket._generateID = () => channelID;
   PushService.init({
     serverURI: "wss://push.example.org/",
-    networkInfo: new MockDesktopNetworkInfo(),
     db,
     makeWebSocket(uri) {
       return new MockWebSocket(uri, {
@@ -48,8 +44,11 @@ add_task(function* test_register_invalid_channel() {
   });
 
   yield rejects(
-    PushNotificationService.register('https://example.com/invalid-channel',
-      ChromeUtils.originAttributesToSuffix({ appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inBrowser: false })),
+    PushService.register({
+      scope: 'https://example.com/invalid-channel',
+      originAttributes: ChromeUtils.originAttributesToSuffix(
+        { appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inIsolatedMozBrowser: false }),
+    }),
     'Expected error for invalid channel ID'
   );
 

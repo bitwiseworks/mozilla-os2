@@ -4,25 +4,32 @@
 
 const { Cu, Cc, Ci } = require("chrome");
 
-Cu.import("resource://devtools/client/shared/widgets/ViewHelpers.jsm");
-const STRINGS_URI = "chrome://devtools/locale/memory.properties"
-const L10N = exports.L10N = new ViewHelpers.L10N(STRINGS_URI);
+const { LocalizationHelper } = require("devtools/shared/l10n");
+const STRINGS_URI = "devtools/client/locales/memory.properties";
+const L10N = exports.L10N = new LocalizationHelper(STRINGS_URI);
 
-const { URL } = require("sdk/url");
 const { OS } = require("resource://gre/modules/osfile.jsm");
 const { assert } = require("devtools/shared/DevToolsUtils");
 const { Preferences } = require("resource://gre/modules/Preferences.jsm");
-const CUSTOM_BREAKDOWN_PREF = "devtools.memory.custom-breakdowns";
+const CUSTOM_CENSUS_DISPLAY_PREF = "devtools.memory.custom-census-displays";
+const CUSTOM_LABEL_DISPLAY_PREF = "devtools.memory.custom-label-displays";
+const CUSTOM_TREE_MAP_DISPLAY_PREF = "devtools.memory.custom-tree-map-displays";
+const BYTES = 1024;
+const KILOBYTES = Math.pow(BYTES, 2);
+const MEGABYTES = Math.pow(BYTES, 3);
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
-const { snapshotState: states, diffingState, breakdowns } = require("./constants");
-
-exports.immutableUpdate = function (...objs) {
-  return Object.freeze(Object.assign({}, ...objs));
-};
+const {
+  snapshotState: states,
+  diffingState,
+  censusState,
+  treeMapState,
+  dominatorTreeState,
+  individualsState,
+} = require("./constants");
 
 /**
- * Takes a snapshot object and returns the
- * localized form of its timestamp to be used as a title.
+ * Takes a snapshot object and returns the localized form of its timestamp to be
+ * used as a title.
  *
  * @param {Snapshot} snapshot
  * @return {String}
@@ -46,76 +53,45 @@ exports.getSnapshotTitle = function (snapshot) {
   });
 };
 
-/**
- * Returns an array of objects with the unique key `name`
- * and `displayName` for each breakdown.
- *
- * @return {Object{name, displayName}}
- */
-exports.getBreakdownDisplayData = function () {
-  return exports.getBreakdownNames().map(name => {
-    // If it's a preset use the display name value
-    let preset = breakdowns[name];
-    let displayName = name;
-    if (preset && preset.displayName) {
-      displayName = preset.displayName;
-    }
-    return { name, displayName };
-  });
-};
-
-/**
- * Returns an array of the unique names for each breakdown in
- * presets and custom pref.
- *
- * @return {Array<Breakdown>}
- */
-exports.getBreakdownNames = function () {
-  let custom = exports.getCustomBreakdowns();
-  return Object.keys(Object.assign({}, breakdowns, custom));
-};
-
-/**
- * Returns custom breakdowns defined in `devtools.memory.custom-breakdowns` pref.
- *
- * @return {Object}
- */
-exports.getCustomBreakdowns = function () {
-  let customBreakdowns = Object.create(null);
+function getCustomDisplaysHelper(pref) {
+  let customDisplays = Object.create(null);
   try {
-    customBreakdowns = JSON.parse(Preferences.get(CUSTOM_BREAKDOWN_PREF)) || Object.create(null);
+    customDisplays = JSON.parse(Preferences.get(pref)) || Object.create(null);
   } catch (e) {
     DevToolsUtils.reportException(
-      `String stored in "${CUSTOM_BREAKDOWN_PREF}" pref cannot be parsed by \`JSON.parse()\`.`);
+      `String stored in "${pref}" pref cannot be parsed by \`JSON.parse()\`.`);
   }
-  return customBreakdowns;
+  return Object.freeze(customDisplays);
 }
 
 /**
- * Converts a breakdown preset name, like "allocationStack", and returns the
- * spec for the breakdown. Also checks properties of keys in the `devtools.memory.custom-breakdowns`
- * pref. If not found, returns an empty object.
+ * Returns custom displays defined in `devtools.memory.custom-census-displays`
+ * pref.
  *
- * @param {String} name
  * @return {Object}
  */
+exports.getCustomCensusDisplays = function () {
+  return getCustomDisplaysHelper(CUSTOM_CENSUS_DISPLAY_PREF);
+};
 
-exports.breakdownNameToSpec = function (name) {
-  let customBreakdowns = exports.getCustomBreakdowns();
+/**
+ * Returns custom displays defined in
+ * `devtools.memory.custom-label-displays` pref.
+ *
+ * @return {Object}
+ */
+exports.getCustomLabelDisplays = function () {
+  return getCustomDisplaysHelper(CUSTOM_LABEL_DISPLAY_PREF);
+};
 
-  // If breakdown is already a breakdown, use it
-  if (typeof name === "object") {
-    return name;
-  }
-  // If it's in our custom breakdowns, use it
-  else if (name in customBreakdowns) {
-    return customBreakdowns[name];
-  }
-  // If breakdown name is in our presets, use that
-  else if (name in breakdowns) {
-    return breakdowns[name].breakdown;
-  }
-  return Object.create(null);
+/**
+ * Returns custom displays defined in
+ * `devtools.memory.custom-tree-map-displays` pref.
+ *
+ * @return {Object}
+ */
+exports.getCustomTreeMapDisplays = function () {
+  return getCustomDisplaysHelper(CUSTOM_TREE_MAP_DISPLAY_PREF);
 };
 
 /**
@@ -145,8 +121,11 @@ exports.getStatusText = function (state) {
     case states.READING:
       return L10N.getStr("snapshot.state.reading");
 
-    case states.SAVING_CENSUS:
+    case censusState.SAVING:
       return L10N.getStr("snapshot.state.saving-census");
+
+    case treeMapState.SAVING:
+      return L10N.getStr("snapshot.state.saving-tree-map");
 
     case diffingState.TAKING_DIFF:
       return L10N.getStr("diffing.state.taking-diff");
@@ -154,11 +133,34 @@ exports.getStatusText = function (state) {
     case diffingState.SELECTING:
       return L10N.getStr("diffing.state.selecting");
 
+    case dominatorTreeState.COMPUTING:
+    case individualsState.COMPUTING_DOMINATOR_TREE:
+      return L10N.getStr("dominatorTree.state.computing");
+
+    case dominatorTreeState.COMPUTED:
+    case dominatorTreeState.FETCHING:
+      return L10N.getStr("dominatorTree.state.fetching");
+
+    case dominatorTreeState.INCREMENTAL_FETCHING:
+      return L10N.getStr("dominatorTree.state.incrementalFetching");
+
+    case dominatorTreeState.ERROR:
+      return L10N.getStr("dominatorTree.state.error");
+
+    case individualsState.ERROR:
+      return L10N.getStr("individuals.state.error");
+
+    case individualsState.FETCHING:
+      return L10N.getStr("individuals.state.fetching");
+
     // These states do not have any message to show as other content will be
     // displayed.
+    case dominatorTreeState.LOADED:
     case diffingState.TOOK_DIFF:
     case states.READ:
-    case states.SAVED_CENSUS:
+    case censusState.SAVED:
+    case treeMapState.SAVED:
+    case individualsState.FETCHED:
       return "";
 
     default:
@@ -194,8 +196,11 @@ exports.getStatusTextFull = function (state) {
     case states.READING:
       return L10N.getStr("snapshot.state.reading.full");
 
-    case states.SAVING_CENSUS:
+    case censusState.SAVING:
       return L10N.getStr("snapshot.state.saving-census.full");
+
+    case treeMapState.SAVING:
+      return L10N.getStr("snapshot.state.saving-tree-map.full");
 
     case diffingState.TAKING_DIFF:
       return L10N.getStr("diffing.state.taking-diff.full");
@@ -203,11 +208,34 @@ exports.getStatusTextFull = function (state) {
     case diffingState.SELECTING:
       return L10N.getStr("diffing.state.selecting.full");
 
+    case dominatorTreeState.COMPUTING:
+    case individualsState.COMPUTING_DOMINATOR_TREE:
+      return L10N.getStr("dominatorTree.state.computing.full");
+
+    case dominatorTreeState.COMPUTED:
+    case dominatorTreeState.FETCHING:
+      return L10N.getStr("dominatorTree.state.fetching.full");
+
+    case dominatorTreeState.INCREMENTAL_FETCHING:
+      return L10N.getStr("dominatorTree.state.incrementalFetching.full");
+
+    case dominatorTreeState.ERROR:
+      return L10N.getStr("dominatorTree.state.error.full");
+
+    case individualsState.ERROR:
+      return L10N.getStr("individuals.state.error.full");
+
+    case individualsState.FETCHING:
+      return L10N.getStr("individuals.state.fetching.full");
+
     // These states do not have any full message to show as other content will
     // be displayed.
+    case dominatorTreeState.LOADED:
     case diffingState.TOOK_DIFF:
     case states.READ:
-    case states.SAVED_CENSUS:
+    case censusState.SAVED:
+    case treeMapState.SAVED:
+    case individualsState.FETCHED:
       return "";
 
     default:
@@ -223,8 +251,8 @@ exports.getStatusTextFull = function (state) {
  * @returns {Boolean}
  */
 exports.snapshotIsDiffable = function snapshotIsDiffable(snapshot) {
-  return snapshot.state === states.SAVED_CENSUS
-    || snapshot.state === states.SAVING_CENSUS
+  return (snapshot.census && snapshot.census.state === censusState.SAVED)
+    || (snapshot.census && snapshot.census.state === censusState.SAVING)
     || snapshot.state === states.SAVED
     || snapshot.state === states.READ;
 };
@@ -238,23 +266,46 @@ exports.snapshotIsDiffable = function snapshotIsDiffable(snapshot) {
  * @param {snapshotId} id
  * @return {snapshotModel|null}
  */
-exports.getSnapshot = function getSnapshot (state, id) {
+exports.getSnapshot = function getSnapshot(state, id) {
   const found = state.snapshots.find(s => s.id === id);
-  assert(found, `No matching snapshot found for ${id}`);
+  assert(found, `No matching snapshot found with id = ${id}`);
   return found;
+};
+
+/**
+ * Get the ID of the selected snapshot, if one is selected, null otherwise.
+ *
+ * @returns {SnapshotId|null}
+ */
+exports.findSelectedSnapshot = function (state) {
+  const found = state.snapshots.find(s => s.selected);
+  return found ? found.id : null;
 };
 
 /**
  * Creates a new snapshot object.
  *
+ * @param {appModel} state
  * @return {Snapshot}
  */
 let ID_COUNTER = 0;
-exports.createSnapshot = function createSnapshot() {
+exports.createSnapshot = function createSnapshot(state) {
+  let dominatorTree = null;
+  if (state.view.state === dominatorTreeState.DOMINATOR_TREE) {
+    dominatorTree = Object.freeze({
+      dominatorTreeId: null,
+      root: null,
+      error: null,
+      state: dominatorTreeState.COMPUTING,
+    });
+  }
+
   return Object.freeze({
     id: ++ID_COUNTER,
     state: states.SAVING,
+    dominatorTree,
     census: null,
+    treeMap: null,
     path: null,
     imported: false,
     selected: false,
@@ -263,61 +314,65 @@ exports.createSnapshot = function createSnapshot() {
 };
 
 /**
- * Takes two objects and compares them deeply, returning
- * a boolean indicating if they're equal or not. Used for breakdown
- * comparison.
+ * Return true if the census is up to date with regards to the current filtering
+ * and requested display, false otherwise.
  *
- * @param {Any} obj1
- * @param {Any} obj2
- * @return {Boolean}
- */
-const breakdownEquals = exports.breakdownEquals = function (obj1, obj2) {
-  let type1 = typeof obj1;
-  let type2 = typeof obj2;
-
-  // Quick checks
-  if (type1 !== type2 || (Array.isArray(obj1) !== Array.isArray(obj2))) {
-    return false;
-  }
-
-  if (obj1 === obj2) {
-    return true;
-  }
-
-  if (Array.isArray(obj1)) {
-    if (obj1.length !== obj2.length) { return false; }
-    return obj1.every((_, i) => exports.breakdownEquals(obj[1], obj2[i]));
-  }
-  else if (type1 === "object") {
-    let k1 = Object.keys(obj1);
-    let k2 = Object.keys(obj2);
-
-    if (k1.length !== k2.length) {
-      return false;
-    }
-
-    return k1.every(k => exports.breakdownEquals(obj1[k], obj2[k]));
-  }
-
-  return false;
-};
-
-/**
- * Return true if the census is up to date with regards to the current
- * inversion/filtering/breakdown, false otherwise.
- *
- * @param {Boolean} inverted
  * @param {String} filter
- * @param {Object} breakdown
+ * @param {censusDisplayModel} display
  * @param {censusModel} census
  *
  * @returns {Boolean}
  */
-exports.censusIsUpToDate = function (inverted, filter, breakdown, census) {
+exports.censusIsUpToDate = function (filter, display, census) {
   return census
-      && inverted === census.inverted
-      && filter === census.filter
-      && breakdownEquals(breakdown, census.breakdown);
+      // Filter could be null == undefined so use loose equality.
+      && filter == census.filter
+      && display === census.display;
+};
+
+
+/**
+ * Check to see if the snapshot is in a state that it can take a census.
+ *
+ * @param {SnapshotModel} A snapshot to check.
+ * @param {Boolean} Assert that the snapshot must be in a ready state.
+ * @returns {Boolean}
+ */
+exports.canTakeCensus = function (snapshot) {
+  return snapshot.state === states.READ &&
+    ((!snapshot.census || snapshot.census.state === censusState.SAVED) ||
+     (!snapshot.treeMap || snapshot.treeMap.state === treeMapState.SAVED));
+};
+
+/**
+ * Returns true if the given snapshot's dominator tree has been computed, false
+ * otherwise.
+ *
+ * @param {SnapshotModel} snapshot
+ * @returns {Boolean}
+ */
+exports.dominatorTreeIsComputed = function (snapshot) {
+  return snapshot.dominatorTree &&
+    (snapshot.dominatorTree.state === dominatorTreeState.COMPUTED ||
+     snapshot.dominatorTree.state === dominatorTreeState.LOADED ||
+     snapshot.dominatorTree.state === dominatorTreeState.INCREMENTAL_FETCHING);
+};
+
+/**
+ * Find the first SAVED census, either from the tree map or the normal
+ * census.
+ *
+ * @param {SnapshotModel} snapshot
+ * @returns {Object|null} Either the census, or null if one hasn't completed
+ */
+exports.getSavedCensus = function (snapshot) {
+  if (snapshot.treeMap && snapshot.treeMap.state === treeMapState.SAVED) {
+    return snapshot.treeMap;
+  }
+  if (snapshot.census && snapshot.census.state === censusState.SAVED) {
+    return snapshot.census;
+  }
+  return null;
 };
 
 /**
@@ -341,49 +396,6 @@ exports.getSnapshotTotals = function (census) {
 };
 
 /**
- * Parse a source into a short and long name as well as a host name.
- *
- * @param {String} source
- *        The source to parse.
- *
- * @returns {Object}
- *          An object with the following properties:
- *            - {String} short: A short name for the source.
- *            - {String} long: The full, long name for the source.
- *            - {String?} host: If available, the host name for the source.
- */
-exports.parseSource = function (source) {
-  const sourceStr = source ? String(source) : "";
-
-  let short;
-  let long;
-  let host;
-
-  try {
-    const url = new URL(sourceStr);
-    short = url.fileName;
-    host = url.host;
-    long = url.toString();
-  } catch (e) {
-    // Malformed URI.
-    long = sourceStr;
-    short = sourceStr.slice(0, 100);
-  }
-
-  if (!short) {
-    // Last ditch effort.
-
-    if (!long) {
-      long = L10N.getStr("unknownSource");
-    }
-
-    short = long.slice(0, 100);
-  }
-
-  return { short, long, host };
-};
-
-/**
  * Takes some configurations and opens up a file picker and returns
  * a promise to the chosen file if successful.
  *
@@ -400,7 +412,7 @@ exports.parseSource = function (source) {
  * @return {Promise<?nsILocalFile>}
  *        The file selected by the user, or null, if cancelled.
  */
-exports.openFilePicker = function({ title, filters, defaultName, mode }) {
+exports.openFilePicker = function ({ title, filters, defaultName, mode }) {
   mode = mode === "save" ? Ci.nsIFilePicker.modeSave :
          mode === "open" ? Ci.nsIFilePicker.modeOpen : null;
 
@@ -427,4 +439,91 @@ exports.openFilePicker = function({ title, filters, defaultName, mode }) {
       }
     });
   });
+};
+
+/**
+ * Format the provided number with a space every 3 digits, and optionally
+ * prefixed by its sign.
+ *
+ * @param {Number} number
+ * @param {Boolean} showSign (defaults to false)
+ */
+exports.formatNumber = function (number, showSign = false) {
+  const rounded = Math.round(number);
+  if (rounded === 0 || rounded === -0) {
+    return "0";
+  }
+
+  const abs = String(Math.abs(rounded));
+  // replace every digit followed by (sets of 3 digits) by (itself and a space)
+  const formatted = abs.replace(/(\d)(?=(\d{3})+$)/g, "$1 ");
+
+  if (showSign) {
+    const sign = rounded < 0 ? "-" : "+";
+    return sign + formatted;
+  }
+  return formatted;
+};
+
+/**
+ * Format the provided percentage following the same logic as formatNumber and
+ * an additional % suffix.
+ *
+ * @param {Number} percent
+ * @param {Boolean} showSign (defaults to false)
+ */
+exports.formatPercent = function (percent, showSign = false) {
+  return exports.L10N.getFormatStr("tree-item.percent2",
+                           exports.formatNumber(percent, showSign));
+};
+
+/**
+ * Change an HSL color array with values ranged 0-1 to a properly formatted
+ * ctx.fillStyle string.
+ *
+ * @param  {Number} h
+ *         hue values ranged between [0 - 1]
+ * @param  {Number} s
+ *         hue values ranged between [0 - 1]
+ * @param  {Number} l
+ *         hue values ranged between [0 - 1]
+ * @return {type}
+ */
+exports.hslToStyle = function (h, s, l) {
+  h = parseInt(h * 360, 10);
+  s = parseInt(s * 100, 10);
+  l = parseInt(l * 100, 10);
+
+  return `hsl(${h},${s}%,${l}%)`;
+};
+
+/**
+ * Linearly interpolate between 2 numbers.
+ *
+ * @param {Number} a
+ * @param {Number} b
+ * @param {Number} t
+ *        A value of 0 returns a, and 1 returns b
+ * @return {Number}
+ */
+exports.lerp = function (a, b, t) {
+  return a * (1 - t) + b * t;
+};
+
+/**
+ * Format a number of bytes as human readable, e.g. 13434 => '13KiB'.
+ *
+ * @param  {Number} n
+ *         Number of bytes
+ * @return {String}
+ */
+exports.formatAbbreviatedBytes = function (n) {
+  if (n < BYTES) {
+    return n + "B";
+  } else if (n < KILOBYTES) {
+    return Math.floor(n / BYTES) + "KiB";
+  } else if (n < MEGABYTES) {
+    return Math.floor(n / KILOBYTES) + "MiB";
+  }
+  return Math.floor(n / MEGABYTES) + "GiB";
 };

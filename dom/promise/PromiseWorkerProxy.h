@@ -11,7 +11,7 @@
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/PromiseNativeHandler.h"
 #include "mozilla/dom/StructuredCloneHolder.h"
-#include "mozilla/dom/workers/bindings/WorkerFeature.h"
+#include "mozilla/dom/workers/bindings/WorkerHolder.h"
 #include "nsProxyRelease.h"
 
 #include "WorkerRunnable.h"
@@ -84,9 +84,7 @@ class WorkerPrivate;
 //
 //        RefPtr<FinishTaskWorkerRunnable> runnable =
 //          new FinishTaskWorkerRunnable(proxy->GetWorkerPrivate(), proxy, result);
-//        AutoJSAPI jsapi;
-//        jsapi.Init();
-//        if (!r->Dispatch(jsapi.cx())) {
+//        if (!r->Dispatch()) {
 //          // Worker is alive but not Running any more, so the Promise can't
 //          // be resolved, give up. The proxy will get Release()d at some
 //          // point.
@@ -103,7 +101,7 @@ class WorkerPrivate;
 //          aWorkerPrivate->AssertIsOnWorkerThread();
 //          RefPtr<Promise> promise = mProxy->WorkerPromise();
 //          promise->MaybeResolve(mResult);
-//          mProxy->CleanUp(aCx);
+//          mProxy->CleanUp();
 //        }
 //
 // Note: If a PromiseWorkerProxy is not cleaned up by a WorkerRunnable - this
@@ -112,7 +110,6 @@ class WorkerPrivate;
 // references to it are dropped.
 
 class PromiseWorkerProxy : public PromiseNativeHandler
-                         , public workers::WorkerFeature
                          , public StructuredCloneHolderBase
 {
   friend class PromiseWorkerProxyRunnable;
@@ -150,13 +147,11 @@ public:
   // worker thread! Do not call this after calling CleanUp().
   Promise* WorkerPromise() const;
 
-  void StoreISupports(nsISupports* aSupports);
-
   // Worker thread only. Calling this invalidates several assumptions, so be
   // sure this is the last thing you do.
   // 1. WorkerPrivate() will no longer return a valid worker.
   // 2. WorkerPromise() will crash!
-  void CleanUp(JSContext* aCx);
+  void CleanUp();
 
   Mutex& Lock()
   {
@@ -186,8 +181,6 @@ protected:
 
   virtual void RejectedCallback(JSContext* aCx,
                                 JS::Handle<JS::Value> aValue) override;
-
-  virtual bool Notify(JSContext* aCx, workers::Status aStatus) override;
 
 private:
   PromiseWorkerProxy(workers::WorkerPrivate* aWorkerPrivate,
@@ -222,15 +215,10 @@ private:
 
   const PromiseWorkerProxyStructuredCloneCallbacks* mCallbacks;
 
-  // Aimed to keep objects alive when doing the structured-clone read/write,
-  // which can be added by calling StoreISupports() on the main thread.
-  nsTArray<nsMainThreadPtrHandle<nsISupports>> mSupportsArray;
-
   // Ensure the worker and the main thread won't race to access |mCleanedUp|.
   Mutex mCleanUpLock;
 
-  // Maybe get rid of this entirely and rely on mCleanedUp
-  DebugOnly<bool> mFeatureAdded;
+  UniquePtr<workers::WorkerHolder> mWorkerHolder;
 };
 } // namespace dom
 } // namespace mozilla

@@ -8,6 +8,8 @@
 
 #include "WebSocketChannel.h"
 #include "nsSocketTransportService2.h"
+#include "nsThreadUtils.h" // for NS_IsMainThread
+#include "ipc/IPCMessageUtils.h"
 
 namespace mozilla {
 namespace net {
@@ -135,7 +137,7 @@ WebSocketFrameData::WriteIPCParams(IPC::Message* aMessage) const
 
 bool
 WebSocketFrameData::ReadIPCParams(const IPC::Message* aMessage,
-                                  void** aIter)
+                                  PickleIterator* aIter)
 {
   if (!ReadParam(aMessage, aIter, &mTimeStamp)) {
     return false;

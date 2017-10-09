@@ -12,6 +12,7 @@
 #include "nsIDOMElement.h"
 #include "nsIDOMHTMLImageElement.h"
 #include "nsIImageLoadingContent.h"
+#include "nsIOutputStream.h"
 #include "nsIPrefService.h"
 #include "nsIPrefLocalizedString.h"
 #include "nsIServiceManager.h"
@@ -49,6 +50,9 @@
 
 #include <mbstring.h>
 #include <shlwapi.h>
+
+#include <lm.h>
+#undef ACCESS_READ
 
 #ifndef MAX_BUF
 #define MAX_BUF 4096
@@ -404,12 +408,6 @@ nsWindowsShellService::IsDefaultBrowser(bool aStartupCheck,
                                         bool aForAllTypes,
                                         bool* aIsDefaultBrowser)
 {
-  // If this is the first browser window, maintain internal state that we've
-  // checked this session (so that subsequent window opens don't show the
-  // default browser dialog).
-  if (aStartupCheck)
-    mCheckedThisSession = true;
-
   // Assume we're the default unless one of the several checks below tell us
   // otherwise.
   *aIsDefaultBrowser = true;
@@ -468,7 +466,7 @@ nsWindowsShellService::IsDefaultBrowser(bool aStartupCheck,
         return NS_OK;
       }
 
-      res = ::RegOpenKeyExW(HKEY_CLASSES_ROOT, PromiseFlatString(keyName).get(),
+      res = ::RegOpenKeyExW(HKEY_CLASSES_ROOT, keyName.get(),
                             0, KEY_SET_VALUE, &theKey);
       if (REG_FAILED(res)) {
         // If updating the open command fails try to update it using the helper
@@ -477,10 +475,9 @@ nsWindowsShellService::IsDefaultBrowser(bool aStartupCheck,
         return NS_OK;
       }
 
-      const nsString &flatValue = PromiseFlatString(valueData);
       res = ::RegSetValueExW(theKey, L"", 0, REG_SZ,
-                             (const BYTE *) flatValue.get(),
-                             (flatValue.Length() + 1) * sizeof(char16_t));
+                             (const BYTE *) valueData.get(),
+                             (valueData.Length() + 1) * sizeof(char16_t));
       // Close the key that was created.
       ::RegCloseKey(theKey);
       if (REG_FAILED(res)) {
@@ -532,9 +529,8 @@ nsWindowsShellService::IsDefaultBrowser(bool aStartupCheck,
       if (REG_FAILED(res) || char16_t('\0') != *currValue) {
         // Key wasn't set or was set to something other than our registry entry.
         // Delete the key along with all of its childrean and then recreate it.
-        const nsString &flatName = PromiseFlatString(keyName);
-        ::SHDeleteKeyW(HKEY_CURRENT_USER, flatName.get());
-        res = ::RegCreateKeyExW(HKEY_CURRENT_USER, flatName.get(), 0, nullptr,
+        ::SHDeleteKeyW(HKEY_CURRENT_USER, keyName.get());
+        res = ::RegCreateKeyExW(HKEY_CURRENT_USER, keyName.get(), 0, nullptr,
                                 REG_OPTION_NON_VOLATILE, KEY_SET_VALUE,
                                 nullptr, &theKey, nullptr);
         if (REG_FAILED(res)) {
@@ -586,10 +582,9 @@ nsWindowsShellService::IsDefaultBrowser(bool aStartupCheck,
 
     NS_ConvertUTF8toUTF16 valueData(VAL_OPEN);
     valueData.Replace(offset, 9, appLongPath);
-    const nsString &flatValue = PromiseFlatString(valueData);
     res = ::RegSetValueExW(theKey, L"", 0, REG_SZ,
-                           (const BYTE *) flatValue.get(),
-                           (flatValue.Length() + 1) * sizeof(char16_t));
+                           (const BYTE *) valueData.get(),
+                           (valueData.Length() + 1) * sizeof(char16_t));
     // Close the key that was created.
     ::RegCloseKey(theKey);
     // If updating the FTP protocol handlers shell open command fails try to
@@ -600,13 +595,6 @@ nsWindowsShellService::IsDefaultBrowser(bool aStartupCheck,
     }
   }
 
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsWindowsShellService::GetCanSetDesktopBackground(bool* aResult)
-{
-  *aResult = true;
   return NS_OK;
 }
 
@@ -656,8 +644,98 @@ nsWindowsShellService::LaunchControlPanelDefaultsSelectionUI()
 }
 
 nsresult
+nsWindowsShellService::LaunchControlPanelDefaultPrograms()
+{
+  // This Default Programs feature is Win7+ only.
+  if (!IsWin7OrLater()) {
+    return NS_ERROR_FAILURE;
+  }
+
+  // Build the path control.exe path safely
+  WCHAR controlEXEPath[MAX_PATH + 1] = { '\0' };
+  if (!GetSystemDirectoryW(controlEXEPath, MAX_PATH)) {
+    return NS_ERROR_FAILURE;
+  }
+  LPCWSTR controlEXE = L"control.exe";
+  if (wcslen(controlEXEPath) + wcslen(controlEXE) >= MAX_PATH) {
+    return NS_ERROR_FAILURE;
+  }
+  if (!PathAppendW(controlEXEPath, controlEXE)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  WCHAR params[] = L"control.exe /name Microsoft.DefaultPrograms /page "
+    "pageDefaultProgram\\pageAdvancedSettings?pszAppName=" APP_REG_NAME;
+  STARTUPINFOW si = {sizeof(si), 0};
+  si.dwFlags = STARTF_USESHOWWINDOW;
+  si.wShowWindow = SW_SHOWDEFAULT;
+  PROCESS_INFORMATION pi = {0};
+  if (!CreateProcessW(controlEXEPath, params, nullptr, nullptr, FALSE,
+                      0, nullptr, nullptr, &si, &pi)) {
+    return NS_ERROR_FAILURE;
+  }
+  CloseHandle(pi.hProcess);
+  CloseHandle(pi.hThread);
+
+  return NS_OK;
+}
+
+static bool
+IsWindowsLogonConnected()
+{
+  WCHAR userName[UNLEN + 1];
+  DWORD size = ArrayLength(userName);
+  if (!GetUserNameW(userName, &size)) {
+    return false;
+  }
+
+  LPUSER_INFO_24 info;
+  if (NetUserGetInfo(nullptr, userName, 24, (LPBYTE *)&info)
+      != NERR_Success) {
+    return false;
+  }
+  bool connected = info->usri24_internet_identity;
+  NetApiBufferFree(info);
+
+  return connected;
+}
+
+static bool
+SettingsAppBelievesConnected()
+{
+  nsresult rv;
+  nsCOMPtr<nsIWindowsRegKey> regKey =
+    do_CreateInstance("@mozilla.org/windows-registry-key;1", &rv);
+  if (NS_FAILED(rv)) {
+    return false;
+  }
+
+  rv = regKey->Open(nsIWindowsRegKey::ROOT_KEY_CURRENT_USER,
+                    NS_LITERAL_STRING("SOFTWARE\\Microsoft\\Windows\\Shell\\Associations"),
+                    nsIWindowsRegKey::ACCESS_READ);
+  if (NS_FAILED(rv)) {
+    return false;
+  }
+
+  uint32_t value;
+  rv = regKey->ReadIntValue(NS_LITERAL_STRING("IsConnectedAtLogon"), &value);
+  if (NS_FAILED(rv)) {
+    return false;
+  }
+
+  return !!value;
+}
+
+nsresult
 nsWindowsShellService::LaunchModernSettingsDialogDefaultApps()
 {
+  if (!IsWindowsBuildOrLater(14965) &&
+      !IsWindowsLogonConnected() && SettingsAppBelievesConnected()) {
+    // Use the classic Control Panel to work around a bug of older
+    // builds of Windows 10.
+    return LaunchControlPanelDefaultPrograms();
+  }
+
   IApplicationActivationManager* pActivator;
   HRESULT hr = CoCreateInstance(CLSID_ApplicationActivationManager,
                                 nullptr,
@@ -671,6 +749,15 @@ nsWindowsShellService::LaunchModernSettingsDialogDefaultApps()
            L"windows.immersivecontrolpanel_cw5n1h2txyewy"
            L"!microsoft.windows.immersivecontrolpanel",
            L"page=SettingsPageAppsDefaults", AO_NONE, &pid);
+    if (SUCCEEDED(hr)) {
+      // Do not check error because we could at least open
+      // the "Default apps" setting.
+      pActivator->ActivateApplication(
+             L"windows.immersivecontrolpanel_cw5n1h2txyewy"
+             L"!microsoft.windows.immersivecontrolpanel",
+             L"page=SettingsPageAppsDefaults"
+             L"&target=SystemSettings_DefaultApps_Browser", AO_NONE, &pid);
+    }
     pActivator->Release();
     return SUCCEEDED(hr) ? NS_OK : NS_ERROR_FAILURE;
   }
@@ -775,39 +862,6 @@ nsWindowsShellService::SetDefaultBrowser(bool aClaimAllTypes, bool aForAllUsers)
   }
 
   return rv;
-}
-
-NS_IMETHODIMP
-nsWindowsShellService::GetShouldCheckDefaultBrowser(bool* aResult)
-{
-  NS_ENSURE_ARG_POINTER(aResult);
-
-  // If we've already checked, the browser has been started and this is a
-  // new window open, and we don't want to check again.
-  if (mCheckedThisSession) {
-    *aResult = false;
-    return NS_OK;
-  }
-
-  nsresult rv;
-  nsCOMPtr<nsIPrefBranch> prefs(do_GetService(NS_PREFSERVICE_CONTRACTID, &rv));
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
-
-  return prefs->GetBoolPref(PREF_CHECKDEFAULTBROWSER, aResult);
-}
-
-NS_IMETHODIMP
-nsWindowsShellService::SetShouldCheckDefaultBrowser(bool aShouldCheck)
-{
-  nsresult rv;
-  nsCOMPtr<nsIPrefBranch> prefs(do_GetService(NS_PREFSERVICE_CONTRACTID, &rv));
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
-
-  return prefs->SetBoolPref(PREF_CHECKDEFAULTBROWSER, aShouldCheck);
 }
 
 static nsresult
@@ -941,7 +995,7 @@ nsWindowsShellService::SetDesktopBackground(nsIDOMElement* aElement,
   // e.g. "Desktop Background.bmp"
   nsString fileLeafName;
   rv = shellBundle->GetStringFromName
-                      (MOZ_UTF16("desktopBackgroundLeafNameWin"),
+                      (u"desktopBackgroundLeafNameWin",
                        getter_Copies(fileLeafName));
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -1151,8 +1205,7 @@ nsWindowsShellService::SetDesktopBackgroundColor(uint32_t aColor)
   return regKey->Close();
 }
 
-nsWindowsShellService::nsWindowsShellService() : 
-  mCheckedThisSession(false) 
+nsWindowsShellService::nsWindowsShellService()
 {
 }
 

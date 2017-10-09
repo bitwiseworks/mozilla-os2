@@ -74,7 +74,7 @@
 #define TOUCH_EVENT MESSAGE_TO_EVENT
 #define DOCUMENT_ONLY_EVENT MESSAGE_TO_EVENT
 #define NON_IDL_EVENT MESSAGE_TO_EVENT
-#endif
+#endif /* MESSAGE_TO_EVENT */
 
 #ifdef DEFINED_FORWARDED_EVENT
 #error "Don't define DEFINED_FORWARDED_EVENT"
@@ -172,6 +172,10 @@ EVENT(contextmenu,
       eContextMenu,
       EventNameType_HTMLXUL,
       eMouseEventClass)
+NON_IDL_EVENT(mouselongtap,
+      eMouseLongTap,
+      EventNameType_HTMLXUL,
+      eMouseEventClass)
 // Not supported yet
 // EVENT(cuechange)
 EVENT(dblclick,
@@ -188,6 +192,10 @@ EVENT(dragend,
       eDragEventClass)
 EVENT(dragenter,
       eDragEnter,
+      EventNameType_HTMLXUL,
+      eDragEventClass)
+EVENT(dragexit,
+      eDragExit,
       EventNameType_HTMLXUL,
       eDragEventClass)
 EVENT(dragleave,
@@ -218,6 +226,14 @@ EVENT(ended,
       eEnded,
       EventNameType_HTML,
       eBasicEventClass)
+EVENT(fullscreenchange,
+      eFullscreenChange,
+      EventNameType_HTML,
+      eBasicEventClass)
+EVENT(fullscreenerror,
+      eFullscreenError,
+      EventNameType_HTML,
+      eBasicEventClass)
 EVENT(input,
       eEditorInput,
       EventNameType_HTMLXUL,
@@ -238,6 +254,14 @@ EVENT(keyup,
       eKeyUp,
       EventNameType_HTMLXUL,
       eKeyboardEventClass)
+EVENT(mozkeydownonplugin,
+      eKeyDownOnPlugin,
+      EventNameType_None,
+      eKeyboardEventClass)
+EVENT(mozkeyuponplugin,
+      eKeyUpOnPlugin,
+      EventNameType_None,
+      eKeyboardEventClass)
 NON_IDL_EVENT(mozbrowserbeforekeydown,
               eBeforeKeyDown,
               EventNameType_None,
@@ -254,12 +278,20 @@ NON_IDL_EVENT(mozbrowserafterkeyup,
               eAfterKeyUp,
               EventNameType_None,
               eBeforeAfterKeyboardEventClass)
+NON_IDL_EVENT(mozaccesskeynotfound,
+              eAccessKeyNotFound,
+              EventNameType_None,
+              eKeyboardEventClass)
 EVENT(loadeddata,
       eLoadedData,
       EventNameType_HTML,
       eBasicEventClass)
 EVENT(loadedmetadata,
       eLoadedMetaData,
+      EventNameType_HTML,
+      eBasicEventClass)
+EVENT(loadend,
+      eLoadEnd,
       EventNameType_HTML,
       eBasicEventClass)
 EVENT(loadstart,
@@ -295,18 +327,26 @@ EVENT(mouseup,
       EventNameType_All,
       eMouseEventClass)
 EVENT(mozfullscreenchange,
-      eFullscreenChange,
+      eMozFullscreenChange,
       EventNameType_HTML,
       eBasicEventClass)
 EVENT(mozfullscreenerror,
-      eFullscreenError,
+      eMozFullscreenError,
       EventNameType_HTML,
       eBasicEventClass)
 EVENT(mozpointerlockchange,
-      ePointerLockChange,
+      eMozPointerLockChange,
       EventNameType_HTML,
       eBasicEventClass)
 EVENT(mozpointerlockerror,
+      eMozPointerLockError,
+      EventNameType_HTML,
+      eBasicEventClass)
+EVENT(pointerlockchange,
+      ePointerLockChange,
+      EventNameType_HTML,
+      eBasicEventClass)
+EVENT(pointerlockerror,
       ePointerLockError,
       EventNameType_HTML,
       eBasicEventClass)
@@ -413,6 +453,10 @@ EVENT(timeupdate,
       eTimeUpdate,
       EventNameType_HTML,
       eBasicEventClass)
+EVENT(toggle,
+      eToggle,
+      EventNameType_HTML,
+      eBasicEventClass)
 EVENT(volumechange,
       eVolumeChange,
       EventNameType_HTML,
@@ -457,6 +501,14 @@ ERROR_EVENT(error,
             eBasicEventClass)
 FORWARDED_EVENT(focus,
                 eFocus,
+                EventNameType_HTMLXUL,
+                eFocusEventClass)
+FORWARDED_EVENT(focusin,
+                eFocusIn,
+                EventNameType_HTMLXUL,
+                eFocusEventClass)
+FORWARDED_EVENT(focusout,
+                eFocusOut,
                 EventNameType_HTMLXUL,
                 eFocusEventClass)
 FORWARDED_EVENT(load,
@@ -547,6 +599,10 @@ WINDOW_ONLY_EVENT(deviceorientation,
                   eDeviceOrientation,
                   EventNameType_None,
                   eBasicEventClass)
+WINDOW_ONLY_EVENT(absolutedeviceorientation,
+                  eAbsoluteDeviceOrientation,
+                  EventNameType_None,
+                  eBasicEventClass)
 WINDOW_ONLY_EVENT(deviceproximity,
                   eDeviceProximity,
                   EventNameType_None,
@@ -559,6 +615,24 @@ WINDOW_ONLY_EVENT(devicelight,
                   eDeviceLight,
                   EventNameType_None,
                   eBasicEventClass)
+WINDOW_ONLY_EVENT(vrdisplayconnect,
+                  eVRDisplayConnect,
+                  EventNameType_None,
+                  eBasicEventClass)
+WINDOW_ONLY_EVENT(vrdisplaydisconnect,
+                  eVRDisplayDisconnect,
+                  EventNameType_None,
+                  eBasicEventClass)
+WINDOW_ONLY_EVENT(vrdisplaypresentchange,
+                  eVRDisplayPresentChange,
+                  EventNameType_None,
+                  eBasicEventClass)
+// Install events as per W3C Manifest spec
+WINDOW_ONLY_EVENT(appinstalled,
+                  eAppInstalled,
+                  EventNameType_None,
+                  eBasicEventClass)
+
 
 #ifdef MOZ_B2G
 WINDOW_ONLY_EVENT(moztimechange,
@@ -647,7 +721,7 @@ NON_IDL_EVENT(DOMFocusOut,
               eLegacyDOMFocusOut,
               EventNameType_HTMLXUL,
               eUIEventClass)
-                                  
+
 NON_IDL_EVENT(DOMMouseScroll,
               eLegacyMouseLineOrPageScroll,
               EventNameType_HTMLXUL,
@@ -656,7 +730,7 @@ NON_IDL_EVENT(MozMousePixelScroll,
               eLegacyMousePixelScroll,
               EventNameType_HTMLXUL,
               eMouseScrollEventClass)
-                                                
+
 NON_IDL_EVENT(open,
               eOpen,
               EventNameType_None,
@@ -684,7 +758,7 @@ NON_IDL_EVENT(speakerforcedchange,
 
 // Events that only have on* attributes on XUL elements
 
- // "text" event is legacy event for modifying composition string in nsEditor.
+ // "text" event is legacy event for modifying composition string in EditorBase.
  // This shouldn't be used by web/xul apps.  "compositionupdate" should be
  // used instead.
 NON_IDL_EVENT(text,
@@ -719,6 +793,10 @@ NON_IDL_EVENT(popupshown,
               eXULPopupShown,
               EventNameType_XUL,
               eBasicEventClass)
+NON_IDL_EVENT(popuppositioned,
+              eXULPopupPositioned,
+              EventNameType_XUL,
+              eBasicEventClass)
 NON_IDL_EVENT(popuphiding,
               eXULPopupHiding,
               EventNameType_XUL,
@@ -735,18 +813,6 @@ NON_IDL_EVENT(commandupdate,
               eXULCommandUpdate,
               EventNameType_XUL,
               eBasicEventClass)
-NON_IDL_EVENT(dragexit,
-              eDragExit,
-              EventNameType_XUL,
-              eDragEventClass)
-NON_IDL_EVENT(dragdrop,
-              eLegacyDragDrop,
-              EventNameType_XUL,
-              eDragEventClass)
-NON_IDL_EVENT(draggesture,
-              eLegacyDragGesture,
-              EventNameType_XUL,
-              eDragEventClass)
 NON_IDL_EVENT(overflow,
               eScrollPortOverflow,
               EventNameType_XUL,
@@ -920,22 +986,67 @@ NON_IDL_EVENT(MozEdgeUICompleted,
               EventNameType_None,
               eSimpleGestureEventClass)
 
-NON_IDL_EVENT(transitionend,
-              eTransitionEnd,
-              EventNameType_None,
-              eTransitionEventClass)
-NON_IDL_EVENT(animationstart,
-              eAnimationStart,
-              EventNameType_None,
-              eAnimationEventClass)
-NON_IDL_EVENT(animationend,
-              eAnimationEnd,
-              EventNameType_None,
-              eAnimationEventClass)
-NON_IDL_EVENT(animationiteration,
-              eAnimationIteration,
-              EventNameType_None,
-              eAnimationEventClass)
+// CSS Transition & Animation events:
+EVENT(transitionstart,
+      eTransitionStart,
+      EventNameType_All,
+      eTransitionEventClass)
+EVENT(transitionrun,
+      eTransitionRun,
+      EventNameType_All,
+      eTransitionEventClass)
+EVENT(transitionend,
+      eTransitionEnd,
+      EventNameType_All,
+      eTransitionEventClass)
+EVENT(animationstart,
+      eAnimationStart,
+      EventNameType_All,
+      eAnimationEventClass)
+EVENT(animationend,
+      eAnimationEnd,
+      EventNameType_All,
+      eAnimationEventClass)
+EVENT(animationiteration,
+      eAnimationIteration,
+      EventNameType_All,
+      eAnimationEventClass)
+
+// Webkit-prefixed versions of Transition & Animation events, for web compat:
+EVENT(webkitAnimationEnd,
+      eWebkitAnimationEnd,
+      EventNameType_All,
+      eAnimationEventClass)
+EVENT(webkitAnimationIteration,
+      eWebkitAnimationIteration,
+      EventNameType_All,
+      eAnimationEventClass)
+EVENT(webkitAnimationStart,
+      eWebkitAnimationStart,
+      EventNameType_All,
+      eAnimationEventClass)
+EVENT(webkitTransitionEnd,
+      eWebkitTransitionEnd,
+      EventNameType_All,
+      eTransitionEventClass)
+#ifndef MESSAGE_TO_EVENT
+EVENT(webkitanimationend,
+      eWebkitAnimationEnd,
+      EventNameType_All,
+      eAnimationEventClass)
+EVENT(webkitanimationiteration,
+      eWebkitAnimationIteration,
+      EventNameType_All,
+      eAnimationEventClass)
+EVENT(webkitanimationstart,
+      eWebkitAnimationStart,
+      EventNameType_All,
+      eAnimationEventClass)
+EVENT(webkittransitionend,
+      eWebkitTransitionEnd,
+      EventNameType_All,
+      eTransitionEventClass)
+#endif
 
 NON_IDL_EVENT(audioprocess,
               eAudioProcess,

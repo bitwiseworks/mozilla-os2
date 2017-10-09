@@ -4,20 +4,21 @@
 
 package org.mozilla.gecko.background.fxa;
 
-import java.util.Map;
-
-import org.mozilla.gecko.background.fxa.FxAccountClient10.RequestDelegate;
-import org.mozilla.gecko.background.fxa.FxAccountClient10.StatusResponse;
-import org.mozilla.gecko.background.fxa.FxAccountClient10.TwoKeys;
-import org.mozilla.gecko.background.fxa.FxAccountClient20.LoginResponse;
+import org.mozilla.gecko.background.fxa.FxAccountClient20.AccountStatusResponse;
+import org.mozilla.gecko.background.fxa.FxAccountClient20.RecoveryEmailStatusResponse;
+import org.mozilla.gecko.background.fxa.FxAccountClient20.RequestDelegate;
+import org.mozilla.gecko.background.fxa.FxAccountClient20.TwoKeys;
+import org.mozilla.gecko.fxa.FxAccountDevice;
 import org.mozilla.gecko.sync.ExtendedJSONObject;
 
+import java.util.List;
+
 public interface FxAccountClient {
-  public void createAccountAndGetKeys(final byte[] emailUTF8, final PasswordStretcher passwordStretcher, final Map<String, String> queryParameters, final RequestDelegate<LoginResponse> delegate);
-  public void loginAndGetKeys(final byte[] emailUTF8, final PasswordStretcher passwordStretcher, final Map<String, String> queryParameters, final RequestDelegate<LoginResponse> requestDelegate);
-  public void status(byte[] sessionToken, RequestDelegate<StatusResponse> requestDelegate);
+  public void accountStatus(String uid, RequestDelegate<AccountStatusResponse> requestDelegate);
+  public void recoveryEmailStatus(byte[] sessionToken, RequestDelegate<RecoveryEmailStatusResponse> requestDelegate);
   public void keys(byte[] keyFetchToken, RequestDelegate<TwoKeys> requestDelegate);
   public void sign(byte[] sessionToken, ExtendedJSONObject publicKey, long certificateDurationInMilliseconds, RequestDelegate<String> requestDelegate);
-  public void resendCode(byte[] sessionToken, RequestDelegate<Void> delegate);
-  public void resendUnlockCode(byte[] emailUTF8, RequestDelegate<Void> delegate);
+  public void registerOrUpdateDevice(byte[] sessionToken, FxAccountDevice device, RequestDelegate<FxAccountDevice> requestDelegate);
+  public void deviceList(byte[] sessionToken, RequestDelegate<FxAccountDevice[]> requestDelegate);
+  public void notifyDevices(byte[] sessionToken, List<String> deviceIds, ExtendedJSONObject payload, Long TTL, RequestDelegate<ExtendedJSONObject> requestDelegate);
 }

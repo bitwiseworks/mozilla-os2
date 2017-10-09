@@ -22,7 +22,7 @@
 #include "nsTableColGroupFrame.h"
 #include "nsTableRowFrame.h"
 #include "nsTableRowGroupFrame.h"
-#include "nsTableOuterFrame.h"
+#include "nsTableWrapperFrame.h"
 #include "nsTablePainter.h"
 
 #include "BasicTableLayoutStrategy.h"
@@ -39,9 +39,9 @@
 #include "nsIScriptError.h"
 #include "nsFrameManager.h"
 #include "nsError.h"
-#include "nsAutoPtr.h"
 #include "nsCSSFrameConstructor.h"
-#include "nsStyleSet.h"
+#include "mozilla/StyleSetHandle.h"
+#include "mozilla/StyleSetHandleInlines.h"
 #include "nsDisplayList.h"
 #include "nsIScrollableFrame.h"
 #include "nsCSSProps.h"
@@ -53,15 +53,17 @@ using namespace mozilla::image;
 using namespace mozilla::layout;
 
 /********************************************************************************
- ** nsTableReflowState                                                         **
+ ** TableReflowInput                                                         **
  ********************************************************************************/
 
-struct nsTableReflowState {
+namespace mozilla {
+
+struct TableReflowInput {
 
   // the real reflow state
-  const nsHTMLReflowState& reflowState;
+  const ReflowInput& reflowInput;
 
-  // The table's available size (in reflowState's writing mode)
+  // The table's available size (in reflowInput's writing mode)
   LogicalSize availSize;
 
   // Stationary inline-offset
@@ -70,17 +72,17 @@ struct nsTableReflowState {
   // Running block-offset
   nscoord bCoord;
 
-  nsTableReflowState(const nsHTMLReflowState& aReflowState,
+  TableReflowInput(const ReflowInput& aReflowInput,
                      const LogicalSize& aAvailSize)
-    : reflowState(aReflowState)
+    : reflowInput(aReflowInput)
     , availSize(aAvailSize)
   {
-    MOZ_ASSERT(reflowState.frame->GetType() == nsGkAtoms::tableFrame,
-               "nsTableReflowState should only be created for nsTableFrame");
+    MOZ_ASSERT(reflowInput.mFrame->GetType() == nsGkAtoms::tableFrame,
+               "TableReflowInput should only be created for nsTableFrame");
     nsTableFrame* table =
-      static_cast<nsTableFrame*>(reflowState.frame->FirstInFlow());
-    WritingMode wm = aReflowState.GetWritingMode();
-    LogicalMargin borderPadding = table->GetChildAreaOffset(wm, &reflowState);
+      static_cast<nsTableFrame*>(reflowInput.mFrame->FirstInFlow());
+    WritingMode wm = aReflowInput.GetWritingMode();
+    LogicalMargin borderPadding = table->GetChildAreaOffset(wm, &reflowInput);
 
     iCoord = borderPadding.IStart(wm) + table->GetColSpacing(-1);
     bCoord = borderPadding.BStart(wm); //cellspacing added during reflow
@@ -103,6 +105,8 @@ struct nsTableReflowState {
   }
 };
 
+} // namespace mozilla
+
 /********************************************************************************
  ** nsTableFrame                                                               **
  ********************************************************************************/
@@ -124,10 +128,10 @@ struct BCPropertyData
 nsStyleContext*
 nsTableFrame::GetParentStyleContext(nsIFrame** aProviderFrame) const
 {
-  // Since our parent, the table outer frame, returned this frame, we
+  // Since our parent, the table wrapper frame, returned this frame, we
   // must return whatever our parent would normally have returned.
 
-  NS_PRECONDITION(GetParent(), "table constructed without outer table");
+  NS_PRECONDITION(GetParent(), "table constructed without table wrapper");
   if (!mContent->GetParent() && !StyleContext()->GetPseudo()) {
     // We're the root.  We have no style context parent.
     *aProviderFrame = nullptr;
@@ -183,7 +187,7 @@ nsTableFrame::Init(nsIContent*       aContent,
     }
   } else {
     // Set my isize, because all frames in a table flow are the same isize and
-    // code in nsTableOuterFrame depends on this being set.
+    // code in nsTableWrapperFrame depends on this being set.
     WritingMode wm = GetWritingMode();
     SetSize(LogicalSize(wm, aPrevInFlow->ISize(wm), BSize(wm)));
   }
@@ -243,8 +247,6 @@ nsTableFrame::PageBreakAfter(nsIFrame* aSourceFrame,
   return false;
 }
 
-typedef nsTArray<nsIFrame*> FrameTArray;
-
 /* static */ void
 nsTableFrame::RegisterPositionedTablePart(nsIFrame* aFrame)
 {
@@ -271,8 +273,7 @@ nsTableFrame::RegisterPositionedTablePart(nsIFrame* aFrame)
 
   // Retrieve the positioned parts array for this table.
   FrameProperties props = tableFrame->Properties();
-  auto positionedParts =
-    static_cast<FrameTArray*>(props.Get(PositionedTablePartArray()));
+  FrameTArray* positionedParts = props.Get(PositionedTablePartArray());
 
   // Lazily create the array if it doesn't exist yet.
   if (!positionedParts) {
@@ -288,19 +289,21 @@ nsTableFrame::RegisterPositionedTablePart(nsIFrame* aFrame)
 nsTableFrame::UnregisterPositionedTablePart(nsIFrame* aFrame,
                                             nsIFrame* aDestructRoot)
 {
-  // Retrieve the table frame, and ensure that we hit aDestructRoot on the way.
-  // If we don't, that means that the table frame will be destroyed, so we don't
-  // need to bother with unregistering this frame.
-  nsTableFrame* tableFrame = GetTableFramePassingThrough(aDestructRoot, aFrame);
-  if (!tableFrame) {
+  // Retrieve the table frame, and check if we hit aDestructRoot on the way.
+  bool didPassThrough;
+  nsTableFrame* tableFrame = GetTableFramePassingThrough(aDestructRoot, aFrame,
+      &didPassThrough);
+  if (!didPassThrough && !tableFrame->GetPrevContinuation()) {
+    // The table frame will be destroyed, and it's the first im flow (and thus
+    // owning the PositionedTablePartArray), so we don't need to do
+    // anything.
     return;
   }
   tableFrame = static_cast<nsTableFrame*>(tableFrame->FirstContinuation());
 
   // Retrieve the positioned parts array for this table.
   FrameProperties props = tableFrame->Properties();
-  auto positionedParts =
-    static_cast<FrameTArray*>(props.Get(PositionedTablePartArray()));
+  FrameTArray* positionedParts = props.Get(PositionedTablePartArray());
 
   // Remove the frame.
   MOZ_ASSERT(positionedParts && positionedParts->Contains(aFrame),
@@ -316,9 +319,13 @@ void
 nsTableFrame::SetInitialChildList(ChildListID     aListID,
                                   nsFrameList&    aChildList)
 {
+  if (aListID != kPrincipalList) {
+    nsContainerFrame::SetInitialChildList(aListID, aChildList);
+    return;
+  }
+
   MOZ_ASSERT(mFrames.IsEmpty() && mColGroups.IsEmpty(),
              "unexpected second call to SetInitialChildList");
-  MOZ_ASSERT(aListID == kPrincipalList, "unexpected child list");
 
   // XXXbz the below code is an icky cesspit that's only needed in its current
   // form for two reasons:
@@ -328,7 +335,7 @@ nsTableFrame::SetInitialChildList(ChildListID     aListID,
     aChildList.RemoveFirstChild();
     const nsStyleDisplay* childDisplay = childFrame->StyleDisplay();
 
-    if (NS_STYLE_DISPLAY_TABLE_COLUMN_GROUP == childDisplay->mDisplay) {
+    if (mozilla::StyleDisplay::TableColumnGroup == childDisplay->mDisplay) {
       NS_ASSERTION(nsGkAtoms::tableColGroupFrame == childFrame->GetType(),
                    "This is not a colgroup");
       mColGroups.AppendFrame(nullptr, childFrame);
@@ -368,7 +375,7 @@ nsTableFrame::AttributeChangedFor(nsIFrame*       aFrame,
         cellFrame->GetRowIndex(rowIndex);
         cellFrame->GetColIndex(colIndex);
         RemoveCell(cellFrame, rowIndex);
-        nsAutoTArray<nsTableCellFrame*, 1> cells;
+        AutoTArray<nsTableCellFrame*, 1> cells;
         cells.AppendElement(cellFrame);
         InsertCells(cells, rowIndex, colIndex - 1);
 
@@ -473,10 +480,9 @@ nsTableFrame::GetEffectiveColSpan(const nsTableCellFrame& aCell,
   int32_t colIndex, rowIndex;
   aCell.GetColIndex(colIndex);
   aCell.GetRowIndex(rowIndex);
-  bool ignore;
 
   if (aCellMap)
-    return aCellMap->GetEffectiveColSpan(*tableCellMap, rowIndex, colIndex, ignore);
+    return aCellMap->GetEffectiveColSpan(*tableCellMap, rowIndex, colIndex);
   else
     return tableCellMap->GetEffectiveColSpan(rowIndex, colIndex);
 }
@@ -524,7 +530,7 @@ nsTableFrame::ResetRowIndices(const nsFrameList::Slice& aRowGroupsToExclude)
     if (!excludeRowGroups.GetEntry(rgFrame)) {
       const nsFrameList& rowFrames = rgFrame->PrincipalChildList();
       for (nsFrameList::Enumerator rows(rowFrames); !rows.AtEnd(); rows.Next()) {
-        if (NS_STYLE_DISPLAY_TABLE_ROW==rows.get()->StyleDisplay()->mDisplay) {
+        if (mozilla::StyleDisplay::TableRow == rows.get()->StyleDisplay()->mDisplay) {
           ((nsTableRowFrame *)rows.get())->SetRowIndex(rowIndex);
           rowIndex++;
         }
@@ -776,21 +782,6 @@ nsTableFrame::MatchCellMapToColCache(nsTableCellMap* aCellMap)
       aCellMap->AddColsAtEnd(numColsNotRemoved);
     }
   }
-  if (numColsToAdd && HasZeroColSpans()) {
-    SetNeedColSpanExpansion(true);
-  }
-  if (NeedColSpanExpansion()) {
-    // This flag can be set in two ways -- either by changing
-    // the number of columns (that happens in the block above),
-    // or by adding a cell with colspan="0" to the cellmap.  To
-    // handle the latter case we need to explicitly check the
-    // flag here -- it may be set even if the number of columns
-    // did not change.
-    //
-    // @see nsCellMap::AppendCell
-
-    aCellMap->ExpandZeroColSpans();
-  }
 }
 
 void
@@ -1000,11 +991,9 @@ nsTableFrame::CollectRows(nsIFrame*                   aFrame,
 {
   NS_PRECONDITION(aFrame, "null frame");
   int32_t numRows = 0;
-  nsIFrame* childFrame = aFrame->GetFirstPrincipalChild();
-  while (childFrame) {
+  for (nsIFrame* childFrame : aFrame->PrincipalChildList()) {
     aCollection.AppendElement(static_cast<nsTableRowFrame*>(childFrame));
     numRows++;
-    childFrame = childFrame->GetNextSibling();
   }
   return numRows;
 }
@@ -1021,7 +1010,7 @@ nsTableFrame::InsertRowGroups(const nsFrameList::Slice& aRowGroups)
     RowGroupArray orderedRowGroups;
     OrderRowGroups(orderedRowGroups);
 
-    nsAutoTArray<nsTableRowFrame*, 8> rows;
+    AutoTArray<nsTableRowFrame*, 8> rows;
     // Loop over the rowgroups and check if some of them are new, if they are
     // insert cellmaps in the order that is predefined by OrderRowGroups,
     // XXXbz this code is O(N*M) where N is number of new rowgroups
@@ -1105,7 +1094,7 @@ nsDisplayTableItem::UpdateForFrameBackground(nsIFrame* aFrame)
   nsStyleContext *bgSC;
   if (!nsCSSRendering::FindBackground(aFrame, &bgSC))
     return;
-  if (!bgSC->StyleBackground()->HasFixedBackground())
+  if (!bgSC->StyleBackground()->HasFixedBackground(aFrame))
     return;
 
   mPartHasFixedBackground = true;
@@ -1127,7 +1116,7 @@ nsDisplayTableItem::ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
     static_cast<const nsDisplayTableItemGeometry*>(aGeometry);
 
   bool invalidateForAttachmentFixed = false;
-  if (mPartHasFixedBackground) {
+  if (mDrawsBackground && mPartHasFixedBackground) {
     nsPoint frameOffsetToViewport = mFrame->GetOffsetTo(
         mFrame->PresContext()->PresShell()->GetRootFrame());
     invalidateForAttachmentFixed =
@@ -1147,8 +1136,9 @@ nsDisplayTableItem::ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
 class nsDisplayTableBorderBackground : public nsDisplayTableItem {
 public:
   nsDisplayTableBorderBackground(nsDisplayListBuilder* aBuilder,
-                                 nsTableFrame* aFrame) :
-    nsDisplayTableItem(aBuilder, aFrame) {
+                                 nsTableFrame* aFrame,
+                                 bool aDrawsBackground) :
+    nsDisplayTableItem(aBuilder, aFrame, aDrawsBackground) {
     MOZ_COUNT_CTOR(nsDisplayTableBorderBackground);
   }
 #ifdef NS_BUILD_REFCNT_LOGGING
@@ -1218,10 +1208,8 @@ nsTableFrame::GenericTraversal(nsDisplayListBuilder* aBuilder, nsFrame* aFrame,
   // stacking context, in which case the child won't use its passed-in
   // BorderBackground list anyway. It does affect cell borders though; this
   // lets us get cell borders into the nsTableFrame's BorderBackground list.
-  nsIFrame* kid = aFrame->GetFirstPrincipalChild();
-  while (kid) {
+  for (nsIFrame* kid : aFrame->PrincipalChildList()) {
     aFrame->BuildDisplayListForChild(aBuilder, kid, aDirtyRect, aLists);
-    kid = kid->GetNextSibling();
   }
 }
 
@@ -1254,7 +1242,7 @@ nsTableFrame::DisplayGenericTablePart(nsDisplayListBuilder* aBuilder,
     }
 
     // Paint the outset box-shadows for the table frames
-    bool hasBoxShadow = aFrame->StyleBorder()->mBoxShadow != nullptr;
+    bool hasBoxShadow = aFrame->StyleEffects()->mBoxShadow != nullptr;
     if (hasBoxShadow) {
       lists->BorderBackground()->AppendNewToTop(
         new (aBuilder) nsDisplayBoxShadowOuter(aBuilder, aFrame));
@@ -1265,6 +1253,7 @@ nsTableFrame::DisplayGenericTablePart(nsDisplayListBuilder* aBuilder,
     // XXX how to handle collapsed borders?
     if (aBuilder->IsForEventDelivery()) {
       nsDisplayBackgroundImage::AppendBackgroundItemsToTop(aBuilder, aFrame,
+                                                           aFrame->GetRectRelativeToSelf(),
                                                            lists->BorderBackground());
     }
 
@@ -1281,7 +1270,7 @@ nsTableFrame::DisplayGenericTablePart(nsDisplayListBuilder* aBuilder,
     // Ensure that the table frame event background goes before the
     // table rowgroups event backgrounds, before the table row event backgrounds,
     // before everything else (cells and their blocks)
-    separatedCollection.BorderBackground()->Sort(aBuilder, CompareByTablePartRank, nullptr);
+    separatedCollection.BorderBackground()->Sort(CompareByTablePartRank, nullptr);
     separatedCollection.MoveTo(aLists);
   }
 
@@ -1332,8 +1321,8 @@ nsTableFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 
   nsDisplayTableItem* item = nullptr;
   if (IsVisibleInSelection(aBuilder)) {
+    nsMargin deflate = GetDeflationForBackground(PresContext());
     if (StyleVisibility()->IsVisible()) {
-      nsMargin deflate = GetDeflationForBackground(PresContext());
       // If 'deflate' is (0,0,0,0) then we can paint the table background
       // in its own display item, so do that to take advantage of
       // opacity and visibility optimizations
@@ -1350,7 +1339,8 @@ nsTableFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     if (aBuilder->IsForEventDelivery() ||
         AnyTablePartHasBorderOrBackground(this, GetNextSibling()) ||
         AnyTablePartHasBorderOrBackground(mColGroups.FirstChild(), nullptr)) {
-      item = new (aBuilder) nsDisplayTableBorderBackground(aBuilder, this);
+      item = new (aBuilder) nsDisplayTableBorderBackground(aBuilder, this,
+          deflate != nsMargin(0, 0, 0, 0));
       aLists.BorderBackground()->AppendNewToTop(item);
     }
   }
@@ -1404,9 +1394,8 @@ nsTableFrame::PaintTableBorderBackground(nsDisplayListBuilder* aBuilder,
         nsCSSRendering::PaintBorder(presContext, aRenderingContext, this,
                                     aDirtyRect, rect, mStyleContext,
                                     borderFlags, skipSides);
-    }
-    else {
-      gfxContext* ctx = aRenderingContext.ThebesContext();
+    } else {
+      DrawTarget* drawTarget = aRenderingContext.GetDrawTarget();
 
       gfxPoint devPixelOffset =
         nsLayoutUtils::PointToGfxPoint(aPt,
@@ -1414,10 +1403,11 @@ nsTableFrame::PaintTableBorderBackground(nsDisplayListBuilder* aBuilder,
 
       // XXX we should probably get rid of this translation at some stage
       // But that would mean modifying PaintBCBorders, ugh
-      gfxContextMatrixAutoSaveRestore autoSR(ctx);
-      ctx->SetMatrix(ctx->CurrentMatrix().Translate(devPixelOffset));
+      AutoRestoreTransform autoRestoreTransform(drawTarget);
+      drawTarget->SetTransform(
+        drawTarget->GetTransform().PreTranslate(ToPoint(devPixelOffset)));
 
-      PaintBCBorders(aRenderingContext, aDirtyRect - aPt);
+      PaintBCBorders(*drawTarget, aDirtyRect - aPt);
     }
   }
 
@@ -1425,10 +1415,10 @@ nsTableFrame::PaintTableBorderBackground(nsDisplayListBuilder* aBuilder,
 }
 
 nsIFrame::LogicalSides
-nsTableFrame::GetLogicalSkipSides(const nsHTMLReflowState* aReflowState) const
+nsTableFrame::GetLogicalSkipSides(const ReflowInput* aReflowInput) const
 {
   if (MOZ_UNLIKELY(StyleBorder()->mBoxDecorationBreak ==
-                     NS_STYLE_BOX_DECORATION_BREAK_CLONE)) {
+                     StyleBoxDecorationBreak::Clone)) {
     return LogicalSides();
   }
 
@@ -1464,7 +1454,7 @@ nsTableFrame::SetColumnDimensions(nscoord aBSize, WritingMode aWM,
     nscoord cellSpacingI = 0;
     const nsFrameList& columnList = colGroupFrame->PrincipalChildList();
     for (nsIFrame* colFrame : columnList) {
-      if (NS_STYLE_DISPLAY_TABLE_COLUMN ==
+      if (mozilla::StyleDisplay::TableColumn ==
           colFrame->StyleDisplay()->mDisplay) {
         NS_ASSERTION(colIdx < GetColCount(), "invalid number of columns");
         cellSpacingI = GetColSpacing(colIdx);
@@ -1486,7 +1476,7 @@ nsTableFrame::SetColumnDimensions(nscoord aBSize, WritingMode aWM,
     colIdx = groupFirstCol;
     LogicalPoint colOrigin(aWM);
     for (nsIFrame* colFrame : columnList) {
-      if (NS_STYLE_DISPLAY_TABLE_COLUMN ==
+      if (mozilla::StyleDisplay::TableColumn ==
           colFrame->StyleDisplay()->mDisplay) {
         nscoord colISize = fif->GetColumnISizeFromFirstInFlow(colIdx);
         LogicalRect colRect(aWM, colOrigin.I(aWM), colOrigin.B(aWM),
@@ -1516,9 +1506,8 @@ nsTableFrame::ProcessRowInserted(nscoord aNewBSize)
   for (uint32_t rgIdx = 0; rgIdx < rowGroups.Length(); rgIdx++) {
     nsTableRowGroupFrame* rgFrame = rowGroups[rgIdx];
     NS_ASSERTION(rgFrame, "Must have rgFrame here");
-    nsIFrame* childFrame = rgFrame->GetFirstPrincipalChild();
     // find the row that was inserted first
-    while (childFrame) {
+    for (nsIFrame* childFrame : rgFrame->PrincipalChildList()) {
       nsTableRowFrame *rowFrame = do_QueryFrame(childFrame);
       if (rowFrame) {
         if (rowFrame->IsFirstInserted()) {
@@ -1530,7 +1519,6 @@ nsTableFrame::ProcessRowInserted(nscoord aNewBSize)
           return; // found it, so leave
         }
       }
-      childFrame = childFrame->GetNextSibling();
     }
   }
 }
@@ -1599,14 +1587,14 @@ nsTableFrame::IntrinsicISizeOffsets()
 
 /* virtual */
 LogicalSize
-nsTableFrame::ComputeSize(nsRenderingContext *aRenderingContext,
-                          WritingMode aWM,
-                          const LogicalSize& aCBSize,
-                          nscoord aAvailableISize,
-                          const LogicalSize& aMargin,
-                          const LogicalSize& aBorder,
-                          const LogicalSize& aPadding,
-                          ComputeSizeFlags aFlags)
+nsTableFrame::ComputeSize(nsRenderingContext* aRenderingContext,
+                          WritingMode         aWM,
+                          const LogicalSize&  aCBSize,
+                          nscoord             aAvailableISize,
+                          const LogicalSize&  aMargin,
+                          const LogicalSize&  aBorder,
+                          const LogicalSize&  aPadding,
+                          ComputeSizeFlags    aFlags)
 {
   LogicalSize result =
     nsContainerFrame::ComputeSize(aRenderingContext, aWM,
@@ -1666,14 +1654,14 @@ nsTableFrame::TableShrinkISizeToFit(nsRenderingContext *aRenderingContext,
 
 /* virtual */
 LogicalSize
-nsTableFrame::ComputeAutoSize(nsRenderingContext *aRenderingContext,
-                              WritingMode aWM,
-                              const LogicalSize& aCBSize,
-                              nscoord aAvailableISize,
-                              const LogicalSize& aMargin,
-                              const LogicalSize& aBorder,
-                              const LogicalSize& aPadding,
-                              bool aShrinkWrap)
+nsTableFrame::ComputeAutoSize(nsRenderingContext* aRenderingContext,
+                              WritingMode         aWM,
+                              const LogicalSize&  aCBSize,
+                              nscoord             aAvailableISize,
+                              const LogicalSize&  aMargin,
+                              const LogicalSize&  aBorder,
+                              const LogicalSize&  aPadding,
+                              ComputeSizeFlags    aFlags)
 {
   // Tables always shrink-wrap.
   nscoord cbBased = aAvailableISize - aMargin.ISize(aWM) - aBorder.ISize(aWM) -
@@ -1682,15 +1670,15 @@ nsTableFrame::ComputeAutoSize(nsRenderingContext *aRenderingContext,
                      NS_UNCONSTRAINEDSIZE);
 }
 
-// Return true if aParentReflowState.frame or any of its ancestors within
+// Return true if aParentReflowInput.frame or any of its ancestors within
 // the containing table have non-auto bsize. (e.g. pct or fixed bsize)
 bool
-nsTableFrame::AncestorsHaveStyleBSize(const nsHTMLReflowState& aParentReflowState)
+nsTableFrame::AncestorsHaveStyleBSize(const ReflowInput& aParentReflowInput)
 {
-  WritingMode wm = aParentReflowState.GetWritingMode();
-  for (const nsHTMLReflowState* rs = &aParentReflowState;
-       rs && rs->frame; rs = rs->parentReflowState) {
-    nsIAtom* frameType = rs->frame->GetType();
+  WritingMode wm = aParentReflowInput.GetWritingMode();
+  for (const ReflowInput* rs = &aParentReflowInput;
+       rs && rs->mFrame; rs = rs->mParentReflowInput) {
+    nsIAtom* frameType = rs->mFrame->GetType();
     if (IS_TABLE_CELL(frameType)                     ||
         (nsGkAtoms::tableRowFrame      == frameType) ||
         (nsGkAtoms::tableRowGroupFrame == frameType)) {
@@ -1712,20 +1700,20 @@ nsTableFrame::AncestorsHaveStyleBSize(const nsHTMLReflowState& aParentReflowStat
 // See if a special block-size reflow needs to occur and if so,
 // call RequestSpecialBSizeReflow
 void
-nsTableFrame::CheckRequestSpecialBSizeReflow(const nsHTMLReflowState& aReflowState)
+nsTableFrame::CheckRequestSpecialBSizeReflow(const ReflowInput& aReflowInput)
 {
-  NS_ASSERTION(IS_TABLE_CELL(aReflowState.frame->GetType()) ||
-               aReflowState.frame->GetType() == nsGkAtoms::tableRowFrame ||
-               aReflowState.frame->GetType() == nsGkAtoms::tableRowGroupFrame ||
-               aReflowState.frame->GetType() == nsGkAtoms::tableFrame,
+  NS_ASSERTION(IS_TABLE_CELL(aReflowInput.mFrame->GetType()) ||
+               aReflowInput.mFrame->GetType() == nsGkAtoms::tableRowFrame ||
+               aReflowInput.mFrame->GetType() == nsGkAtoms::tableRowGroupFrame ||
+               aReflowInput.mFrame->GetType() == nsGkAtoms::tableFrame,
                "unexpected frame type");
-  WritingMode wm = aReflowState.GetWritingMode();
-  if (!aReflowState.frame->GetPrevInFlow() &&  // 1st in flow
-      (NS_UNCONSTRAINEDSIZE == aReflowState.ComputedBSize() ||  // no computed bsize
-       0                    == aReflowState.ComputedBSize()) &&
-      eStyleUnit_Percent == aReflowState.mStylePosition->BSize(wm).GetUnit() && // pct bsize
-      nsTableFrame::AncestorsHaveStyleBSize(*aReflowState.parentReflowState)) {
-    nsTableFrame::RequestSpecialBSizeReflow(aReflowState);
+  WritingMode wm = aReflowInput.GetWritingMode();
+  if (!aReflowInput.mFrame->GetPrevInFlow() &&  // 1st in flow
+      (NS_UNCONSTRAINEDSIZE == aReflowInput.ComputedBSize() ||  // no computed bsize
+       0                    == aReflowInput.ComputedBSize()) &&
+      eStyleUnit_Percent == aReflowInput.mStylePosition->BSize(wm).GetUnit() && // pct bsize
+      nsTableFrame::AncestorsHaveStyleBSize(*aReflowInput.mParentReflowInput)) {
+    nsTableFrame::RequestSpecialBSizeReflow(aReflowInput);
   }
 }
 
@@ -1735,20 +1723,20 @@ nsTableFrame::CheckRequestSpecialBSizeReflow(const nsHTMLReflowState& aReflowSta
 // change the bsize of row groups, rows, cells in DistributeBSizeToRows after.
 // And the row group can change the bsize of rows, cells in CalculateRowBSizes.
 void
-nsTableFrame::RequestSpecialBSizeReflow(const nsHTMLReflowState& aReflowState)
+nsTableFrame::RequestSpecialBSizeReflow(const ReflowInput& aReflowInput)
 {
   // notify the frame and its ancestors of the special reflow, stopping at the containing table
-  for (const nsHTMLReflowState* rs = &aReflowState; rs && rs->frame; rs = rs->parentReflowState) {
-    nsIAtom* frameType = rs->frame->GetType();
+  for (const ReflowInput* rs = &aReflowInput; rs && rs->mFrame; rs = rs->mParentReflowInput) {
+    nsIAtom* frameType = rs->mFrame->GetType();
     NS_ASSERTION(IS_TABLE_CELL(frameType) ||
                  nsGkAtoms::tableRowFrame == frameType ||
                  nsGkAtoms::tableRowGroupFrame == frameType ||
                  nsGkAtoms::tableFrame == frameType,
                  "unexpected frame type");
 
-    rs->frame->AddStateBits(NS_FRAME_CONTAINS_RELATIVE_BSIZE);
+    rs->mFrame->AddStateBits(NS_FRAME_CONTAINS_RELATIVE_BSIZE);
     if (nsGkAtoms::tableFrame == frameType) {
-      NS_ASSERTION(rs != &aReflowState,
+      NS_ASSERTION(rs != &aReflowInput,
                    "should not request special bsize reflow for table");
       // always stop when we reach a table
       break;
@@ -1820,15 +1808,15 @@ nsTableFrame::RequestSpecialBSizeReflow(const nsHTMLReflowState& aReflowState)
 /* Layout the entire inner table. */
 void
 nsTableFrame::Reflow(nsPresContext*           aPresContext,
-                     nsHTMLReflowMetrics&     aDesiredSize,
-                     const nsHTMLReflowState& aReflowState,
+                     ReflowOutput&     aDesiredSize,
+                     const ReflowInput& aReflowInput,
                      nsReflowStatus&          aStatus)
 {
   MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("nsTableFrame");
-  DISPLAY_REFLOW(aPresContext, this, aReflowState, aDesiredSize, aStatus);
+  DISPLAY_REFLOW(aPresContext, this, aReflowInput, aDesiredSize, aStatus);
   bool isPaginated = aPresContext->IsPaginated();
-  WritingMode wm = aReflowState.GetWritingMode();
+  WritingMode wm = aReflowInput.GetWritingMode();
 
   aStatus = NS_FRAME_COMPLETE;
   if (!GetPrevInFlow() && !mTableLayoutStrategy) {
@@ -1841,7 +1829,7 @@ nsTableFrame::Reflow(nsPresContext*           aPresContext,
     CalcBCBorders();
   }
 
-  aDesiredSize.ISize(wm) = aReflowState.AvailableISize();
+  aDesiredSize.ISize(wm) = aReflowInput.AvailableISize();
 
   // Check for an overflow list, and append any row group frames being pushed
   MoveOverflowToChildList();
@@ -1855,16 +1843,16 @@ nsTableFrame::Reflow(nsPresContext*           aPresContext,
   // reflows with a constrained isize.
   bool fixupKidPositions = false;
   if (NS_SUBTREE_DIRTY(this) ||
-      aReflowState.ShouldReflowAllKids() ||
+      aReflowInput.ShouldReflowAllKids() ||
       IsGeometryDirty() ||
-      aReflowState.IsBResize()) {
+      aReflowInput.IsBResize()) {
 
-    if (aReflowState.ComputedBSize() != NS_UNCONSTRAINEDSIZE ||
+    if (aReflowInput.ComputedBSize() != NS_UNCONSTRAINEDSIZE ||
         // Also check IsBResize(), to handle the first Reflow preceding a
         // special bsize Reflow, when we've already had a special bsize
         // Reflow (where ComputedBSize() would not be
         // NS_UNCONSTRAINEDSIZE, but without a style change in between).
-        aReflowState.IsBResize()) {
+        aReflowInput.IsBResize()) {
       // XXX Eventually, we should modify DistributeBSizeToRows to use
       // nsTableRowFrame::GetInitialBSize instead of nsIFrame::BSize().
       // That way, it will make its calculations based on internal table
@@ -1879,8 +1867,8 @@ nsTableFrame::Reflow(nsPresContext*           aPresContext,
       HasAnyStateBits(NS_FRAME_CONTAINS_RELATIVE_BSIZE);
     // see if an extra reflow will be necessary in pagination mode
     // when there is a specified table bsize
-    if (isPaginated && !GetPrevInFlow() && (NS_UNCONSTRAINEDSIZE != aReflowState.AvailableBSize())) {
-      nscoord tableSpecifiedBSize = CalcBorderBoxBSize(aReflowState);
+    if (isPaginated && !GetPrevInFlow() && (NS_UNCONSTRAINEDSIZE != aReflowInput.AvailableBSize())) {
+      nscoord tableSpecifiedBSize = CalcBorderBoxBSize(aReflowInput);
       if ((tableSpecifiedBSize > 0) &&
           (tableSpecifiedBSize != NS_UNCONSTRAINEDSIZE)) {
         needToInitiateSpecialReflow = true;
@@ -1888,7 +1876,7 @@ nsTableFrame::Reflow(nsPresContext*           aPresContext,
     }
     nsIFrame* lastChildReflowed = nullptr;
 
-    NS_ASSERTION(!aReflowState.mFlags.mSpecialBSizeReflow,
+    NS_ASSERTION(!aReflowInput.mFlags.mSpecialBSizeReflow,
                  "Shouldn't be in special bsize reflow here!");
 
     // do the pass 2 reflow unless this is a special bsize reflow and we will be
@@ -1899,15 +1887,15 @@ nsTableFrame::Reflow(nsPresContext*           aPresContext,
     // bsize of the reflow before that
     nscoord availBSize = needToInitiateSpecialReflow
                          ? NS_UNCONSTRAINEDSIZE
-                         : aReflowState.AvailableBSize();
+                         : aReflowInput.AvailableBSize();
 
-    ReflowTable(aDesiredSize, aReflowState, availBSize,
+    ReflowTable(aDesiredSize, aReflowInput, availBSize,
                 lastChildReflowed, aStatus);
     // If ComputedWidth is unconstrained, we may need to fix child positions
     // later (in vertical-rl mode) due to use of 0 as a dummy
     // containerSize.width during ReflowChildren.
     fixupKidPositions = wm.IsVerticalRL() &&
-      aReflowState.ComputedWidth() == NS_UNCONSTRAINEDSIZE;
+      aReflowInput.ComputedWidth() == NS_UNCONSTRAINEDSIZE;
 
     // reevaluate special bsize reflow conditions
     if (HasAnyStateBits(NS_FRAME_CONTAINS_RELATIVE_BSIZE)) {
@@ -1918,20 +1906,20 @@ nsTableFrame::Reflow(nsPresContext*           aPresContext,
     if (needToInitiateSpecialReflow && NS_FRAME_IS_COMPLETE(aStatus)) {
       // XXXldb Do we need to set the IsBResize flag on any reflow states?
 
-      nsHTMLReflowState &mutable_rs =
-        const_cast<nsHTMLReflowState&>(aReflowState);
+      ReflowInput &mutable_rs =
+        const_cast<ReflowInput&>(aReflowInput);
 
       // distribute extra block-direction space to rows
-      CalcDesiredBSize(aReflowState, aDesiredSize);
+      CalcDesiredBSize(aReflowInput, aDesiredSize);
       mutable_rs.mFlags.mSpecialBSizeReflow = true;
 
-      ReflowTable(aDesiredSize, aReflowState, aReflowState.AvailableBSize(),
+      ReflowTable(aDesiredSize, aReflowInput, aReflowInput.AvailableBSize(),
                   lastChildReflowed, aStatus);
 
       if (lastChildReflowed && NS_FRAME_IS_NOT_COMPLETE(aStatus)) {
         // if there is an incomplete child, then set the desired bsize
         // to include it but not the next one
-        LogicalMargin borderPadding = GetChildAreaOffset(wm, &aReflowState);
+        LogicalMargin borderPadding = GetChildAreaOffset(wm, &aReflowInput);
         aDesiredSize.BSize(wm) =
           borderPadding.BEnd(wm) + GetRowSpacing(GetRowCount()) +
           lastChildReflowed->GetNormalRect().YMost(); // XXX YMost should be B-flavored
@@ -1942,10 +1930,10 @@ nsTableFrame::Reflow(nsPresContext*           aPresContext,
     }
   }
 
-  aDesiredSize.ISize(wm) = aReflowState.ComputedISize() +
-    aReflowState.ComputedLogicalBorderPadding().IStartEnd(wm);
+  aDesiredSize.ISize(wm) = aReflowInput.ComputedISize() +
+    aReflowInput.ComputedLogicalBorderPadding().IStartEnd(wm);
   if (!haveDesiredBSize) {
-    CalcDesiredBSize(aReflowState, aDesiredSize);
+    CalcDesiredBSize(aReflowInput, aDesiredSize);
   }
   if (IsRowInserted()) {
     ProcessRowInserted(aDesiredSize.BSize(wm));
@@ -1968,22 +1956,22 @@ nsTableFrame::Reflow(nsPresContext*           aPresContext,
     ConsiderChildOverflow(aDesiredSize.mOverflowAreas, kid);
   }
 
-  LogicalMargin borderPadding = GetChildAreaOffset(wm, &aReflowState);
+  LogicalMargin borderPadding = GetChildAreaOffset(wm, &aReflowInput);
   SetColumnDimensions(aDesiredSize.BSize(wm), wm, borderPadding,
                       aDesiredSize.PhysicalSize());
   if (NeedToCollapse() &&
-      (NS_UNCONSTRAINEDSIZE != aReflowState.AvailableISize())) {
+      (NS_UNCONSTRAINEDSIZE != aReflowInput.AvailableISize())) {
     AdjustForCollapsingRowsCols(aDesiredSize, wm, borderPadding);
   }
 
   // If there are any relatively-positioned table parts, we need to reflow their
   // absolutely-positioned descendants now that their dimensions are final.
-  FixupPositionedTableParts(aPresContext, aDesiredSize, aReflowState);
+  FixupPositionedTableParts(aPresContext, aDesiredSize, aReflowInput);
 
   // make sure the table overflow area does include the table rect.
   nsRect tableRect(0, 0, aDesiredSize.Width(), aDesiredSize.Height()) ;
 
-  if (!ShouldApplyOverflowClipping(this, aReflowState.mStyleDisplay)) {
+  if (!ShouldApplyOverflowClipping(this, aReflowInput.mStyleDisplay)) {
     // collapsed border may leak out
     LogicalMargin bcMargin = GetExcludedOuterBCBorder(wm);
     tableRect.Inflate(bcMargin.GetPhysicalMargin(wm));
@@ -1996,16 +1984,15 @@ nsTableFrame::Reflow(nsPresContext*           aPresContext,
   }
 
   FinishAndStoreOverflow(&aDesiredSize);
-  NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
+  NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aDesiredSize);
 }
 
 void
 nsTableFrame::FixupPositionedTableParts(nsPresContext*           aPresContext,
-                                        nsHTMLReflowMetrics&     aDesiredSize,
-                                        const nsHTMLReflowState& aReflowState)
+                                        ReflowOutput&     aDesiredSize,
+                                        const ReflowInput& aReflowInput)
 {
-  auto positionedParts =
-    static_cast<FrameTArray*>(Properties().Get(PositionedTablePartArray()));
+  FrameTArray* positionedParts = Properties().Get(PositionedTablePartArray());
   if (!positionedParts) {
     return;
   }
@@ -2019,7 +2006,7 @@ nsTableFrame::FixupPositionedTableParts(nsPresContext*           aPresContext,
     // As we've already finished reflow, positionedParts's size and overflow
     // areas have already been assigned, so we just pull them back out.
     nsSize size(positionedPart->GetSize());
-    nsHTMLReflowMetrics desiredSize(aReflowState.GetWritingMode());
+    ReflowOutput desiredSize(aReflowInput.GetWritingMode());
     desiredSize.Width() = size.width;
     desiredSize.Height() = size.height;
     desiredSize.mOverflowAreas = positionedPart->GetOverflowAreasRelativeToSelf();
@@ -2031,9 +2018,9 @@ nsTableFrame::FixupPositionedTableParts(nsPresContext*           aPresContext,
     WritingMode wm = positionedPart->GetWritingMode();
     LogicalSize availSize(wm, size);
     availSize.BSize(wm) = NS_UNCONSTRAINEDSIZE;
-    nsHTMLReflowState reflowState(aPresContext, positionedPart,
-                                  aReflowState.rendContext, availSize,
-                                  nsHTMLReflowState::DUMMY_PARENT_REFLOW_STATE);
+    ReflowInput reflowInput(aPresContext, positionedPart,
+                                  aReflowInput.mRenderingContext, availSize,
+                                  ReflowInput::DUMMY_PARENT_REFLOW_STATE);
     nsReflowStatus reflowStatus = NS_FRAME_COMPLETE;
 
     // Reflow absolutely-positioned descendants of the positioned part.
@@ -2043,7 +2030,7 @@ nsTableFrame::FixupPositionedTableParts(nsPresContext*           aPresContext,
     nsFrame* positionedFrame = static_cast<nsFrame*>(positionedPart);
     positionedFrame->FinishReflowWithAbsoluteFrames(PresContext(),
                                                     desiredSize,
-                                                    reflowState,
+                                                    reflowInput,
                                                     reflowStatus,
                                                     true);
 
@@ -2067,27 +2054,24 @@ nsTableFrame::FixupPositionedTableParts(nsPresContext*           aPresContext,
 }
 
 bool
-nsTableFrame::UpdateOverflow()
+nsTableFrame::ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas)
 {
-  nsRect bounds(nsPoint(0, 0), GetSize());
-
   // As above in Reflow, make sure the table overflow area includes the table
   // rect, and check for collapsed borders leaking out.
   if (!ShouldApplyOverflowClipping(this, StyleDisplay())) {
+    nsRect bounds(nsPoint(0, 0), GetSize());
     WritingMode wm = GetWritingMode();
     LogicalMargin bcMargin = GetExcludedOuterBCBorder(wm);
     bounds.Inflate(bcMargin.GetPhysicalMargin(wm));
+
+    aOverflowAreas.UnionAllWith(bounds);
   }
-
-  nsOverflowAreas overflowAreas(bounds, bounds);
-  nsLayoutUtils::UnionChildOverflow(this, overflowAreas);
-
-  return FinishAndStoreOverflow(overflowAreas, GetSize());
+  return nsContainerFrame::ComputeCustomOverflow(aOverflowAreas);
 }
 
 void
-nsTableFrame::ReflowTable(nsHTMLReflowMetrics&     aDesiredSize,
-                          const nsHTMLReflowState& aReflowState,
+nsTableFrame::ReflowTable(ReflowOutput&     aDesiredSize,
+                          const ReflowInput& aReflowInput,
                           nscoord                  aAvailBSize,
                           nsIFrame*&               aLastChildReflowed,
                           nsReflowStatus&          aStatus)
@@ -2095,20 +2079,20 @@ nsTableFrame::ReflowTable(nsHTMLReflowMetrics&     aDesiredSize,
   aLastChildReflowed = nullptr;
 
   if (!GetPrevInFlow()) {
-    mTableLayoutStrategy->ComputeColumnISizes(aReflowState);
+    mTableLayoutStrategy->ComputeColumnISizes(aReflowInput);
   }
   // Constrain our reflow isize to the computed table isize (of the 1st in flow).
   // and our reflow bsize to our avail bsize minus border, padding, cellspacing
-  WritingMode wm = aReflowState.GetWritingMode();
-  aDesiredSize.ISize(wm) = aReflowState.ComputedISize() +
-                     aReflowState.ComputedLogicalBorderPadding().IStartEnd(wm);
-  nsTableReflowState reflowState(aReflowState,
+  WritingMode wm = aReflowInput.GetWritingMode();
+  aDesiredSize.ISize(wm) = aReflowInput.ComputedISize() +
+                     aReflowInput.ComputedLogicalBorderPadding().IStartEnd(wm);
+  TableReflowInput reflowInput(aReflowInput,
                                  LogicalSize(wm, aDesiredSize.ISize(wm),
                                              aAvailBSize));
-  ReflowChildren(reflowState, aStatus, aLastChildReflowed,
+  ReflowChildren(reflowInput, aStatus, aLastChildReflowed,
                  aDesiredSize.mOverflowAreas);
 
-  ReflowColGroups(aReflowState.rendContext);
+  ReflowColGroups(aReflowInput.mRenderingContext);
 }
 
 nsIFrame*
@@ -2122,7 +2106,7 @@ nsTableFrame::GetFirstBodyRowGroupFrame()
 
     // We expect the header and footer row group frames to be first, and we only
     // allow one header and one footer
-    if (NS_STYLE_DISPLAY_TABLE_HEADER_GROUP == childDisplay->mDisplay) {
+    if (mozilla::StyleDisplay::TableHeaderGroup == childDisplay->mDisplay) {
       if (headerFrame) {
         // We already have a header frame and so this header frame is treated
         // like an ordinary body row group frame
@@ -2130,7 +2114,7 @@ nsTableFrame::GetFirstBodyRowGroupFrame()
       }
       headerFrame = kidFrame;
 
-    } else if (NS_STYLE_DISPLAY_TABLE_FOOTER_GROUP == childDisplay->mDisplay) {
+    } else if (mozilla::StyleDisplay::TableFooterGroup == childDisplay->mDisplay) {
       if (footerFrame) {
         // We already have a footer frame and so this footer frame is treated
         // like an ordinary body row group frame
@@ -2138,7 +2122,7 @@ nsTableFrame::GetFirstBodyRowGroupFrame()
       }
       footerFrame = kidFrame;
 
-    } else if (NS_STYLE_DISPLAY_TABLE_ROW_GROUP == childDisplay->mDisplay) {
+    } else if (mozilla::StyleDisplay::TableRowGroup == childDisplay->mDisplay) {
       return kidFrame;
     }
   }
@@ -2192,7 +2176,7 @@ nsTableFrame::PushChildren(const RowGroupArray& aRowGroups,
 // collapsing row groups, rows, col groups and cols are accounted for after both passes of
 // reflow so that it has no effect on the calculations of reflow.
 void
-nsTableFrame::AdjustForCollapsingRowsCols(nsHTMLReflowMetrics& aDesiredSize,
+nsTableFrame::AdjustForCollapsingRowsCols(ReflowOutput& aDesiredSize,
                                           const WritingMode aWM,
                                           const LogicalMargin& aBorderPadding)
 {
@@ -2245,7 +2229,7 @@ nsTableFrame::GetCollapsedISize(const WritingMode aWM,
          colFrame = colFrame->GetNextCol()) {
       const nsStyleDisplay* colDisplay = colFrame->StyleDisplay();
       nscoord colIdx = colFrame->GetColIndex();
-      if (NS_STYLE_DISPLAY_TABLE_COLUMN == colDisplay->mDisplay) {
+      if (mozilla::StyleDisplay::TableColumn == colDisplay->mDisplay) {
         const nsStyleVisibility* colVis = colFrame->StyleVisibility();
         bool collapseCol = (NS_STYLE_VISIBILITY_COLLAPSE == colVis->mVisible);
         nscoord colISize = fif->GetColumnISizeFromFirstInFlow(colIdx);
@@ -2316,7 +2300,7 @@ nsTableFrame::AppendFrames(ChildListID     aListID,
     // See what kind of frame we have
     const nsStyleDisplay* display = f->StyleDisplay();
 
-    if (NS_STYLE_DISPLAY_TABLE_COLUMN_GROUP == display->mDisplay) {
+    if (mozilla::StyleDisplay::TableColumnGroup == display->mDisplay) {
       if (MOZ_UNLIKELY(GetPrevInFlow())) {
         nsFrameList colgroupFrame(f, f);
         auto firstInFlow = static_cast<nsTableFrame*>(FirstInFlow());
@@ -2390,7 +2374,7 @@ nsTableFrame::InsertFrames(ChildListID     aListID,
     nsIFrame* next = e.NextFrame();
     if (!next || next->StyleDisplay()->mDisplay != display->mDisplay) {
       nsFrameList head = aFrameList.ExtractHead(e);
-      if (display->mDisplay == NS_STYLE_DISPLAY_TABLE_COLUMN_GROUP) {
+      if (display->mDisplay == mozilla::StyleDisplay::TableColumnGroup) {
         insertions[0].mID = kColGroupList;
         insertions[0].mList.AppendFrames(nullptr, head);
       } else {
@@ -2421,14 +2405,14 @@ nsTableFrame::HomogenousInsertFrames(ChildListID     aListID,
 {
   // See what kind of frame we have
   const nsStyleDisplay* display = aFrameList.FirstChild()->StyleDisplay();
-  bool isColGroup = NS_STYLE_DISPLAY_TABLE_COLUMN_GROUP == display->mDisplay;
+  bool isColGroup = mozilla::StyleDisplay::TableColumnGroup == display->mDisplay;
 #ifdef DEBUG
   // Verify that either all siblings have display:table-column-group, or they
   // all have display values different from table-column-group.
   for (nsIFrame* frame : aFrameList) {
     auto nextDisplay = frame->StyleDisplay()->mDisplay;
     MOZ_ASSERT(isColGroup ==
-               (nextDisplay == NS_STYLE_DISPLAY_TABLE_COLUMN_GROUP),
+               (nextDisplay == mozilla::StyleDisplay::TableColumnGroup),
                "heterogenous childlist");
   }
 #endif
@@ -2440,24 +2424,24 @@ nsTableFrame::HomogenousInsertFrames(ChildListID     aListID,
   if (aPrevFrame) {
     const nsStyleDisplay* prevDisplay = aPrevFrame->StyleDisplay();
     // Make sure they belong on the same frame list
-    if ((display->mDisplay == NS_STYLE_DISPLAY_TABLE_COLUMN_GROUP) !=
-        (prevDisplay->mDisplay == NS_STYLE_DISPLAY_TABLE_COLUMN_GROUP)) {
+    if ((display->mDisplay == mozilla::StyleDisplay::TableColumnGroup) !=
+        (prevDisplay->mDisplay == mozilla::StyleDisplay::TableColumnGroup)) {
       // the previous frame is not valid, see comment at ::AppendFrames
       // XXXbz Using content indices here means XBL will get screwed
       // over...  Oh, well.
       nsIFrame* pseudoFrame = aFrameList.FirstChild();
       nsIContent* parentContent = GetContent();
-      nsIContent* content;
+      nsIContent* content = nullptr;
       aPrevFrame = nullptr;
       while (pseudoFrame  && (parentContent ==
                               (content = pseudoFrame->GetContent()))) {
-        pseudoFrame = pseudoFrame->GetFirstPrincipalChild();
+        pseudoFrame = pseudoFrame->PrincipalChildList().FirstChild();
       }
       nsCOMPtr<nsIContent> container = content->GetParent();
       if (MOZ_LIKELY(container)) { // XXX need this null-check, see bug 411823.
         int32_t newIndex = container->IndexOf(content);
         nsIFrame* kidFrame;
-        nsTableColGroupFrame* lastColGroup;
+        nsTableColGroupFrame* lastColGroup = nullptr;
         if (isColGroup) {
           kidFrame = mColGroups.FirstChild();
           lastColGroup = nsTableColGroupFrame::GetLastRealColGroup(this);
@@ -2477,7 +2461,7 @@ nsTableFrame::HomogenousInsertFrames(ChildListID     aListID,
           pseudoFrame = kidFrame;
           while (pseudoFrame  && (parentContent ==
                                   (content = pseudoFrame->GetContent()))) {
-            pseudoFrame = pseudoFrame->GetFirstPrincipalChild();
+            pseudoFrame = pseudoFrame->PrincipalChildList().FirstChild();
           }
           int32_t index = container->IndexOf(content);
           if (index > lastIndex && index < newIndex) {
@@ -2489,7 +2473,7 @@ nsTableFrame::HomogenousInsertFrames(ChildListID     aListID,
       }
     }
   }
-  if (NS_STYLE_DISPLAY_TABLE_COLUMN_GROUP == display->mDisplay) {
+  if (mozilla::StyleDisplay::TableColumnGroup == display->mDisplay) {
     NS_ASSERTION(aListID == kColGroupList, "unexpected child list");
     // Insert the column group frames
     const nsFrameList::Slice& newColgroups =
@@ -2608,7 +2592,7 @@ nsTableFrame::RemoveFrame(ChildListID     aListID,
                           nsIFrame*       aOldFrame)
 {
   NS_ASSERTION(aListID == kColGroupList ||
-               NS_STYLE_DISPLAY_TABLE_COLUMN_GROUP !=
+               mozilla::StyleDisplay::TableColumnGroup !=
                  aOldFrame->StyleDisplay()->mDisplay,
                "Wrong list name; use kColGroupList iff colgroup");
   nsIPresShell* shell = PresContext()->PresShell();
@@ -2661,19 +2645,18 @@ nsTableFrame::GetUsedPadding() const
 /* virtual */ nsMargin
 nsTableFrame::GetUsedMargin() const
 {
-  // The margin is inherited to the outer table frame via
-  // the ::-moz-table-outer rule in ua.css.
+  // The margin is inherited to the table wrapper frame via
+  // the ::-moz-table-wrapper rule in ua.css.
   return nsMargin(0, 0, 0, 0);
 }
 
-NS_DECLARE_FRAME_PROPERTY(TableBCProperty, DeleteValue<BCPropertyData>)
+NS_DECLARE_FRAME_PROPERTY_DELETABLE(TableBCProperty, BCPropertyData)
 
 BCPropertyData*
 nsTableFrame::GetBCProperty(bool aCreateIfNecessary) const
 {
   FrameProperties props = Properties();
-  BCPropertyData* value = static_cast<BCPropertyData*>
-                          (props.Get(TableBCProperty()));
+  BCPropertyData* value = props.Get(TableBCProperty());
   if (!value && aCreateIfNecessary) {
     value = new BCPropertyData();
     props.Set(TableBCProperty(), value);
@@ -2737,7 +2720,7 @@ nsTableFrame::GetExcludedOuterBCBorder(const WritingMode aWM) const
 
 static LogicalMargin
 GetSeparateModelBorderPadding(const WritingMode aWM,
-                              const nsHTMLReflowState* aReflowState,
+                              const ReflowInput* aReflowInput,
                               nsStyleContext* aStyleContext)
 {
   // XXXbz Either we _do_ have a reflow state and then we can use its
@@ -2745,22 +2728,22 @@ GetSeparateModelBorderPadding(const WritingMode aWM,
   // wrong!
   const nsStyleBorder* border = aStyleContext->StyleBorder();
   LogicalMargin borderPadding(aWM, border->GetComputedBorder());
-  if (aReflowState) {
-    borderPadding += aReflowState->ComputedLogicalPadding();
+  if (aReflowInput) {
+    borderPadding += aReflowInput->ComputedLogicalPadding();
   }
   return borderPadding;
 }
 
 LogicalMargin
 nsTableFrame::GetChildAreaOffset(const WritingMode aWM,
-                                 const nsHTMLReflowState* aReflowState) const
+                                 const ReflowInput* aReflowInput) const
 {
   return IsBorderCollapse() ? GetIncludedOuterBCBorder(aWM) :
-    GetSeparateModelBorderPadding(aWM, aReflowState, mStyleContext);
+    GetSeparateModelBorderPadding(aWM, aReflowInput, mStyleContext);
 }
 
 void
-nsTableFrame::InitChildReflowState(nsHTMLReflowState& aReflowState)
+nsTableFrame::InitChildReflowInput(ReflowInput& aReflowInput)
 {
   nsMargin collapseBorder;
   nsMargin padding(0,0,0,0);
@@ -2768,33 +2751,33 @@ nsTableFrame::InitChildReflowState(nsHTMLReflowState& aReflowState)
   nsPresContext* presContext = PresContext();
   if (IsBorderCollapse()) {
     nsTableRowGroupFrame* rgFrame =
-       static_cast<nsTableRowGroupFrame*>(aReflowState.frame);
+       static_cast<nsTableRowGroupFrame*>(aReflowInput.mFrame);
     WritingMode wm = GetWritingMode();
     LogicalMargin border = rgFrame->GetBCBorderWidth(wm);
     collapseBorder = border.GetPhysicalMargin(wm);
     pCollapseBorder = &collapseBorder;
   }
-  aReflowState.Init(presContext, nullptr, pCollapseBorder, &padding);
+  aReflowInput.Init(presContext, nullptr, pCollapseBorder, &padding);
 
   NS_ASSERTION(!mBits.mResizedColumns ||
-               !aReflowState.parentReflowState->mFlags.mSpecialBSizeReflow,
+               !aReflowInput.mParentReflowInput->mFlags.mSpecialBSizeReflow,
                "should not resize columns on special bsize reflow");
   if (mBits.mResizedColumns) {
-    aReflowState.SetIResize(true);
+    aReflowInput.SetIResize(true);
   }
 }
 
 // Position and size aKidFrame and update our reflow state. The origin of
 // aKidRect is relative to the upper-left origin of our frame
 void
-nsTableFrame::PlaceChild(nsTableReflowState&  aReflowState,
+nsTableFrame::PlaceChild(TableReflowInput&  aReflowInput,
                          nsIFrame*            aKidFrame,
                          nsPoint              aKidPosition,
-                         nsHTMLReflowMetrics& aKidDesiredSize,
+                         ReflowOutput& aKidDesiredSize,
                          const nsRect&        aOriginalKidRect,
                          const nsRect&        aOriginalKidVisualOverflow)
 {
-  WritingMode wm = aReflowState.reflowState.GetWritingMode();
+  WritingMode wm = aReflowInput.reflowInput.GetWritingMode();
   bool isFirstReflow =
     aKidFrame->HasAnyStateBits(NS_FRAME_FIRST_REFLOW);
 
@@ -2806,11 +2789,11 @@ nsTableFrame::PlaceChild(nsTableReflowState&  aReflowState,
                        isFirstReflow);
 
   // Adjust the running block-offset
-  aReflowState.bCoord += aKidDesiredSize.BSize(wm);
+  aReflowInput.bCoord += aKidDesiredSize.BSize(wm);
 
   // If our bsize is constrained, then update the available bsize
-  if (NS_UNCONSTRAINEDSIZE != aReflowState.availSize.BSize(wm)) {
-    aReflowState.availSize.BSize(wm) -= aKidDesiredSize.BSize(wm);
+  if (NS_UNCONSTRAINEDSIZE != aReflowInput.availSize.BSize(wm)) {
+    aReflowInput.availSize.BSize(wm) -= aKidDesiredSize.BSize(wm);
   }
 }
 
@@ -2830,7 +2813,7 @@ nsTableFrame::OrderRowGroups(RowGroupArray& aChildren,
       static_cast<nsTableRowGroupFrame*>(kidFrame);
 
     switch (kidDisplay->mDisplay) {
-    case NS_STYLE_DISPLAY_TABLE_HEADER_GROUP:
+    case mozilla::StyleDisplay::TableHeaderGroup:
       if (head) { // treat additional thead like tbody
         aChildren.AppendElement(rowGroup);
       }
@@ -2838,7 +2821,7 @@ nsTableFrame::OrderRowGroups(RowGroupArray& aChildren,
         head = rowGroup;
       }
       break;
-    case NS_STYLE_DISPLAY_TABLE_FOOTER_GROUP:
+    case mozilla::StyleDisplay::TableFooterGroup:
       if (foot) { // treat additional tfoot like tbody
         aChildren.AppendElement(rowGroup);
       }
@@ -2846,7 +2829,7 @@ nsTableFrame::OrderRowGroups(RowGroupArray& aChildren,
         foot = rowGroup;
       }
       break;
-    case NS_STYLE_DISPLAY_TABLE_ROW_GROUP:
+    case mozilla::StyleDisplay::TableRowGroup:
       aChildren.AppendElement(rowGroup);
       break;
     default:
@@ -2884,7 +2867,7 @@ nsTableFrame::GetTHead() const
   nsIFrame* kidFrame = mFrames.FirstChild();
   while (kidFrame) {
     if (kidFrame->StyleDisplay()->mDisplay ==
-          NS_STYLE_DISPLAY_TABLE_HEADER_GROUP) {
+          mozilla::StyleDisplay::TableHeaderGroup) {
       return static_cast<nsTableRowGroupFrame*>(kidFrame);
     }
 
@@ -2907,7 +2890,7 @@ nsTableFrame::GetTFoot() const
   nsIFrame* kidFrame = mFrames.FirstChild();
   while (kidFrame) {
     if (kidFrame->StyleDisplay()->mDisplay ==
-          NS_STYLE_DISPLAY_TABLE_FOOTER_GROUP) {
+          mozilla::StyleDisplay::TableFooterGroup) {
       return static_cast<nsTableRowGroupFrame*>(kidFrame);
     }
 
@@ -2931,7 +2914,7 @@ IsRepeatable(nscoord aFrameHeight, nscoord aPageHeight)
 }
 
 nsresult
-nsTableFrame::SetupHeaderFooterChild(const nsTableReflowState& aReflowState,
+nsTableFrame::SetupHeaderFooterChild(const TableReflowInput& aReflowInput,
                                      nsTableRowGroupFrame* aFrame,
                                      nscoord* aDesiredHeight)
 {
@@ -2940,22 +2923,22 @@ nsTableFrame::SetupHeaderFooterChild(const nsTableReflowState& aReflowState,
 
   // Reflow the child with unconstrained height
   WritingMode wm = aFrame->GetWritingMode();
-  LogicalSize availSize = aReflowState.reflowState.AvailableSize(wm);
+  LogicalSize availSize = aReflowInput.reflowInput.AvailableSize(wm);
 
   nsSize containerSize = availSize.GetPhysicalSize(wm);
   // XXX check for containerSize.* == NS_UNCONSTRAINEDSIZE
 
   availSize.BSize(wm) = NS_UNCONSTRAINEDSIZE;
-  nsHTMLReflowState kidReflowState(presContext, aReflowState.reflowState,
+  ReflowInput kidReflowInput(presContext, aReflowInput.reflowInput,
                                    aFrame, availSize, nullptr,
-                                   nsHTMLReflowState::CALLER_WILL_INIT);
-  InitChildReflowState(kidReflowState);
-  kidReflowState.mFlags.mIsTopOfPage = true;
-  nsHTMLReflowMetrics desiredSize(aReflowState.reflowState);
+                                   ReflowInput::CALLER_WILL_INIT);
+  InitChildReflowInput(kidReflowInput);
+  kidReflowInput.mFlags.mIsTopOfPage = true;
+  ReflowOutput desiredSize(aReflowInput.reflowInput);
   desiredSize.ClearSize();
   nsReflowStatus status;
-  ReflowChild(aFrame, presContext, desiredSize, kidReflowState,
-              wm, LogicalPoint(wm, aReflowState.iCoord, aReflowState.bCoord),
+  ReflowChild(aFrame, presContext, desiredSize, kidReflowInput,
+              wm, LogicalPoint(wm, aReflowInput.iCoord, aReflowInput.bCoord),
               containerSize, 0, status);
   // The child will be reflowed again "for real" so no need to place it now
 
@@ -2965,38 +2948,38 @@ nsTableFrame::SetupHeaderFooterChild(const nsTableReflowState& aReflowState,
 }
 
 void
-nsTableFrame::PlaceRepeatedFooter(nsTableReflowState& aReflowState,
+nsTableFrame::PlaceRepeatedFooter(TableReflowInput& aReflowInput,
                                   nsTableRowGroupFrame *aTfoot,
                                   nscoord aFooterHeight)
 {
   nsPresContext* presContext = PresContext();
   WritingMode wm = aTfoot->GetWritingMode();
-  LogicalSize kidAvailSize = aReflowState.availSize;
+  LogicalSize kidAvailSize = aReflowInput.availSize;
 
   nsSize containerSize = kidAvailSize.GetPhysicalSize(wm);
   // XXX check for containerSize.* == NS_UNCONSTRAINEDSIZE
 
   kidAvailSize.BSize(wm) = aFooterHeight;
-  nsHTMLReflowState footerReflowState(presContext,
-                                      aReflowState.reflowState,
+  ReflowInput footerReflowInput(presContext,
+                                      aReflowInput.reflowInput,
                                       aTfoot, kidAvailSize,
                                       nullptr,
-                                      nsHTMLReflowState::CALLER_WILL_INIT);
-  InitChildReflowState(footerReflowState);
-  aReflowState.bCoord += GetRowSpacing(GetRowCount());
+                                      ReflowInput::CALLER_WILL_INIT);
+  InitChildReflowInput(footerReflowInput);
+  aReflowInput.bCoord += GetRowSpacing(GetRowCount());
 
   nsRect origTfootRect = aTfoot->GetRect();
   nsRect origTfootVisualOverflow = aTfoot->GetVisualOverflowRect();
 
   nsReflowStatus footerStatus;
-  nsHTMLReflowMetrics desiredSize(aReflowState.reflowState);
+  ReflowOutput desiredSize(aReflowInput.reflowInput);
   desiredSize.ClearSize();
-  LogicalPoint kidPosition(wm, aReflowState.iCoord, aReflowState.bCoord);
-  ReflowChild(aTfoot, presContext, desiredSize, footerReflowState,
+  LogicalPoint kidPosition(wm, aReflowInput.iCoord, aReflowInput.bCoord);
+  ReflowChild(aTfoot, presContext, desiredSize, footerReflowInput,
               wm, kidPosition, containerSize, 0, footerStatus);
-  footerReflowState.ApplyRelativePositioning(&kidPosition, containerSize);
+  footerReflowInput.ApplyRelativePositioning(&kidPosition, containerSize);
 
-  PlaceChild(aReflowState, aTfoot,
+  PlaceChild(aReflowInput, aTfoot,
              // We subtract desiredSize.PhysicalSize() from containerSize here
              // to account for the fact that in RTL modes, the origin is
              // on the right-hand side so we're not simply converting a
@@ -3006,10 +2989,9 @@ nsTableFrame::PlaceRepeatedFooter(nsTableReflowState& aReflowState,
              desiredSize, origTfootRect, origTfootVisualOverflow);
 }
 
-// Reflow the children based on the avail size and reason in aReflowState
-// update aReflowMetrics a aStatus
+// Reflow the children based on the avail size and reason in aReflowInput
 void
-nsTableFrame::ReflowChildren(nsTableReflowState& aReflowState,
+nsTableFrame::ReflowChildren(TableReflowInput& aReflowInput,
                              nsReflowStatus&     aStatus,
                              nsIFrame*&          aLastChildReflowed,
                              nsOverflowAreas&    aOverflowAreas)
@@ -3018,12 +3000,13 @@ nsTableFrame::ReflowChildren(nsTableReflowState& aReflowState,
   aLastChildReflowed = nullptr;
 
   nsIFrame* prevKidFrame = nullptr;
-  WritingMode wm = aReflowState.reflowState.GetWritingMode();
-  NS_WARN_IF_FALSE(wm.IsVertical() || NS_UNCONSTRAINEDSIZE !=
-                                      aReflowState.reflowState.ComputedWidth(),
-                   "shouldn't have unconstrained width in horizontal mode");
+  WritingMode wm = aReflowInput.reflowInput.GetWritingMode();
+  NS_WARNING_ASSERTION(
+    wm.IsVertical() ||
+    NS_UNCONSTRAINEDSIZE != aReflowInput.reflowInput.ComputedWidth(),
+    "shouldn't have unconstrained width in horizontal mode");
   nsSize containerSize =
-    aReflowState.reflowState.ComputedSizeAsContainerIfConstrained();
+    aReflowInput.reflowInput.ComputedSizeAsContainerIfConstrained();
 
   nsPresContext* presContext = PresContext();
   // XXXldb Should we be checking constrained height instead?
@@ -3031,12 +3014,12 @@ nsTableFrame::ReflowChildren(nsTableReflowState& aReflowState,
   // under paginated contexts tables are should not paginate if they are inside
   // column set
   bool isPaginated = presContext->IsPaginated() &&
-                       NS_UNCONSTRAINEDSIZE != aReflowState.availSize.BSize(wm) &&
-                       aReflowState.reflowState.mFlags.mTableIsSplittable;
+                       NS_UNCONSTRAINEDSIZE != aReflowInput.availSize.BSize(wm) &&
+                       aReflowInput.reflowInput.mFlags.mTableIsSplittable;
 
   aOverflowAreas.Clear();
 
-  bool reflowAllKids = aReflowState.reflowState.ShouldReflowAllKids() ||
+  bool reflowAllKids = aReflowInput.reflowInput.ShouldReflowAllKids() ||
                          mBits.mResizedColumns ||
                          IsGeometryDirty();
 
@@ -3057,12 +3040,12 @@ nsTableFrame::ReflowChildren(nsTableReflowState& aReflowState,
   if (isPaginated) {
     if (thead && !GetPrevInFlow()) {
       nscoord desiredHeight;
-      nsresult rv = SetupHeaderFooterChild(aReflowState, thead, &desiredHeight);
+      nsresult rv = SetupHeaderFooterChild(aReflowInput, thead, &desiredHeight);
       if (NS_FAILED(rv))
         return;
     }
     if (tfoot) {
-      nsresult rv = SetupHeaderFooterChild(aReflowState, tfoot, &footerHeight);
+      nsresult rv = SetupHeaderFooterChild(aReflowInput, tfoot, &footerHeight);
       if (NS_FAILED(rv))
         return;
     }
@@ -3078,12 +3061,12 @@ nsTableFrame::ReflowChildren(nsTableReflowState& aReflowState,
     // See if we should only reflow the dirty child frames
     if (reflowAllKids ||
         NS_SUBTREE_DIRTY(kidFrame) ||
-        (aReflowState.reflowState.mFlags.mSpecialBSizeReflow &&
+        (aReflowInput.reflowInput.mFlags.mSpecialBSizeReflow &&
          (isPaginated || kidFrame->HasAnyStateBits(
                           NS_FRAME_CONTAINS_RELATIVE_BSIZE)))) {
       if (pageBreak) {
         if (allowRepeatedFooter) {
-          PlaceRepeatedFooter(aReflowState, tfoot, footerHeight);
+          PlaceRepeatedFooter(aReflowInput, tfoot, footerHeight);
         }
         else if (tfoot && tfoot->IsRepeatable()) {
           tfoot->SetRepeatable(false);
@@ -3093,7 +3076,7 @@ nsTableFrame::ReflowChildren(nsTableReflowState& aReflowState,
         break;
       }
 
-      LogicalSize kidAvailSize(aReflowState.availSize);
+      LogicalSize kidAvailSize(aReflowInput.availSize);
       allowRepeatedFooter = false;
       if (isPaginated && (NS_UNCONSTRAINEDSIZE != kidAvailSize.BSize(wm))) {
         nsTableRowGroupFrame* kidRG =
@@ -3111,16 +3094,16 @@ nsTableFrame::ReflowChildren(nsTableReflowState& aReflowState,
       nsRect oldKidRect = kidFrame->GetRect();
       nsRect oldKidVisualOverflow = kidFrame->GetVisualOverflowRect();
 
-      nsHTMLReflowMetrics desiredSize(aReflowState.reflowState);
+      ReflowOutput desiredSize(aReflowInput.reflowInput);
       desiredSize.ClearSize();
 
       // Reflow the child into the available space
-      nsHTMLReflowState kidReflowState(presContext, aReflowState.reflowState,
+      ReflowInput kidReflowInput(presContext, aReflowInput.reflowInput,
                                        kidFrame,
                                        kidAvailSize,
                                        nullptr,
-                                       nsHTMLReflowState::CALLER_WILL_INIT);
-      InitChildReflowState(kidReflowState);
+                                       ReflowInput::CALLER_WILL_INIT);
+      InitChildReflowInput(kidReflowInput);
 
       // If this isn't the first row group, and the previous row group has a
       // nonzero YMost, then we can't be at the top of the page.
@@ -3128,11 +3111,11 @@ nsTableFrame::ReflowChildren(nsTableReflowState& aReflowState,
       // infinite loops in some circumstances - see bug 344883.
       if (childX > ((thead && IsRepeatedFrame(thead)) ? 1u : 0u) &&
           (rowGroups[childX - 1]->GetNormalRect().YMost() > 0)) {
-        kidReflowState.mFlags.mIsTopOfPage = false;
+        kidReflowInput.mFlags.mIsTopOfPage = false;
       }
-      aReflowState.bCoord += cellSpacingB;
-      if (NS_UNCONSTRAINEDSIZE != aReflowState.availSize.BSize(wm)) {
-        aReflowState.availSize.BSize(wm) -= cellSpacingB;
+      aReflowInput.bCoord += cellSpacingB;
+      if (NS_UNCONSTRAINEDSIZE != aReflowInput.availSize.BSize(wm)) {
+        aReflowInput.availSize.BSize(wm) -= cellSpacingB;
       }
       // record the presence of a next in flow, it might get destroyed so we
       // need to reorder the row group array
@@ -3140,10 +3123,10 @@ nsTableFrame::ReflowChildren(nsTableReflowState& aReflowState,
       if (kidFrame->GetNextInFlow())
         reorder = true;
 
-      LogicalPoint kidPosition(wm, aReflowState.iCoord, aReflowState.bCoord);
-      ReflowChild(kidFrame, presContext, desiredSize, kidReflowState,
+      LogicalPoint kidPosition(wm, aReflowInput.iCoord, aReflowInput.bCoord);
+      ReflowChild(kidFrame, presContext, desiredSize, kidReflowInput,
                   wm, kidPosition, containerSize, 0, aStatus);
-      kidReflowState.ApplyRelativePositioning(&kidPosition, containerSize);
+      kidReflowInput.ApplyRelativePositioning(&kidPosition, containerSize);
 
       if (reorder) {
         // reorder row groups the reflow may have changed the nextinflows
@@ -3155,7 +3138,7 @@ nsTableFrame::ReflowChildren(nsTableReflowState& aReflowState,
         }
       }
       if (isPaginated && !NS_FRAME_IS_FULLY_COMPLETE(aStatus) &&
-          ShouldAvoidBreakInside(aReflowState.reflowState)) {
+          ShouldAvoidBreakInside(aReflowInput.reflowInput)) {
         aStatus = NS_INLINE_LINE_BREAK_BEFORE();
         break;
       }
@@ -3164,23 +3147,23 @@ nsTableFrame::ReflowChildren(nsTableReflowState& aReflowState,
       if (isPaginated &&
           (NS_INLINE_IS_BREAK_BEFORE(aStatus) ||
            (NS_FRAME_IS_COMPLETE(aStatus) &&
-            (NS_UNCONSTRAINEDSIZE != kidReflowState.AvailableHeight()) &&
-            kidReflowState.AvailableHeight() < desiredSize.Height()))) {
-        if (ShouldAvoidBreakInside(aReflowState.reflowState)) {
+            (NS_UNCONSTRAINEDSIZE != kidReflowInput.AvailableHeight()) &&
+            kidReflowInput.AvailableHeight() < desiredSize.Height()))) {
+        if (ShouldAvoidBreakInside(aReflowInput.reflowInput)) {
           aStatus = NS_INLINE_LINE_BREAK_BEFORE();
           break;
         }
         // if we are on top of the page place with dataloss
-        if (kidReflowState.mFlags.mIsTopOfPage) {
+        if (kidReflowInput.mFlags.mIsTopOfPage) {
           if (childX+1 < rowGroups.Length()) {
             nsIFrame* nextRowGroupFrame = rowGroups[childX + 1];
             if (nextRowGroupFrame) {
-              PlaceChild(aReflowState, kidFrame,
+              PlaceChild(aReflowInput, kidFrame,
                          kidPosition.GetPhysicalPoint(wm,
                            containerSize - desiredSize.PhysicalSize()),
                          desiredSize, oldKidRect, oldKidVisualOverflow);
               if (allowRepeatedFooter) {
-                PlaceRepeatedFooter(aReflowState, tfoot, footerHeight);
+                PlaceRepeatedFooter(aReflowInput, tfoot, footerHeight);
               }
               else if (tfoot && tfoot->IsRepeatable()) {
                 tfoot->SetRepeatable(false);
@@ -3195,7 +3178,7 @@ nsTableFrame::ReflowChildren(nsTableReflowState& aReflowState,
         else { // we are not on top, push this rowgroup onto the next page
           if (prevKidFrame) { // we had a rowgroup before so push this
             if (allowRepeatedFooter) {
-              PlaceRepeatedFooter(aReflowState, tfoot, footerHeight);
+              PlaceRepeatedFooter(aReflowInput, tfoot, footerHeight);
             }
             else if (tfoot && tfoot->IsRepeatable()) {
               tfoot->SetRepeatable(false);
@@ -3206,13 +3189,13 @@ nsTableFrame::ReflowChildren(nsTableReflowState& aReflowState,
             break;
           }
           else { // we can't push so lets make clear how much space we need
-            PlaceChild(aReflowState, kidFrame,
+            PlaceChild(aReflowInput, kidFrame,
                        kidPosition.GetPhysicalPoint(wm,
                          containerSize - desiredSize.PhysicalSize()),
                        desiredSize, oldKidRect, oldKidVisualOverflow);
             aLastChildReflowed = kidFrame;
             if (allowRepeatedFooter) {
-              PlaceRepeatedFooter(aReflowState, tfoot, footerHeight);
+              PlaceRepeatedFooter(aReflowInput, tfoot, footerHeight);
               aLastChildReflowed = tfoot;
             }
             break;
@@ -3225,14 +3208,14 @@ nsTableFrame::ReflowChildren(nsTableReflowState& aReflowState,
       pageBreak = false;
       // see if there is a page break after this row group or before the next one
       if (NS_FRAME_IS_COMPLETE(aStatus) && isPaginated &&
-          (NS_UNCONSTRAINEDSIZE != kidReflowState.AvailableHeight())) {
+          (NS_UNCONSTRAINEDSIZE != kidReflowInput.AvailableHeight())) {
         nsIFrame* nextKid =
           (childX + 1 < rowGroups.Length()) ? rowGroups[childX + 1] : nullptr;
         pageBreak = PageBreakAfter(kidFrame, nextKid);
       }
 
       // Place the child
-      PlaceChild(aReflowState, kidFrame,
+      PlaceChild(aReflowInput, kidFrame,
                  kidPosition.GetPhysicalPoint(wm, containerSize -
                                                   desiredSize.PhysicalSize()),
                  desiredSize, oldKidRect, oldKidVisualOverflow);
@@ -3240,8 +3223,11 @@ nsTableFrame::ReflowChildren(nsTableReflowState& aReflowState,
       // Remember where we just were in case we end up pushing children
       prevKidFrame = kidFrame;
 
+      MOZ_ASSERT(!NS_FRAME_IS_NOT_COMPLETE(aStatus) || isPaginated,
+                 "Table contents should only fragment in paginated contexts");
+
       // Special handling for incomplete children
-      if (NS_FRAME_IS_NOT_COMPLETE(aStatus)) {
+      if (isPaginated && NS_FRAME_IS_NOT_COMPLETE(aStatus)) {
         nsIFrame* kidNextInFlow = kidFrame->GetNextInFlow();
         if (!kidNextInFlow) {
           // The child doesn't have a next-in-flow so create a continuing
@@ -3266,7 +3252,7 @@ nsTableFrame::ReflowChildren(nsTableReflowState& aReflowState,
         // We've used up all of our available space so push the remaining
         // children.
         if (allowRepeatedFooter) {
-          PlaceRepeatedFooter(aReflowState, tfoot, footerHeight);
+          PlaceRepeatedFooter(aReflowInput, tfoot, footerHeight);
         }
         else if (tfoot && tfoot->IsRepeatable()) {
           tfoot->SetRepeatable(false);
@@ -3280,23 +3266,23 @@ nsTableFrame::ReflowChildren(nsTableReflowState& aReflowState,
       }
     }
     else { // it isn't being reflowed
-      aReflowState.bCoord += cellSpacingB;
+      aReflowInput.bCoord += cellSpacingB;
       LogicalRect kidRect(wm, kidFrame->GetNormalRect(), containerSize);
-      if (kidRect.BStart(wm) != aReflowState.bCoord) {
+      if (kidRect.BStart(wm) != aReflowInput.bCoord) {
         // invalidate the old position
         kidFrame->InvalidateFrameSubtree();
         // move to the new position
-        kidFrame->MovePositionBy(wm, LogicalPoint(wm, 0, aReflowState.bCoord -
+        kidFrame->MovePositionBy(wm, LogicalPoint(wm, 0, aReflowInput.bCoord -
                                                          kidRect.BStart(wm)));
         RePositionViews(kidFrame);
         // invalidate the new position
         kidFrame->InvalidateFrameSubtree();
       }
-      aReflowState.bCoord += kidRect.BSize(wm);
+      aReflowInput.bCoord += kidRect.BSize(wm);
 
       // If our bsize is constrained then update the available bsize.
-      if (NS_UNCONSTRAINEDSIZE != aReflowState.availSize.BSize(wm)) {
-        aReflowState.availSize.BSize(wm) -= cellSpacingB + kidRect.BSize(wm);
+      if (NS_UNCONSTRAINEDSIZE != aReflowInput.availSize.BSize(wm)) {
+        aReflowInput.availSize.BSize(wm) -= cellSpacingB + kidRect.BSize(wm);
       }
     }
   }
@@ -3311,16 +3297,16 @@ void
 nsTableFrame::ReflowColGroups(nsRenderingContext *aRenderingContext)
 {
   if (!GetPrevInFlow() && !HaveReflowedColGroups()) {
-    nsHTMLReflowMetrics kidMet(GetWritingMode());
+    ReflowOutput kidMet(GetWritingMode());
     nsPresContext *presContext = PresContext();
     for (nsIFrame* kidFrame : mColGroups) {
       if (NS_SUBTREE_DIRTY(kidFrame)) {
         // The column groups don't care about dimensions or reflow states.
-        nsHTMLReflowState
-          kidReflowState(presContext, kidFrame, aRenderingContext,
+        ReflowInput
+          kidReflowInput(presContext, kidFrame, aRenderingContext,
                          LogicalSize(kidFrame->GetWritingMode()));
         nsReflowStatus cgStatus;
-        ReflowChild(kidFrame, presContext, kidMet, kidReflowState, 0, 0, 0,
+        ReflowChild(kidFrame, presContext, kidMet, kidReflowInput, 0, 0, 0,
                     cgStatus);
         FinishReflowChild(kidFrame, presContext, kidMet, nullptr, 0, 0, 0);
       }
@@ -3330,24 +3316,24 @@ nsTableFrame::ReflowColGroups(nsRenderingContext *aRenderingContext)
 }
 
 void
-nsTableFrame::CalcDesiredBSize(const nsHTMLReflowState& aReflowState,
-                               nsHTMLReflowMetrics& aDesiredSize)
+nsTableFrame::CalcDesiredBSize(const ReflowInput& aReflowInput,
+                               ReflowOutput& aDesiredSize)
 {
-  WritingMode wm = aReflowState.GetWritingMode();
+  WritingMode wm = aReflowInput.GetWritingMode();
   nsTableCellMap* cellMap = GetCellMap();
   if (!cellMap) {
     NS_ERROR("never ever call me until the cell map is built!");
     aDesiredSize.BSize(wm) = 0;
     return;
   }
-  LogicalMargin borderPadding = GetChildAreaOffset(wm, &aReflowState);
+  LogicalMargin borderPadding = GetChildAreaOffset(wm, &aReflowInput);
 
   // get the natural bsize based on the last child's (row group) rect
   RowGroupArray rowGroups;
   OrderRowGroups(rowGroups);
   if (rowGroups.IsEmpty()) {
     // tables can be used as rectangular items without content
-    nscoord tableSpecifiedBSize = CalcBorderBoxBSize(aReflowState);
+    nscoord tableSpecifiedBSize = CalcBorderBoxBSize(aReflowInput);
     if ((NS_UNCONSTRAINEDSIZE != tableSpecifiedBSize) &&
         (tableSpecifiedBSize > 0) &&
         eCompatibility_NavQuirks != PresContext()->CompatibilityMode()) {
@@ -3372,13 +3358,13 @@ nsTableFrame::CalcDesiredBSize(const nsHTMLReflowState& aReflowState,
 
   // see if a specified table bsize requires dividing additional space to rows
   if (!GetPrevInFlow()) {
-    nscoord tableSpecifiedBSize = CalcBorderBoxBSize(aReflowState);
+    nscoord tableSpecifiedBSize = CalcBorderBoxBSize(aReflowInput);
     if ((tableSpecifiedBSize > 0) &&
         (tableSpecifiedBSize != NS_UNCONSTRAINEDSIZE) &&
         (tableSpecifiedBSize > desiredBSize)) {
       // proportionately distribute the excess bsize to unconstrained rows in each
       // unconstrained row group.
-      DistributeBSizeToRows(aReflowState, tableSpecifiedBSize - desiredBSize);
+      DistributeBSizeToRows(aReflowInput, tableSpecifiedBSize - desiredBSize);
       // this might have changed the overflow area incorporate the childframe overflow area.
       for (nsIFrame* kidFrame : mFrames) {
         ConsiderChildOverflow(aDesiredSize.mOverflowAreas, kidFrame);
@@ -3395,14 +3381,14 @@ void ResizeCells(nsTableFrame& aTableFrame)
   nsTableFrame::RowGroupArray rowGroups;
   aTableFrame.OrderRowGroups(rowGroups);
   WritingMode wm = aTableFrame.GetWritingMode();
-  nsHTMLReflowMetrics tableDesiredSize(wm);
+  ReflowOutput tableDesiredSize(wm);
   tableDesiredSize.SetSize(wm, aTableFrame.GetLogicalSize(wm));
   tableDesiredSize.SetOverflowAreasToDesiredBounds();
 
   for (uint32_t rgIdx = 0; rgIdx < rowGroups.Length(); rgIdx++) {
     nsTableRowGroupFrame* rgFrame = rowGroups[rgIdx];
 
-    nsHTMLReflowMetrics groupDesiredSize(wm);
+    ReflowOutput groupDesiredSize(wm);
     groupDesiredSize.SetSize(wm, rgFrame->GetLogicalSize(wm));
     groupDesiredSize.SetOverflowAreasToDesiredBounds();
 
@@ -3420,14 +3406,14 @@ void ResizeCells(nsTableFrame& aTableFrame)
 }
 
 void
-nsTableFrame::DistributeBSizeToRows(const nsHTMLReflowState& aReflowState,
+nsTableFrame::DistributeBSizeToRows(const ReflowInput& aReflowInput,
                                     nscoord                  aAmount)
 {
-  WritingMode wm = aReflowState.GetWritingMode();
-  LogicalMargin borderPadding = GetChildAreaOffset(wm, &aReflowState);
+  WritingMode wm = aReflowInput.GetWritingMode();
+  LogicalMargin borderPadding = GetChildAreaOffset(wm, &aReflowInput);
 
   nsSize containerSize =
-    aReflowState.ComputedSizeAsContainerIfConstrained();
+    aReflowInput.ComputedSizeAsContainerIfConstrained();
 
   RowGroupArray rowGroups;
   OrderRowGroups(rowGroups);
@@ -3436,7 +3422,7 @@ nsTableFrame::DistributeBSizeToRows(const nsHTMLReflowState& aReflowState,
   // distribute space to each pct bsize row whose row group doesn't have a computed
   // bsize, and base the pct on the table bsize. If the row group had a computed
   // bsize, then this was already done in nsTableRowGroupFrame::CalculateRowBSizes
-  nscoord pctBasis = aReflowState.ComputedBSize() - GetRowSpacing(-1, GetRowCount());
+  nscoord pctBasis = aReflowInput.ComputedBSize() - GetRowSpacing(-1, GetRowCount());
   nscoord bOriginRG = borderPadding.BStart(wm) + GetRowSpacing(0);
   nscoord bEndRG = bOriginRG;
   uint32_t rgIdx;
@@ -3793,35 +3779,54 @@ nsTableFrame::GetRowSpacing(int32_t aStartRowIndex,
 }
 
 /* virtual */ nscoord
-nsTableFrame::GetLogicalBaseline(WritingMode aWritingMode) const
+nsTableFrame::GetLogicalBaseline(WritingMode aWM) const
 {
-  nscoord ascent = 0;
+  nscoord baseline;
+  if (!GetNaturalBaselineBOffset(aWM, BaselineSharingGroup::eFirst, &baseline)) {
+    baseline = BSize(aWM);
+  }
+  return baseline;
+}
+
+/* virtual */ bool
+nsTableFrame::GetNaturalBaselineBOffset(WritingMode aWM,
+                                        BaselineSharingGroup aBaselineGroup,
+                                        nscoord*             aBaseline) const
+{
   RowGroupArray orderedRowGroups;
   OrderRowGroups(orderedRowGroups);
-  nsTableRowFrame* firstRow = nullptr;
   // XXX not sure if this should be the size of the containing block instead.
   nsSize containerSize = mRect.Size();
-  for (uint32_t rgIndex = 0; rgIndex < orderedRowGroups.Length(); rgIndex++) {
-    nsTableRowGroupFrame* rgFrame = orderedRowGroups[rgIndex];
-    if (rgFrame->GetRowCount()) {
-      firstRow = rgFrame->GetFirstRow();
-
-      nscoord rgNormalBStart =
-        LogicalRect(aWritingMode, rgFrame->GetNormalRect(), containerSize)
-        .Origin(aWritingMode).B(aWritingMode);
-      nscoord firstRowNormalBStart =
-        LogicalRect(aWritingMode, firstRow->GetNormalRect(), containerSize)
-        .Origin(aWritingMode).B(aWritingMode);
-
-      ascent = rgNormalBStart + firstRowNormalBStart +
-               firstRow->GetRowBaseline(aWritingMode);
-      break;
+  auto TableBaseline = [aWM, containerSize] (nsTableRowGroupFrame* aRowGroup,
+                                             nsTableRowFrame* aRow) {
+    nscoord rgBStart = LogicalRect(aWM, aRowGroup->GetNormalRect(),
+                                   containerSize).BStart(aWM);
+    nscoord rowBStart = LogicalRect(aWM, aRow->GetNormalRect(),
+                                    containerSize).BStart(aWM);
+    return rgBStart + rowBStart + aRow->GetRowBaseline(aWM);
+  };
+  if (aBaselineGroup == BaselineSharingGroup::eFirst) {
+    for (uint32_t rgIndex = 0; rgIndex < orderedRowGroups.Length(); rgIndex++) {
+      nsTableRowGroupFrame* rgFrame = orderedRowGroups[rgIndex];
+      nsTableRowFrame* row = rgFrame->GetFirstRow();
+      if (row) {
+        *aBaseline = TableBaseline(rgFrame, row);
+        return true;
+      }
+    }
+  } else {
+    for (uint32_t rgIndex = orderedRowGroups.Length(); rgIndex-- > 0;) {
+      nsTableRowGroupFrame* rgFrame = orderedRowGroups[rgIndex];
+      nsTableRowFrame* row = rgFrame->GetLastRow();
+      if (row) {
+        *aBaseline = BSize(aWM) - TableBaseline(rgFrame, row);
+        return true;
+      }
     }
   }
-  if (!firstRow)
-    ascent = BSize(aWritingMode);
-  return ascent;
+  return false;
 }
+
 /* ----- global methods ----- */
 
 nsTableFrame*
@@ -3847,19 +3852,20 @@ nsTableFrame::GetTableFrame(nsIFrame* aFrame)
 
 nsTableFrame*
 nsTableFrame::GetTableFramePassingThrough(nsIFrame* aMustPassThrough,
-                                          nsIFrame* aFrame)
+                                          nsIFrame* aFrame,
+                                          bool* aDidPassThrough)
 {
   MOZ_ASSERT(aMustPassThrough == aFrame ||
              nsLayoutUtils::IsProperAncestorFrame(aMustPassThrough, aFrame),
              "aMustPassThrough should be an ancestor");
 
-  // Retrieve the table frame, and ensure that we hit aMustPassThrough on the
-  // way.  If we don't, just return null.
-  bool hitPassThroughFrame = false;
+  // Retrieve the table frame, and check if we hit aMustPassThrough on the
+  // way.
+  *aDidPassThrough = false;
   nsTableFrame* tableFrame = nullptr;
   for (nsIFrame* ancestor = aFrame; ancestor; ancestor = ancestor->GetParent()) {
     if (ancestor == aMustPassThrough) {
-      hitPassThroughFrame = true;
+      *aDidPassThrough = true;
     }
     if (nsGkAtoms::tableFrame == ancestor->GetType()) {
       tableFrame = static_cast<nsTableFrame*>(ancestor);
@@ -3868,7 +3874,7 @@ nsTableFrame::GetTableFramePassingThrough(nsIFrame* aMustPassThrough,
   }
 
   MOZ_ASSERT(tableFrame, "Should have a table frame here");
-  return hitPassThroughFrame ? tableFrame : nullptr;
+  return tableFrame;
 }
 
 bool
@@ -3882,7 +3888,7 @@ nsTableFrame::IsAutoBSize(WritingMode aWM)
 }
 
 nscoord
-nsTableFrame::CalcBorderBoxBSize(const nsHTMLReflowState& aState)
+nsTableFrame::CalcBorderBoxBSize(const ReflowInput& aState)
 {
   nscoord bSize = aState.ComputedBSize();
   if (NS_AUTOHEIGHT != bSize) {
@@ -3936,7 +3942,7 @@ nsTableFrame::GetFrameAtOrBefore(nsIFrame*       aParentFrame,
   // aPriorChildFrame is not of type aChildType, so we need start from
   // the beginnng and find the closest one
   nsIFrame* lastMatchingFrame = nullptr;
-  nsIFrame* childFrame = aParentFrame->GetFirstPrincipalChild();
+  nsIFrame* childFrame = aParentFrame->PrincipalChildList().FirstChild();
   while (childFrame && (childFrame != aPriorChildFrame)) {
     if (aChildType == childFrame->GetType()) {
       lastMatchingFrame = childFrame;
@@ -3953,28 +3959,24 @@ nsTableFrame::DumpRowGroup(nsIFrame* aKidFrame)
   if (!aKidFrame)
     return;
 
-  nsIFrame* cFrame = aKidFrame->GetFirstPrincipalChild();
-  while (cFrame) {
+  for (nsIFrame* cFrame : aKidFrame->PrincipalChildList()) {
     nsTableRowFrame *rowFrame = do_QueryFrame(cFrame);
     if (rowFrame) {
       printf("row(%d)=%p ", rowFrame->GetRowIndex(),
              static_cast<void*>(rowFrame));
-      nsIFrame* childFrame = cFrame->GetFirstPrincipalChild();
-      while (childFrame) {
+      for (nsIFrame* childFrame : cFrame->PrincipalChildList()) {
         nsTableCellFrame *cellFrame = do_QueryFrame(childFrame);
         if (cellFrame) {
           int32_t colIndex;
           cellFrame->GetColIndex(colIndex);
           printf("cell(%d)=%p ", colIndex, static_cast<void*>(childFrame));
         }
-        childFrame = childFrame->GetNextSibling();
       }
       printf("\n");
     }
     else {
       DumpRowGroup(rowFrame);
     }
-    cFrame = cFrame->GetNextSibling();
   }
 }
 
@@ -4308,8 +4310,7 @@ BCMapCellInfo::BCMapCellInfo(nsTableFrame* aTableFrame)
   : mTableFrame(aTableFrame)
   , mNumTableRows(aTableFrame->GetRowCount())
   , mNumTableCols(aTableFrame->GetColCount())
-  , mTableBCData(static_cast<BCPropertyData*>(
-      mTableFrame->Properties().Get(TableBCProperty())))
+  , mTableBCData(mTableFrame->Properties().Get(TableBCProperty()))
   , mTableWM(aTableFrame->StyleContext())
 {
   ResetCellInfo();
@@ -4816,7 +4817,7 @@ GetPaintStyleInfo(const nsIFrame* aFrame,
   }
 }
 
-class nsDelayedCalcBCBorders : public nsRunnable {
+class nsDelayedCalcBCBorders : public Runnable {
 public:
   explicit nsDelayedCalcBCBorders(nsIFrame* aFrame) :
     mFrame(aFrame) {}
@@ -6230,7 +6231,7 @@ struct BCBlockDirSeg
 
 
   void Paint(BCPaintBorderIterator& aIter,
-             nsRenderingContext&    aRenderingContext,
+             DrawTarget&            aDrawTarget,
              BCPixelSize            aInlineSegBSize);
   void AdvanceOffsetB();
   void IncludeCurrentBorder(BCPaintBorderIterator& aIter);
@@ -6280,8 +6281,7 @@ struct BCInlineDirSeg
                      BCPixelSize            aIStartSegISize);
   void AdvanceOffsetI();
   void IncludeCurrentBorder(BCPaintBorderIterator& aIter);
-  void Paint(BCPaintBorderIterator& aIter,
-             nsRenderingContext&    aRenderingContext);
+  void Paint(BCPaintBorderIterator& aIter, DrawTarget& aDrawTarget);
 
   nscoord            mOffsetI;       // i-offset with respect to the table edge
   nscoord            mOffsetB;       // b-offset with respect to the table edge
@@ -6325,8 +6325,8 @@ public:
   bool SetDamageArea(const nsRect& aDamageRect);
   void First();
   void Next();
-  void AccumulateOrPaintInlineDirSegment(nsRenderingContext& aRenderingContext);
-  void AccumulateOrPaintBlockDirSegment(nsRenderingContext& aRenderingContext);
+  void AccumulateOrPaintInlineDirSegment(DrawTarget& aDrawTarget);
+  void AccumulateOrPaintBlockDirSegment(DrawTarget& aDrawTarget);
   void ResetVerInfo();
   void StoreColumnWidth(int32_t aIndex);
   bool BlockDirSegmentOwnsCorner();
@@ -6508,7 +6508,7 @@ BCPaintBorderIterator::SetDamageArea(const nsRect& aDirtyRect)
 
   // XXX comment refers to the obsolete NS_FRAME_OUTSIDE_CHILDREN flag
   // XXX but I don't understand it, so not changing it for now
-  // outer table borders overflow the table, so the table might be
+  // table wrapper borders overflow the table, so the table might be
   // target to other areas as the NS_FRAME_OUTSIDE_CHILDREN is set
   // on the table
   if (!haveIntersect)
@@ -6693,10 +6693,9 @@ BCPaintBorderIterator::SetNewRowGroup()
       // header or footer
       const nsStyleDisplay* display = mRg->StyleDisplay();
       if (mRowIndex == mDamageArea.StartRow()) {
-        mIsRepeatedHeader = (NS_STYLE_DISPLAY_TABLE_HEADER_GROUP == display->mDisplay);
-      }
-      else {
-        mIsRepeatedFooter = (NS_STYLE_DISPLAY_TABLE_FOOTER_GROUP == display->mDisplay);
+        mIsRepeatedHeader = (mozilla::StyleDisplay::TableHeaderGroup == display->mDisplay);
+      } else {
+        mIsRepeatedFooter = (mozilla::StyleDisplay::TableFooterGroup == display->mDisplay);
       }
     }
   }
@@ -6952,14 +6951,14 @@ BCBlockDirSeg::GetBEndCorner(BCPaintBorderIterator& aIter,
 
 /**
  * Paint the block-dir segment
- * @param aIter             - iterator containing the structural information
- * @param aRenderingContext - the rendering context
- * @param aInlineSegBSize   - the width of the inline-dir segment joining the corner
- *                            at the start
+ * @param aIter           - iterator containing the structural information
+ * @param aDrawTarget     - the draw target
+ * @param aInlineSegBSize - the width of the inline-dir segment joining the
+ *                          corner at the start
  */
 void
 BCBlockDirSeg::Paint(BCPaintBorderIterator& aIter,
-                     nsRenderingContext&    aRenderingContext,
+                     DrawTarget&            aDrawTarget,
                      BCPixelSize            aInlineSegBSize)
 {
   // get the border style, color and paint the segment
@@ -6984,7 +6983,8 @@ BCBlockDirSeg::Paint(BCPaintBorderIterator& aIter,
       side = eLogicalSideIEnd;
       if (!aIter.IsTableIEndMost() && (relColIndex > 0)) {
         col = aIter.mBlockDirInfo[relColIndex - 1].mCol;
-      } // and fall through
+      }
+      MOZ_FALLTHROUGH;
     case eColGroupOwner:
       if (col) {
         owner = col->GetParent();
@@ -6994,20 +6994,22 @@ BCBlockDirSeg::Paint(BCPaintBorderIterator& aIter,
       side = eLogicalSideIEnd;
       if (!aIter.IsTableIEndMost() && (relColIndex > 0)) {
         col = aIter.mBlockDirInfo[relColIndex - 1].mCol;
-      } // and fall through
+      }
+      MOZ_FALLTHROUGH;
     case eColOwner:
       owner = col;
       break;
     case eAjaRowGroupOwner:
       NS_ERROR("a neighboring rowgroup can never own a vertical border");
-      // and fall through
+      MOZ_FALLTHROUGH;
     case eRowGroupOwner:
       NS_ASSERTION(aIter.IsTableIStartMost() || aIter.IsTableIEndMost(),
                   "row group can own border only at table edge");
       owner = mFirstRowGroup;
       break;
     case eAjaRowOwner:
-      NS_ERROR("program error"); // and fall through
+      NS_ERROR("program error");
+      MOZ_FALLTHROUGH;
     case eRowOwner:
       NS_ASSERTION(aIter.IsTableIStartMost() || aIter.IsTableIEndMost(),
                    "row can own border only at table edge");
@@ -7015,7 +7017,8 @@ BCBlockDirSeg::Paint(BCPaintBorderIterator& aIter,
       break;
     case eAjaCellOwner:
       side = eLogicalSideIEnd;
-      cell = mAjaCell; // and fall through
+      cell = mAjaCell;
+      MOZ_FALLTHROUGH;
     case eCellOwner:
       owner = cell;
       break;
@@ -7061,7 +7064,7 @@ BCBlockDirSeg::Paint(BCPaintBorderIterator& aIter,
     Swap(startBevelSide, endBevelSide);
     Swap(startBevelOffset, endBevelOffset);
   }
-  nsCSSRendering::DrawTableBorderSegment(aRenderingContext, style, color,
+  nsCSSRendering::DrawTableBorderSegment(aDrawTarget, style, color,
                                          aIter.mTableBgColor, physicalRect,
                                          appUnitsPerDevPixel,
                                          nsPresContext::AppUnitsPerCSSPixel(),
@@ -7163,12 +7166,11 @@ BCInlineDirSeg::GetIEndCorner(BCPaintBorderIterator& aIter,
 
 /**
  * Paint the inline-dir segment
- * @param aIter             - iterator containing the structural information
- * @param aRenderingContext - the rendering context
+ * @param aIter       - iterator containing the structural information
+ * @param aDrawTarget - the draw target
  */
 void
-BCInlineDirSeg::Paint(BCPaintBorderIterator& aIter,
-                      nsRenderingContext&    aRenderingContext)
+BCInlineDirSeg::Paint(BCPaintBorderIterator& aIter, DrawTarget& aDrawTarget)
 {
   // get the border style, color and paint the segment
   LogicalSide side =
@@ -7192,7 +7194,7 @@ BCInlineDirSeg::Paint(BCPaintBorderIterator& aIter,
       break;
     case eAjaColGroupOwner:
       NS_ERROR("neighboring colgroups can never own an inline-dir border");
-      // and fall through
+      MOZ_FALLTHROUGH;
     case eColGroupOwner:
       NS_ASSERTION(aIter.IsTableBStartMost() || aIter.IsTableBEndMost(),
                    "col group can own border only at the table edge");
@@ -7202,7 +7204,7 @@ BCInlineDirSeg::Paint(BCPaintBorderIterator& aIter,
       break;
     case eAjaColOwner:
       NS_ERROR("neighboring column can never own an inline-dir border");
-      // and fall through
+      MOZ_FALLTHROUGH;
     case eColOwner:
       NS_ASSERTION(aIter.IsTableBStartMost() || aIter.IsTableBEndMost(),
                    "col can own border only at the table edge");
@@ -7211,14 +7213,14 @@ BCInlineDirSeg::Paint(BCPaintBorderIterator& aIter,
     case eAjaRowGroupOwner:
       side = eLogicalSideBEnd;
       rg = (aIter.IsTableBEndMost()) ? aIter.mRg : aIter.mPrevRg;
-      // and fall through
+      MOZ_FALLTHROUGH;
     case eRowGroupOwner:
       owner = rg;
       break;
     case eAjaRowOwner:
       side = eLogicalSideBEnd;
       row = (aIter.IsTableBEndMost()) ? aIter.mRow : aIter.mPrevRow;
-      // and fall through
+      MOZ_FALLTHROUGH;
     case eRowOwner:
       owner = row;
       break;
@@ -7227,7 +7229,7 @@ BCInlineDirSeg::Paint(BCPaintBorderIterator& aIter,
       // if this is null due to the damage area origin-y > 0, then the border
       // won't show up anyway
       cell = mAjaCell;
-      // and fall through
+      MOZ_FALLTHROUGH;
     case eCellOwner:
       owner = cell;
       break;
@@ -7266,7 +7268,7 @@ BCInlineDirSeg::Paint(BCPaintBorderIterator& aIter,
     Swap(startBevelSide, endBevelSide);
     Swap(startBevelOffset, endBevelOffset);
   }
-  nsCSSRendering::DrawTableBorderSegment(aRenderingContext, style, color,
+  nsCSSRendering::DrawTableBorderSegment(aDrawTarget, style, color,
                                          aIter.mTableBgColor, physicalRect,
                                          appUnitsPerDevPixel,
                                          nsPresContext::AppUnitsPerCSSPixel(),
@@ -7325,10 +7327,10 @@ BCPaintBorderIterator::BlockDirSegmentOwnsCorner()
 
 /**
  * Paint if necessary an inline-dir segment, otherwise accumulate it
- * @param aRenderingContext - the rendering context
+ * @param aDrawTarget - the draw target
  */
 void
-BCPaintBorderIterator::AccumulateOrPaintInlineDirSegment(nsRenderingContext& aRenderingContext)
+BCPaintBorderIterator::AccumulateOrPaintInlineDirSegment(DrawTarget& aDrawTarget)
 {
 
   int32_t relColIndex = GetRelativeColIndex();
@@ -7361,7 +7363,7 @@ BCPaintBorderIterator::AccumulateOrPaintInlineDirSegment(nsRenderingContext& aRe
     if (mInlineSeg.mLength > 0) {
       mInlineSeg.GetIEndCorner(*this, iStartSegISize);
       if (mInlineSeg.mWidth > 0) {
-        mInlineSeg.Paint(*this, aRenderingContext);
+        mInlineSeg.Paint(*this, aDrawTarget);
       }
       mInlineSeg.AdvanceOffsetI();
     }
@@ -7373,10 +7375,10 @@ BCPaintBorderIterator::AccumulateOrPaintInlineDirSegment(nsRenderingContext& aRe
 }
 /**
  * Paint if necessary a block-dir segment, otherwise accumulate it
- * @param aRenderingContext - the rendering context
+ * @param aDrawTarget - the draw target
  */
 void
-BCPaintBorderIterator::AccumulateOrPaintBlockDirSegment(nsRenderingContext& aRenderingContext)
+BCPaintBorderIterator::AccumulateOrPaintBlockDirSegment(DrawTarget& aDrawTarget)
 {
   BCBorderOwner borderOwner = eCellOwner;
   BCBorderOwner ignoreBorderOwner;
@@ -7403,7 +7405,7 @@ BCPaintBorderIterator::AccumulateOrPaintBlockDirSegment(nsRenderingContext& aRen
     if (blockDirSeg.mLength > 0) {
       blockDirSeg.GetBEndCorner(*this, inlineSegBSize);
       if (blockDirSeg.mWidth > 0) {
-        blockDirSeg.Paint(*this, aRenderingContext, inlineSegBSize);
+        blockDirSeg.Paint(*this, aDrawTarget, inlineSegBSize);
       }
       blockDirSeg.AdvanceOffsetB();
     }
@@ -7431,12 +7433,11 @@ BCPaintBorderIterator::ResetVerInfo()
 /**
  * Method to paint BCBorders, this does not use currently display lists although
  * it will do this in future
- * @param aRenderingContext - the rendering context
- * @param aDirtyRect        - inside this rectangle the BC Borders will redrawn
+ * @param aDrawTarget - the rendering context
+ * @param aDirtyRect  - inside this rectangle the BC Borders will redrawn
  */
 void
-nsTableFrame::PaintBCBorders(nsRenderingContext& aRenderingContext,
-                             const nsRect&       aDirtyRect)
+nsTableFrame::PaintBCBorders(DrawTarget& aDrawTarget, const nsRect& aDirtyRect)
 {
   // We first transfer the aDirtyRect into cellmap coordinates to compute which
   // cell borders need to be painted
@@ -7455,7 +7456,7 @@ nsTableFrame::PaintBCBorders(nsRenderingContext& aRenderingContext,
   // this we  the now active segment with the current border. These
   // segments are stored in mBlockDirInfo to be used on the next row
   for (iter.First(); !iter.mAtEnd; iter.Next()) {
-    iter.AccumulateOrPaintBlockDirSegment(aRenderingContext);
+    iter.AccumulateOrPaintBlockDirSegment(aDrawTarget);
   }
 
   // Next, paint all of the inline-dir border segments from bStart to bEnd reuse
@@ -7463,7 +7464,7 @@ nsTableFrame::PaintBCBorders(nsRenderingContext& aRenderingContext,
   // corner calculations
   iter.Reset();
   for (iter.First(); !iter.mAtEnd; iter.Next()) {
-    iter.AccumulateOrPaintInlineDirSegment(aRenderingContext);
+    iter.AccumulateOrPaintInlineDirSegment(aDrawTarget);
   }
 }
 
@@ -7529,7 +7530,7 @@ nsTableFrame::InvalidateTableFrame(nsIFrame* aFrame,
              aOrigVisualOverflow.Size() != visualOverflow.Size()){
     aFrame->InvalidateFrameWithRect(aOrigVisualOverflow);
     aFrame->InvalidateFrame();
-    parent->InvalidateFrameWithRect(aOrigRect);;
+    parent->InvalidateFrameWithRect(aOrigRect);
     parent->InvalidateFrame();
   }
 }

@@ -52,6 +52,7 @@ static const char* const gHTMLTypes[] = {
   TEXT_HTML,
   VIEWSOURCE_CONTENT_TYPE,
   APPLICATION_XHTML_XML,
+  APPLICATION_WAPXHTML_XML,
   0
 };
   
@@ -212,7 +213,8 @@ nsContentDLF::CreateInstance(const char* aCommand,
                              aExtraInfo, aDocListener, aDocViewer);
   }
 
-  if (mozilla::DecoderTraits::ShouldHandleMediaType(contentType.get())) {
+  if (mozilla::DecoderTraits::ShouldHandleMediaType(contentType.get(),
+                    /* DecoderDoctorDiagnostics* */ nullptr)) {
     return CreateDocument(aCommand,
                           aChannel, aLoadGroup,
                           aContainer, kVideoDocumentCID,
@@ -328,8 +330,7 @@ nsContentDLF::CreateBlankDocument(nsILoadGroup *aLoadGroup,
     blankDoc->SetDocumentCharacterSetSource(kCharsetFromDocTypeDefault);
     blankDoc->SetDocumentCharacterSet(NS_LITERAL_CSTRING("UTF-8"));
     
-    *aDocument = blankDoc;
-    NS_ADDREF(*aDocument);
+    blankDoc.forget(aDocument);
   }
   return rv;
 }

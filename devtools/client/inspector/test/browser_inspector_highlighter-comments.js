@@ -5,7 +5,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-///////////////////
 //
 // Whitelisting this test.
 // As part of bug 1077403, the leaking uncaught rejection should be fixed.
@@ -15,44 +14,49 @@ thisTestLeaksUncaughtRejectionsAndShouldBeFixed("false");
 // Test that hovering over the markup-view's containers doesn't always show the
 // highlighter, depending on the type of node hovered over.
 
-const TEST_PAGE = TEST_URL_ROOT +
+const TEST_PAGE = URL_ROOT +
   "doc_inspector_highlighter-comments.html";
 
 add_task(function* () {
-  let {toolbox, inspector, testActor} = yield openInspectorForURL(TEST_PAGE);
+  let {inspector, testActor} = yield openInspectorForURL(TEST_PAGE);
   let markupView = inspector.markup;
   yield selectNode("p", inspector);
 
   info("Hovering over #id1 and waiting for highlighter to appear.");
   yield hoverElement("#id1");
-  yield assertHighlighterShownOn(testActor, "#id1");
+  yield assertHighlighterShownOn("#id1");
 
   info("Hovering over comment node and ensuring highlighter doesn't appear.");
   yield hoverComment();
-  yield assertHighlighterHidden(testActor);
+  yield assertHighlighterHidden();
 
   info("Hovering over #id1 again and waiting for highlighter to appear.");
   yield hoverElement("#id1");
-  yield assertHighlighterShownOn(testActor, "#id1");
+  yield assertHighlighterShownOn("#id1");
 
   info("Hovering over #id2 and waiting for highlighter to appear.");
   yield hoverElement("#id2");
-  yield assertHighlighterShownOn(testActor, "#id2");
+  yield assertHighlighterShownOn("#id2");
 
   info("Hovering over <script> and ensuring highlighter doesn't appear.");
   yield hoverElement("script");
-  yield assertHighlighterHidden(testActor);
+  yield assertHighlighterHidden();
 
   info("Hovering over #id3 and waiting for highlighter to appear.");
   yield hoverElement("#id3");
-  yield assertHighlighterShownOn(testActor, "#id3");
+  yield assertHighlighterShownOn("#id3");
 
   info("Hovering over hidden #id4 and ensuring highlighter doesn't appear.");
   yield hoverElement("#id4");
-  yield assertHighlighterHidden(testActor);
+  yield assertHighlighterHidden();
+
+  info("Hovering over a text node and waiting for highlighter to appear.");
+  yield hoverTextNode("Visible text node");
+  yield assertHighlighterShownOnTextNode("body", 14);
 
   function hoverContainer(container) {
     let promise = inspector.toolbox.once("node-highlight");
+
     EventUtils.synthesizeMouse(container.tagLine, 2, 2, {type: "mousemove"},
         markupView.doc.defaultView);
 
@@ -60,7 +64,7 @@ add_task(function* () {
   }
 
   function* hoverElement(selector) {
-    info("Hovering node " + selector + " in the markup view");
+    info(`Hovering node ${selector} in the markup view`);
     let container = yield getContainerForSelector(selector, inspector);
     return hoverContainer(container);
   }
@@ -72,13 +76,29 @@ add_task(function* () {
         return hoverContainer(container);
       }
     }
+    return null;
   }
 
-  function* assertHighlighterShownOn(testActor, selector) {
-    ok((yield testActor.assertHighlightedNode(selector)), "Highlighter is shown on the right node: " + selector);
+  function hoverTextNode(text) {
+    info(`Hovering the text node "${text}" in the markup view`);
+    let container = [...markupView._containers].filter(([nodeFront]) => {
+      return nodeFront.nodeType === Ci.nsIDOMNode.TEXT_NODE &&
+             nodeFront._form.nodeValue.trim() === text.trim();
+    })[0][1];
+    return hoverContainer(container);
   }
 
-  function* assertHighlighterHidden(testActor) {
+  function* assertHighlighterShownOn(selector) {
+    ok((yield testActor.assertHighlightedNode(selector)),
+       "Highlighter is shown on the right node: " + selector);
+  }
+
+  function* assertHighlighterShownOnTextNode(parentSelector, childNodeIndex) {
+    ok((yield testActor.assertHighlightedTextNode(parentSelector, childNodeIndex)),
+       "Highlighter is shown on the right text node");
+  }
+
+  function* assertHighlighterHidden() {
     let isVisible = yield testActor.isHighlighting();
     ok(!isVisible, "Highlighter is hidden");
   }

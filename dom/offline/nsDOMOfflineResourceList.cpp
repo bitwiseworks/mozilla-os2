@@ -16,7 +16,6 @@
 #include "nsServiceManagerUtils.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIOfflineCacheUpdate.h"
-#include "nsAutoPtr.h"
 #include "nsContentUtils.h"
 #include "nsIObserverService.h"
 #include "nsIScriptGlobalObject.h"
@@ -25,6 +24,7 @@
 #include "mozilla/dom/OfflineResourceListBinding.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/BasePrincipal.h"
 
 #include "nsXULAppAPI.h"
 #define IS_CHILD_PROCESS() \
@@ -82,7 +82,7 @@ NS_IMPL_EVENT_HANDLER(nsDOMOfflineResourceList, obsolete)
 nsDOMOfflineResourceList::nsDOMOfflineResourceList(nsIURI *aManifestURI,
                                                    nsIURI *aDocumentURI,
                                                    nsIPrincipal *aLoadingPrincipal,
-                                                   nsPIDOMWindow *aWindow)
+                                                   nsPIDOMWindowInner *aWindow)
   : DOMEventTargetHelper(aWindow)
   , mInitialized(false)
   , mManifestURI(aManifestURI)
@@ -465,8 +465,7 @@ nsDOMOfflineResourceList::Update()
     do_GetService(NS_OFFLINECACHEUPDATESERVICE_CONTRACTID, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<nsIDOMWindow> window = 
-    do_QueryInterface(GetOwner());
+  nsCOMPtr<nsPIDOMWindowInner> window = GetOwner();
 
   nsCOMPtr<nsIOfflineCacheUpdate> update;
   rv = updateService->ScheduleUpdate(mManifestURI, mDocumentURI, mLoadingPrincipal,
@@ -813,16 +812,18 @@ nsDOMOfflineResourceList::CacheKeys()
   nsCOMPtr<nsIWebNavigation> webNav = do_GetInterface(window);
   nsCOMPtr<nsILoadContext> loadContext = do_QueryInterface(webNav);
 
-  uint32_t appId = 0;
-  bool inBrowser = false;
+  nsAutoCString originSuffix;
   if (loadContext) {
-    loadContext->GetAppId(&appId);
-    loadContext->GetIsInBrowserElement(&inBrowser);
+    mozilla::DocShellOriginAttributes oa;
+    bool ok = loadContext->GetOriginAttributes(oa);
+    NS_ENSURE_TRUE(ok, NS_ERROR_UNEXPECTED);
+
+    oa.CreateSuffix(originSuffix);
   }
 
   nsAutoCString groupID;
-  mApplicationCacheService->BuildGroupIDForApp(
-      mManifestURI, appId, inBrowser, groupID);
+  mApplicationCacheService->BuildGroupIDForSuffix(
+      mManifestURI, originSuffix, groupID);
 
   nsCOMPtr<nsIApplicationCache> appCache;
   mApplicationCacheService->GetActiveCache(groupID,

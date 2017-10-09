@@ -37,7 +37,7 @@ private:
     {
         // our reference to mSink could be the last, so be sure to release
         // it on the target thread.  otherwise, we could get into trouble.
-        NS_ProxyRelease(mTarget, mSink);
+        NS_ProxyRelease(mTarget, dont_AddRef(mSink));
     }
 
 public:
@@ -47,7 +47,7 @@ public:
     nsTransportStatusEvent          *mLastEvent;
 };
 
-class nsTransportStatusEvent : public nsRunnable
+class nsTransportStatusEvent : public Runnable
 {
 public:
     nsTransportStatusEvent(nsTransportEventSinkProxy *proxy,
@@ -64,7 +64,7 @@ public:
 
     ~nsTransportStatusEvent() {}
 
-    NS_IMETHOD Run()
+    NS_IMETHOD Run() override
     {
         // since this event is being handled, we need to clear the proxy's ref.
         // if not coalescing all, then last event may not equal self!

@@ -13,7 +13,9 @@
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/dom/ipc/BlobChild.h"
 #include "mozilla/dom/ipc/StructuredCloneData.h"
+#include "mozilla/ipc/FileDescriptorSetChild.h"
 #include "mozilla/ipc/InputStreamUtils.h"
+#include "mozilla/ipc/SendStream.h"
 
 #include "nsPrintfCString.h"
 #include "xpcpublic.h"
@@ -27,7 +29,7 @@ namespace dom {
 PJavaScriptChild*
 nsIContentChild::AllocPJavaScriptChild()
 {
-  return NewJavaScriptChild(xpc::GetJSRuntime());
+  return NewJavaScriptChild();
 }
 
 bool
@@ -109,11 +111,37 @@ nsIContentChild::GetOrCreateActorForBlobImpl(BlobImpl* aImpl)
   return actor;
 }
 
+PSendStreamChild*
+nsIContentChild::AllocPSendStreamChild()
+{
+  MOZ_CRASH("PSendStreamChild actors should be manually constructed!");
+}
+
+bool
+nsIContentChild::DeallocPSendStreamChild(PSendStreamChild* aActor)
+{
+  delete aActor;
+  return true;
+}
+
+PFileDescriptorSetChild*
+nsIContentChild::AllocPFileDescriptorSetChild(const FileDescriptor& aFD)
+{
+  return new FileDescriptorSetChild(aFD);
+}
+
+bool
+nsIContentChild::DeallocPFileDescriptorSetChild(PFileDescriptorSetChild* aActor)
+{
+  delete static_cast<FileDescriptorSetChild*>(aActor);
+  return true;
+}
+
 bool
 nsIContentChild::RecvAsyncMessage(const nsString& aMsg,
-                                  const ClonedMessageData& aData,
                                   InfallibleTArray<CpowEntry>&& aCpows,
-                                  const IPC::Principal& aPrincipal)
+                                  const IPC::Principal& aPrincipal,
+                                  const ClonedMessageData& aData)
 {
   RefPtr<nsFrameMessageManager> cpm = nsFrameMessageManager::GetChildProcessManager();
   if (cpm) {

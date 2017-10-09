@@ -35,7 +35,6 @@
 
 #include <float.h>
 
-#include "asmjs/AsmJSValidate.h"
 #include "jit/mips32/Assembler-mips32.h"
 #include "vm/Runtime.h"
 
@@ -282,7 +281,7 @@ SimInstruction::isForbiddenInBranchDelay() const
         break;
       default:
         return false;
-    };
+    }
 }
 
 bool
@@ -447,7 +446,7 @@ SimInstruction::instructionType() const
         return kJumpType;
       default:
         return kUnsupported;
-    };
+    }
     return kUnsupported;
 }
 
@@ -488,23 +487,26 @@ class CachePage {
 
 // Protects the icache() and redirection() properties of the
 // Simulator.
-class AutoLockSimulatorCache
+class AutoLockSimulatorCache : public LockGuard<Mutex>
 {
+    using Base = LockGuard<Mutex>;
+
   public:
-    explicit AutoLockSimulatorCache(Simulator* sim) : sim_(sim) {
-        PR_Lock(sim_->cacheLock_);
-        MOZ_ASSERT(!sim_->cacheLockHolder_);
+    explicit AutoLockSimulatorCache(Simulator* sim)
+      : Base(sim->cacheLock_)
+      , sim_(sim)
+    {
+        MOZ_ASSERT(sim_->cacheLockHolder_.isNothing());
 #ifdef DEBUG
-        sim_->cacheLockHolder_ = PR_GetCurrentThread();
+        sim_->cacheLockHolder_ = mozilla::Some(ThisThread::GetId());
 #endif
     }
 
     ~AutoLockSimulatorCache() {
-        MOZ_ASSERT(sim_->cacheLockHolder_);
+        MOZ_ASSERT(sim_->cacheLockHolder_.isSome());
 #ifdef DEBUG
-        sim_->cacheLockHolder_ = nullptr;
+        sim_->cacheLockHolder_.reset();
 #endif
-        PR_Unlock(sim_->cacheLock_);
     }
 
   private:
@@ -516,7 +518,7 @@ bool Simulator::ICacheCheckingEnabled = false;
 int Simulator::StopSimAt = -1;
 
 Simulator*
-Simulator::Create()
+Simulator::Create(JSContext* cx)
 {
     Simulator* sim = js_new<Simulator>();
     if (!sim)
@@ -1239,6 +1241,7 @@ Simulator::FlushICache(void* start_addr, size_t size)
 }
 
 Simulator::Simulator()
+  : cacheLock_(mutexid::SimulatorCacheLock)
 {
     // Set up simulator support first. Some of this information is needed to
     // setup the architecture state.
@@ -1275,20 +1278,12 @@ Simulator::Simulator()
 
     lastDebuggerInput_ = nullptr;
 
-    cacheLock_ = nullptr;
-#ifdef DEBUG
-    cacheLockHolder_ = nullptr;
-#endif
     redirection_ = nullptr;
 }
 
 bool
 Simulator::init()
 {
-    cacheLock_ = PR_NewLock();
-    if (!cacheLock_)
-        return false;
-
     if (!icache_.init())
         return false;
 
@@ -1378,7 +1373,6 @@ class Redirection
 Simulator::~Simulator()
 {
     js_free(stack_);
-    PR_DestroyLock(cacheLock_);
     Redirection* r = redirection_;
     while (r) {
         Redirection* next = r->next_;
@@ -1622,7 +1616,7 @@ Simulator::readW(uint32_t addr, SimInstruction* instr)
 {
     if (addr < 0x400) {
         // This has to be a NULL-dereference, drop into debugger.
-        printf("Memory read from bad address: 0x%08x, pc=0x%08x\n",
+        printf("Memory read from bad address: 0x%08x, pc=0x%08" PRIxPTR "\n",
                addr, reinterpret_cast<intptr_t>(instr));
         MOZ_CRASH();
     }
@@ -1630,7 +1624,7 @@ Simulator::readW(uint32_t addr, SimInstruction* instr)
         intptr_t* ptr = reinterpret_cast<intptr_t*>(addr);
         return *ptr;
     }
-    printf("Unaligned read at 0x%08x, pc=0x%08x\n",
+    printf("Unaligned read at 0x%08x, pc=0x%08" PRIxPTR "\n",
            addr,
            reinterpret_cast<intptr_t>(instr));
     MOZ_CRASH();
@@ -1642,7 +1636,7 @@ Simulator::writeW(uint32_t addr, int value, SimInstruction* instr)
 {
     if (addr < 0x400) {
         // This has to be a NULL-dereference, drop into debugger.
-        printf("Memory write to bad address: 0x%08x, pc=0x%08x\n",
+        printf("Memory write to bad address: 0x%08x, pc=0x%08" PRIxPTR "\n",
                addr, reinterpret_cast<intptr_t>(instr));
         MOZ_CRASH();
     }
@@ -1651,7 +1645,7 @@ Simulator::writeW(uint32_t addr, int value, SimInstruction* instr)
         *ptr = value;
         return;
     }
-    printf("Unaligned write at 0x%08x, pc=0x%08x\n",
+    printf("Unaligned write at 0x%08x, pc=0x%08" PRIxPTR "\n",
            addr,
            reinterpret_cast<intptr_t>(instr));
     MOZ_CRASH();
@@ -1664,7 +1658,7 @@ Simulator::readD(uint32_t addr, SimInstruction* instr)
         double* ptr = reinterpret_cast<double*>(addr);
         return *ptr;
     }
-    printf("Unaligned (double) read at 0x%08x, pc=0x%08x\n",
+    printf("Unaligned (double) read at 0x%08x, pc=0x%08" PRIxPTR "\n",
            addr,
            reinterpret_cast<intptr_t>(instr));
     MOZ_CRASH();
@@ -1679,7 +1673,7 @@ Simulator::writeD(uint32_t addr, double value, SimInstruction* instr)
         *ptr = value;
         return;
     }
-    printf("Unaligned (double) write at 0x%08x, pc=0x%08x\n",
+    printf("Unaligned (double) write at 0x%08x, pc=0x%08" PRIxPTR "\n",
            addr,
            reinterpret_cast<intptr_t>(instr));
     MOZ_CRASH();
@@ -1692,7 +1686,7 @@ Simulator::readHU(uint32_t addr, SimInstruction* instr)
         uint16_t* ptr = reinterpret_cast<uint16_t*>(addr);
         return *ptr;
     }
-    printf("Unaligned unsigned halfword read at 0x%08x, pc=0x%08x\n",
+    printf("Unaligned unsigned halfword read at 0x%08x, pc=0x%08" PRIxPTR "\n",
            addr,
            reinterpret_cast<intptr_t>(instr));
     MOZ_CRASH();
@@ -1706,7 +1700,7 @@ Simulator::readH(uint32_t addr, SimInstruction* instr)
         int16_t* ptr = reinterpret_cast<int16_t*>(addr);
         return *ptr;
     }
-    printf("Unaligned signed halfword read at 0x%08x, pc=0x%08x\n",
+    printf("Unaligned signed halfword read at 0x%08x, pc=0x%08" PRIxPTR "\n",
            addr,
            reinterpret_cast<intptr_t>(instr));
     MOZ_CRASH();
@@ -1721,7 +1715,7 @@ Simulator::writeH(uint32_t addr, uint16_t value, SimInstruction* instr)
         *ptr = value;
         return;
     }
-    printf("Unaligned unsigned halfword write at 0x%08x, pc=0x%08x\n",
+    printf("Unaligned unsigned halfword write at 0x%08x, pc=0x%08" PRIxPTR "\n",
            addr,
            reinterpret_cast<intptr_t>(instr));
     MOZ_CRASH();
@@ -1735,7 +1729,7 @@ Simulator::writeH(uint32_t addr, int16_t value, SimInstruction* instr)
         *ptr = value;
         return;
     }
-    printf("Unaligned halfword write at 0x%08x, pc=0x%08x\n",
+    printf("Unaligned halfword write at 0x%08x, pc=0x%08" PRIxPTR "\n",
            addr,
            reinterpret_cast<intptr_t>(instr));
     MOZ_CRASH();
@@ -1800,7 +1794,7 @@ Simulator::overRecursedWithExtra(uint32_t extra) const
 void
 Simulator::format(SimInstruction* instr, const char* format)
 {
-    printf("Simulator found unsupported instruction:\n 0x%08x: %s\n",
+    printf("Simulator found unsupported instruction:\n 0x%08" PRIxPTR ": %s\n",
            reinterpret_cast<intptr_t>(instr), format);
     MOZ_CRASH();
 }
@@ -1826,12 +1820,14 @@ typedef double (*Prototype_Double_None)();
 typedef double (*Prototype_Double_Double)(double arg0);
 typedef double (*Prototype_Double_Int)(int32_t arg0);
 typedef int32_t (*Prototype_Int_Double)(double arg0);
+typedef int64_t (*Prototype_Int64_Double)(double arg0);
 typedef int32_t (*Prototype_Int_DoubleIntInt)(double arg0, int32_t arg1, int32_t arg2);
 typedef int32_t (*Prototype_Int_IntDoubleIntInt)(int32_t arg0, double arg1, int32_t arg2,
                                                  int32_t arg3);
 typedef float (*Prototype_Float32_Float32)(float arg0);
 
 typedef double (*Prototype_DoubleInt)(double arg0, int32_t arg1);
+typedef double (*Prototype_Double_IntInt)(int32_t arg0, int32_t arg1);
 typedef double (*Prototype_Double_IntDouble)(int32_t arg0, double arg1);
 typedef double (*Prototype_Double_DoubleDouble)(double arg0, double arg1);
 typedef int32_t (*Prototype_Int_IntDouble)(int32_t arg0, double arg1);
@@ -1948,6 +1944,15 @@ Simulator::softwareInterrupt(SimInstruction* instr)
             setRegister(v0, res);
             break;
           }
+          case Args_Int64_Double: {
+            double dval0, dval1;
+            int32_t ival;
+            getFpArgs(&dval0, &dval1, &ival);
+            Prototype_Int64_Double target = reinterpret_cast<Prototype_Int64_Double>(external);
+            int64_t result = target(dval0);
+            setCallResult(result);
+            break;
+          }
           case Args_Int_DoubleIntInt: {
             double dval = getFpuRegisterDouble(12);
             Prototype_Int_DoubleIntInt target = reinterpret_cast<Prototype_Int_DoubleIntInt>(external);
@@ -1982,6 +1987,12 @@ Simulator::softwareInterrupt(SimInstruction* instr)
           case Args_Double_Int: {
             Prototype_Double_Int target = reinterpret_cast<Prototype_Double_Int>(external);
             double dresult = target(arg0);
+            setCallResultDouble(dresult);
+            break;
+          }
+          case Args_Double_IntInt: {
+            Prototype_Double_IntInt target = reinterpret_cast<Prototype_Double_IntInt>(external);
+            double dresult = target(arg0, arg1);
             setCallResultDouble(dresult);
             break;
           }
@@ -2232,7 +2243,7 @@ Simulator::configureTypeRegister(SimInstruction* instr,
             break;
           default:
             MOZ_CRASH();
-        };
+        }
         break;
       case op_cop1x:
         break;
@@ -2368,7 +2379,7 @@ Simulator::configureTypeRegister(SimInstruction* instr,
             break;
           default:
             MOZ_CRASH();
-        };
+        }
         break;
       case op_special2:
         switch (instr->functionFieldRaw()) {
@@ -2380,7 +2391,7 @@ Simulator::configureTypeRegister(SimInstruction* instr,
             break;
           default:
             MOZ_CRASH();
-        };
+        }
         break;
       case op_special3:
         switch (instr->functionFieldRaw()) {
@@ -2406,11 +2417,11 @@ Simulator::configureTypeRegister(SimInstruction* instr,
           }
           default:
             MOZ_CRASH();
-        };
+        }
         break;
       default:
         MOZ_CRASH();
-    };
+    }
 }
 
 void
@@ -2776,7 +2787,7 @@ Simulator::decodeTypeRegister(SimInstruction* instr)
                 break;
               default:
                 MOZ_CRASH();
-            };
+            }
             break;
           case rs_l:
             switch (instr->functionFieldRaw()) {
@@ -2798,7 +2809,7 @@ Simulator::decodeTypeRegister(SimInstruction* instr)
             break;
           default:
             MOZ_CRASH();
-        };
+        }
         break;
       case op_cop1x:
         switch (instr->functionFieldRaw()) {
@@ -2818,7 +2829,7 @@ Simulator::decodeTypeRegister(SimInstruction* instr)
             break;
           default:
             MOZ_CRASH();
-        };
+        }
         break;
       case op_special:
         switch (instr->functionFieldRaw()) {
@@ -2898,7 +2909,7 @@ Simulator::decodeTypeRegister(SimInstruction* instr)
             break;
           default:  // For other special opcodes we do the default operation.
             setRegister(rd_reg, alu_out);
-          };
+          }
           break;
       case op_special2:
         switch (instr->functionFieldRaw()) {
@@ -2924,14 +2935,14 @@ Simulator::decodeTypeRegister(SimInstruction* instr)
             break;
           default:
             MOZ_CRASH();
-        };
+        }
         break;
         // Unimplemented opcodes raised an error in the configuration step before,
         // so we can use the default here to set the destination register in common
         // cases.
       default:
         setRegister(rd_reg, alu_out);
-      };
+      }
 }
 
 // Type 2: instructions using a 16 bytes immediate. (e.g. addi, beq).
@@ -2993,7 +3004,7 @@ Simulator::decodeTypeImmediate(SimInstruction* instr)
             break;
           default:
             MOZ_CRASH();
-        };
+        }
         break;
         // ------------- op_regimm class.
       case op_regimm:
@@ -3012,7 +3023,7 @@ Simulator::decodeTypeImmediate(SimInstruction* instr)
             break;
           default:
             MOZ_CRASH();
-        };
+        }
         switch (instr->rtFieldRaw()) {
           case rt_bltz:
           case rt_bltzal:
@@ -3031,7 +3042,7 @@ Simulator::decodeTypeImmediate(SimInstruction* instr)
             }
           default:
             break;
-        };
+        }
         break;  // case op_regimm.
         // ------------- Branch instructions.
         // When comparing to zero, the encoding of rt field is always 0, so we don't
@@ -3164,7 +3175,7 @@ Simulator::decodeTypeImmediate(SimInstruction* instr)
         break;
       default:
         MOZ_CRASH();
-    };
+    }
 
     // ---------- Raise exceptions triggered.
     signalExceptions();
@@ -3240,7 +3251,7 @@ Simulator::decodeTypeImmediate(SimInstruction* instr)
         break;
       default:
         break;
-    };
+    }
 
 
     if (execute_branch_delay_instruction) {
@@ -3332,7 +3343,7 @@ Simulator::execute()
     // Get the PC to simulate. Cannot use the accessor here as we need the
     // raw PC value and not the one used as input to arithmetic instructions.
     int program_counter = get_pc();
-    AsmJSActivation* activation = TlsPerThreadData.get()->runtimeFromMainThread()->asmJSActivationStack();
+    WasmActivation* activation = TlsPerThreadData.get()->runtimeFromMainThread()->wasmActivationStack();
 
     while (program_counter != end_sim_pc) {
         if (enableStopSimAt && (icount_ == Simulator::StopSimAt)) {
@@ -3345,7 +3356,7 @@ Simulator::execute()
 
             int32_t rpc = resume_pc_;
             if (MOZ_UNLIKELY(rpc != 0)) {
-                // AsmJS signal handler ran and we have to adjust the pc.
+                // wasm signal handler ran and we have to adjust the pc.
                 activation->setResumePC((void*)get_pc());
                 set_pc(rpc);
                 resume_pc_ = 0;
@@ -3506,4 +3517,3 @@ JSRuntime::addressOfSimulatorStackLimit()
 {
     return simulator_->addressOfStackLimit();
 }
-

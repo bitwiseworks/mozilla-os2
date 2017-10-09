@@ -145,7 +145,9 @@ QuotaUsageRequestChild::HandleResponse(const UsageResponse& aResponse)
   AssertIsOnOwningThread();
   MOZ_ASSERT(mRequest);
 
-  mRequest->SetResult(aResponse.usage(), aResponse.fileUsage());
+  mRequest->SetResult(aResponse.usage(),
+                      aResponse.fileUsage(),
+                      aResponse.limit());
 }
 
 void
@@ -250,7 +252,7 @@ QuotaRequestChild::Recv__delete__(const RequestResponse& aResponse)
       break;
 
     case RequestResponse::TClearOriginResponse:
-    case RequestResponse::TClearAppResponse:
+    case RequestResponse::TClearOriginsResponse:
     case RequestResponse::TClearAllResponse:
     case RequestResponse::TResetAllResponse:
       HandleResponse();

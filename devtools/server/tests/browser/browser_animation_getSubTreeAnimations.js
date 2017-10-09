@@ -9,7 +9,7 @@
 
 const URL = MAIN_DOMAIN + "animation.html";
 
-add_task(function*() {
+add_task(function* () {
   info("Creating a test document with 2 iframes containing animated nodes");
 
   let {client, walker, animations} = yield initAnimationsFrontForUrl(
@@ -33,6 +33,6 @@ add_task(function*() {
   // at least have the infinitely running animations.
   ok(players.length >= 4, "All subtree animations were retrieved");
 
-  yield closeDebuggerClient(client);
+  yield client.close();
   gBrowser.removeCurrentTab();
 });

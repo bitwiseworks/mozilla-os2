@@ -13,13 +13,13 @@ public class SiteIdentity {
     private final String LOGTAG = "GeckoSiteIdentity";
     private SecurityMode mSecurityMode;
     private boolean mSecure;
-    private boolean mLoginInsecure;
     private MixedMode mMixedModeActive;
     private MixedMode mMixedModeDisplay;
     private TrackingMode mTrackingMode;
     private String mHost;
     private String mOwner;
     private String mSupplemental;
+    private String mCountry;
     private String mVerifier;
     private String mOrigin;
 
@@ -28,7 +28,8 @@ public class SiteIdentity {
     public enum SecurityMode {
         UNKNOWN("unknown"),
         IDENTIFIED("identified"),
-        VERIFIED("verified");
+        VERIFIED("verified"),
+        CHROMEUI("chromeUI");
 
         private final String mId;
 
@@ -42,7 +43,7 @@ public class SiteIdentity {
             }
 
             for (SecurityMode mode : SecurityMode.values()) {
-                if (TextUtils.equals(mode.mId, id.toLowerCase())) {
+                if (TextUtils.equals(mode.mId, id)) {
                     return mode;
                 }
             }
@@ -132,9 +133,9 @@ public class SiteIdentity {
         mHost = null;
         mOwner = null;
         mSupplemental = null;
+        mCountry = null;
         mVerifier = null;
         mSecure = false;
-        mLoginInsecure = false;
     }
 
     public void reset() {
@@ -180,10 +181,11 @@ public class SiteIdentity {
 
             try {
                 mOrigin = identityData.getString("origin");
-                mHost = identityData.getString("host");
+                mHost = identityData.optString("host", null);
                 mOwner = identityData.optString("owner", null);
                 mSupplemental = identityData.optString("supplemental", null);
-                mVerifier = identityData.getString("verifier");
+                mCountry = identityData.optString("country", null);
+                mVerifier = identityData.optString("verifier", null);
                 mSecure = identityData.optBoolean("secure", false);
             } catch (Exception e) {
                 resetIdentity();
@@ -209,8 +211,20 @@ public class SiteIdentity {
         return mOwner;
     }
 
+    public boolean hasOwner() {
+        return !TextUtils.isEmpty(mOwner);
+    }
+
     public String getSupplemental() {
         return mSupplemental;
+    }
+
+    public String getCountry() {
+        return mCountry;
+    }
+
+    public boolean hasCountry() {
+        return !TextUtils.isEmpty(mCountry);
     }
 
     public String getVerifier() {
@@ -219,14 +233,6 @@ public class SiteIdentity {
 
     public boolean isSecure() {
         return mSecure;
-    }
-
-    public void setLoginInsecure(boolean isInsecure) {
-        mLoginInsecure = isInsecure;
-    }
-
-    public boolean loginInsecure() {
-        return mLoginInsecure;
     }
 
     public MixedMode getMixedModeActive() {

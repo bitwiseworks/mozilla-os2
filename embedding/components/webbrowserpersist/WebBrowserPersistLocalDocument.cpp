@@ -162,7 +162,7 @@ WebBrowserPersistLocalDocument::GetReferrer(nsAString& aReferrer)
 NS_IMETHODIMP
 WebBrowserPersistLocalDocument::GetContentDisposition(nsAString& aCD)
 {
-    nsCOMPtr<nsIDOMWindow> window = mDocument->GetDefaultView();
+    nsCOMPtr<nsPIDOMWindowOuter> window = mDocument->GetDefaultView();
     if (NS_WARN_IF(!window)) {
         aCD.SetIsVoid(true);
         return NS_OK;
@@ -216,7 +216,7 @@ WebBrowserPersistLocalDocument::GetPostData(nsIInputStream** aStream)
 already_AddRefed<nsISHEntry>
 WebBrowserPersistLocalDocument::GetHistory()
 {
-    nsCOMPtr<nsIDOMWindow> window = mDocument->GetDefaultView();
+    nsCOMPtr<nsPIDOMWindowOuter> window = mDocument->GetDefaultView();
     if (NS_WARN_IF(!window)) {
         return nullptr;
     }
@@ -825,11 +825,11 @@ PersistNodeFixup::FixupAnchor(nsIDOMNode *aNode)
         nsCOMPtr<nsIURI> newURI;
         rv = NS_NewURI(getter_AddRefs(newURI), oldCValue,
                        mParent->GetCharacterSet().get(), relativeURI);
-        if (NS_SUCCEEDED(rv) && newURI)
-        {
+        if (NS_SUCCEEDED(rv) && newURI) {
             newURI->SetUserPass(EmptyCString());
             nsAutoCString uriSpec;
-            newURI->GetSpec(uriSpec);
+            rv = newURI->GetSpec(uriSpec);
+            NS_ENSURE_SUCCESS(rv, rv);
             attr->SetValue(NS_ConvertUTF8toUTF16(uriSpec));
         }
     }

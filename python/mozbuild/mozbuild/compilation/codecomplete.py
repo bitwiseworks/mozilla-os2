@@ -15,7 +15,11 @@ from mach.decorators import (
 )
 
 from mozbuild.base import MachCommandBase
-from mozbuild.shellutil import quote as shell_quote
+from mozbuild.shellutil import (
+    split as shell_split,
+    quote as shell_quote,
+)
+
 
 @CommandProvider
 class Introspection(MachCommandBase):
@@ -43,14 +47,17 @@ class Introspection(MachCommandBase):
         build_vars = util.get_build_vars(make_dir, self)
 
         if what.endswith('.c'):
+            cc = 'CC'
             name = 'COMPILE_CFLAGS'
         else:
+            cc = 'CXX'
             name = 'COMPILE_CXXFLAGS'
 
         if name not in build_vars:
             return
 
-        print(' '.join(shell_quote(arg)
-                       for arg in util.get_flags(self.topobjdir, make_dir,
-                                                 build_vars, name)))
+        # Drop the first flag since that is the pathname of the compiler.
+        flags = (shell_split(build_vars[cc]) + shell_split(build_vars[name]))[1:]
 
+        print(' '.join(shell_quote(arg)
+                       for arg in util.sanitize_cflags(flags)))

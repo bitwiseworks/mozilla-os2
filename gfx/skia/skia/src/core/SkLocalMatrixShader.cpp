@@ -7,18 +7,34 @@
 
 #include "SkLocalMatrixShader.h"
 
-SkLocalMatrixShader::SkLocalMatrixShader(SkReadBuffer& buffer) : INHERITED(buffer) {
-    if (buffer.isVersionLT(SkReadBuffer::kSimplifyLocalMatrix_Version)) {
-        buffer.readMatrix(&(INHERITED::fLocalMatrix));
+#if SK_SUPPORT_GPU
+#include "GrFragmentProcessor.h"
+#endif
+
+#if SK_SUPPORT_GPU
+sk_sp<GrFragmentProcessor> SkLocalMatrixShader::asFragmentProcessor(const AsFPArgs& args) const {
+    SkMatrix tmp = this->getLocalMatrix();
+    if (args.fLocalMatrix) {
+        tmp.preConcat(*args.fLocalMatrix);
     }
-    fProxyShader.reset(buffer.readShader());
-    if (NULL == fProxyShader.get()) {
-        sk_throw();
+    return fProxyShader->asFragmentProcessor(AsFPArgs(
+        args.fContext, args.fViewMatrix, &tmp, args.fFilterQuality, args.fDstColorSpace,
+        args.fGammaTreatment));
+}
+#endif
+
+sk_sp<SkFlattenable> SkLocalMatrixShader::CreateProc(SkReadBuffer& buffer) {
+    SkMatrix lm;
+    buffer.readMatrix(&lm);
+    auto baseShader(buffer.readShader());
+    if (!baseShader) {
+        return nullptr;
     }
+    return baseShader->makeWithLocalMatrix(lm);
 }
 
 void SkLocalMatrixShader::flatten(SkWriteBuffer& buffer) const {
-    this->INHERITED::flatten(buffer);
+    buffer.writeMatrix(this->getLocalMatrix());
     buffer.writeFlattenable(fProxyShader.get());
 }
 
@@ -27,7 +43,7 @@ SkShader::Context* SkLocalMatrixShader::onCreateContext(const ContextRec& rec,
     ContextRec newRec(rec);
     SkMatrix tmp;
     if (rec.fLocalMatrix) {
-        tmp.setConcat(this->getLocalMatrix(), *rec.fLocalMatrix);
+        tmp.setConcat(*rec.fLocalMatrix, this->getLocalMatrix());
         newRec.fLocalMatrix = &tmp;
     } else {
         newRec.fLocalMatrix = &this->getLocalMatrix();
@@ -47,20 +63,21 @@ void SkLocalMatrixShader::toString(SkString* str) const {
 }
 #endif
 
-SkShader* SkShader::CreateLocalMatrixShader(SkShader* proxy, const SkMatrix& localMatrix) {
+sk_sp<SkShader> SkShader::makeWithLocalMatrix(const SkMatrix& localMatrix) const {
     if (localMatrix.isIdentity()) {
-        return SkRef(proxy);
+        return sk_ref_sp(const_cast<SkShader*>(this));
     }
 
     const SkMatrix* lm = &localMatrix;
 
+    SkShader* baseShader = const_cast<SkShader*>(this);
     SkMatrix otherLocalMatrix;
-    SkAutoTUnref<SkShader> otherProxy(proxy->refAsALocalMatrixShader(&otherLocalMatrix));
-    if (otherProxy.get()) {
+    SkAutoTUnref<SkShader> proxy(this->refAsALocalMatrixShader(&otherLocalMatrix));
+    if (proxy) {
         otherLocalMatrix.preConcat(localMatrix);
         lm = &otherLocalMatrix;
-        proxy = otherProxy.get();
+        baseShader = proxy.get();
     }
 
-    return SkNEW_ARGS(SkLocalMatrixShader, (proxy, *lm));
+    return sk_make_sp<SkLocalMatrixShader>(baseShader, *lm);
 }

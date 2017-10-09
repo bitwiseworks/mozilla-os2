@@ -3,32 +3,44 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-%filter substitution
-%define smw_marginDark #000
-%define smw_marginLight #aaa
-%define smw_itemDarkTopBorder rgba(0,0,0,0.2)
-%define smw_itemDarkBottomBorder rgba(128,128,128,0.15)
-%define smw_itemLightTopBorder rgba(128,128,128,0.15)
-%define smw_itemLightBottomBorder transparent
 .theme-dark {
   --table-splitter-color: rgba(255,255,255,0.15);
   --table-zebra-background: rgba(255,255,255,0.05);
+  --sidemenu-selected-arrow: url(images/item-arrow-dark-ltr.svg);
+  --sidemenu-selected-arrow-rtl: url(images/item-arrow-dark-rtl.svg);
+  --delete-icon: url(chrome://devtools/skin/images/vview-delete.png);
+  --delete-icon-2x: url(chrome://devtools/skin/images/vview-delete@2x.png);
 }
+
 .theme-light {
   --table-splitter-color: rgba(0,0,0,0.15);
   --table-zebra-background: rgba(0,0,0,0.05);
+  --sidemenu-selected-arrow: url(images/item-arrow-ltr.svg);
+  --sidemenu-selected-arrow-rtl: url(images/item-arrow-rtl.svg);
+  --delete-icon: url(chrome://devtools/skin/images/vview-delete.png);
+  --delete-icon-2x: url(chrome://devtools/skin/images/vview-delete@2x.png);
 }
+
+.theme-firebug {
+  --table-splitter-color: rgba(0,0,0,0.15);
+  --table-zebra-background: rgba(0,0,0,0.05);
+  --sidemenu-selected-arrow: url(images/item-arrow-ltr.svg);
+  --sidemenu-selected-arrow-rtl: url(images/item-arrow-rtl.svg);
+  --delete-icon: url(chrome://devtools/skin/images/firebug/close.svg);
+  --delete-icon-2x: url(chrome://devtools/skin/images/firebug/close.svg);
+}
+
 
 /* Generic pane helpers */
 
-.generic-toggled-side-pane {
-  -moz-margin-start: 0 !important;
+.generic-toggled-pane {
+  margin-inline-start: 0 !important;
   /* Unfortunately, transitions don't work properly with locale-aware properties,
      so both the left and right margins are set via js, while the start margin
      is always overridden here. */
 }
 
-.generic-toggled-side-pane[animated] {
+.generic-toggled-pane[animated] {
   transition: margin 0.25s ease-in-out;
 }
 
@@ -48,6 +60,17 @@
   position: relative;
 }
 
+@media (min-width: 701px) {
+  .devtools-responsive-container .generic-toggled-pane {
+    /* To hide generic-toggled-pane, negative margins are applied dynamically.
+     * In the default horizontal layout, the pane is on the side and should be
+     * hidden using negative margin-inline-end only.
+     */
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+  }
+}
+
 @media (max-width: 700px) {
   .devtools-responsive-container {
     -moz-box-orient: vertical;
@@ -56,32 +79,44 @@
   .devtools-responsive-container > .devtools-side-splitter {
     /* This is a normally vertical splitter, but we have turned it horizontal
        due to the smaller resolution */
-    min-height: 3px;
-    height: 3px;
-    margin-top: -3px;
+    min-height: calc(var(--devtools-splitter-top-width) +
+    var(--devtools-splitter-bottom-width) + 1px);
+    border-top-width: var(--devtools-splitter-top-width);
+    border-bottom-width: var(--devtools-splitter-bottom-width);
+    margin-top: calc(-1 * var(--devtools-splitter-top-width) - 1px);
+    margin-bottom: calc(-1 * var(--devtools-splitter-bottom-width));
 
     /* Reset the vertical splitter styles */
-    border-width: 0;
-    border-bottom-width: 1px;
-    border-bottom-style: solid;
-    -moz-margin-start: 0;
-    width: auto;
     min-width: 0;
+    border-inline-end-width: 0;
+    border-inline-start-width: 0;
+    margin-inline-end: 0;
+    margin-inline-start: 0;
 
     /* In some edge case the cursor is not changed to n-resize */
     cursor: n-resize;
   }
 
-  .devtools-responsive-container > .devtools-sidebar-tabs {
+  .devtools-responsive-container > .devtools-sidebar-tabs:not(.pane-collapsed) {
+    /* When the panel is collapsed min/max height should not be applied because
+       collapsing relies on negative margins, which implies constant height. */
     min-height: 35vh;
     max-height: 75vh;
+  }
+
+  .devtools-responsive-container .generic-toggled-pane {
+    /* To hide generic-toggled-pane, negative margins are applied dynamically.
+     * If a vertical layout, the pane is on the bottom and should be hidden
+     * using negative bottom margin only.
+     */
+    margin-inline-end: 0 !important;
   }
 }
 
 /* BreacrumbsWidget */
 
 .breadcrumbs-widget-container {
-  -moz-margin-end: 3px;
+  margin-inline-end: 3px;
   max-height: 24px; /* Set max-height for proper sizing on linux */
   height: 24px; /* Set height to prevent starting small waiting for content */
 }
@@ -154,54 +189,6 @@
   transform: scaleX(-1);
 }
 
-/* The breadcrumb separator elements are used as background images with
- * -moz-element, so we position them offscreen since we don't care about
- * seeing the original elements.
- */
-.breadcrumb-separator-container {
-  position: fixed;
-  top: -1000px;
-  left: -1000px;
-}
-
-#breadcrumb-separator-before,
-#breadcrumb-separator-after,
-#breadcrumb-separator-normal {
-  width: 12px;
-  height: 24px;
-  overflow: hidden;
-}
-
-#breadcrumb-separator-before,
-#breadcrumb-separator-after:after {
-  background: var(--theme-selection-background);
-}
-
-#breadcrumb-separator-after,
-#breadcrumb-separator-before:after {
-  background: var(--theme-toolbar-background);
-}
-
-/* This chevron arrow cannot be replicated easily in CSS, so we are using
- * a background image for it (still keeping it in a separate element so
- * we can handle RTL support with a CSS transform).
- */
-#breadcrumb-separator-normal {
-  background: url(images/breadcrumbs-divider@2x.png) no-repeat center right;
-  background-size: 12px 24px;
-}
-
-/* Fake a triangle by rotating a rectangle inside the elements */
-#breadcrumb-separator-before:after,
-#breadcrumb-separator-after:after {
-  content: "";
-  display: block;
-  width: 25px;
-  height: 24px;
-  transform: translateX(-18px) rotate(45deg);
-  -moz-box-sizing: border-box;
-}
-
 .breadcrumbs-widget-item {
   background-color: transparent;
   -moz-appearance: none;
@@ -212,6 +199,7 @@
   border: none;
   outline: none;
   color: hsl(210,30%,85%);
+  position: relative;
 }
 
 .breadcrumbs-widget-item > .button-box {
@@ -220,22 +208,97 @@
   padding-bottom: 0;
 }
 
-%ifdef XP_WIN
-.breadcrumbs-widget-item:-moz-focusring > .button-box {
+:root[platform="win"] .breadcrumbs-widget-item:-moz-focusring > .button-box {
   border-width: 0;
 }
-%endif
 
-.breadcrumbs-widget-item:not([checked]) {
-  background: -moz-element(#breadcrumb-separator-normal) no-repeat center left;
+.breadcrumbs-widget-item::before {
+  content: "";
+  position: absolute;
+  top: 1px;
+  offset-inline-start: 0;
+  width: 12px;
+  height: 22px;
+  background-repeat: no-repeat;
+  /* Given the 1/2 aspect ratio of the separator pseudo-element and the 45deg angle of
+     the arrow shape, we need the arrow edges to be at this position from the start of
+     the gradient line. */
+  --position: 66.5%;
+  /* The color of the thin line in the arrow-shaped separator between 2 unselected
+     crumbs. There is no theme variable for this, this used to be an image. */
+  --line-color: #ACACAC;
+  --background-color: var(--theme-body-background);
 }
 
-.breadcrumbs-widget-item[checked] + .breadcrumbs-widget-item {
-  background: -moz-element(#breadcrumb-separator-after) no-repeat 0 0;
+#debugger-toolbar .breadcrumbs-widget-item::before {
+  --background-color: var(--theme-toolbar-background);
 }
 
-.breadcrumbs-widget-item[checked] {
-  background: -moz-element(#breadcrumb-separator-before) no-repeat 0 0;
+.theme-dark .breadcrumbs-widget-item::before {
+  --line-color: #6E6E6E;
+}
+
+.breadcrumbs-widget-item:first-child::before {
+  /* The first crumb does not need any separator before itself */
+  content: unset;
+}
+
+.breadcrumbs-widget-item:dir(rtl)::before {
+  transform: scaleX(-1);
+}
+
+.breadcrumbs-widget-item:not([checked])::before {
+  background-color: var(--background-color);
+  background-image:
+    linear-gradient(45deg,
+                    var(--background-color) 30%,
+                    transparent),
+    linear-gradient(-45deg,
+                    transparent,
+                    var(--background-color) 70%,
+                    var(--background-color)),
+    linear-gradient(45deg,
+                    transparent var(--position),
+                    var(--line-color) var(--position),
+                    var(--line-color) calc(var(--position) + 1px),
+                    transparent 0),
+    linear-gradient(-45deg,
+                    transparent calc(100% - var(--position)),
+                    var(--line-color) calc(100% - var(--position)),
+                    var(--line-color) calc(calc(100% - var(--position)) + 1px),
+                    transparent 0);
+  background-size:
+    100% 50%,
+    100% 50%,
+    100%,
+    100%;
+  background-position:
+    left bottom,
+    left top,
+    left top,
+    left top;
+}
+
+.breadcrumbs-widget-item[checked] + .breadcrumbs-widget-item::before {
+  background-color: var(--theme-selection-background);
+  background-image:
+    linear-gradient(45deg,
+                    transparent var(--position),
+                    var(--background-color) 0),
+    linear-gradient(-45deg,
+                    var(--background-color) calc(100% - var(--position)),
+                    transparent 0);
+  background-size: unset;
+}
+
+.breadcrumbs-widget-item[checked]::before {
+  background-image:
+    linear-gradient(45deg,
+                    transparent var(--position),
+                    var(--theme-selection-background) 0),
+    linear-gradient(-45deg,
+                    var(--theme-selection-background) calc(100% - var(--position)),
+                    var(--background-color) 0);
 }
 
 .breadcrumbs-widget-item[checked] {
@@ -249,24 +312,13 @@
 /* RTL support: move the images that were on the left to the right,
  * and move images that were on the right to the left.
  */
-.breadcrumbs-widget-item:-moz-locale-dir(rtl) {
+.breadcrumbs-widget-item:dir(rtl) {
   padding: 0 20px 0 8px;
 }
 
-.breadcrumbs-widget-item:-moz-locale-dir(rtl),
-.breadcrumbs-widget-item[checked] + .breadcrumbs-widget-item:-moz-locale-dir(rtl) {
+.breadcrumbs-widget-item:dir(rtl),
+.breadcrumbs-widget-item[checked] + .breadcrumbs-widget-item:dir(rtl) {
   background-position: center right;
-}
-
-#breadcrumb-separator-before:-moz-locale-dir(rtl),
-#breadcrumb-separator-after:-moz-locale-dir(rtl),
-#breadcrumb-separator-normal:-moz-locale-dir(rtl) {
-  transform: scaleX(-1);
-}
-
-#breadcrumb-separator-before:-moz-locale-dir(rtl):after,
-#breadcrumb-separator-after:-moz-locale-dir(rtl):after {
-  transform: translateX(-5px) rotate(45deg);
 }
 
 .breadcrumbs-widget-item[checked] .breadcrumbs-widget-item-id,
@@ -302,6 +354,104 @@
 
 .theme-light .breadcrumbs-widget-item:not([checked]):hover label {
   color: black;
+}
+
+/* Firebug theme support for breadcrumbs widget. */
+
+.theme-firebug .breadcrumbs-widget-item {
+  margin-inline-start: 10px;
+  margin-inline-end: 1px;
+  background-image: none;
+  border: 1px solid transparent;
+  color: #141414;
+  border-radius: 2px;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  font-size: var(--theme-toolbar-font-size);
+}
+
+.theme-firebug .breadcrumbs-widget-item:hover {
+  border-color: rgba(0, 0, 0, 0.2);
+  background: transparent linear-gradient(
+              rgba(255, 255, 255, 0.4),
+              rgba(255, 255, 255, 0.2)) no-repeat;
+  box-shadow: 1px 1px 1px rgba(255, 255, 255, 0.6) inset,
+              0 0 1px rgba(255, 255, 255, 0.6) inset,
+              0 0 2px rgba(0, 0, 0, 0.05);
+}
+
+.theme-firebug .breadcrumbs-widget-item > .button-box {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.theme-firebug .breadcrumbs-widget-item:first-child {
+  margin: 0;
+}
+
+.theme-firebug .breadcrumbs-widget-item:not(:first-child)::before {
+  content: url(chrome://devtools/skin/images/firebug/breadcrumbs-divider.svg);
+  background: none;
+  position: relative;
+  left: -3px;
+  margin: 0 0 0 -5px;
+  padding: 0;
+  width: 5px;
+}
+
+/* Breadcrumbs Separators (reset selection styles) */
+.theme-firebug .breadcrumbs-widget-item[checked],
+.theme-firebug .breadcrumbs-widget-item[checked] .breadcrumbs-widget-item-id,
+.theme-firebug .breadcrumbs-widget-item[checked] .breadcrumbs-widget-item-tag,
+.theme-firebug .breadcrumbs-widget-item[checked] .breadcrumbs-widget-item-pseudo-classes,
+.theme-firebug .breadcrumbs-widget-item[checked] .breadcrumbs-widget-item-classes {
+  background: none;
+  font-weight: bold;
+  color: inherit;
+}
+
+/* The first rule is there only to make sure the default rule from
+widgets.css is overwritten. */
+.theme-firebug .breadcrumbs-widget-item[checked] + .breadcrumbs-widget-item {
+  background: none;
+}
+
+.theme-firebug .breadcrumbs-widget-item .breadcrumbs-widget-item-tag {
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+/* Breadcrumbs Scrolling Buttons */
+
+.theme-firebug .breadcrumbs-widget-container .scrollbutton-up,
+.theme-firebug .breadcrumbs-widget-container .scrollbutton-down {
+  padding: 0;
+  box-shadow: none;
+}
+
+.theme-firebug .breadcrumbs-widget-container .scrollbutton-up:hover,
+.theme-firebug .breadcrumbs-widget-container .scrollbutton-down:hover {
+  border: 1px transparent solid !important;
+  box-shadow: none !important;
+}
+
+.theme-firebug .breadcrumbs-widget-container .scrollbutton-up:active,
+.theme-firebug .breadcrumbs-widget-container .scrollbutton-down:active {
+  background: none !important;
+}
+
+.theme-firebug .breadcrumbs-widget-container .scrollbutton-up > .toolbarbutton-icon {
+  background-image: url(chrome://global/skin/arrow/arrow-lft-sharp.gif);
+}
+
+.theme-firebug .breadcrumbs-widget-container .scrollbutton-down > .toolbarbutton-icon {
+  background-image: url(chrome://global/skin/arrow/arrow-lft-sharp.gif);
+}
+
+.theme-firebug .breadcrumbs-widget-container .scrollbutton-up:not([disabled]):active:hover > .toolbarbutton-icon,
+.theme-firebug .breadcrumbs-widget-container .scrollbutton-down:not([disabled]):active:hover > .toolbarbutton-icon {
+  background-position: 0 center;
 }
 
 /* SimpleListWidget */
@@ -358,78 +508,28 @@
 
 /* SideMenuWidget container */
 
-.theme-dark .side-menu-widget-container:-moz-locale-dir(ltr),
-.theme-dark .side-menu-widget-empty-text:-moz-locale-dir(ltr) {
-  box-shadow: inset -1px 0 0 @smw_marginDark@;
-}
-
-.theme-dark .side-menu-widget-container:-moz-locale-dir(rtl),
-.theme-dark .side-menu-widget-empty-text:-moz-locale-dir(rtl) {
-  box-shadow: inset 1px 0 0 @smw_marginDark@;
-}
-
-.side-menu-widget-container:-moz-locale-dir(ltr),
-.side-menu-widget-empty-text:-moz-locale-dir(ltr) {
-  box-shadow: inset -1px 0 0 @smw_marginLight@;
-}
-
-.side-menu-widget-container:-moz-locale-dir(rtl),
-.side-menu-widget-empty-text:-moz-locale-dir(rtl) {
-  box-shadow: inset 1px 0 0 @smw_marginLight@;
-}
-
-.side-menu-widget-group {
-  /* To allow visibility of the dark margin shadow. */
-  -moz-margin-end: 1px;
-}
-
 .side-menu-widget-container[with-arrows=true] .side-menu-widget-item {
   /* To compensate for the arrow image's dark margin. */
-  -moz-margin-end: -1px;
+  margin-inline-end: -1px;
 }
 
 /* SideMenuWidget groups */
 
 .side-menu-widget-group-title {
   padding: 4px;
-  background-color: var(--theme-tab-toolbar-background);
+  font-weight: 600;
+  border-bottom: 1px solid rgba(128,128,128,0.15);
 }
 
-.theme-dark .side-menu-widget-group-title {
-  color: var(--theme-content-color1);
-}
-
-.theme-light .side-menu-widget-group-title {
-  color: var(--theme-content-color3);
+.side-menu-widget-group-title + .side-menu-widget-group-list .side-menu-widget-item-contents {
+  padding-inline-start: 20px;
 }
 
 /* SideMenuWidget items */
 
 .side-menu-widget-item {
-  /* To compensate for the top and bottom borders */
-  margin-top: -1px;
-  margin-bottom: -1px;
+  border-bottom: 1px solid rgba(128,128,128,0.15);
   background-clip: padding-box;
-}
-
-.theme-dark .side-menu-widget-item {
-  border-top: 1px solid @smw_itemDarkTopBorder@;
-  border-bottom: 1px solid @smw_itemDarkBottomBorder@;
-  color: var(--theme-selection-color);
-}
-
-.theme-dark .side-menu-widget-item:last-of-type {
-  box-shadow: inset 0 -1px 0 @smw_itemDarkTopBorder@;
-}
-
-.theme-light .side-menu-widget-item {
-  border-top: 1px solid @smw_itemLightTopBorder@;
-  border-bottom: 1px solid @smw_itemLightBottomBorder@;
-  color: var(--theme-body-color);
-}
-
-.theme-light .side-menu-widget-item:last-of-type {
-  box-shadow: inset 0 -1px 0 @smw_itemLightTopBorder@;
 }
 
 .side-menu-widget-item.selected {
@@ -438,40 +538,20 @@
 }
 
 .side-menu-widget-item-arrow {
-  -moz-margin-start: -7px;
+  margin-inline-start: -7px;
   width: 7px; /* The image's width is 7 pixels */
-  /* Cover the border of the side-menu-widget-item */
-  margin-top: -1px;
-  margin-bottom: -1px;
 }
 
 .side-menu-widget-item.selected > .side-menu-widget-item-arrow {
-  background-size: auto, 1px 100%;
+  background-image: var(--sidemenu-selected-arrow);
+  background-size: auto;
   background-repeat: no-repeat;
-}
-
-.side-menu-widget-item.selected > .side-menu-widget-item-arrow:-moz-locale-dir(ltr) {
-  background-position: center right, top right;
+  background-position: center right;
 }
 
 .side-menu-widget-item.selected > .side-menu-widget-item-arrow:-moz-locale-dir(rtl) {
-  background-position: center left, top left;
-}
-
-.theme-dark .side-menu-widget-item.selected > .side-menu-widget-item-arrow:-moz-locale-dir(ltr) {
-  background-image: url(images/itemArrow-dark-ltr.svg), linear-gradient(to right, @smw_marginDark@, @smw_marginDark@);
-}
-
-.theme-dark .side-menu-widget-item.selected > .side-menu-widget-item-arrow:-moz-locale-dir(rtl) {
-  background-image: url(images/itemArrow-dark-rtl.svg), linear-gradient(to right, @smw_marginDark@, @smw_marginDark@);
-}
-
-.theme-light .side-menu-widget-item.selected > .side-menu-widget-item-arrow:-moz-locale-dir(ltr) {
-  background-image: url(images/itemArrow-ltr.svg), linear-gradient(to right, @smw_marginLight@, @smw_marginLight@);
-}
-
-.theme-light .side-menu-widget-item.selected > .side-menu-widget-item-arrow:-moz-locale-dir(rtl) {
-  background-image: url(images/itemArrow-rtl.svg), linear-gradient(to right, @smw_marginLight@, @smw_marginLight@);
+  background-image: var(--sidemenu-selected-arrow-rtl);
+  background-position: center left;
 }
 
 /* SideMenuWidget items contents */
@@ -479,15 +559,30 @@
 .side-menu-widget-item-contents {
   padding: 4px;
   /* To avoid having content overlapping the arrow image. */
-  -moz-padding-end: 8px;
+  padding-inline-end: 8px;
 }
 
 .side-menu-widget-item-other {
   /* To avoid having content overlapping the arrow image. */
-  -moz-padding-end: 8px;
+  padding-inline-end: 8px;
   /* To compensate for the .side-menu-widget-item-contents padding. */
-  -moz-margin-start: -4px;
-  -moz-margin-end: -8px;
+  margin-inline-start: -4px;
+  margin-inline-end: -8px;
+}
+
+.side-menu-widget-group-title + .side-menu-widget-group-list .side-menu-widget-item-other {
+  /* To compensate for the .side-menu-widget-item-contents padding. */
+  margin-inline-start: -20px;
+}
+
+.side-menu-widget-item.selected .side-menu-widget-item-other:not(.selected) {
+  background-color: var(--theme-sidebar-background);
+  box-shadow: inset 2px 0 0 var(--theme-selection-background);
+  color: var(--theme-body-color);
+}
+
+.side-menu-widget-item.selected .side-menu-widget-item-other.selected {
+  background-color: var(--theme-selection-background);
 }
 
 .side-menu-widget-item-other:first-of-type {
@@ -498,50 +593,23 @@
   margin-bottom: -4px;
 }
 
-.theme-dark .side-menu-widget-item-other {
-  background-color: rgba(0,0,0,.1);
-}
-
-.theme-light .side-menu-widget-item-other {
-  background-color: rgba(128,128,128,.1);
-}
-
-.theme-dark .side-menu-widget-item.selected .side-menu-widget-item-other {
-  background-color: rgba(0,0,0,.2); /* Darken the selection by 20% */
-  color: var(--theme-selection-color);
-}
-
-.theme-light .side-menu-widget-item.selected .side-menu-widget-item-other {
-  background-color: rgba(255,255,255,.8); /* Lighten the selection by 20% */
-  color: var(--theme-body-color);
-}
-
-.side-menu-widget-item.selected .side-menu-widget-item-other.selected {
-  background-color: transparent;
-  color: var(--theme-selection-color);
-}
-
 /* SideMenuWidget checkboxes */
 
 .side-menu-widget-group-checkbox {
   margin: 0;
-  -moz-margin-end: 4px;
+  margin-inline-end: 4px;
 }
 
 .side-menu-widget-item-checkbox {
   margin: 0;
-  -moz-margin-start: 4px;
+  margin-inline-start: 4px;
 }
 
 /* SideMenuWidget misc */
 
-.theme-dark .side-menu-widget-container,
-.theme-dark .side-menu-widget-empty-text {
-  background-color: var(--theme-toolbar-background);
-}
-
 .side-menu-widget-empty-text {
   padding: 4px 8px;
+  background-color: var(--theme-sidebar-background);
 }
 
 /* VariablesView */
@@ -571,10 +639,20 @@
   margin-top: -1px;
 }
 
+/* Custom scope stylings */
+
+.variables-view-watch-expressions .title > .name  {
+  max-width: 14em;
+}
+
 /* Generic variables traits */
 
 .variables-view-variable:not(:last-child) {
   border-bottom: 1px solid rgba(128, 128, 128, .15);
+}
+
+.theme-firebug .variables-view-variable {
+  border-bottom: 1px solid transparent;
 }
 
 .variables-view-variable > .title > .name {
@@ -592,11 +670,11 @@
 }
 
 .variable-or-property > .title > .theme-twisty {
-  -moz-margin-start: 5px;
+  margin-inline-start: 5px;
 }
 
 .variable-or-property:not([untitled]) > .variables-view-element-details {
-  -moz-margin-start: 7px;
+  margin-inline-start: 7px;
 }
 
 /* Traits applied when variables or properties are changed or overridden */
@@ -657,7 +735,7 @@
 .variable-or-property-sealed-label,
 .variable-or-property-non-extensible-label {
   height: 16px;
-  -moz-padding-end: 4px;
+  padding-inline-end: 4px;
 }
 
 .variable-or-property:not(:focus) > .title > .variable-or-property-frozen-label,
@@ -728,13 +806,13 @@
 }
 
 .variable-or-property[overridden] > tooltip > label.overridden {
-  -moz-padding-start: 4px;
-  -moz-border-start: 1px dotted #000;
+  padding-inline-start: 4px;
+  border-inline-start: 1px dotted #000;
 }
 
 .variable-or-property[safe-getter] > tooltip > label.WebIDL {
-  -moz-padding-start: 4px;
-  -moz-border-start: 1px dotted #000;
+  padding-inline-start: 4px;
+  border-inline-start: 1px dotted #000;
   color: #080;
 }
 
@@ -767,12 +845,12 @@
 }
 
 .variables-view-delete {
-  background-image: url("chrome://devtools/skin/images/vview-delete.png");
+  background-image: var(--delete-icon);
 }
 
 @media (min-resolution: 1.1dppx) {
   .variables-view-delete {
-    background-image: url("chrome://devtools/skin/images/vview-delete@2x.png");
+    background-image: var(--delete-icon-2x);
   }
 }
 
@@ -796,22 +874,21 @@
   }
 }
 
-
 /* Variables and properties input boxes */
 
 .variable-or-property > .title > .separator + .element-value-input {
-  -moz-margin-start: -2px !important;
-  -moz-margin-end: 2px !important;
+  margin-inline-start: -2px !important;
+  margin-inline-end: 2px !important;
 }
 
 .variable-or-property > .title > .separator[hidden=true] + .element-value-input {
-  -moz-margin-start: 4px !important;
-  -moz-margin-end: 2px !important;
+  margin-inline-start: 4px !important;
+  margin-inline-end: 2px !important;
 }
 
 .element-name-input {
-  -moz-margin-start: -2px !important;
-  -moz-margin-end: 2px !important;
+  margin-inline-start: -2px !important;
+  margin-inline-end: 2px !important;
   font-weight: 600;
 }
 
@@ -875,17 +952,17 @@
   top: 0;
   left: 0;
   pointer-events: none;
-  -moz-border-end: 1px solid;
+  border-inline-end: 1px solid;
 }
 
 .theme-light .line-graph-widget-gutter {
   background: rgba(255,255,255,0.75);
-  -moz-border-end-color: rgba(255,255,255,0.25);
+  border-inline-end-color: rgba(255,255,255,0.25);
 }
 
 .theme-dark .line-graph-widget-gutter {
   background: rgba(0,0,0,0.5);
-  -moz-border-end-color: rgba(0,0,0,0.25);
+  border-inline-end-color: rgba(0,0,0,0.25);
 }
 
 .line-graph-widget-gutter-line {
@@ -910,8 +987,8 @@
   position: absolute;
   border-radius: 2px;
   line-height: 15px;
-  -moz-padding-start: 6px;
-  -moz-padding-end: 6px;
+  padding-inline-start: 6px;
+  padding-inline-end: 6px;
   transform: translateY(-50%);
   font-size: 0.8rem !important;
   z-index: 1;
@@ -935,29 +1012,29 @@
 }
 
 .line-graph-widget-tooltip[arrow=start][with-arrows=true]::before {
-  -moz-border-end: 3px solid;
+  border-inline-end: 3px solid;
   left: -3px;
 }
 
 .line-graph-widget-tooltip[arrow=end][with-arrows=true]::before {
-  -moz-border-start: 3px solid;
+  border-inline-start: 3px solid;
   right: -3px;
 }
 
 .theme-light .line-graph-widget-tooltip[arrow=start][with-arrows=true]::before {
-  -moz-border-end-color: rgba(255,255,255,0.75);
+  border-inline-end-color: rgba(255,255,255,0.75);
 }
 
 .theme-dark .line-graph-widget-tooltip[arrow=start][with-arrows=true]::before {
-  -moz-border-end-color: rgba(0,0,0,0.5);
+  border-inline-end-color: rgba(0,0,0,0.5);
 }
 
 .theme-light .line-graph-widget-tooltip[arrow=end][with-arrows=true]::before {
-  -moz-border-start-color: rgba(255,255,255,0.75);
+  border-inline-start-color: rgba(255,255,255,0.75);
 }
 
 .theme-dark .line-graph-widget-tooltip[arrow=end][with-arrows=true]::before {
-  -moz-border-start-color: rgba(0,0,0,0.5);
+  border-inline-start-color: rgba(0,0,0,0.5);
 }
 
 .line-graph-widget-tooltip[type=maximum] {
@@ -977,11 +1054,11 @@
 }
 
 .line-graph-widget-tooltip > [text=value] {
-  -moz-margin-start: 3px;
+  margin-inline-start: 3px;
 }
 
 .line-graph-widget-tooltip > [text=metric] {
-  -moz-margin-start: 1px;
+  margin-inline-start: 1px;
   color: var(--theme-content-color3);
 }
 
@@ -1026,7 +1103,7 @@
 
 .bar-graph-widget-legend-item {
   float: left;
-  -moz-margin-end: 8px;
+  margin-inline-end: 8px;
 }
 
 .bar-graph-widget-legend-item > [view="color"],
@@ -1040,7 +1117,7 @@
   height: 8px;
   border: 1px solid #fff;
   border-radius: 1px;
-  -moz-margin-end: 4px;
+  margin-inline-end: 4px;
   pointer-events: all;
   cursor: pointer;
 }
@@ -1153,12 +1230,12 @@
 .table-chart-row-box {
   width: 8px;
   height: 1.5em;
-  -moz-margin-end: 10px;
+  margin-inline-end: 10px;
 }
 
 .table-chart-row-label {
   width: 8em;
-  -moz-padding-end: 6px;
+  padding-inline-end: 6px;
   cursor: inherit;
 }
 
@@ -1189,7 +1266,7 @@
 /* Table body */
 
 .table-widget-body > .devtools-side-splitter {
-  border: none;
+  background-color: transparent;
 }
 
 .table-widget-body {
@@ -1205,7 +1282,7 @@
 
 .table-widget-column-header,
 .table-widget-cell {
-  -moz-border-end: 1px solid var(--table-splitter-color) !important;
+  border-inline-end: 1px solid var(--table-splitter-color) !important;
 }
 
 /* Table widget column header colors are taken from netmonitor.inc.css to match
@@ -1220,8 +1297,12 @@
   color: inherit;
   text-align: center;
   font-weight: inherit !important;
-  border-bottom-width: 0 !important;
-  border-image: linear-gradient(transparent 15%, var(--theme-splitter-color) 15%, var(--theme-splitter-color) 85%, transparent 85%) 1 1;
+  border-image: linear-gradient(transparent 15%,
+                                var(--theme-splitter-color) 15%,
+                                var(--theme-splitter-color) 85%,
+                                transparent 85%,
+                                transparent calc(100% - 1px),
+                                var(--theme-splitter-color) calc(100% - 1px)) 1 1;
   background-repeat: no-repeat;
 }
 
@@ -1233,7 +1314,7 @@
   background-color: var(--theme-selection-background);
   color: var(--theme-selection-color);
   border-image: linear-gradient(var(--theme-splitter-color), var(--theme-splitter-color)) 1 1;
-  box-shadow: -0.5px 0px 0px 0.5px var(--theme-splitter-color);
+  box-shadow: -0.5px -0.5px 0 0.5px var(--theme-splitter-color);
   background-position: right 6px center;
 }
 
@@ -1249,33 +1330,72 @@
   background-image: url("chrome://devtools/skin/images/sort-arrows.svg#descending");
 }
 
+.theme-dark .table-widget-column[readonly] {
+  background-color: rgba(255,255,255,0.1);
+}
+
+.theme-light .table-widget-column[readonly] {
+  background-color: rgba(0,0,0,0.1);
+}
+
+.table-widget-body .devtools-side-splitter:last-of-type {
+  display: none;
+}
+
+/* Firebug theme support for table widget */
+
+.theme-firebug .devtools-toolbar.table-widget-column-header {
+  font-family: var(--proportional-font-family);
+  color: var(--theme-body-color);
+
+  /* Make sure to override the default Firebug devtools-toolbar height */
+  height: 19px !important;
+
+  /* Make sure to override the dafault .table-widget-column-header font-weight and background */
+  font-weight: bold !important;
+  background-image: linear-gradient(rgba(255, 255, 255, 0.05), rgba(0, 0, 0, 0.05));
+  background-color: #C8D2DC !important;
+
+  /* Vertically center header label */
+  padding-top: 2px !important;
+}
+
+.theme-firebug .devtools-toolbar.table-widget-column-header[sorted] {
+  background-color: #AAC3DC !important;
+}
+
+.theme-firebug .devtools-toolbar.table-widget-column-header:hover:active {
+  background-image: linear-gradient(rgba(0, 0, 0, 0.1),
+                                    transparent);
+}
+
+.theme-firebug .devtools-toolbar.table-widget-column-header[sorted=descending]:not(:active) {
+  background-image: url(chrome://devtools/skin/images/firebug/arrow-down.svg);
+}
+
+.theme-firebug .devtools-toolbar.table-widget-column-header[sorted=ascending]:not(:active) {
+  background-image: url(chrome://devtools/skin/images/firebug/arrow-up.svg);
+}
+
 /* Cells */
 
 .table-widget-cell {
   width: 100%;
   padding: 3px 4px;
-  background-clip: padding-box;
   min-width: 100px;
   -moz-user-focus: normal;
-  margin-bottom: -1px !important;
-  border-bottom: 1px solid transparent;
   color: var(--theme-body-color);
 }
 
-.table-widget-column-header + .table-widget-cell {
-  border-top: 1px solid var(--theme-splitter-color);
+.table-widget-cell[hidden] {
+  display: none;
 }
 
-.table-widget-cell:last-child {
-  border-bottom: 1px solid var(--table-splitter-color);
+.table-widget-cell.even:not(.theme-selected) {
+  background-color: var(--table-zebra-background);
 }
 
-:root:not(.filtering) .table-widget-cell:nth-child(odd):not(.theme-selected),
-.table-widget-cell:not(.theme-selected)[odd] {
-  background: var(--table-zebra-background);
-}
-
-.table-widget-cell.flash-out {
+:root:not(.no-animate) .table-widget-cell.flash-out {
   animation: flash-out 0.5s ease-in;
 }
 
@@ -1308,7 +1428,7 @@
   height: 100%;
   list-style: none;
   overflow: hidden;
-  -moz-margin-end: 40px;
+  margin-inline-end: 40px;
 }
 
 .tree-widget-container:-moz-focusring,
@@ -1422,37 +1542,37 @@
 
 /* For level > 6 */
 .tree-widget-item[level] + ul > li > .tree-widget-item {
-  -moz-padding-start: 98px;
+  padding-inline-start: 98px;
 }
 
 /* First level */
 .tree-widget-item[level="1"] + ul > li > .tree-widget-item {
-  -moz-padding-start: 14px;
+  padding-inline-start: 14px;
 }
 
 /* Second level */
 .tree-widget-item[level="2"] + ul > li > .tree-widget-item {
-  -moz-padding-start: 28px;
+  padding-inline-start: 28px;
 }
 
 /* Third level */
 .tree-widget-item[level="3"] + ul > li > .tree-widget-item {
-  -moz-padding-start: 42px;
+  padding-inline-start: 42px;
 }
 
 /* Fourth level */
 .tree-widget-item[level="4"] + ul > li > .tree-widget-item {
-  -moz-padding-start: 56px;
+  padding-inline-start: 56px;
 }
 
 /* Fifth level */
 .tree-widget-item[level="5"] + ul > li > .tree-widget-item {
-  -moz-padding-start: 70px;
+  padding-inline-start: 70px;
 }
 
 /* Sixth level */
 .tree-widget-item[level="6"] + ul > li > .tree-widget-item {
-  -moz-padding-start: 84px;
+  padding-inline-start: 84px;
 }
 
 /* Custom icons for certain tree items indicating the type of the item */
@@ -1462,7 +1582,7 @@
   float: left;
   width: 16px;
   height: 17px;
-  -moz-margin-end: 4px;
+  margin-inline-end: 4px;
   background-repeat: no-repeat;
   background-size: 20px auto;
   background-position: 0 0;

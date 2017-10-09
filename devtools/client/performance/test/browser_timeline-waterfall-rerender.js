@@ -1,6 +1,6 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
-
+/* eslint-disable */
 /**
  * Tests if the waterfall remembers the selection when rerendering.
  */
@@ -16,7 +16,7 @@ function* spawnTest() {
   ok(true, "Recording has started.");
 
   let updated = 0;
-  OverviewView.on(EVENTS.OVERVIEW_RENDERED, () => updated++);
+  OverviewView.on(EVENTS.UI_OVERVIEW_RENDERED, () => updated++);
 
   ok((yield waitUntil(() => updated > 0)),
     "The overview graphs were updated a bunch of times.");
@@ -33,7 +33,7 @@ function* spawnTest() {
   info("Initial bars count: " + initialBarsCount);
 
   // Select a portion of the overview.
-  let rerendered = WaterfallView.once(EVENTS.WATERFALL_RENDERED);
+  let rerendered = WaterfallView.once(EVENTS.UI_WATERFALL_RENDERED);
   OverviewView.setTimeInterval({ startTime: 0, endTime: currentMarkers[MAX_MARKERS_SELECT].end });
   yield rerendered;
 
@@ -56,7 +56,7 @@ function* spawnTest() {
     "The waterfall sidebar is now visible.");
 
   // Simulate a resize on the marker details.
-  rerendered = WaterfallView.once(EVENTS.WATERFALL_RENDERED);
+  rerendered = WaterfallView.once(EVENTS.UI_WATERFALL_RENDERED);
   EventUtils.sendMouseEvent({ type: "mouseup" }, WaterfallView.detailsSplitter);
   yield rerendered;
 
@@ -73,3 +73,4 @@ function* spawnTest() {
   yield teardown(panel);
   finish();
 }
+/* eslint-enable */

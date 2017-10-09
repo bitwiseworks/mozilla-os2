@@ -371,7 +371,7 @@ function serverDebug(metadata, response)
  * Creates a generator that iterates over the contents of
  * an nsIFile directory.
  */
-function dirIter(dir)
+function* dirIter(dir)
 {
   var en = dir.directoryEntries;
   while (en.hasMoreElements()) {
@@ -712,7 +712,7 @@ function testListing(metadata, response)
           ),
           DIV({class: "clear"}),
           DIV({class: "frameholder"},
-            IFRAME({scrolling: "no", id: "testframe"})
+            IFRAME({scrolling: "no", id: "testframe", "allowfullscreen": true})
           ),
           DIV({class: "clear"}),
           DIV({class: "toggle"},

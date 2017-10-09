@@ -34,7 +34,7 @@ this.StructuredLogger = function(name, dumpFun=dump, mutators=[]) {
  */
 StructuredLogger.prototype = {
   testStart: function (test) {
-    var data = {test: test};
+    var data = {test: this._testId(test)};
     this._logData("test_start", data);
   },
 
@@ -47,7 +47,7 @@ StructuredLogger.prototype = {
     }
 
     var data = {
-      test: test,
+      test: this._testId(test),
       subtest: subtest,
       status: status,
     };
@@ -69,7 +69,7 @@ StructuredLogger.prototype = {
   },
 
   testEnd: function (test, status, expected="OK", message=null, stack=null, extra=null) {
-    var data = {test: test, status: status};
+    var data = {test: this._testId(test), status: status};
 
     if (expected != status && status != "SKIP") {
       data.expected = expected;
@@ -87,17 +87,35 @@ StructuredLogger.prototype = {
     this._logData("test_end", data);
   },
 
-  suiteStart: function (tests, runinfo=null) {
-    var data = {tests: tests};
+  suiteStart: function (tests, runinfo=null, versioninfo=null, deviceinfo=null, extra=null) {
+    var data = {tests: tests.map(x => this._testId(x))};
     if (runinfo !== null) {
       data.runinfo = runinfo;
+    }
+
+    if (versioninfo !== null) {
+      data.versioninfo = versioninfo;
+    }
+
+    if (deviceinfo !== null) {
+      data.deviceinfo = deviceinfo;
+    }
+
+    if (extra !== null) {
+      data.extra = extra;
     }
 
     this._logData("suite_start", data);
   },
 
-  suiteEnd: function () {
-    this._logData("suite_end");
+  suiteEnd: function (extra=null) {
+    var data = {};
+
+    if (extra !== null) {
+      data.extra = extra;
+    }
+
+    this._logData("suite_end", data);
   },
 
 
@@ -142,6 +160,14 @@ StructuredLogger.prototype = {
     this.log("CRITICAL", message, extra);
   },
 
+  processOutput: function(thread, message) {
+    this._logData('process_output', {
+      message: message,
+      thread: thread,
+    });
+  },
+
+
   _logData: function (action, data={}) {
     var allData = {
       action: action,
@@ -160,7 +186,14 @@ StructuredLogger.prototype = {
     }
 
     this._dumpFun(allData);
-  }
+  },
+
+  _testId: function(test) {
+    if (Array.isArray(test)) {
+      return test.join(" ");
+    }
+    return test;
+  },
 };
 
 

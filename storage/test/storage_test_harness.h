@@ -318,7 +318,7 @@ void watch_for_mutex_use_on_this_thread()
  *
  * The wedger is self-dispatching, just construct it with its target.
  */
-class ThreadWedger : public nsRunnable
+class ThreadWedger : public mozilla::Runnable
 {
 public:
   explicit ThreadWedger(nsIEventTarget *aTarget)
@@ -328,7 +328,7 @@ public:
     aTarget->Dispatch(this, aTarget->NS_DISPATCH_NORMAL);
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     mozilla::ReentrantMonitorAutoEnter automon(mReentrantMonitor);
 

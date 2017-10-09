@@ -7,6 +7,7 @@
 #include "jit/Safepoints.h"
 
 #include "mozilla/MathAlgorithms.h"
+#include "mozilla/SizePrintfMacros.h"
 
 #include "jit/BitSet.h"
 #include "jit/JitSpewer.h"
@@ -31,7 +32,7 @@ SafepointWriter::init(TempAllocator& alloc)
 uint32_t
 SafepointWriter::startEntry()
 {
-    JitSpew(JitSpew_Safepoints, "Encoding safepoint (position %d):", stream_.length());
+    JitSpew(JitSpew_Safepoints, "Encoding safepoint (position %" PRIuSIZE "):", stream_.length());
     return uint32_t(stream_.length());
 }
 
@@ -113,7 +114,7 @@ SafepointWriter::writeGcRegs(LSafepoint* safepoint)
 
 #ifdef JS_JITSPEW
     if (JitSpewEnabled(JitSpew_Safepoints)) {
-        for (GeneralRegisterForwardIterator iter(spilledGpr); iter.more(); iter++) {
+        for (GeneralRegisterForwardIterator iter(spilledGpr); iter.more(); ++iter) {
             const char* type = gc.has(*iter)
                                ? "gc"
                                : slots.has(*iter)
@@ -123,7 +124,7 @@ SafepointWriter::writeGcRegs(LSafepoint* safepoint)
                                    : "any";
             JitSpew(JitSpew_Safepoints, "    %s reg: %s", type, (*iter).name());
         }
-        for (FloatRegisterForwardIterator iter(spilledFloat); iter.more(); iter++)
+        for (FloatRegisterForwardIterator iter(spilledFloat); iter.more(); ++iter)
             JitSpew(JitSpew_Safepoints, "    float reg: %s", (*iter).name());
     }
 #endif
@@ -165,7 +166,7 @@ SafepointWriter::writeGcSlots(LSafepoint* safepoint)
 
 #ifdef JS_JITSPEW
     for (uint32_t i = 0; i < slots.length(); i++)
-        JitSpew(JitSpew_Safepoints, "    gc slot: %d", slots[i]);
+        JitSpew(JitSpew_Safepoints, "    gc slot: %u", slots[i].slot);
 #endif
 
     MapSlotsToBitset(frameSlots_, argumentSlots_, stream_, slots);
@@ -195,7 +196,7 @@ SafepointWriter::writeValueSlots(LSafepoint* safepoint)
 
 #ifdef JS_JITSPEW
     for (uint32_t i = 0; i < slots.length(); i++)
-        JitSpew(JitSpew_Safepoints, "    gc value: %d", slots[i]);
+        JitSpew(JitSpew_Safepoints, "    gc value: %u", slots[i].slot);
 #endif
 
     MapSlotsToBitset(frameSlots_, argumentSlots_, stream_, slots);

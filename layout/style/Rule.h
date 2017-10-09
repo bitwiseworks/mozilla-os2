@@ -8,7 +8,7 @@
 #ifndef mozilla_css_Rule_h___
 #define mozilla_css_Rule_h___
 
-#include "mozilla/CSSStyleSheet.h"
+#include "mozilla/StyleSheetInlines.h"
 #include "mozilla/MemoryReporting.h"
 #include "nsISupports.h"
 #include "nsIDOMCSSRule.h"
@@ -122,11 +122,6 @@ public:
   // thus measured elsewhere.
   virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf)
     const MOZ_MUST_OVERRIDE = 0;
-
-  // This is used to measure nsCOMArray<Rule>s.
-  static size_t SizeOfCOMArrayElementIncludingThis(css::Rule* aElement,
-                                                   mozilla::MallocSizeOf aMallocSizeOf,
-                                                   void* aData);
 
 protected:
   // This is sometimes null (e.g., for style attributes).

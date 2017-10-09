@@ -188,20 +188,23 @@ PlacesController.prototype = {
              !PlacesUtils.asQuery(this._view.result.root).queryOptions.excludeItems &&
              this._view.result.sortingMode ==
                  Ci.nsINavHistoryQueryOptions.SORT_BY_NONE;
-    case "placesCmd_show:info":
-      var selectedNode = this._view.selectedNode;
+    case "placesCmd_show:info": {
+      let selectedNode = this._view.selectedNode;
       return selectedNode && PlacesUtils.getConcreteItemId(selectedNode) != -1
-    case "placesCmd_reload":
+    }
+    case "placesCmd_reload": {
       // Livemark containers
-      var selectedNode = this._view.selectedNode;
+      let selectedNode = this._view.selectedNode;
       return selectedNode && this.hasCachedLivemarkInfo(selectedNode);
-    case "placesCmd_sortBy:name":
-      var selectedNode = this._view.selectedNode;
+    }
+    case "placesCmd_sortBy:name": {
+      let selectedNode = this._view.selectedNode;
       return selectedNode &&
              PlacesUtils.nodeIsFolder(selectedNode) &&
              !PlacesUIUtils.isContentsReadOnly(selectedNode) &&
              this._view.result.sortingMode ==
                  Ci.nsINavHistoryQueryOptions.SORT_BY_NONE;
+    }
     case "placesCmd_createBookmark":
       var node = this._view.selectedNode;
       return node && PlacesUtils.nodeIsURI(node) && node.itemId == -1;
@@ -386,7 +389,7 @@ PlacesController.prototype = {
         return false;
 
       // unwrapNodes() will throw if the data blob is malformed.
-      var unwrappedNodes = PlacesUtils.unwrapNodes(data, type.value);
+      PlacesUtils.unwrapNodes(data, type.value);
       return this._view.insertionPoint != null;
     }
     catch (e) {
@@ -453,8 +456,6 @@ PlacesController.prototype = {
           uri = NetUtil.newURI(node.uri);
           if (PlacesUtils.nodeIsBookmark(node)) {
             nodeData["bookmark"] = true;
-            PlacesUtils.nodeIsTagQuery(node.parent)
-
             var parentNode = node.parent;
             if (parentNode) {
               if (PlacesUtils.nodeIsTagQuery(parentNode))
@@ -557,6 +558,8 @@ PlacesController.prototype = {
    * Detects information (meta-data rules) about the current selection in the
    * view (see _buildSelectionMetadata) and sets the visibility state for each
    * of the menu-items in the given popup with the following rules applied:
+   *  0) The "ignoreitem" attribute may be set to "true" for this code not to
+   *     handle that menuitem.
    *  1) The "selectiontype" attribute may be set on a menu-item to "single"
    *     if the menu-item should be visible only if there is a single node
    *     selected, or to "multiple" if the menu-item should be visible only if
@@ -598,6 +601,9 @@ PlacesController.prototype = {
     var usableItemCount = 0;
     for (var i = 0; i < aPopup.childNodes.length; ++i) {
       var item = aPopup.childNodes[i];
+      if (item.getAttribute("ignoreitem") == "true") {
+        continue;
+      }
       if (item.localName != "menuseparator") {
         // We allow pasting into tag containers, so special case that.
         var hideIfNoIP = item.getAttribute("hideifnoinsertionpoint") == "true" &&
@@ -963,15 +969,12 @@ PlacesController.prototype = {
     }
 
     // Do removal in chunks to give some breath to main-thread.
-    function pagesChunkGenerator(aURIs) {
+    function* pagesChunkGenerator(aURIs) {
       while (aURIs.length) {
         let URIslice = aURIs.splice(0, REMOVE_PAGES_CHUNKLEN);
         PlacesUtils.bhistory.removePages(URIslice, URIslice.length);
-        Services.tm.mainThread.dispatch(function() {
-          try {
-            gen.next();
-          } catch (ex if ex instanceof StopIteration) {}
-        }, Ci.nsIThread.DISPATCH_NORMAL);
+        Services.tm.mainThread.dispatch(() => gen.next(),
+                                        Ci.nsIThread.DISPATCH_NORMAL);
         yield undefined;
       }
     }
@@ -1107,7 +1110,7 @@ PlacesController.prototype = {
       xferable.getTransferData(PlacesUtils.TYPE_X_MOZ_PLACE_ACTION, action, {});
       [action, actionOwner] =
         action.value.QueryInterface(Ci.nsISupportsString).data.split(",");
-    } catch(ex) {
+    } catch (ex) {
       // Paste from external sources don't have any associated action, just
       // fallback to a copy action.
       return "copy";
@@ -1285,7 +1288,7 @@ PlacesController.prototype = {
       data = data.value.QueryInterface(Ci.nsISupportsString).data;
       type = type.value;
       items = PlacesUtils.unwrapNodes(data, type);
-    } catch(ex) {
+    } catch (ex) {
       // No supported data exists or nodes unwrap failed, just bail out.
       return;
     }
@@ -1547,19 +1550,27 @@ var PlacesControllerDragHelper = {
    *
    * @param   aNode
    *          A nsINavHistoryResultNode node.
+   * @param   [optional] aDOMNode
+   *          A XUL DOM node.
    * @return True if the node can be moved, false otherwise.
    */
-  canMoveNode:
-  function PCDH_canMoveNode(aNode) {
+  canMoveNode(aNode, aDOMNode) {
     // Only bookmark items are movable.
     if (aNode.itemId == -1)
       return false;
 
+    let parentNode = aNode.parent;
+    if (!parentNode) {
+      // Normally parentless places nodes can not be moved,
+      // but simulated bookmarked URI nodes are special.
+      return !!aDOMNode &&
+             aDOMNode.hasAttribute("simulated-places-node") &&
+             PlacesUtils.nodeIsBookmark(aNode);
+    }
+
     // Once tags and bookmarked are divorced, the tag-query check should be
     // removed.
-    let parentNode = aNode.parent;
-    return parentNode != null &&
-           !(PlacesUtils.nodeIsFolder(parentNode) &&
+    return !(PlacesUtils.nodeIsFolder(parentNode) &&
              PlacesUIUtils.isContentsReadOnly(parentNode)) &&
            !PlacesUtils.nodeIsTagQuery(parentNode);
   },
@@ -1590,16 +1601,15 @@ var PlacesControllerDragHelper = {
         unwrapped = PlacesUtils.unwrapNodes(data, flavor)[0];
       }
       else if (data instanceof XULElement && data.localName == "tab" &&
-               data.ownerDocument.defaultView instanceof ChromeWindow) {
+               data.ownerGlobal instanceof ChromeWindow) {
         let uri = data.linkedBrowser.currentURI;
         let spec = uri ? uri.spec : "about:blank";
-        let title = data.label;
         unwrapped = { uri: spec,
                       title: data.label,
                       type: PlacesUtils.TYPE_X_MOZ_URL};
       }
       else
-        throw("bogus data was passed as a tab")
+        throw new Error("bogus data was passed as a tab");
 
       let index = insertionPoint.index;
 
@@ -1730,4 +1740,3 @@ function goDoPlacesCommand(aCommand)
   if (controller && controller.isCommandEnabled(aCommand))
     controller.doCommand(aCommand);
 }
-

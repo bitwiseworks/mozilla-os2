@@ -31,7 +31,7 @@ static SkUnichar SkUTF16BE_NextUnichar(const uint16_t** srcPtr) {
 }
 
 static void SkStringFromUTF16BE(const uint16_t* utf16be, size_t length, SkString& utf8) {
-    SkASSERT(utf16be != NULL);
+    SkASSERT(utf16be != nullptr);
 
     utf8.reset();
     size_t numberOf16BitValues = length / 2;
@@ -230,7 +230,7 @@ BCP47FromLanguageID[] = {
     { 0x0411, "ja-JP" }, //Japanese
     { 0x0412, "ko-KR" }, //Korean
     { 0x0413, "nl-NL" }, //Dutch
-    { 0x0414, "nb-NO" }, //Norwegian (Bokmål)
+    { 0x0414, "nb-NO" }, //Norwegian (BokmÃ¥l)
     { 0x0415, "pl-PL" }, //Polish
     { 0x0416, "pt-BR" }, //Portuguese
     { 0x0417, "rm-CH" }, //Romansh

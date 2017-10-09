@@ -8,6 +8,10 @@
 
 #include <stdint.h>
 
+#include "nsTArray.h"
+
+class nsCString;
+
 /**
  * XXX Following enums should be in BasicEvents.h.  However, currently, it's
  *     impossible to use foward delearation for enum.
@@ -81,7 +85,8 @@ typedef uint16_t Modifiers;
 #define NS_DEFINE_KEYNAME(aCPPName, aDOMKeyName) \
   KEY_NAME_INDEX_##aCPPName,
 
-enum KeyNameIndex
+typedef uint16_t KeyNameIndexType;
+enum KeyNameIndex : KeyNameIndexType
 {
 #include "mozilla/KeyNameList.h"
   // If a DOM keyboard event is synthesized by script, this is used.  Then,
@@ -91,10 +96,13 @@ enum KeyNameIndex
 
 #undef NS_DEFINE_KEYNAME
 
+const nsCString ToString(KeyNameIndex aKeyNameIndex);
+
 #define NS_DEFINE_PHYSICAL_KEY_CODE_NAME(aCPPName, aDOMCodeName) \
   CODE_NAME_INDEX_##aCPPName,
 
-enum CodeNameIndex
+typedef uint8_t CodeNameIndexType;
+enum CodeNameIndex : CodeNameIndexType
 {
 #include "mozilla/PhysicalKeyCodeNameList.h"
   // If a DOM keyboard event is synthesized by script, this is used.  Then,
@@ -103,6 +111,8 @@ enum CodeNameIndex
 };
 
 #undef NS_DEFINE_PHYSICAL_KEY_CODE_NAME
+
+const nsCString ToString(CodeNameIndex aCodeNameIndex);
 
 #define NS_DEFINE_COMMAND(aName, aCommandStr) , Command##aName
 
@@ -135,10 +145,21 @@ namespace mozilla {
 struct BaseEventFlags;
 struct EventFlags;
 
+class WidgetEventTime;
+
+class NativeEventData;
+
 // TextEvents.h
 struct AlternativeCharCode;
+struct ShortcutKeyCandidate;
+
+typedef nsTArray<ShortcutKeyCandidate> ShortcutKeyCandidateArray;
+typedef AutoTArray<ShortcutKeyCandidate, 10> AutoShortcutKeyCandidateArray;
 
 // TextRange.h
+typedef uint8_t RawTextRangeType;
+enum class TextRangeType : RawTextRangeType;
+
 struct TextRangeStyle;
 struct TextRange;
 

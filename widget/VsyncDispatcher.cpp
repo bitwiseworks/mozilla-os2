@@ -8,7 +8,8 @@
 #include "VsyncSource.h"
 #include "gfxPlatform.h"
 #include "mozilla/layers/Compositor.h"
-#include "mozilla/layers/CompositorParent.h"
+#include "mozilla/layers/CompositorBridgeParent.h"
+#include "mozilla/layers/CompositorThread.h"
 
 #ifdef MOZ_ENABLE_PROFILER_SPS
 #include "GeckoProfiler.h"
@@ -16,14 +17,6 @@
 #endif
 
 namespace mozilla {
-static bool sThreadAssertionsEnabled = true;
-
-void CompositorVsyncDispatcher::SetThreadAssertionsEnabled(bool aEnable)
-{
-  // Should only be used in test environments
-  MOZ_ASSERT(NS_IsMainThread());
-  sThreadAssertionsEnabled = aEnable;
-}
 
 CompositorVsyncDispatcher::CompositorVsyncDispatcher()
   : mCompositorObserverLock("CompositorObserverLock")
@@ -44,23 +37,13 @@ CompositorVsyncDispatcher::NotifyVsync(TimeStamp aVsyncTimestamp)
 {
   // In vsync thread
 #ifdef MOZ_ENABLE_PROFILER_SPS
-  layers::CompositorParent::PostInsertVsyncProfilerMarker(aVsyncTimestamp);
+  layers::CompositorBridgeParent::PostInsertVsyncProfilerMarker(aVsyncTimestamp);
 #endif
 
   MutexAutoLock lock(mCompositorObserverLock);
   if (mCompositorVsyncObserver) {
     mCompositorVsyncObserver->NotifyVsync(aVsyncTimestamp);
   }
-}
-
-void
-CompositorVsyncDispatcher::AssertOnCompositorThread()
-{
-  if (!sThreadAssertionsEnabled) {
-    return;
-  }
-
-  Compositor::AssertOnCompositorThread();
 }
 
 void
@@ -82,14 +65,18 @@ CompositorVsyncDispatcher::ObserveVsync(bool aEnable)
 void
 CompositorVsyncDispatcher::SetCompositorVsyncObserver(VsyncObserver* aVsyncObserver)
 {
-  AssertOnCompositorThread();
+  // When remote compositing or running gtests, vsync observation is
+  // initiated on the main thread. Otherwise, it is initiated from the compositor
+  // thread.
+  MOZ_ASSERT(NS_IsMainThread() || CompositorThreadHolder::IsInCompositorThread());
+
   { // scope lock
     MutexAutoLock lock(mCompositorObserverLock);
     mCompositorVsyncObserver = aVsyncObserver;
   }
 
   bool observeVsync = aVsyncObserver != nullptr;
-  nsCOMPtr<nsIRunnable> vsyncControl = NS_NewRunnableMethodWithArg<bool>(this,
+  nsCOMPtr<nsIRunnable> vsyncControl = NewRunnableMethod<bool>(this,
                                         &CompositorVsyncDispatcher::ObserveVsync,
                                         observeVsync);
   NS_DispatchToMainThread(vsyncControl);
@@ -100,7 +87,7 @@ CompositorVsyncDispatcher::Shutdown()
 {
   // Need to explicitly remove CompositorVsyncDispatcher when the nsBaseWidget shuts down.
   // Otherwise, we would get dead vsync notifications between when the nsBaseWidget
-  // shuts down and the CompositorParent shuts down.
+  // shuts down and the CompositorBridgeParent shuts down.
   MOZ_ASSERT(XRE_IsParentProcess());
   MOZ_ASSERT(NS_IsMainThread());
   ObserveVsync(false);
@@ -180,9 +167,8 @@ void
 RefreshTimerVsyncDispatcher::UpdateVsyncStatus()
 {
   if (!NS_IsMainThread()) {
-    nsCOMPtr<nsIRunnable> vsyncControl = NS_NewRunnableMethod(this,
-                                           &RefreshTimerVsyncDispatcher::UpdateVsyncStatus);
-    NS_DispatchToMainThread(vsyncControl);
+    NS_DispatchToMainThread(NewRunnableMethod(this,
+                                              &RefreshTimerVsyncDispatcher::UpdateVsyncStatus));
     return;
   }
 

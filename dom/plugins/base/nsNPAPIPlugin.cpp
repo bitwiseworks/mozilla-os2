@@ -33,9 +33,9 @@
 #include "nsGlobalWindow.h"
 #include "nsIDocument.h"
 #include "nsIContent.h"
+#include "nsIIDNService.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIScriptContext.h"
-#include "nsIUnicodeNormalizer.h"
 #include "nsDOMJSUtils.h"
 #include "nsIPrincipal.h"
 #include "nsWildCard.h"
@@ -101,12 +101,13 @@ using mozilla::plugins::PluginModuleContentParent;
 #include <android/log.h>
 #include "android_npapi.h"
 #include "ANPBase.h"
-#include "AndroidBridge.h"
+#include "GeneratedJNIWrappers.h"
 #undef LOG
 #define LOG(args...)  __android_log_print(ANDROID_LOG_INFO, "GeckoPlugins" , ## args)
 #endif
 
 #include "nsIAudioChannelAgent.h"
+#include "AudioChannelService.h"
 
 using namespace mozilla;
 using namespace mozilla::plugins::parent;
@@ -184,32 +185,14 @@ enum eNPPStreamTypeInternal {
   eNPPStreamTypeInternal_Post
 };
 
-PRIntervalTime NS_NotifyBeginPluginCall(NSPluginCallReentry aReentryState)
+void NS_NotifyBeginPluginCall(NSPluginCallReentry aReentryState)
 {
   nsNPAPIPluginInstance::BeginPluginCall(aReentryState);
-  return PR_IntervalNow();
 }
 
-// This function sends a notification using the observer service to any object
-// registered to listen to the "experimental-notify-plugin-call" subject.
-// Each "experimental-notify-plugin-call" notification carries with it the run
-// time value in milliseconds that the call took to execute.
-void NS_NotifyPluginCall(PRIntervalTime startTime, NSPluginCallReentry aReentryState)
+void NS_NotifyPluginCall(NSPluginCallReentry aReentryState)
 {
   nsNPAPIPluginInstance::EndPluginCall(aReentryState);
-
-  PRIntervalTime endTime = PR_IntervalNow() - startTime;
-  nsCOMPtr<nsIObserverService> notifyUIService =
-    mozilla::services::GetObserverService();
-  if (!notifyUIService)
-    return;
-
-  float runTimeInSeconds = float(endTime) / PR_TicksPerSecond();
-  nsAutoString runTimeString;
-  runTimeString.AppendFloat(runTimeInSeconds);
-  const char16_t* runTime = runTimeString.get();
-  notifyUIService->NotifyObservers(nullptr, "experimental-notify-plugin-call",
-                                   runTime);
 }
 
 static void CheckClassInitialized()
@@ -475,7 +458,7 @@ namespace {
 
 static char *gNPPException;
 
-class nsPluginThreadRunnable : public nsRunnable,
+class nsPluginThreadRunnable : public Runnable,
                                public PRCList
 {
 public:
@@ -531,7 +514,7 @@ GetChannelFromNPP(NPP npp)
   nsCOMPtr<nsIDocument> doc = GetDocumentFromNPP(npp);
   if (!doc)
     return nullptr;
-  nsCOMPtr<nsPIDOMWindow> domwindow = doc->GetWindow();
+  nsCOMPtr<nsPIDOMWindowOuter> domwindow = doc->GetWindow();
   nsCOMPtr<nsIChannel> channel;
   if (domwindow) {
     nsCOMPtr<nsIDocShell> docShell = domwindow->GetDocShell();
@@ -1056,12 +1039,12 @@ _getwindowobject(NPP npp)
   // we don't know what the plugin will do with it).
   nsIDocument* doc = GetDocumentFromNPP(npp);
   NS_ENSURE_TRUE(doc, nullptr);
-  nsCOMPtr<nsPIDOMWindow> outer = do_QueryInterface(doc->GetWindow());
+  nsCOMPtr<nsPIDOMWindowOuter> outer = doc->GetWindow();
   NS_ENSURE_TRUE(outer, nullptr);
 
-  AutoJSContext cx;
-  JS::Rooted<JSObject*> global(cx, static_cast<nsGlobalWindow*>(outer.get())->GetGlobalJSObject());
-  return nsJSObjWrapper::GetNewOrUsed(npp, cx, global);
+  JS::Rooted<JSObject*> global(dom::RootingCx(),
+                               nsGlobalWindow::Cast(outer)->GetGlobalJSObject());
+  return nsJSObjWrapper::GetNewOrUsed(npp, global);
 }
 
 NPObject*
@@ -1101,7 +1084,7 @@ _getpluginelement(NPP npp)
                   NS_GET_IID(nsIDOMElement), obj.address());
   NS_ENSURE_TRUE(obj, nullptr);
 
-  return nsJSObjWrapper::GetNewOrUsed(npp, cx, obj);
+  return nsJSObjWrapper::GetNewOrUsed(npp, obj);
 }
 
 NPIdentifier
@@ -1348,14 +1331,13 @@ _evaluate(NPP npp, NPObject* npobj, NPString *script, NPVariant *result)
   nsIDocument *doc = GetDocumentFromNPP(npp);
   NS_ENSURE_TRUE(doc, false);
 
-  nsGlobalWindow* win = static_cast<nsGlobalWindow*>(doc->GetInnerWindow());
+  nsGlobalWindow* win = nsGlobalWindow::Cast(doc->GetInnerWindow());
   if (NS_WARN_IF(!win || !win->FastGetGlobalJSObject())) {
     return false;
   }
 
   nsAutoMicroTask mt;
   dom::AutoEntryScript aes(win, "NPAPI NPN_evaluate");
-  aes.TakeOwnershipOfErrorReporting();
   JSContext* cx = aes.cx();
 
   JS::Rooted<JSObject*> obj(cx, nsNPObjWrapper::GetNewOrUsed(npp, cx, npobj));
@@ -1691,7 +1673,7 @@ _releasevariantvalue(NPVariant* variant)
         } else {
           void *p = (void *)s->UTF8Characters;
           DWORD nheaps = 0;
-          nsAutoTArray<HANDLE, 50> heaps;
+          AutoTArray<HANDLE, 50> heaps;
           nheaps = GetProcessHeaps(0, heaps.Elements());
           heaps.AppendElements(nheaps);
           GetProcessHeaps(nheaps, heaps.Elements());
@@ -1809,7 +1791,7 @@ _getvalue(NPP npp, NPNVariable variable, void *result)
     return NPERR_GENERIC_ERROR;
 #endif
 
-#if defined(XP_WIN) || defined(MOZ_WIDGET_GTK) || defined(MOZ_WIDGET_QT)
+#if defined(XP_WIN) || defined(MOZ_WIDGET_GTK)
   case NPNVnetscapeWindow: {
     if (!npp || !npp->ndata)
       return NPERR_INVALID_INSTANCE_ERROR;
@@ -1858,10 +1840,6 @@ _getvalue(NPP npp, NPNVariable variable, void *result)
     *((NPNToolkitType*)result) = NPNVGtk2;
 #endif
 
-#ifdef MOZ_WIDGET_QT
-    /* Fake toolkit so flash plugin works */
-    *((NPNToolkitType*)result) = NPNVGtk2;
-#endif
     if (*(NPNToolkitType*)result)
         return NPERR_NO_ERROR;
 
@@ -1870,11 +1848,6 @@ _getvalue(NPP npp, NPNVariable variable, void *result)
 
   case NPNVSupportsXEmbedBool: {
 #ifdef MOZ_WIDGET_GTK
-    *(NPBool*)result = true;
-#elif defined(MOZ_WIDGET_QT)
-    // Desktop Flash fail to initialize if browser does not support NPNVSupportsXEmbedBool
-    // even when wmode!=windowed, lets return fake support
-    fprintf(stderr, "Fake support for XEmbed plugins in Qt port\n");
     *(NPBool*)result = true;
 #else
     *(NPBool*)result = false;
@@ -1896,7 +1869,7 @@ _getvalue(NPP npp, NPNVariable variable, void *result)
 
   case NPNVSupportsWindowless: {
 #if defined(XP_WIN) || defined(XP_MACOSX) || \
-    (defined(MOZ_X11) && (defined(MOZ_WIDGET_GTK) || defined(MOZ_WIDGET_QT)))
+    (defined(MOZ_X11) && defined(MOZ_WIDGET_GTK))
     *(NPBool*)result = true;
 #else
     *(NPBool*)result = false;
@@ -1942,18 +1915,25 @@ _getvalue(NPP npp, NPNVariable variable, void *result)
       return NPERR_GENERIC_ERROR;
     }
 
-    nsCOMPtr<nsIUnicodeNormalizer> normalizer = do_GetService(NS_UNICODE_NORMALIZER_CONTRACTID);
-    if (!normalizer) {
+    nsCOMPtr<nsIIDNService> idnService = do_GetService(NS_IDNSERVICE_CONTRACTID);
+    if (!idnService) {
       return NPERR_GENERIC_ERROR;
     }
 
-    nsAutoString normalizedUTF16Origin;
-    res = normalizer->NormalizeUnicodeNFKC(utf16Origin, normalizedUTF16Origin);
+    // This is a bit messy: we convert to UTF-8 here, but then
+    // nsIDNService::Normalize will convert back to UTF-16 for processing,
+    // and back to UTF-8 again to return the result.
+    // Alternative: perhaps we should add a NormalizeUTF16 version of the API,
+    // and just convert to UTF-8 for the final return (resulting in one
+    // encoding form conversion instead of three).
+    NS_ConvertUTF16toUTF8 utf8Origin(utf16Origin);
+    nsAutoCString normalizedUTF8Origin;
+    res = idnService->Normalize(utf8Origin, normalizedUTF8Origin);
     if (NS_FAILED(res)) {
       return NPERR_GENERIC_ERROR;
     }
 
-    *(char**)result = ToNewUTF8String(normalizedUTF16Origin);
+    *(char**)result = ToNewCString(normalizedUTF8Origin);
     return *(char**)result ? NPERR_NO_ERROR : NPERR_GENERIC_ERROR;
   }
 
@@ -2020,7 +2000,9 @@ _getvalue(NPP npp, NPNVariable variable, void *result)
     *(NPBool*)result = true;
     return NPERR_NO_ERROR;
   }
+#endif
 
+#if defined(XP_MACOSX) || defined(XP_WIN)
   case NPNVcontentsScaleFactor: {
     nsNPAPIPluginInstance *inst =
       (nsNPAPIPluginInstance *) (npp ? npp->ndata : nullptr);
@@ -2029,6 +2011,14 @@ _getvalue(NPP npp, NPNVariable variable, void *result)
     return NPERR_NO_ERROR;
   }
 #endif
+
+  case NPNVCSSZoomFactor: {
+    nsNPAPIPluginInstance *inst =
+      (nsNPAPIPluginInstance *) (npp ? npp->ndata : nullptr);
+    double scaleFactor = inst ? inst->GetCSSZoomFactor() : 1.0;
+    *(double*)result = scaleFactor;
+    return NPERR_NO_ERROR;
+  }
 
 #ifdef MOZ_WIDGET_ANDROID
     case kLogInterfaceV0_ANPGetValue: {
@@ -2040,23 +2030,17 @@ _getvalue(NPP npp, NPNVariable variable, void *result)
 
     case kBitmapInterfaceV0_ANPGetValue: {
       LOG("get bitmap interface");
-      ANPBitmapInterfaceV0 *i = (ANPBitmapInterfaceV0 *) result;
-      InitBitmapInterface(i);
-      return NPERR_NO_ERROR;
+      return NPERR_GENERIC_ERROR;
     }
 
     case kMatrixInterfaceV0_ANPGetValue: {
       LOG("get matrix interface");
-      ANPMatrixInterfaceV0 *i = (ANPMatrixInterfaceV0 *) result;
-      InitMatrixInterface(i);
-      return NPERR_NO_ERROR;
+      return NPERR_GENERIC_ERROR;
     }
 
     case kPathInterfaceV0_ANPGetValue: {
       LOG("get path interface");
-      ANPPathInterfaceV0 *i = (ANPPathInterfaceV0 *) result;
-      InitPathInterface(i);
-      return NPERR_NO_ERROR;
+      return NPERR_GENERIC_ERROR;
     }
 
     case kTypefaceInterfaceV0_ANPGetValue: {
@@ -2103,9 +2087,7 @@ _getvalue(NPP npp, NPNVariable variable, void *result)
 
     case kSystemInterfaceV0_ANPGetValue: {
       LOG("get system interface");
-      ANPSystemInterfaceV0* i = reinterpret_cast<ANPSystemInterfaceV0*>(result);
-      InitSystemInterface(i);
-      return NPERR_NO_ERROR;
+      return NPERR_GENERIC_ERROR;
     }
 
     case kSurfaceInterfaceV0_ANPGetValue: {
@@ -2117,13 +2099,12 @@ _getvalue(NPP npp, NPNVariable variable, void *result)
 
     case kSupportedDrawingModel_ANPGetValue: {
       LOG("get supported drawing model");
-      uint32_t* bits = reinterpret_cast<uint32_t*>(result);
-      *bits = kBitmap_ANPDrawingModel && kSurface_ANPDrawingModel;
-      return NPERR_NO_ERROR;
+      return NPERR_GENERIC_ERROR;
     }
 
     case kJavaContext_ANPGetValue: {
-      auto ret = widget::GeckoAppShell::GetContext();
+      LOG("get java context");
+      auto ret = java::GeckoAppShell::GetContext();
       if (!ret)
         return NPERR_GENERIC_ERROR;
 
@@ -2147,16 +2128,12 @@ _getvalue(NPP npp, NPNVariable variable, void *result)
 
     case kOpenGLInterfaceV0_ANPGetValue: {
       LOG("get openGL interface");
-      ANPOpenGLInterfaceV0 *i = (ANPOpenGLInterfaceV0*) result;
-      InitOpenGLInterface(i);
-      return NPERR_NO_ERROR;
+      return NPERR_GENERIC_ERROR;
     }
 
     case kWindowInterfaceV1_ANPGetValue: {
       LOG("get Window interface V1");
-      ANPWindowInterfaceV1 *i = (ANPWindowInterfaceV1 *) result;
-      InitWindowInterfaceV1(i);
-      return NPERR_NO_ERROR;
+      return NPERR_GENERIC_ERROR;
     }
 
     case kWindowInterfaceV2_ANPGetValue: {
@@ -2167,14 +2144,12 @@ _getvalue(NPP npp, NPNVariable variable, void *result)
     }
 
     case kVideoInterfaceV0_ANPGetValue: {
-      LOG("get video interface");
-      ANPVideoInterfaceV0 *i = (ANPVideoInterfaceV0*) result;
-      InitVideoInterfaceV0(i);
-      return NPERR_NO_ERROR;
+      LOG("get video interface V0");
+      return NPERR_GENERIC_ERROR;
     }
 
     case kVideoInterfaceV1_ANPGetValue: {
-      LOG("get video interface");
+      LOG("get video interface V1");
       ANPVideoInterfaceV1 *i = (ANPVideoInterfaceV1*) result;
       InitVideoInterfaceV1(i);
       return NPERR_NO_ERROR;
@@ -2295,15 +2270,27 @@ _setvalue(NPP npp, NPPVariable variable, void *result)
           return NPERR_NO_ERROR;
         }
       } else {
-        float volume = 0.0;
-        bool muted = true;
-        rv = agent->NotifyStartedPlaying(nsIAudioChannelAgent::AUDIO_AGENT_NOTIFY,
-                                         &volume, &muted);
+
+        dom::AudioPlaybackConfig config;
+        rv = agent->NotifyStartedPlaying(&config,
+                                         dom::AudioChannelService::AudibleState::eAudible);
         if (NS_WARN_IF(NS_FAILED(rv))) {
           return NPERR_NO_ERROR;
         }
 
-        rv = inst->WindowVolumeChanged(volume, muted);
+        rv = inst->WindowVolumeChanged(config.mVolume, config.mMuted);
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          return NPERR_NO_ERROR;
+        }
+
+        // Since we only support for muting now, the implementation of suspend
+        // is equal to muting. Therefore, if we have already muted the plugin,
+        // then we don't need to call WindowSuspendChanged() again.
+        if (config.mMuted) {
+          return NPERR_NO_ERROR;
+        }
+
+        rv = inst->WindowSuspendChanged(config.mSuspend);
         if (NS_WARN_IF(NS_FAILED(rv))) {
           return NPERR_NO_ERROR;
         }

@@ -1,8 +1,9 @@
---enable-optimize
---enable-debug
---enable-stdcxx-compat
---enable-ctypes
---disable-shared-js
---enable-exact-rooting
---enable-gcgenerational
---enable-threadsafe
+{
+    "configure-args": "--enable-stdcxx-compat --enable-ctypes",
+    "optimize": true,
+    "debug": true,
+    "env": {
+        "JS_GC_ZEAL": "GenerationalGC",
+        "JSTESTS_EXTRA_ARGS": "--jitflags=debug"
+    }
+}

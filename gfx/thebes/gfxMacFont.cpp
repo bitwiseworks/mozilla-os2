@@ -6,6 +6,7 @@
 #include "gfxMacFont.h"
 
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/Sprintf.h"
 
 #include "gfxCoreTextShaper.h"
 #include <algorithm>
@@ -49,8 +50,9 @@ gfxMacFont::gfxMacFont(MacOSFontEntry *aFontEntry, const gfxFontStyle *aFontStyl
         mIsValid = false;
 #ifdef DEBUG
         char warnBuf[1024];
-        sprintf(warnBuf, "Failed to create Cairo font face: %s status: %d",
-                NS_ConvertUTF16toUTF8(GetName()).get(), cairoerr);
+        SprintfLiteral(warnBuf,
+                       "Failed to create Cairo font face: %s status: %d",
+                       NS_ConvertUTF16toUTF8(GetName()).get(), cairoerr);
         NS_WARNING(warnBuf);
 #endif
         return;
@@ -99,8 +101,8 @@ gfxMacFont::gfxMacFont(MacOSFontEntry *aFontEntry, const gfxFontStyle *aFontStyl
         mIsValid = false;
 #ifdef DEBUG
         char warnBuf[1024];
-        sprintf(warnBuf, "Failed to create scaled font: %s status: %d",
-                NS_ConvertUTF16toUTF8(GetName()).get(), cairoerr);
+        SprintfLiteral(warnBuf, "Failed to create scaled font: %s status: %d",
+                       NS_ConvertUTF16toUTF8(GetName()).get(), cairoerr);
         NS_WARNING(warnBuf);
 #endif
     }
@@ -120,11 +122,11 @@ gfxMacFont::~gfxMacFont()
 }
 
 bool
-gfxMacFont::ShapeText(gfxContext     *aContext,
+gfxMacFont::ShapeText(DrawTarget     *aDrawTarget,
                       const char16_t *aText,
                       uint32_t        aOffset,
                       uint32_t        aLength,
-                      int32_t         aScript,
+                      Script          aScript,
                       bool            aVertical,
                       gfxShapedText  *aShapedText)
 {
@@ -138,43 +140,43 @@ gfxMacFont::ShapeText(gfxContext     *aContext,
     if (static_cast<MacOSFontEntry*>(GetFontEntry())->RequiresAATLayout() &&
         !aVertical) {
         if (!mCoreTextShaper) {
-            mCoreTextShaper = new gfxCoreTextShaper(this);
+            mCoreTextShaper = MakeUnique<gfxCoreTextShaper>(this);
         }
-        if (mCoreTextShaper->ShapeText(aContext, aText, aOffset, aLength,
+        if (mCoreTextShaper->ShapeText(aDrawTarget, aText, aOffset, aLength,
                                        aScript, aVertical, aShapedText)) {
-            PostShapingFixup(aContext, aText, aOffset, aLength, aVertical,
-                             aShapedText);
+            PostShapingFixup(aDrawTarget, aText, aOffset,
+                             aLength, aVertical, aShapedText);
             return true;
         }
     }
 
-    return gfxFont::ShapeText(aContext, aText, aOffset, aLength, aScript,
+    return gfxFont::ShapeText(aDrawTarget, aText, aOffset, aLength, aScript,
                               aVertical, aShapedText);
 }
 
 bool
-gfxMacFont::SetupCairoFont(gfxContext *aContext)
+gfxMacFont::SetupCairoFont(DrawTarget* aDrawTarget)
 {
     if (cairo_scaled_font_status(mScaledFont) != CAIRO_STATUS_SUCCESS) {
         // Don't cairo_set_scaled_font as that would propagate the error to
         // the cairo_t, precluding any further drawing.
         return false;
     }
-    cairo_set_scaled_font(aContext->GetCairo(), mScaledFont);
+    cairo_set_scaled_font(gfxFont::RefCairo(aDrawTarget), mScaledFont);
     return true;
 }
 
 gfxFont::RunMetrics
-gfxMacFont::Measure(gfxTextRun *aTextRun,
+gfxMacFont::Measure(const gfxTextRun *aTextRun,
                     uint32_t aStart, uint32_t aEnd,
                     BoundingBoxType aBoundingBoxType,
-                    gfxContext *aRefContext,
+                    DrawTarget *aRefDrawTarget,
                     Spacing *aSpacing,
                     uint16_t aOrientation)
 {
     gfxFont::RunMetrics metrics =
         gfxFont::Measure(aTextRun, aStart, aEnd,
-                         aBoundingBoxType, aRefContext, aSpacing,
+                         aBoundingBoxType, aRefDrawTarget, aSpacing,
                          aOrientation);
 
     // if aBoundingBoxType is not TIGHT_HINTED_OUTLINE_EXTENTS then we need to add
@@ -219,8 +221,9 @@ gfxMacFont::InitMetrics()
         // See http://www.microsoft.com/typography/otspec/head.htm
 #ifdef DEBUG
         char warnBuf[1024];
-        sprintf(warnBuf, "Bad font metrics for: %s (invalid unitsPerEm value)",
-                NS_ConvertUTF16toUTF8(mFontEntry->Name()).get());
+        SprintfLiteral(warnBuf,
+                       "Bad font metrics for: %s (invalid unitsPerEm value)",
+                       NS_ConvertUTF16toUTF8(mFontEntry->Name()).get());
         NS_WARNING(warnBuf);
 #endif
         return;
@@ -251,6 +254,10 @@ gfxMacFont::InitMetrics()
 
     if (mMetrics.xHeight == 0.0) {
         mMetrics.xHeight = ::CGFontGetXHeight(mCGFont) * cgConvFactor;
+    }
+
+    if (mMetrics.capHeight == 0.0) {
+        mMetrics.capHeight = ::CGFontGetCapHeight(mCGFont) * cgConvFactor;
     }
 
     if (mStyle.sizeAdjust > 0.0 && mStyle.size > 0.0 &&
@@ -333,7 +340,7 @@ gfxMacFont::InitMetrics()
     fprintf (stderr, "    emHeight: %f emAscent: %f emDescent: %f\n", mMetrics.emHeight, mMetrics.emAscent, mMetrics.emDescent);
     fprintf (stderr, "    maxAscent: %f maxDescent: %f maxAdvance: %f\n", mMetrics.maxAscent, mMetrics.maxDescent, mMetrics.maxAdvance);
     fprintf (stderr, "    internalLeading: %f externalLeading: %f\n", mMetrics.internalLeading, mMetrics.externalLeading);
-    fprintf (stderr, "    spaceWidth: %f aveCharWidth: %f xHeight: %f\n", mMetrics.spaceWidth, mMetrics.aveCharWidth, mMetrics.xHeight);
+    fprintf (stderr, "    spaceWidth: %f aveCharWidth: %f xHeight: %f capHeight: %f\n", mMetrics.spaceWidth, mMetrics.aveCharWidth, mMetrics.xHeight, mMetrics.capHeight);
     fprintf (stderr, "    uOff: %f uSize: %f stOff: %f stSize: %f\n", mMetrics.underlineOffset, mMetrics.underlineSize, mMetrics.strikeoutOffset, mMetrics.strikeoutSize);
 #endif
 }
@@ -420,6 +427,7 @@ gfxMacFont::InitMetricsFromPlatform()
     mMetrics.aveCharWidth = 0;
 
     mMetrics.xHeight = ::CTFontGetXHeight(ctFont);
+    mMetrics.capHeight = ::CTFontGetCapHeight(ctFont);
 
     ::CFRelease(ctFont);
 

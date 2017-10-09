@@ -7,19 +7,19 @@
 #ifndef mozilla_Hal_h
 #define mozilla_Hal_h
 
-#include "mozilla/hal_sandbox/PHal.h"
-#include "mozilla/HalTypes.h"
 #include "base/basictypes.h"
 #include "base/platform_thread.h"
-#include "mozilla/Observer.h"
-#include "mozilla/Types.h"
 #include "nsTArray.h"
-#include "mozilla/dom/MozPowerManagerBinding.h"
 #include "mozilla/dom/battery/Types.h"
+#include "mozilla/dom/MozPowerManagerBinding.h"
 #include "mozilla/dom/network/Types.h"
 #include "mozilla/dom/power/Types.h"
 #include "mozilla/dom/ScreenOrientation.h"
+#include "mozilla/hal_sandbox/PHal.h"
 #include "mozilla/HalScreenConfiguration.h"
+#include "mozilla/HalTypes.h"
+#include "mozilla/Observer.h"
+#include "mozilla/Types.h"
 
 /*
  * Hal.h contains the public Hal API.
@@ -31,7 +31,7 @@
  * functions here in the hal_impl and hal_sandbox namespaces.
  */
 
-class nsIDOMWindow;
+class nsPIDOMWindowInner;
 
 #ifndef MOZ_HAL_NAMESPACE
 # define MOZ_HAL_NAMESPACE hal
@@ -69,7 +69,7 @@ namespace MOZ_HAL_NAMESPACE {
  * The method with WindowIdentifier will be called automatically.
  */
 void Vibrate(const nsTArray<uint32_t>& pattern,
-             nsIDOMWindow* aWindow);
+             nsPIDOMWindowInner* aWindow);
 void Vibrate(const nsTArray<uint32_t>& pattern,
              const hal::WindowIdentifier &id);
 
@@ -85,7 +85,7 @@ void Vibrate(const nsTArray<uint32_t>& pattern,
  * world, pass an nsIDOMWindow*. The method with WindowIdentifier will be called
  * automatically.
  */
-void CancelVibrate(nsIDOMWindow* aWindow);
+void CancelVibrate(nsPIDOMWindowInner* aWindow);
 void CancelVibrate(const hal::WindowIdentifier &id);
 
 /**
@@ -394,7 +394,7 @@ void NotifyScreenConfigurationChange(const hal::ScreenConfiguration& aScreenConf
  * Lock the screen orientation to the specific orientation.
  * @return Whether the lock has been accepted.
  */
-bool LockScreenOrientation(const dom::ScreenOrientationInternal& aOrientation);
+MOZ_MUST_USE bool LockScreenOrientation(const dom::ScreenOrientationInternal& aOrientation);
 
 /**
  * Unlock the screen orientation.
@@ -438,7 +438,7 @@ void NotifySwitchStateFromInputDevice(hal::SwitchDevice aDevice,
  *
  * Currently, there can only be 0 or 1 alarm observers.
  */
-bool RegisterTheOneAlarmObserver(hal::AlarmObserver* aObserver);
+MOZ_MUST_USE bool RegisterTheOneAlarmObserver(hal::AlarmObserver* aObserver);
 
 /**
  * Unregister the alarm observer.  Doing so will implicitly cancel any
@@ -465,7 +465,7 @@ void NotifyAlarmFired();
  * This API is currently only allowed to be used from non-sandboxed
  * contexts.
  */
-bool SetAlarm(int32_t aSeconds, int32_t aNanoseconds);
+MOZ_MUST_USE bool SetAlarm(int32_t aSeconds, int32_t aNanoseconds);
 
 /**
  * Set the priority of the given process.
@@ -493,104 +493,6 @@ void SetCurrentThreadPriority(hal::ThreadPriority aThreadPriority);
  */
 void SetThreadPriority(PlatformThreadId aThreadId,
                        hal::ThreadPriority aThreadPriority);
-
-/**
- * Register an observer for the FM radio.
- */
-void RegisterFMRadioObserver(hal::FMRadioObserver* aRadioObserver);
-
-/**
- * Unregister the observer for the FM radio.
- */
-void UnregisterFMRadioObserver(hal::FMRadioObserver* aRadioObserver);
-
-/**
- * Register an observer for the FM radio.
- */
-void RegisterFMRadioRDSObserver(hal::FMRadioRDSObserver* aRDSObserver);
-
-/**
- * Unregister the observer for the FM radio.
- */
-void UnregisterFMRadioRDSObserver(hal::FMRadioRDSObserver* aRDSObserver);
-
-/**
- * Notify observers that a call to EnableFMRadio, DisableFMRadio, or FMRadioSeek
- * has completed, and indicate what the call returned.
- */
-void NotifyFMRadioStatus(const hal::FMRadioOperationInformation& aRadioState);
-
-/**
- * Notify observers of new RDS data
- * This can be called on any thread.
- */
-void NotifyFMRadioRDSGroup(const hal::FMRadioRDSGroup& aRDSGroup);
-
-/**
- * Enable the FM radio and configure it according to the settings in aInfo.
- */
-void EnableFMRadio(const hal::FMRadioSettings& aInfo);
-
-/**
- * Disable the FM radio.
- */
-void DisableFMRadio();
-
-/**
- * Seek to an available FM radio station.
- *
- * This can be called off main thread, but all calls must be completed
- * before calling DisableFMRadio.
- */
-void FMRadioSeek(const hal::FMRadioSeekDirection& aDirection);
-
-/**
- * Get the current FM radio settings.
- */
-void GetFMRadioSettings(hal::FMRadioSettings* aInfo);
-
-/**
- * Set the FM radio's frequency.
- *
- * This can be called off main thread, but all calls must be completed
- * before calling DisableFMRadio.
- */
-void SetFMRadioFrequency(const uint32_t frequency);
-
-/**
- * Get the FM radio's frequency.
- */
-uint32_t GetFMRadioFrequency();
-
-/**
- * Get FM radio power state
- */
-bool IsFMRadioOn();
-
-/**
- * Get FM radio signal strength
- */
-uint32_t GetFMRadioSignalStrength();
-
-/**
- * Cancel FM radio seeking
- */
-void CancelFMRadioSeek();
-
-/**
- * Get FM radio band settings by country.
- */
-hal::FMRadioSettings GetFMBandSettings(hal::FMRadioCountry aCountry);
-
-/**
- * Enable RDS data reception
- */
-bool EnableRDS(uint32_t aMask);
-
-/**
- * Disable RDS data reception
- */
-void DisableRDS();
 
 /**
  * Start a watchdog to compulsively shutdown the system if it hangs.
@@ -628,17 +530,24 @@ void StopDiskSpaceWatcher();
 uint32_t GetTotalSystemMemory();
 
 /**
- * Get the level of total system memory on device in MiB.
- * (round the value up to the next power of two)
- *
- * Returns 0 if we are unable to determine this information from /proc/meminfo.
- */
-uint32_t GetTotalSystemMemoryLevel();
-
-/**
  * Determine whether the headphone switch event is from input device
  */
 bool IsHeadphoneEventFromInputDev();
+
+/**
+ * Start the system service with the specified name and arguments.
+ */
+nsresult StartSystemService(const char* aSvcName, const char* aArgs);
+
+/**
+ * Stop the system service with the specified name.
+ */
+void StopSystemService(const char* aSvcName);
+
+/**
+ * Determine whether the system service with the specified name is running.
+ */
+bool SystemServiceIsRunning(const char* aSvcName);
 
 } // namespace MOZ_HAL_NAMESPACE
 } // namespace mozilla

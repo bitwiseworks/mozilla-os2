@@ -7,19 +7,21 @@
 #ifndef CDMCaps_h_
 #define CDMCaps_h_
 
-#include "nsString.h"
-#include "nsAutoPtr.h"
-#include "mozilla/Monitor.h"
+#include "gmp-decryption.h"
 #include "nsIThread.h"
 #include "nsTArray.h"
-#include "mozilla/Attributes.h"
+#include "nsString.h"
 #include "SamplesWaitingForKey.h"
-#include "gmp-decryption.h"
+
+#include "mozilla/Monitor.h"
+#include "mozilla/Attributes.h"
+#include "mozilla/dom/MediaKeyStatusMapBinding.h" // For MediaKeyStatus
+#include "mozilla/dom/BindingDeclarations.h" // For Optional
 
 namespace mozilla {
 
-// CDM capabilities; what keys a CDMProxy can use, and whether it can decrypt, or
-// decrypt-and-decode on a per stream basis. Must be locked to access state.
+// CDM capabilities; what keys a CDMProxy can use.
+// Must be locked to access state.
 class CDMCaps {
 public:
   CDMCaps();
@@ -28,7 +30,7 @@ public:
   struct KeyStatus {
     KeyStatus(const CencKeyId& aId,
               const nsString& aSessionId,
-              GMPMediaKeyStatus aStatus)
+              dom::MediaKeyStatus aStatus)
       : mId(aId)
       , mSessionId(aSessionId)
       , mStatus(aStatus)
@@ -45,7 +47,7 @@ public:
 
     CencKeyId mId;
     nsString mSessionId;
-    GMPMediaKeyStatus mStatus;
+    dom::MediaKeyStatus mStatus;
   };
 
   // Locks the CDMCaps. It must be locked to access its shared state.
@@ -55,15 +57,13 @@ public:
     explicit AutoLock(CDMCaps& aKeyCaps);
     ~AutoLock();
 
-    // Returns true if the capabilities of the CDM are known, i.e. they have
-    // been reported by the CDM to Gecko.
-    bool AreCapsKnown();
-
     bool IsKeyUsable(const CencKeyId& aKeyId);
 
     // Returns true if key status changed,
     // i.e. the key status changed from usable to expired.
-    bool SetKeyStatus(const CencKeyId& aKeyId, const nsString& aSessionId, GMPMediaKeyStatus aStatus);
+    bool SetKeyStatus(const CencKeyId& aKeyId,
+                      const nsString& aSessionId,
+                      const dom::Optional<dom::MediaKeyStatus>& aStatus);
 
     void GetKeyStatusesForSession(const nsAString& aSessionId,
                                   nsTArray<KeyStatus>& aOutKeyStatuses);
@@ -71,20 +71,9 @@ public:
     void GetSessionIdsForKeyId(const CencKeyId& aKeyId,
                                nsTArray<nsCString>& aOutSessionIds);
 
-    // Sets the capabilities of the CDM. aCaps is the logical OR of the
-    // GMP_EME_CAP_* flags from gmp-decryption.h.
-    void SetCaps(uint64_t aCaps);
-
-    bool CanRenderAudio();
-    bool CanRenderVideo();
-
-    bool CanDecryptAndDecodeAudio();
-    bool CanDecryptAndDecodeVideo();
-
-    bool CanDecryptAudio();
-    bool CanDecryptVideo();
-
-    void CallOnMainThreadWhenCapsAvailable(nsIRunnable* aContinuation);
+    // Ensures all keys for a session are marked as 'unknown', i.e. removed.
+    // Returns true if a key status was changed.
+    bool RemoveKeysForSession(const nsString& aSessionId);
 
     // Notifies the SamplesWaitingForKey when key become usable.
     void NotifyWhenKeyIdUsable(const CencKeyId& aKey,
@@ -97,7 +86,6 @@ public:
 private:
   void Lock();
   void Unlock();
-  bool HasCap(uint64_t);
 
   struct WaitForKeys {
     WaitForKeys(const CencKeyId& aKeyId,
@@ -114,9 +102,6 @@ private:
   nsTArray<KeyStatus> mKeyStatuses;
 
   nsTArray<WaitForKeys> mWaitForKeys;
-
-  nsTArray<nsCOMPtr<nsIRunnable>> mWaitForCaps;
-  uint64_t mCaps;
 
   // It is not safe to copy this object.
   CDMCaps(const CDMCaps&) = delete;

@@ -103,13 +103,7 @@ this.DOMApplicationRegistry = {
       this.cpmm.addMessageListener(aMsgName, this);
     }).bind(this));
 
-    this.cpmm.sendAsyncMessage("Webapps:RegisterForMessages", {
-      messages: APPS_IPC_MSG_NAMES
-    });
-
-    // We need to prime the cache with the list of apps.
-    let list = this.cpmm.sendSyncMessage("Webapps:GetList", { })[0];
-    this.webapps = list.webapps;
+    this.webapps = { };
     // We need a fast mapping from localId -> app, so we add an index.
     // We also add the manifest to the app object.
     this.localIdIndex = { };
@@ -371,16 +365,6 @@ this.DOMApplicationRegistry = {
     return AppsUtils.getAppLocalIdByManifestURL(this.webapps, aManifestURL);
   },
 
-  getManifestCSPByLocalId: function(aLocalId) {
-    debug("getManifestCSPByLocalId:" + aLocalId);
-    return AppsUtils.getManifestCSPByLocalId(this.webapps, aLocalId);
-  },
-
-  getDefaultCSPByLocalId: function(aLocalId) {
-    debug("getDefaultCSPByLocalId:" + aLocalId);
-    return AppsUtils.getDefaultCSPByLocalId(this.webapps, aLocalId);
-  },
-
   getAppLocalIdByStoreId: function(aStoreId) {
     debug("getAppLocalIdByStoreId:" + aStoreId);
     return AppsUtils.getAppLocalIdByStoreId(this.webapps, aStoreId);
@@ -412,12 +396,12 @@ this.DOMApplicationRegistry = {
     return null;
   },
 
-  getAppInfo: function getAppInfo(aAppId) {
-    return AppsUtils.getAppInfo(this.webapps, aAppId);
+  areAnyAppsInstalled: function() {
+    return AppsUtils.areAnyAppsInstalled(this.webapps);
   },
 
-  updateDataStoreEntriesFromLocalId: function(aLocalId) {
-    debug("updateDataStoreEntriesFromLocalId() not yet supported on child!");
+  getAppInfo: function getAppInfo(aAppId) {
+    return AppsUtils.getAppInfo(this.webapps, aAppId);
   }
 }
 

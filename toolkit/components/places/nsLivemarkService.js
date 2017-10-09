@@ -4,8 +4,7 @@
 
 const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 
-////////////////////////////////////////////////////////////////////////////////
-//// Modules and services.
+// Modules and services.
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
@@ -24,8 +23,7 @@ XPCOMUtils.defineLazyGetter(this, "asyncHistory", function () {
   return PlacesUtils.asyncHistory;
 });
 
-////////////////////////////////////////////////////////////////////////////////
-//// Constants
+// Constants
 
 // Delay between reloads of consecute livemarks.
 const RELOAD_DELAY_MS = 500;
@@ -34,8 +32,7 @@ const EXPIRE_TIME_MS = 3600000; // 1 hour.
 // Expire livemarks after this time on error.
 const ONERROR_EXPIRE_TIME_MS = 300000; // 5 minutes.
 
-////////////////////////////////////////////////////////////////////////////////
-//// Livemarks cache.
+// Livemarks cache.
 
 XPCOMUtils.defineLazyGetter(this, "CACHE_SQL", () => {
   function getAnnoSQLFragment(aAnnoParam) {
@@ -108,8 +105,7 @@ function toDate(time) {
   return time ? new Date(parseInt(time / 1000)) : undefined;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-//// LivemarkService
+// LivemarkService
 
 function LivemarkService() {
   // Cleanup on shutdown.
@@ -149,8 +145,7 @@ LivemarkService.prototype = {
     }, RELOAD_DELAY_MS, Ci.nsITimer.TYPE_ONE_SHOT);
   },
 
-  //////////////////////////////////////////////////////////////////////////////
-  //// nsIObserver
+  // nsIObserver
 
   observe(aSubject, aTopic, aData) {
     if (aTopic == PlacesUtils.TOPIC_SHUTDOWN) {
@@ -169,8 +164,7 @@ LivemarkService.prototype = {
     }
   },
 
-  //////////////////////////////////////////////////////////////////////////////
-  //// mozIAsyncLivemarks
+  // mozIAsyncLivemarks
 
   addLivemark(aLivemarkInfo) {
     if (!aLivemarkInfo) {
@@ -208,7 +202,8 @@ LivemarkService.prototype = {
         title: aLivemarkInfo.title,
         index: aLivemarkInfo.index,
         guid: aLivemarkInfo.guid,
-        dateAdded: toDate(aLivemarkInfo.dateAdded) || toDate(aLivemarkInfo.lastModified)
+        dateAdded: toDate(aLivemarkInfo.dateAdded) || toDate(aLivemarkInfo.lastModified),
+        source: aLivemarkInfo.source,
       });
 
       // Set feed and site URI annotations.
@@ -227,14 +222,15 @@ LivemarkService.prototype = {
                                   , lastModified: toPRTime(folder.lastModified)
                                   });
 
-      livemark.writeFeedURI(aLivemarkInfo.feedURI);
+      livemark.writeFeedURI(aLivemarkInfo.feedURI, aLivemarkInfo.source);
       if (aLivemarkInfo.siteURI) {
-        livemark.writeSiteURI(aLivemarkInfo.siteURI);
+        livemark.writeSiteURI(aLivemarkInfo.siteURI, aLivemarkInfo.source);
       }
 
       if (aLivemarkInfo.lastModified) {
         yield PlacesUtils.bookmarks.update({ guid: folder.guid,
-                                             lastModified: toDate(aLivemarkInfo.lastModified) });
+                                             lastModified: toDate(aLivemarkInfo.lastModified),
+                                             source: aLivemarkInfo.source });
         livemark.lastModified = aLivemarkInfo.lastModified;
       }
 
@@ -265,7 +261,8 @@ LivemarkService.prototype = {
       if (!livemarksMap.has(aLivemarkInfo.guid))
         throw new Components.Exception("Invalid livemark", Cr.NS_ERROR_INVALID_ARG);
 
-      yield PlacesUtils.bookmarks.remove(aLivemarkInfo.guid);
+      yield PlacesUtils.bookmarks.remove(aLivemarkInfo.guid,
+                                         { source: aLivemarkInfo.source });
     }.bind(this));
   },
 
@@ -311,8 +308,7 @@ LivemarkService.prototype = {
     }.bind(this));
   },
 
-  //////////////////////////////////////////////////////////////////////////////
-  //// nsINavBookmarkObserver
+  // nsINavBookmarkObserver
 
   onBeginUpdateBatch() {},
   onEndUpdateBatch() {},
@@ -363,8 +359,7 @@ LivemarkService.prototype = {
     });
   },
 
-  //////////////////////////////////////////////////////////////////////////////
-  //// nsINavHistoryObserver
+  // nsINavHistoryObserver
 
   onPageChanged() {},
   onTitleChanged() {},
@@ -394,8 +389,7 @@ LivemarkService.prototype = {
     });
   },
 
-  //////////////////////////////////////////////////////////////////////////////
-  //// nsISupports
+  // nsISupports
 
   classID: Components.ID("{dca61eb5-c7cd-4df1-b0fb-d0722baba251}"),
 
@@ -410,8 +404,7 @@ LivemarkService.prototype = {
   ])
 };
 
-////////////////////////////////////////////////////////////////////////////////
-//// Livemark
+// Livemark
 
 /**
  * Object used internally to represent a livemark.
@@ -464,25 +457,27 @@ Livemark.prototype = {
     return this._status;
   },
 
-  writeFeedURI(aFeedURI) {
+  writeFeedURI(aFeedURI, aSource) {
     PlacesUtils.annotations
                .setItemAnnotation(this.id, PlacesUtils.LMANNO_FEEDURI,
                                   aFeedURI.spec,
-                                  0, PlacesUtils.annotations.EXPIRE_NEVER);
+                                  0, PlacesUtils.annotations.EXPIRE_NEVER,
+                                  aSource);
     this.feedURI = aFeedURI;
   },
 
-  writeSiteURI(aSiteURI) {
+  writeSiteURI(aSiteURI, aSource) {
     if (!aSiteURI) {
       PlacesUtils.annotations.removeItemAnnotation(this.id,
-                                                   PlacesUtils.LMANNO_SITEURI)
+                                                   PlacesUtils.LMANNO_SITEURI,
+                                                   aSource)
       this.siteURI = null;
       return;
     }
 
     // Security check the site URI against the feed URI principal.
     let secMan = Services.scriptSecurityManager;
-    let feedPrincipal = secMan.getSimpleCodebasePrincipal(this.feedURI);
+    let feedPrincipal = secMan.createCodebasePrincipal(this.feedURI, {});
     try {
       secMan.checkLoadURIWithPrincipal(feedPrincipal, aSiteURI,
                                        Ci.nsIScriptSecurityManager.DISALLOW_INHERIT_PRINCIPAL);
@@ -494,7 +489,8 @@ Livemark.prototype = {
     PlacesUtils.annotations
                .setItemAnnotation(this.id, PlacesUtils.LMANNO_SITEURI,
                                   aSiteURI.spec,
-                                  0, PlacesUtils.annotations.EXPIRE_NEVER);
+                                  0, PlacesUtils.annotations.EXPIRE_NEVER,
+                                  aSource);
     this.siteURI = aSiteURI;
   },
 
@@ -528,9 +524,14 @@ Livemark.prototype = {
       // cancel the channel.
       let loadgroup = Cc["@mozilla.org/network/load-group;1"].
                       createInstance(Ci.nsILoadGroup);
+      // Creating a CodeBasePrincipal and using it as the loadingPrincipal
+      // is *not* desired and is only tolerated within this file.
+      // TODO: Find the right OriginAttributes and pass something other
+      // than {} to .createCodeBasePrincipal().
       let channel = NetUtil.newChannel({
-        uri: this.feedURI.spec,
+        uri: this.feedURI,
         loadingPrincipal: Services.scriptSecurityManager.createCodebasePrincipal(this.feedURI, {}),
+        securityFlags: Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
         contentPolicyType: Ci.nsIContentPolicy.TYPE_INTERNAL_XMLHTTPREQUEST
       }).QueryInterface(Ci.nsIHttpChannel);
       channel.loadGroup = loadgroup;
@@ -542,7 +543,7 @@ Livemark.prototype = {
       // Stream the result to the feed parser with this listener
       let listener = new LivemarkLoadListener(this);
       channel.notificationCallbacks = listener;
-      channel.asyncOpen(listener, null);
+      channel.asyncOpen2(listener);
 
       this.loadGroup = loadgroup;
     }
@@ -719,8 +720,7 @@ Livemark.prototype = {
   ])
 }
 
-////////////////////////////////////////////////////////////////////////////////
-//// LivemarkLoadListener
+// LivemarkLoadListener
 
 /**
  * Object used internally to handle loading a livemark's contents.
@@ -754,7 +754,7 @@ LivemarkLoadListener.prototype = {
       // We need this to make sure the item links are safe
       let feedPrincipal =
         Services.scriptSecurityManager
-                .getSimpleCodebasePrincipal(this._livemark.feedURI);
+                .createCodebasePrincipal(this._livemark.feedURI, {});
 
       // Enforce well-formedness because the existing code does
       if (!aResult || !aResult.doc || aResult.bozo) {
@@ -782,7 +782,7 @@ LivemarkLoadListener.prototype = {
                   .checkLoadURIWithPrincipal(feedPrincipal, uri,
                                              Ci.nsIScriptSecurityManager.DISALLOW_INHERIT_PRINCIPAL);
         }
-        catch(ex) {
+        catch (ex) {
           continue;
         }
 

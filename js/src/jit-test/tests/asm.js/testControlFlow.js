@@ -1,4 +1,3 @@
-// |jit-test| test-also-noasmjs
 load(libdir + "asm.js");
 
 assertEq(asmLink(asmCompile(USE_ASM + "function f(i,j) { i=i|0;j=+j; if (i) return j; return j+1.0 } return f"))(0, 1.2), 1.2+1.0);
@@ -21,6 +20,9 @@ assertEq(asmLink(asmCompile(USE_ASM + "function f() { do {} while(0); return 0} 
 assertEq(asmLink(asmCompile(USE_ASM + "function f() { while (0) ; return 0} return f"))(), 0);
 assertEq(asmLink(asmCompile(USE_ASM + "function f() { for (;0;) ; return 0} return f"))(), 0);
 assertEq(asmLink(asmCompile(USE_ASM + "function f() { do ; while(0); return 0} return f"))(), 0);
+
+assertEq(asmLink(asmCompile(USE_ASM + "function f() { do {} while (0); while (0); return 0} return f"))(), 0);
+assertEq(asmLink(asmCompile(USE_ASM + "function f() { var i = 0; do {} while (0); return i|0} return f"))(), 0);
 
 assertAsmTypeFail(USE_ASM + "function f(d) {d=+d; while (d) {}; return 0} return f");
 assertAsmTypeFail(USE_ASM + "function f(d) {d=+d; for (;d;) {}; return 0} return f");

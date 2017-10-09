@@ -3,10 +3,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* This content script should work in any browser or iframe and should not
- * depend on the frame being contained in tabbrowser. */
+/* This content script is intended for use by iframes in the share panel. */
 
-var {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
+var {interfaces: Ci, utils: Cu} = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
@@ -14,10 +13,62 @@ Cu.import("resource://gre/modules/Services.jsm");
 // social frames are always treated as app tabs
 docShell.isAppTab = true;
 
+addEventListener("DOMContentLoaded", function(event) {
+  if (event.target != content.document)
+    return;
+  // Some share panels (e.g. twitter and facebook) check content.opener, and if
+  // it doesn't exist they act like they are in a browser tab.  We want them to
+  // act like they are in a dialog (which is the typical case).
+  if (content && !content.opener) {
+    content.opener = content;
+  }
+  hookWindowClose();
+  disableDialogs();
+});
+
+addMessageListener("Social:OpenGraphData", (message) => {
+  let ev = new content.CustomEvent("OpenGraphData", { detail: JSON.stringify(message.data) });
+  content.dispatchEvent(ev);
+});
+
+addMessageListener("Social:ClearFrame", () => {
+  docShell.createAboutBlankContentViewer(null);
+});
+
+addEventListener("DOMWindowClose", (evt) => {
+  // preventDefault stops the default window.close() function being called,
+  // which doesn't actually close anything but causes things to get into
+  // a bad state (an internal 'closed' flag is set and debug builds start
+  // asserting as the window is used.).
+  // None of the windows we inject this API into are suitable for this
+  // default close behaviour, so even if we took no action above, we avoid
+  // the default close from doing anything.
+  evt.preventDefault();
+
+  // Tells the SocialShare class to close the panel
+  sendAsyncMessage("Social:DOMWindowClose");
+});
+
+function hookWindowClose() {
+  // Allow scripts to close the "window".  Because we are in a panel and not
+  // in a full dialog, the DOMWindowClose listener above will only receive the
+  // event if we do this.
+  let dwu = content.QueryInterface(Ci.nsIInterfaceRequestor)
+     .getInterface(Ci.nsIDOMWindowUtils);
+  dwu.allowScriptsToClose();
+}
+
+function disableDialogs() {
+  let windowUtils = content.QueryInterface(Ci.nsIInterfaceRequestor).
+                    getInterface(Ci.nsIDOMWindowUtils);
+  windowUtils.disableDialogs();
+}
+
 // Error handling class used to listen for network errors in the social frames
 // and replace them with a social-specific error page
-SocialErrorListener = {
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIWebProgressListener,
+const SocialErrorListener = {
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsIDOMEventListener,
+                                         Ci.nsIWebProgressListener,
                                          Ci.nsISupportsWeakReference,
                                          Ci.nsISupports]),
 
@@ -31,12 +82,13 @@ SocialErrorListener = {
     webProgress.addProgressListener(this, Ci.nsIWebProgress.NOTIFY_STATE_REQUEST |
                                           Ci.nsIWebProgress.NOTIFY_LOCATION);
   },
+
   receiveMessage(message) {
-    switch(message.name) {
-      case "Social:SetErrorURL": {
-        // either a url or null to reset to default template
-        this.urlTemplate = message.objects.template;
-      }
+    switch (message.name) {
+      case "Social:SetErrorURL":
+        // Either a url or null to reset to default template.
+        this.urlTemplate = message.data.template;
+        break;
     }
   },
 
@@ -69,6 +121,8 @@ SocialErrorListener = {
 
   onStateChange(aWebProgress, aRequest, aState, aStatus) {
     let failure = false;
+    if ((aState & Ci.nsIWebProgressListener.STATE_IS_REQUEST))
+      return;
     if ((aState & Ci.nsIWebProgressListener.STATE_STOP)) {
       if (aRequest instanceof Ci.nsIHttpChannel) {
         try {

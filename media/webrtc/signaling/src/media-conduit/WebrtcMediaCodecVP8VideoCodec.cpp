@@ -12,7 +12,6 @@
 #include "MediaCodec.h"
 #include "WebrtcMediaCodecVP8VideoCodec.h"
 #include "AndroidJNIWrapper.h"
-#include "mozilla/Scoped.h"
 #include "mozilla/ArrayUtils.h"
 #include "nsThreadUtils.h"
 #include "mozilla/Monitor.h"
@@ -27,7 +26,7 @@
 #include <webrtc/common_video/libyuv/include/webrtc_libyuv.h>
 
 using namespace mozilla;
-using namespace mozilla::widget::sdk;
+using namespace mozilla::java::sdk;
 
 static const int32_t DECODER_TIMEOUT = 10 * PR_USEC_PER_MSEC; // 10ms
 static const char MEDIACODEC_VIDEO_MIME_VP8[] = "video/x-vnd.on2.vp8";
@@ -72,7 +71,7 @@ ShutdownThread(nsCOMPtr<nsIThread>& aThread)
 //   should contains corresponding info such as image size and timestamps for
 //   DrainOutput() implementation to construct data needed by encoded/decoded
 //   callbacks.
-class MediaCodecOutputDrain : public nsRunnable
+class MediaCodecOutputDrain : public Runnable
 {
 public:
   void Start() {
@@ -109,7 +108,7 @@ public:
     lock.NotifyAll();
   }
 
-  NS_IMETHODIMP Run() override
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(mThread);
 
@@ -623,7 +622,7 @@ WebrtcMediaCodecVP8VideoEncoder::VerifyAndAllocate(const uint32_t minimumSize)
 int32_t WebrtcMediaCodecVP8VideoEncoder::InitEncode(
     const webrtc::VideoCodec* codecSettings,
     int32_t numberOfCores,
-    uint32_t maxPayloadSize) {
+    size_t maxPayloadSize) {
   mMaxPayloadSize = maxPayloadSize;
   CSFLogDebug(logTag,  "%s, w = %d, h = %d", __FUNCTION__, codecSettings->width, codecSettings->height);
 

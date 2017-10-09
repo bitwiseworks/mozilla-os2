@@ -12,10 +12,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef XP_WIN
-#if defined(MOZ_OPTIMIZE) && !defined(MOZ_PROFILING)
-#error "Optimized, DMD-enabled builds on Windows must be built with --enable-profiling"
+#if !defined(MOZ_PROFILING)
+#error "DMD requires MOZ_PROFILING"
 #endif
+
+#ifdef XP_WIN
 #include <windows.h>
 #include <process.h>
 #else
@@ -33,6 +34,7 @@
 #include "js/Vector.h"
 
 #include "mozilla/Assertions.h"
+#include "mozilla/FastBernoulliTrial.h"
 #include "mozilla/HashFunctions.h"
 #include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/JSONWriter.h"
@@ -223,24 +225,22 @@ public:
   static T* new_()
   {
     void* mem = malloc_(sizeof(T));
-    ExitOnFailure(mem);
     return new (mem) T;
   }
 
   template <class T, typename P1>
-  static T* new_(P1 p1)
+  static T* new_(P1 aP1)
   {
     void* mem = malloc_(sizeof(T));
-    ExitOnFailure(mem);
-    return new (mem) T(p1);
+    return new (mem) T(aP1);
   }
 
   template <class T>
-  static void delete_(T *p)
+  static void delete_(T* aPtr)
   {
-    if (p) {
-      p->~T();
-      InfallibleAllocPolicy::free_(p);
+    if (aPtr) {
+      aPtr->~T();
+      InfallibleAllocPolicy::free_(aPtr);
     }
   }
 
@@ -259,11 +259,6 @@ void
 DMDFuncs::StatusMsg(const char* aFmt, va_list aAp)
 {
 #ifdef ANDROID
-#ifdef MOZ_B2G_LOADER
-  // Don't call __android_log_vprint() during initialization, or the magic file
-  // descriptors will be occupied by android logcat.
-  if (gIsDMDInitialized)
-#endif
     __android_log_vprint(ANDROID_LOG_INFO, "DMD", aFmt, aAp);
 #else
   // The +64 is easily enough for the "DMD[<pid>] " prefix and the NUL.
@@ -353,11 +348,11 @@ class Options
   // give some extra flexibility at moderate memory and file size cost. But
   // certain mode pairs wouldn't work, which would be confusing.
   //
-  enum Mode
+  enum class Mode
   {
-    // For each live block, this mode outputs: size (usable and slop),
-    // allocation stack, and whether it's sampled. This mode is good for live
-    // heap profiling.
+    // For each live block, this mode outputs: size (usable and slop) and
+    // (possibly) and allocation stack. This mode is good for live heap
+    // profiling.
     Live,
 
     // Like "Live", but for each live block it also outputs: zero or more
@@ -367,21 +362,34 @@ class Options
 
     // Like "Live", but also outputs the same data for dead blocks. This mode
     // does cumulative heap profiling, which is good for identifying where large
-    // amounts of short-lived allocations occur.
+    // amounts of short-lived allocations ("heap churn") occur.
     Cumulative,
 
     // Like "Live", but this mode also outputs for each live block the address
     // of the block and the values contained in the blocks. This mode is useful
     // for investigating leaks, by helping to figure out which blocks refer to
-    // other blocks. This mode disables sampling.
+    // other blocks. This mode force-enables full stacks coverage.
     Scan
+  };
+
+  // With full stacks, every heap block gets a stack trace recorded for it.
+  // This is complete but slow.
+  //
+  // With partial stacks, not all heap blocks will get a stack trace recorded.
+  // A Bernoulli trial (see mfbt/FastBernoulliTrial.h for details) is performed
+  // for each heap block to decide if it gets one. Because bigger heap blocks
+  // are more likely to get a stack trace, even though most heap *blocks* won't
+  // get a stack trace, most heap *bytes* will.
+  enum class Stacks
+  {
+    Full,
+    Partial
   };
 
   char* mDMDEnvVar;   // a saved copy, for later printing
 
   Mode mMode;
-  NumOption<size_t> mSampleBelowSize;
-  NumOption<uint32_t> mMaxFrames;
+  Stacks mStacks;
   bool mShowDumpStats;
 
   void BadArg(const char* aArg);
@@ -393,17 +401,16 @@ class Options
 public:
   explicit Options(const char* aDMDEnvVar);
 
-  bool IsLiveMode()       const { return mMode == Live; }
-  bool IsDarkMatterMode() const { return mMode == DarkMatter; }
-  bool IsCumulativeMode() const { return mMode == Cumulative; }
-  bool IsScanMode()       const { return mMode == Scan; }
+  bool IsLiveMode()       const { return mMode == Mode::Live; }
+  bool IsDarkMatterMode() const { return mMode == Mode::DarkMatter; }
+  bool IsCumulativeMode() const { return mMode == Mode::Cumulative; }
+  bool IsScanMode()       const { return mMode == Mode::Scan; }
 
   const char* ModeString() const;
 
   const char* DMDEnvVar() const { return mDMDEnvVar; }
 
-  size_t SampleBelowSize() const { return mSampleBelowSize.mActual; }
-  size_t MaxFrames()       const { return mMaxFrames.mActual; }
+  bool DoFullStacks()      const { return mStacks == Stacks::Full; }
   size_t ShowDumpStats()   const { return mShowDumpStats; }
 };
 
@@ -610,7 +617,10 @@ public:
 class StringTable
 {
 public:
-  StringTable() { (void)mSet.init(64); }
+  StringTable()
+  {
+    MOZ_ALWAYS_TRUE(mSet.init(64));
+  }
 
   const char*
   Intern(const char* aString)
@@ -621,7 +631,7 @@ public:
     }
 
     const char* newString = InfallibleAllocPolicy::strdup_(aString);
-    (void)mSet.add(p, newString);
+    MOZ_ALWAYS_TRUE(mSet.add(p, newString));
     return newString;
   }
 
@@ -691,9 +701,7 @@ public:
 
 private:
   uint32_t mLength;             // The number of PCs.
-  const void* mPcs[MaxFrames];  // The PCs themselves.  If --max-frames is less
-                                // than 24, this array is bigger than
-                                // necessary, but that case is unusual.
+  const void* mPcs[MaxFrames];  // The PCs themselves.
 
 public:
   StackTrace() : mLength(0) {}
@@ -775,7 +783,7 @@ StackTrace::Get(Thread* aT)
     AutoUnlockState unlock;
     uint32_t skipFrames = 2;
     if (MozStackWalk(StackWalkCallback, skipFrames,
-                      gOptions->MaxFrames(), &tmp, 0, nullptr)) {
+                     MaxFrames, &tmp, 0, nullptr)) {
       // Handle the common case first.  All is ok.  Nothing to do.
     } else {
       tmp.mLength = 0;
@@ -785,7 +793,7 @@ StackTrace::Get(Thread* aT)
   StackTraceTable::AddPtr p = gStackTraceTable->lookupForAdd(&tmp);
   if (!p) {
     StackTrace* stnew = InfallibleAllocPolicy::new_<StackTrace>(tmp);
-    (void)gStackTraceTable->add(p, stnew);
+    MOZ_ALWAYS_TRUE(gStackTraceTable->add(p, stnew));
   }
   return *p;
 }
@@ -851,12 +859,9 @@ class LiveBlock
   const void*  mPtr;
   const size_t mReqSize;    // size requested
 
-  // Ptr: |mAllocStackTrace| - stack trace where this block was allocated.
-  // Tag bit 0: |mIsSampled| - was this block sampled? (if so, slop == 0).
-  //
-  // Only used in DarkMatter mode.
-  TaggedPtr<const StackTrace* const>
-    mAllocStackTrace_mIsSampled;
+  // The stack trace where this block was allocated, or nullptr if we didn't
+  // record one.
+  const StackTrace* const mAllocStackTrace;
 
   // This array has two elements because we record at most two reports of a
   // block.
@@ -874,38 +879,25 @@ class LiveBlock
 
 public:
   LiveBlock(const void* aPtr, size_t aReqSize,
-            const StackTrace* aAllocStackTrace, bool aIsSampled)
+            const StackTrace* aAllocStackTrace)
     : mPtr(aPtr)
     , mReqSize(aReqSize)
-    , mAllocStackTrace_mIsSampled(aAllocStackTrace, aIsSampled)
+    , mAllocStackTrace(aAllocStackTrace)
     , mReportStackTrace_mReportedOnAlloc()     // all fields get zeroed
-  {
-    MOZ_ASSERT(aAllocStackTrace);
-  }
+  {}
 
   const void* Address() const { return mPtr; }
 
   size_t ReqSize() const { return mReqSize; }
 
-  // Sampled blocks always have zero slop.
   size_t SlopSize() const
   {
-    return IsSampled() ? 0 : MallocSizeOf(mPtr) - mReqSize;
-  }
-
-  size_t UsableSize() const
-  {
-    return IsSampled() ? mReqSize : MallocSizeOf(mPtr);
-  }
-
-  bool IsSampled() const
-  {
-    return mAllocStackTrace_mIsSampled.Tag();
+    return MallocSizeOf(mPtr) - mReqSize;
   }
 
   const StackTrace* AllocStackTrace() const
   {
-    return mAllocStackTrace_mIsSampled.Ptr();
+    return mAllocStackTrace;
   }
 
   const StackTrace* ReportStackTrace1() const
@@ -934,14 +926,15 @@ public:
 
   void AddStackTracesToTable(StackTraceSet& aStackTraces) const
   {
-    aStackTraces.put(AllocStackTrace());  // never null
+    if (AllocStackTrace()) {
+      MOZ_ALWAYS_TRUE(aStackTraces.put(AllocStackTrace()));
+    }
     if (gOptions->IsDarkMatterMode()) {
-      const StackTrace* st;
-      if ((st = ReportStackTrace1())) {     // may be null
-        aStackTraces.put(st);
+      if (ReportStackTrace1()) {
+        MOZ_ALWAYS_TRUE(aStackTraces.put(ReportStackTrace1()));
       }
-      if ((st = ReportStackTrace2())) {     // may be null
-        aStackTraces.put(st);
+      if (ReportStackTrace2()) {
+        MOZ_ALWAYS_TRUE(aStackTraces.put(ReportStackTrace2()));
       }
     }
   }
@@ -1004,8 +997,47 @@ public:
   }
 };
 
+// A table of live blocks where the lookup key is the block address.
 typedef js::HashSet<LiveBlock, LiveBlock, InfallibleAllocPolicy> LiveBlockTable;
 static LiveBlockTable* gLiveBlockTable = nullptr;
+
+class AggregatedLiveBlockHashPolicy
+{
+public:
+  typedef const LiveBlock* const Lookup;
+
+  static uint32_t hash(const LiveBlock* const& aB)
+  {
+    return gOptions->IsDarkMatterMode()
+         ? mozilla::HashGeneric(aB->ReqSize(),
+                                aB->SlopSize(),
+                                aB->AllocStackTrace(),
+                                aB->ReportedOnAlloc1(),
+                                aB->ReportedOnAlloc2())
+         : mozilla::HashGeneric(aB->ReqSize(),
+                                aB->SlopSize(),
+                                aB->AllocStackTrace());
+  }
+
+  static bool match(const LiveBlock* const& aA, const LiveBlock* const& aB)
+  {
+    return gOptions->IsDarkMatterMode()
+         ? aA->ReqSize() == aB->ReqSize() &&
+           aA->SlopSize() == aB->SlopSize() &&
+           aA->AllocStackTrace() == aB->AllocStackTrace() &&
+           aA->ReportStackTrace1() == aB->ReportStackTrace1() &&
+           aA->ReportStackTrace2() == aB->ReportStackTrace2()
+         : aA->ReqSize() == aB->ReqSize() &&
+           aA->SlopSize() == aB->SlopSize() &&
+           aA->AllocStackTrace() == aB->AllocStackTrace();
+  }
+};
+
+// A table of live blocks where the lookup key is everything but the block
+// address. For aggregating similar live blocks at output time.
+typedef js::HashMap<const LiveBlock*, size_t, AggregatedLiveBlockHashPolicy,
+                    InfallibleAllocPolicy>
+        AggregatedLiveBlockTable;
 
 // A freed heap block.
 class DeadBlock
@@ -1013,46 +1045,37 @@ class DeadBlock
   const size_t mReqSize;    // size requested
   const size_t mSlopSize;   // slop above size requested
 
-  // Ptr: |mAllocStackTrace| - stack trace where this block was allocated.
-  // Tag bit 0: |mIsSampled| - was this block sampled? (if so, slop == 0).
-  TaggedPtr<const StackTrace* const>
-    mAllocStackTrace_mIsSampled;
+  // The stack trace where this block was allocated.
+  const StackTrace* const mAllocStackTrace;
 
 public:
   DeadBlock()
     : mReqSize(0)
     , mSlopSize(0)
-    , mAllocStackTrace_mIsSampled(nullptr, 0)
+    , mAllocStackTrace(nullptr)
   {}
 
   explicit DeadBlock(const LiveBlock& aLb)
     : mReqSize(aLb.ReqSize())
     , mSlopSize(aLb.SlopSize())
-    , mAllocStackTrace_mIsSampled(aLb.AllocStackTrace(), aLb.IsSampled())
-  {
-    MOZ_ASSERT(AllocStackTrace());
-    MOZ_ASSERT_IF(IsSampled(), SlopSize() == 0);
-  }
+    , mAllocStackTrace(aLb.AllocStackTrace())
+  {}
 
   ~DeadBlock() {}
 
   size_t ReqSize()    const { return mReqSize; }
   size_t SlopSize()   const { return mSlopSize; }
-  size_t UsableSize() const { return mReqSize + mSlopSize; }
-
-  bool IsSampled() const
-  {
-    return mAllocStackTrace_mIsSampled.Tag();
-  }
 
   const StackTrace* AllocStackTrace() const
   {
-    return mAllocStackTrace_mIsSampled.Ptr();
+    return mAllocStackTrace;
   }
 
   void AddStackTracesToTable(StackTraceSet& aStackTraces) const
   {
-    aStackTraces.put(AllocStackTrace());  // never null
+    if (AllocStackTrace()) {
+      MOZ_ALWAYS_TRUE(aStackTraces.put(AllocStackTrace()));
+    }
   }
 
   // Hash policy.
@@ -1063,7 +1086,6 @@ public:
   {
     return mozilla::HashGeneric(aB.ReqSize(),
                                 aB.SlopSize(),
-                                aB.IsSampled(),
                                 aB.AllocStackTrace());
   }
 
@@ -1071,7 +1093,6 @@ public:
   {
     return aA.ReqSize() == aB.ReqSize() &&
            aA.SlopSize() == aB.SlopSize() &&
-           aA.IsSampled() == aB.IsSampled() &&
            aA.AllocStackTrace() == aB.AllocStackTrace();
   }
 };
@@ -1079,7 +1100,7 @@ public:
 // For each unique DeadBlock value we store a count of how many actual dead
 // blocks have that value.
 typedef js::HashMap<DeadBlock, size_t, DeadBlock, InfallibleAllocPolicy>
-  DeadBlockTable;
+        DeadBlockTable;
 static DeadBlockTable* gDeadBlockTable = nullptr;
 
 // Add the dead block to the dead block table, if that's appropriate.
@@ -1090,7 +1111,7 @@ void MaybeAddToDeadBlockTable(const DeadBlock& aDb)
     if (DeadBlockTable::AddPtr p = gDeadBlockTable->lookupForAdd(aDb)) {
       p->value() += 1;
     } else {
-      gDeadBlockTable->add(p, aDb, 1);
+      MOZ_ALWAYS_TRUE(gDeadBlockTable->add(p, aDb, 1));
     }
   }
 }
@@ -1104,7 +1125,7 @@ GatherUsedStackTraces(StackTraceSet& aStackTraces)
   MOZ_ASSERT(Thread::Fetch()->InterceptsAreBlocked());
 
   aStackTraces.finish();
-  aStackTraces.init(512);
+  MOZ_ALWAYS_TRUE(aStackTraces.init(512));
 
   for (auto r = gLiveBlockTable->all(); !r.empty(); r.popFront()) {
     r.front().AddStackTracesToTable(aStackTraces);
@@ -1144,7 +1165,27 @@ GCStackTraces()
 // malloc/free callbacks
 //---------------------------------------------------------------------------
 
-static size_t gSmallBlockActualSizeCounter = 0;
+static FastBernoulliTrial* gBernoulli;
+
+// In testing, a probability of 0.003 resulted in ~25% of heap blocks getting
+// a stack trace and ~80% of heap bytes getting a stack trace. (This is
+// possible because big heap blocks are more likely to get a stack trace.)
+//
+// We deliberately choose not to give the user control over this probability
+// (other than effectively setting it to 1 via --stacks=full) because it's
+// quite inscrutable and generally the user just wants "faster and imprecise"
+// or "slower and precise".
+//
+// The random number seeds are arbitrary and were obtained from random.org. If
+// you change them you'll need to change the tests as well, because their
+// expected output is based on the particular sequence of trial results that we
+// get with these seeds.
+static void
+ResetBernoulli()
+{
+  new (gBernoulli) FastBernoulliTrial(0.003, 0x8e26eeee166bc8ca,
+                                             0x56820f304a9c9ae0);
+}
 
 static void
 AllocCallback(void* aPtr, size_t aReqSize, Thread* aT)
@@ -1157,26 +1198,12 @@ AllocCallback(void* aPtr, size_t aReqSize, Thread* aT)
   AutoBlockIntercepts block(aT);
 
   size_t actualSize = gMallocTable->malloc_usable_size(aPtr);
-  size_t sampleBelowSize = gOptions->SampleBelowSize();
 
-  if (actualSize < sampleBelowSize) {
-    // If this allocation is smaller than the sample-below size, increment the
-    // cumulative counter.  Then, if that counter now exceeds the sample size,
-    // blame this allocation for |sampleBelowSize| bytes.  This precludes the
-    // measurement of slop.
-    gSmallBlockActualSizeCounter += actualSize;
-    if (gSmallBlockActualSizeCounter >= sampleBelowSize) {
-      gSmallBlockActualSizeCounter -= sampleBelowSize;
-
-      LiveBlock b(aPtr, sampleBelowSize, StackTrace::Get(aT),
-                  /* isSampled */ true);
-      (void)gLiveBlockTable->putNew(aPtr, b);
-    }
-  } else {
-    // If this block size is larger than the sample size, record it exactly.
-    LiveBlock b(aPtr, aReqSize, StackTrace::Get(aT), /* isSampled */ false);
-    (void)gLiveBlockTable->putNew(aPtr, b);
-  }
+  // We may or may not record the allocation stack trace, depending on the
+  // options and the outcome of a Bernoulli trial.
+  bool getTrace = gOptions->DoFullStacks() || gBernoulli->trial(actualSize);
+  LiveBlock b(aPtr, aReqSize, getTrace ? StackTrace::Get(aT) : nullptr);
+  MOZ_ALWAYS_TRUE(gLiveBlockTable->putNew(aPtr, b));
 }
 
 static void
@@ -1196,9 +1223,8 @@ FreeCallback(void* aPtr, Thread* aT, DeadBlock* aDeadBlock)
     }
     gLiveBlockTable->remove(lb);
   } else {
-    // We have no record of the block. Do nothing. Either:
-    // - We're sampling and we skipped this block. This is likely.
-    // - It's a bogus pointer.
+    // We have no record of the block. It must be a bogus pointer, or one that
+    // DMD wasn't able to see allocated. This should be extremely rare.
   }
 
   if (gStackTraceTable->count() > gGCStackTraceTableWhenSizeExceeds) {
@@ -1413,20 +1439,11 @@ Options::GetBool(const char* aArg, const char* aOptionName, bool* aValue)
   return false;
 }
 
-// The sample-below default is a prime number close to 4096.
-// - Why that size?  Because it's *much* faster but only moderately less precise
-//   than a size of 1.
-// - Why prime?  Because it makes our sampling more random.  If we used a size
-//   of 4096, for example, then our alloc counter would only take on even
-//   values, because jemalloc always rounds up requests sizes.  In contrast, a
-//   prime size will explore all possible values of the alloc counter.
-//
 Options::Options(const char* aDMDEnvVar)
   : mDMDEnvVar(aDMDEnvVar ? InfallibleAllocPolicy::strdup_(aDMDEnvVar)
                           : nullptr)
-  , mMode(DarkMatter)
-  , mSampleBelowSize(4093, 100 * 100 * 1000)
-  , mMaxFrames(StackTrace::MaxFrames, StackTrace::MaxFrames)
+  , mMode(Mode::DarkMatter)
+  , mStacks(Stacks::Partial)
   , mShowDumpStats(false)
 {
   // It's no longer necessary to set the DMD env var to "1" if you want default
@@ -1454,23 +1471,20 @@ Options::Options(const char* aDMDEnvVar)
       *e = '\0';
 
       // Handle arg
-      long myLong;
       bool myBool;
       if (strcmp(arg, "--mode=live") == 0) {
-        mMode = Options::Live;
+        mMode = Mode::Live;
       } else if (strcmp(arg, "--mode=dark-matter") == 0) {
-        mMode = Options::DarkMatter;
+        mMode = Mode::DarkMatter;
       } else if (strcmp(arg, "--mode=cumulative") == 0) {
-        mMode = Options::Cumulative;
+        mMode = Mode::Cumulative;
       } else if (strcmp(arg, "--mode=scan") == 0) {
-        mMode = Options::Scan;
+        mMode = Mode::Scan;
 
-      } else if (GetLong(arg, "--sample-below", 1, mSampleBelowSize.mMax,
-                 &myLong)) {
-        mSampleBelowSize.mActual = myLong;
-
-      } else if (GetLong(arg, "--max-frames", 1, mMaxFrames.mMax, &myLong)) {
-        mMaxFrames.mActual = myLong;
+      } else if (strcmp(arg, "--stacks=full") == 0) {
+        mStacks = Stacks::Full;
+      } else if (strcmp(arg, "--stacks=partial") == 0) {
+        mStacks = Stacks::Partial;
 
       } else if (GetBool(arg, "--show-dump-stats", &myBool)) {
         mShowDumpStats = myBool;
@@ -1488,8 +1502,8 @@ Options::Options(const char* aDMDEnvVar)
     }
   }
 
-  if (mMode == Options::Scan) {
-    mSampleBelowSize.mActual = 1;
+  if (mMode == Mode::Scan) {
+    mStacks = Stacks::Full;
   }
 }
 
@@ -1498,22 +1512,7 @@ Options::BadArg(const char* aArg)
 {
   StatusMsg("\n");
   StatusMsg("Bad entry in the $DMD environment variable: '%s'.\n", aArg);
-  StatusMsg("\n");
-  StatusMsg("$DMD must be a whitespace-separated list of |--option=val|\n");
-  StatusMsg("entries.\n");
-  StatusMsg("\n");
-  StatusMsg("The following options are allowed;  defaults are shown in [].\n");
-  StatusMsg("  --mode=<mode>                Profiling mode [dark-matter]\n");
-  StatusMsg("      where <mode> is one of: live, dark-matter, cumulative\n");
-  StatusMsg("  --sample-below=<1..%d> Sample blocks smaller than this [%d]\n",
-            int(mSampleBelowSize.mMax),
-            int(mSampleBelowSize.mDefault));
-  StatusMsg("                               (prime numbers are recommended)\n");
-  StatusMsg("  --max-frames=<1..%d>         Max. depth of stack traces [%d]\n",
-            int(mMaxFrames.mMax),
-            int(mMaxFrames.mDefault));
-  StatusMsg("  --show-dump-stats=<yes|no>   Show stats about dumps? [no]\n");
-  StatusMsg("\n");
+  StatusMsg("See the output of |mach help run| for the allowed options.\n");
   exit(1);
 }
 
@@ -1521,13 +1520,13 @@ const char*
 Options::ModeString() const
 {
   switch (mMode) {
-  case Live:
+  case Mode::Live:
     return "live";
-  case DarkMatter:
+  case Mode::DarkMatter:
     return "dark-matter";
-  case Cumulative:
+  case Mode::Cumulative:
     return "cumulative";
-  case Scan:
+  case Mode::Scan:
     return "scan";
   default:
     MOZ_ASSERT(false);
@@ -1582,7 +1581,9 @@ Init(const malloc_table_t* aMallocTable)
 
   gStateLock = InfallibleAllocPolicy::new_<Mutex>();
 
-  gSmallBlockActualSizeCounter = 0;
+  gBernoulli = (FastBernoulliTrial*)
+    InfallibleAllocPolicy::malloc_(sizeof(FastBernoulliTrial));
+  ResetBernoulli();
 
   DMD_CREATE_TLS_INDEX(gTlsIndex);
 
@@ -1590,16 +1591,17 @@ Init(const malloc_table_t* aMallocTable)
     AutoLockState lock;
 
     gStackTraceTable = InfallibleAllocPolicy::new_<StackTraceTable>();
-    gStackTraceTable->init(8192);
+    MOZ_ALWAYS_TRUE(gStackTraceTable->init(8192));
 
     gLiveBlockTable = InfallibleAllocPolicy::new_<LiveBlockTable>();
-    gLiveBlockTable->init(8192);
+    MOZ_ALWAYS_TRUE(gLiveBlockTable->init(8192));
 
     // Create this even if the mode isn't Cumulative (albeit with a small
     // size), in case the mode is changed later on (as is done by SmokeDMD.cpp,
     // for example).
     gDeadBlockTable = InfallibleAllocPolicy::new_<DeadBlockTable>();
-    gDeadBlockTable->init(gOptions->IsCumulativeMode() ? 8192 : 4);
+    size_t tableSize = gOptions->IsCumulativeMode() ? 8192 : 4;
+    MOZ_ALWAYS_TRUE(gDeadBlockTable->init(tableSize));
   }
 
   gIsDMDInitialized = true;
@@ -1624,10 +1626,9 @@ ReportHelper(const void* aPtr, bool aReportedOnAlloc)
   if (LiveBlockTable::Ptr p = gLiveBlockTable->lookup(aPtr)) {
     p->Report(t, aReportedOnAlloc);
   } else {
-    // We have no record of the block.  Do nothing.  Either:
-    // - We're sampling and we skipped this block.  This is likely.
-    // - It's a bogus pointer.  This is unlikely because Report() is almost
-    //   always called in conjunction with a malloc_size_of-style function.
+    // We have no record of the block. It must be a bogus pointer. This should
+    // be extremely rare because Report() is almost always called in
+    // conjunction with a malloc_size_of-style function.
   }
 }
 
@@ -1650,7 +1651,7 @@ DMDFuncs::ReportOnAlloc(const void* aPtr)
 // The version number of the output format. Increment this if you make
 // backwards-incompatible changes to the format. See DMD.h for the version
 // history.
-static const int kOutputVersionNumber = 4;
+static const int kOutputVersionNumber = 5;
 
 // Note that, unlike most SizeOf* functions, this function does not take a
 // |mozilla::MallocSizeOf| argument.  That's because those arguments are
@@ -1720,7 +1721,11 @@ DMDFuncs::ClearReports()
 class ToIdStringConverter final
 {
 public:
-  ToIdStringConverter() : mNextId(0) { mIdMap.init(512); }
+  ToIdStringConverter()
+    : mNextId(0)
+  {
+    MOZ_ALWAYS_TRUE(mIdMap.init(512));
+  }
 
   // Converts a pointer to a unique ID. Reuses the existing ID for the pointer
   // if it's been seen before.
@@ -1730,7 +1735,7 @@ public:
     PointerIdMap::AddPtr p = mIdMap.lookupForAdd(aPtr);
     if (!p) {
       id = mNextId++;
-      (void)mIdMap.add(p, aPtr, id);
+      MOZ_ALWAYS_TRUE(mIdMap.add(p, aPtr, id));
     } else {
       id = p->value();
     }
@@ -1743,17 +1748,13 @@ public:
   }
 
 private:
-  // This function converts an integer to base-32. |aBuf| must have space for at
-  // least eight chars, which is the space needed to hold 'Dffffff' (including
-  // the terminating null char), which is the base-32 representation of
-  // 0xffffffff.
-  //
-  // We use base-32 values for indexing into the traceTable and the frameTable,
-  // for the following reasons.
+  // This function converts an integer to base-32. We use base-32 values for
+  // indexing into the traceTable and the frameTable, for the following reasons.
   //
   // - Base-32 gives more compact indices than base-16.
   //
-  // - 32 is a power-of-two, which makes the necessary div/mod calculations fast.
+  // - 32 is a power-of-two, which makes the necessary div/mod calculations
+  //   fast.
   //
   // - We can (and do) choose non-numeric digits for base-32. When
   //   inspecting/debugging the JSON output, non-numeric indices are easier to
@@ -1779,6 +1780,10 @@ private:
 
   PointerIdMap mIdMap;
   uint32_t mNextId;
+
+  // |mIdBuf| must have space for at least eight chars, which is the space
+  // needed to hold 'Dffffff' (including the terminating null char), which is
+  // the base-32 representation of 0xffffffff.
   static const size_t kIdBufLen = 16;
   char mIdBuf[kIdBufLen];
 };
@@ -1800,8 +1805,6 @@ private:
 static void
 WriteBlockContents(JSONWriter& aWriter, const LiveBlock& aBlock)
 {
-  MOZ_ASSERT(!aBlock.IsSampled(), "Sampled blocks do not have accurate sizes");
-
   size_t numWords = aBlock.ReqSize() / sizeof(uintptr_t*);
   if (numWords == 0) {
     return;
@@ -1821,6 +1824,15 @@ WriteBlockContents(JSONWriter& aWriter, const LiveBlock& aBlock)
 static void
 AnalyzeImpl(UniquePtr<JSONWriteFunc> aWriter)
 {
+  // Some blocks may have been allocated while creating |aWriter|. Those blocks
+  // will be freed at the end of this function when |write| is destroyed. The
+  // allocations will have occurred while intercepts were not blocked, so the
+  // frees better be as well, otherwise we'll get assertion failures.
+  // Therefore, this declaration must precede the AutoBlockIntercepts
+  // declaration, to ensure that |write| is destroyed *after* intercepts are
+  // unblocked.
+  JSONWriter writer(Move(aWriter));
+
   AutoBlockIntercepts block(Thread::Fetch());
   AutoLockState lock;
 
@@ -1828,17 +1840,16 @@ AnalyzeImpl(UniquePtr<JSONWriteFunc> aWriter)
   auto locService = InfallibleAllocPolicy::new_<CodeAddressService>();
 
   StackTraceSet usedStackTraces;
-  usedStackTraces.init(512);
+  MOZ_ALWAYS_TRUE(usedStackTraces.init(512));
 
   PointerSet usedPcs;
-  usedPcs.init(512);
+  MOZ_ALWAYS_TRUE(usedPcs.init(512));
 
   size_t iscSize;
 
   static int analysisCount = 1;
   StatusMsg("Dump %d {\n", analysisCount++);
 
-  JSONWriter writer(Move(aWriter));
   writer.Start();
   {
     writer.IntProperty("version", kOutputVersionNumber);
@@ -1853,7 +1864,6 @@ AnalyzeImpl(UniquePtr<JSONWriteFunc> aWriter)
       }
 
       writer.StringProperty("mode", gOptions->ModeString());
-      writer.IntProperty("sampleBelowSize", gOptions->SampleBelowSize());
     }
     writer.EndObject();
 
@@ -1864,38 +1874,81 @@ AnalyzeImpl(UniquePtr<JSONWriteFunc> aWriter)
 
     writer.StartArrayProperty("blockList");
     {
-      // Live blocks.
-      for (auto r = gLiveBlockTable->all(); !r.empty(); r.popFront()) {
-        const LiveBlock& b = r.front();
-        b.AddStackTracesToTable(usedStackTraces);
+      // Lambda that writes out a live block.
+      auto writeLiveBlock = [&](const LiveBlock& aB, size_t aNum) {
+        aB.AddStackTracesToTable(usedStackTraces);
+
+        MOZ_ASSERT_IF(gOptions->IsScanMode(), aNum == 1);
 
         writer.StartObjectElement(writer.SingleLineStyle);
         {
-          if (!b.IsSampled()) {
-            if (gOptions->IsScanMode()) {
-              writer.StringProperty("addr", sc.ToPtrString(b.Address()));
-              WriteBlockContents(writer, b);
-            }
-            writer.IntProperty("req", b.ReqSize());
-            if (b.SlopSize() > 0) {
-              writer.IntProperty("slop", b.SlopSize());
-            }
+          if (gOptions->IsScanMode()) {
+            writer.StringProperty("addr", sc.ToPtrString(aB.Address()));
+            WriteBlockContents(writer, aB);
           }
-          writer.StringProperty("alloc", isc.ToIdString(b.AllocStackTrace()));
-          if (gOptions->IsDarkMatterMode() && b.NumReports() > 0) {
+          writer.IntProperty("req", aB.ReqSize());
+          if (aB.SlopSize() > 0) {
+            writer.IntProperty("slop", aB.SlopSize());
+          }
+
+          if (aB.AllocStackTrace()) {
+            writer.StringProperty("alloc",
+                                  isc.ToIdString(aB.AllocStackTrace()));
+          }
+
+          if (gOptions->IsDarkMatterMode() && aB.NumReports() > 0) {
             writer.StartArrayProperty("reps");
             {
-              if (b.ReportStackTrace1()) {
-                writer.StringElement(isc.ToIdString(b.ReportStackTrace1()));
+              if (aB.ReportStackTrace1()) {
+                writer.StringElement(isc.ToIdString(aB.ReportStackTrace1()));
               }
-              if (b.ReportStackTrace2()) {
-                writer.StringElement(isc.ToIdString(b.ReportStackTrace2()));
+              if (aB.ReportStackTrace2()) {
+                writer.StringElement(isc.ToIdString(aB.ReportStackTrace2()));
               }
             }
             writer.EndArray();
           }
+
+          if (aNum > 1) {
+            writer.IntProperty("num", aNum);
+          }
         }
         writer.EndObject();
+      };
+
+      // Live blocks.
+      if (!gOptions->IsScanMode()) {
+        // At this point we typically have many LiveBlocks that differ only in
+        // their address. Aggregate them to reduce the size of the output file.
+        AggregatedLiveBlockTable agg;
+        MOZ_ALWAYS_TRUE(agg.init(8192));
+        for (auto r = gLiveBlockTable->all(); !r.empty(); r.popFront()) {
+          const LiveBlock& b = r.front();
+          b.AddStackTracesToTable(usedStackTraces);
+
+          if (AggregatedLiveBlockTable::AddPtr p = agg.lookupForAdd(&b)) {
+            p->value() += 1;
+          } else {
+            MOZ_ALWAYS_TRUE(agg.add(p, &b, 1));
+          }
+        }
+
+        // Now iterate over the aggregated table.
+        for (auto r = agg.all(); !r.empty(); r.popFront()) {
+          const LiveBlock& b = *r.front().key();
+          size_t num = r.front().value();
+          writeLiveBlock(b, num);
+        }
+
+      } else {
+        // In scan mode we cannot aggregate because we print each live block's
+        // address and contents.
+        for (auto r = gLiveBlockTable->all(); !r.empty(); r.popFront()) {
+          const LiveBlock& b = r.front();
+          b.AddStackTracesToTable(usedStackTraces);
+
+          writeLiveBlock(b, 1);
+        }
       }
 
       // Dead blocks.
@@ -1908,13 +1961,13 @@ AnalyzeImpl(UniquePtr<JSONWriteFunc> aWriter)
 
         writer.StartObjectElement(writer.SingleLineStyle);
         {
-          if (!b.IsSampled()) {
-            writer.IntProperty("req", b.ReqSize());
-            if (b.SlopSize() > 0) {
-              writer.IntProperty("slop", b.SlopSize());
-            }
+          writer.IntProperty("req", b.ReqSize());
+          if (b.SlopSize() > 0) {
+            writer.IntProperty("slop", b.SlopSize());
           }
-          writer.StringProperty("alloc", isc.ToIdString(b.AllocStackTrace()));
+          if (b.AllocStackTrace()) {
+            writer.StringProperty("alloc", isc.ToIdString(b.AllocStackTrace()));
+          }
 
           if (num > 1) {
             writer.IntProperty("num", num);
@@ -1936,7 +1989,7 @@ AnalyzeImpl(UniquePtr<JSONWriteFunc> aWriter)
           for (uint32_t i = 0; i < st->Length(); i++) {
             const void* pc = st->Pc(i);
             writer.StringElement(isc.ToIdString(pc));
-            usedPcs.put(pc);
+            MOZ_ALWAYS_TRUE(usedPcs.put(pc));
           }
         }
         writer.EndArray();
@@ -2059,7 +2112,10 @@ DMDFuncs::ResetEverything(const char* aOptions)
   // Clear all existing blocks.
   gLiveBlockTable->clear();
   gDeadBlockTable->clear();
-  gSmallBlockActualSizeCounter = 0;
+
+  // Reset gBernoulli to a deterministic state. (Its current state depends on
+  // all previous trials.)
+  ResetBernoulli();
 }
 
 } // namespace dmd

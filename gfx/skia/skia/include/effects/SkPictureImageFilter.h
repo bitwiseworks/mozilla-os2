@@ -16,40 +16,78 @@ public:
     /**
      *  Refs the passed-in picture.
      */
-    static SkPictureImageFilter* Create(const SkPicture* picture) {
-        return SkNEW_ARGS(SkPictureImageFilter, (picture));
-    }
+    static sk_sp<SkImageFilter> Make(sk_sp<SkPicture> picture);
 
     /**
      *  Refs the passed-in picture. cropRect can be used to crop or expand the destination rect when
      *  the picture is drawn. (No scaling is implied by the dest rect; only the CTM is applied.)
      */
-    static SkPictureImageFilter* Create(const SkPicture* picture, const SkRect& cropRect) {
-        return SkNEW_ARGS(SkPictureImageFilter, (picture, cropRect));
-    }
+    static sk_sp<SkImageFilter> Make(sk_sp<SkPicture> picture, const SkRect& cropRect);
 
+    /**
+     *  Refs the passed-in picture. The picture is rasterized at a resolution that matches the
+     *  local coordinate space. If the picture needs to be resampled for drawing it into the
+     *  destination canvas, bilinear filtering will be used. cropRect can be used to crop or
+     *  expand the destination rect when the picture is drawn. (No scaling is implied by the
+     *  dest rect; only the CTM is applied.)
+     */
+    static sk_sp<SkImageFilter> MakeForLocalSpace(sk_sp<SkPicture> picture,
+                                                  const SkRect& cropRect,
+                                                  SkFilterQuality filterQuality);
+
+#ifdef SK_SUPPORT_LEGACY_IMAGEFILTER_PTR
+    static SkImageFilter* Create(const SkPicture* picture) {
+        return Make(sk_ref_sp(const_cast<SkPicture*>(picture))).release();
+    }
+    static SkImageFilter* Create(const SkPicture* picture, const SkRect& cropRect) {
+        return Make(sk_ref_sp(const_cast<SkPicture*>(picture)), cropRect).release();
+    }
+    static SkImageFilter* CreateForLocalSpace(const SkPicture* picture,
+                                              const SkRect& cropRect,
+                                              SkFilterQuality filterQuality) {
+        return MakeForLocalSpace(sk_ref_sp(const_cast<SkPicture*>(picture)),
+                                           cropRect,
+                                           filterQuality).release();
+    }
+#endif
+
+    SK_TO_STRING_OVERRIDE()
     SK_DECLARE_PUBLIC_FLATTENABLE_DESERIALIZATION_PROCS(SkPictureImageFilter)
 
 protected:
-    explicit SkPictureImageFilter(const SkPicture* picture);
-    SkPictureImageFilter(const SkPicture* picture, const SkRect& cropRect);
-    virtual ~SkPictureImageFilter();
+    enum PictureResolution {
+        kDeviceSpace_PictureResolution,
+        kLocalSpace_PictureResolution
+    };
+
     /*  Constructs an SkPictureImageFilter object from an SkReadBuffer.
      *  Note: If the SkPictureImageFilter object construction requires bitmap
      *  decoding, the decoder must be set on the SkReadBuffer parameter by calling
      *  SkReadBuffer::setBitmapDecoder() before calling this constructor.
      *  @param SkReadBuffer Serialized picture data.
      */
-    explicit SkPictureImageFilter(SkReadBuffer&);
-    virtual void flatten(SkWriteBuffer&) const SK_OVERRIDE;
-    virtual bool onFilterImage(Proxy*, const SkBitmap& src, const Context&,
-                               SkBitmap* result, SkIPoint* offset) const SK_OVERRIDE;
-    virtual bool onFilterBounds(const SkIRect& src, const SkMatrix&,
-                                SkIRect* dst) const SK_OVERRIDE;
+    void flatten(SkWriteBuffer&) const override;
+    sk_sp<SkSpecialImage> onFilterImage(SkSpecialImage* source, const Context&,
+                                        SkIPoint* offset) const override;
 
 private:
-    const SkPicture* fPicture;
-    SkRect           fCropRect;
+    explicit SkPictureImageFilter(sk_sp<SkPicture> picture);
+    SkPictureImageFilter(sk_sp<SkPicture> picture, const SkRect& cropRect,
+                         PictureResolution, SkFilterQuality);
+
+    void drawPictureAtDeviceResolution(SkCanvas* canvas,
+                                       const SkIRect& deviceBounds,
+                                       const Context&) const;
+    void drawPictureAtLocalResolution(SkSpecialImage* source,
+                                      SkCanvas*,
+                                      const SkIRect& deviceBounds,
+                                      const Context&) const;
+
+    sk_sp<SkPicture>      fPicture;
+    SkRect                fCropRect;
+    PictureResolution     fPictureResolution;
+    SkFilterQuality       fFilterQuality;
+
     typedef SkImageFilter INHERITED;
 };
 

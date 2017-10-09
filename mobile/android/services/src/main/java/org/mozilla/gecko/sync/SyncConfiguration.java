@@ -30,6 +30,8 @@ public class SyncConfiguration {
   public URI             clusterURL;
   public KeyBundle       syncKeyBundle;
 
+  public InfoConfiguration infoConfiguration;
+
   public CollectionKeys  collectionKeys;
   public InfoCollections infoCollections;
   public MetaGlobal      metaGlobal;
@@ -171,7 +173,7 @@ public class SyncConfiguration {
       return null;
     }
     try {
-      final ExtendedJSONObject o = ExtendedJSONObject.parseJSONObject(json);
+      final ExtendedJSONObject o = new ExtendedJSONObject(json);
       return new HashSet<String>(o.keySet());
     } catch (Exception e) {
       return null;
@@ -212,7 +214,7 @@ public class SyncConfiguration {
       return null;
     }
     try {
-      ExtendedJSONObject o = ExtendedJSONObject.parseJSONObject(json);
+      ExtendedJSONObject o = new ExtendedJSONObject(json);
       Map<String, Boolean> map = new HashMap<String, Boolean>();
       for (Entry<String, Object> e : o.entrySet()) {
         String key = e.getKey();
@@ -364,6 +366,10 @@ public class SyncConfiguration {
 
   public String infoCollectionsURL() {
     return infoBaseURL() + "collections";
+  }
+
+  public String infoConfigurationURL() {
+    return infoBaseURL() + "configuration";
   }
 
   public String infoCollectionCountsURL() {

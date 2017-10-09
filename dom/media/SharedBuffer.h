@@ -9,7 +9,6 @@
 #include "mozilla/CheckedInt.h"
 #include "mozilla/mozalloc.h"
 #include "nsCOMPtr.h"
-#include "nsAutoPtr.h"
 
 namespace mozilla {
 
@@ -67,7 +66,7 @@ public:
     return p.forget();
   }
 
-  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override
+  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override
   {
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }

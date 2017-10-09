@@ -7,32 +7,34 @@
 #include "nsNSSCertificateDB.h"
 
 #include "AppTrustDomain.h"
+#include "CryptoTask.h"
+#include "NSSCertDBTrustDomain.h"
+#include "ScopedNSSTypes.h"
 #include "base64.h"
 #include "certdb.h"
-#include "CryptoTask.h"
+#include "mozilla/Casting.h"
+#include "mozilla/Logging.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/UniquePtr.h"
-#include "nsComponentManagerUtils.h"
 #include "nsCOMPtr.h"
+#include "nsComponentManagerUtils.h"
 #include "nsDataSignatureVerifier.h"
 #include "nsHashKeys.h"
+#include "nsIDirectoryEnumerator.h"
 #include "nsIFile.h"
 #include "nsIFileStreams.h"
 #include "nsIInputStream.h"
 #include "nsIStringEnumerator.h"
-#include "nsIDirectoryEnumerator.h"
 #include "nsIZipReader.h"
-#include "nsNetUtil.h"
 #include "nsNSSCertificate.h"
+#include "nsNetUtil.h"
 #include "nsProxyRelease.h"
-#include "nssb64.h"
-#include "NSSCertDBTrustDomain.h"
 #include "nsString.h"
 #include "nsTHashtable.h"
-#include "plstr.h"
-#include "mozilla/Logging.h"
+#include "nssb64.h"
 #include "pkix/pkix.h"
 #include "pkix/pkixnss.h"
+#include "plstr.h"
 #include "secmime.h"
 
 
@@ -40,7 +42,7 @@ using namespace mozilla::pkix;
 using namespace mozilla;
 using namespace mozilla::psm;
 
-extern PRLogModuleInfo* gPIPNSSLog;
+extern mozilla::LazyLogModule gPIPNSSLog;
 
 namespace {
 
@@ -84,7 +86,8 @@ ReadStream(const nsCOMPtr<nsIInputStream>& stream, /*out*/ SECItem& buf)
   // instead of length, so that we can check whether the metadata for
   // the entry is incorrect.
   uint32_t bytesRead;
-  rv = stream->Read(char_ptr_cast(buf.data), buf.len, &bytesRead);
+  rv = stream->Read(BitwiseCast<char*, unsigned char*>(buf.data), buf.len,
+                    &bytesRead);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -175,18 +178,19 @@ VerifyStreamContentDigest(nsIInputStream* stream,
     return NS_ERROR_SIGNED_JAR_ENTRY_TOO_LARGE;
   }
 
-  ScopedPK11Context digestContext(PK11_CreateDigestContext(SEC_OID_SHA1));
+  UniquePK11Context digestContext(PK11_CreateDigestContext(SEC_OID_SHA1));
   if (!digestContext) {
     return mozilla::psm::GetXPCOMFromNSSError(PR_GetError());
   }
 
-  rv = MapSECStatus(PK11_DigestBegin(digestContext));
+  rv = MapSECStatus(PK11_DigestBegin(digestContext.get()));
   NS_ENSURE_SUCCESS(rv, rv);
 
   uint64_t totalBytesRead = 0;
   for (;;) {
     uint32_t bytesRead;
-    rv = stream->Read(char_ptr_cast(buf.data), buf.len, &bytesRead);
+    rv = stream->Read(BitwiseCast<char*, unsigned char*>(buf.data), buf.len,
+                      &bytesRead);
     NS_ENSURE_SUCCESS(rv, rv);
 
     if (bytesRead == 0) {
@@ -198,7 +202,7 @@ VerifyStreamContentDigest(nsIInputStream* stream,
       return NS_ERROR_SIGNED_JAR_ENTRY_TOO_LARGE;
     }
 
-    rv = MapSECStatus(PK11_DigestOp(digestContext, buf.data, bytesRead));
+    rv = MapSECStatus(PK11_DigestOp(digestContext.get(), buf.data, bytesRead));
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
@@ -621,7 +625,7 @@ ParseMF(const char* filebuf, nsIZipReader * zip,
 
 struct VerifyCertificateContext {
   AppTrustedRoot trustedRoot;
-  ScopedCERTCertList& builtChain;
+  UniqueCERTCertList& builtChain;
 };
 
 nsresult
@@ -632,14 +636,15 @@ VerifyCertificate(CERTCertificate* signerCert, void* voidContext, void* pinArg)
     return NS_ERROR_INVALID_ARG;
   }
   const VerifyCertificateContext& context =
-    *reinterpret_cast<const VerifyCertificateContext*>(voidContext);
+    *static_cast<const VerifyCertificateContext*>(voidContext);
 
   AppTrustDomain trustDomain(context.builtChain, pinArg);
   if (trustDomain.SetTrustedRoot(context.trustedRoot) != SECSuccess) {
     return MapSECStatus(SECFailure);
   }
   Input certDER;
-  Result rv = certDER.Init(signerCert->derCert.data, signerCert->derCert.len);
+  mozilla::pkix::Result rv = certDER.Init(signerCert->derCert.data,
+                                          signerCert->derCert.len);
   if (rv != Success) {
     return mozilla::psm::GetXPCOMFromNSSError(MapResultToPRErrorCode(rv));
   }
@@ -650,7 +655,7 @@ VerifyCertificate(CERTCertificate* signerCert, void* voidContext, void* pinArg)
                       KeyPurposeId::id_kp_codeSigning,
                       CertPolicyId::anyPolicy,
                       nullptr/*stapledOCSPResponse*/);
-  if (rv == Result::ERROR_EXPIRED_CERTIFICATE) {
+  if (rv == mozilla::pkix::Result::ERROR_EXPIRED_CERTIFICATE) {
     // For code-signing you normally need trusted 3rd-party timestamps to
     // handle expiration properly. The signer could always mess with their
     // system clock so you can't trust the certificate was un-expired when
@@ -681,13 +686,20 @@ VerifyCertificate(CERTCertificate* signerCert, void* voidContext, void* pinArg)
 nsresult
 VerifySignature(AppTrustedRoot trustedRoot, const SECItem& buffer,
                 const SECItem& detachedDigest,
-                /*out*/ ScopedCERTCertList& builtChain)
+                /*out*/ UniqueCERTCertList& builtChain)
 {
+  // Currently, this function is only called within the CalculateResult() method
+  // of CryptoTasks. As such, NSS should not be shut down at this point and the
+  // CryptoTask implementation should already hold a nsNSSShutDownPreventionLock.
+  // We acquire a nsNSSShutDownPreventionLock here solely to prove we did to
+  // VerifyCMSDetachedSignatureIncludingCertificate().
+  nsNSSShutDownPreventionLock locker;
   VerifyCertificateContext context = { trustedRoot, builtChain };
   // XXX: missing pinArg
   return VerifyCMSDetachedSignatureIncludingCertificate(buffer, detachedDigest,
                                                         VerifyCertificate,
-                                                        &context, nullptr);
+                                                        &context, nullptr,
+                                                        locker);
 }
 
 NS_IMETHODIMP
@@ -734,7 +746,7 @@ OpenSignedAppFile(AppTrustedRoot aTrustedRoot, nsIFile* aJarFile,
   }
 
   sigBuffer.type = siBuffer;
-  ScopedCERTCertList builtChain;
+  UniqueCERTCertList builtChain;
   rv = VerifySignature(aTrustedRoot, sigBuffer, sfCalculatedDigest.get(),
                        builtChain);
   if (NS_FAILED(rv)) {
@@ -742,7 +754,7 @@ OpenSignedAppFile(AppTrustedRoot aTrustedRoot, nsIFile* aJarFile,
   }
 
   ScopedAutoSECItem mfDigest;
-  rv = ParseSF(char_ptr_cast(sfBuffer.data), mfDigest);
+  rv = ParseSF(BitwiseCast<char*, unsigned char*>(sfBuffer.data), mfDigest);
   if (NS_FAILED(rv)) {
     return rv;
   }
@@ -768,7 +780,8 @@ OpenSignedAppFile(AppTrustedRoot aTrustedRoot, nsIFile* aJarFile,
 
   nsTHashtable<nsCStringHashKey> items;
 
-  rv = ParseMF(char_ptr_cast(manifestBuffer.data), zip, items, buf);
+  rv = ParseMF(BitwiseCast<char*, unsigned char*>(manifestBuffer.data), zip,
+               items, buf);
   if (NS_FAILED(rv)) {
     return rv;
   }
@@ -850,9 +863,13 @@ OpenSignedAppFile(AppTrustedRoot aTrustedRoot, nsIFile* aJarFile,
   // Return the signer's certificate to the reader if they want it.
   // XXX: We should return an nsIX509CertList with the whole validated chain.
   if (aSignerCert) {
-    MOZ_ASSERT(CERT_LIST_HEAD(builtChain));
+    CERTCertListNode* signerCertNode = CERT_LIST_HEAD(builtChain);
+    if (!signerCertNode || CERT_LIST_END(signerCertNode, builtChain) ||
+        !signerCertNode->cert) {
+      return NS_ERROR_FAILURE;
+    }
     nsCOMPtr<nsIX509Cert> signerCert =
-      nsNSSCertificate::Create(CERT_LIST_HEAD(builtChain)->cert);
+      nsNSSCertificate::Create(signerCertNode->cert);
     NS_ENSURE_TRUE(signerCert, NS_ERROR_OUT_OF_MEMORY);
     signerCert.forget(aSignerCert);
   }
@@ -898,10 +915,9 @@ VerifySignedManifest(AppTrustedRoot aTrustedRoot,
   }
 
   // Get base64 encoded string from manifest buffer digest
-  UniquePtr<char, void(&)(void*)>
+  UniquePORTString
     base64EncDigest(NSSBase64_EncodeItem(nullptr, nullptr, 0,
-                      const_cast<SECItem*>(&manifestCalculatedDigest.get())),
-                    PORT_Free);
+                      const_cast<SECItem*>(&manifestCalculatedDigest.get())));
   if (NS_WARN_IF(!base64EncDigest)) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
@@ -909,14 +925,14 @@ VerifySignedManifest(AppTrustedRoot aTrustedRoot,
   // Calculate SHA1 digest of the base64 encoded string
   Digest doubleDigest;
   rv = doubleDigest.DigestBuf(SEC_OID_SHA1,
-                              reinterpret_cast<uint8_t*>(base64EncDigest.get()),
+                              BitwiseCast<uint8_t*, char*>(base64EncDigest.get()),
                               strlen(base64EncDigest.get()));
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
 
   // Verify the manifest signature (signed digest of the base64 encoded string)
-  ScopedCERTCertList builtChain;
+  UniqueCERTCertList builtChain;
   rv = VerifySignature(aTrustedRoot, signatureBuffer,
                        doubleDigest.get(), builtChain);
   if (NS_FAILED(rv)) {
@@ -925,9 +941,13 @@ VerifySignedManifest(AppTrustedRoot aTrustedRoot,
 
   // Return the signer's certificate to the reader if they want it.
   if (aSignerCert) {
-    MOZ_ASSERT(CERT_LIST_HEAD(builtChain));
+    CERTCertListNode* signerCertNode = CERT_LIST_HEAD(builtChain);
+    if (!signerCertNode || CERT_LIST_END(signerCertNode, builtChain) ||
+        !signerCertNode->cert) {
+      return NS_ERROR_FAILURE;
+    }
     nsCOMPtr<nsIX509Cert> signerCert =
-      nsNSSCertificate::Create(CERT_LIST_HEAD(builtChain)->cert);
+      nsNSSCertificate::Create(signerCertNode->cert);
     if (NS_WARN_IF(!signerCert)) {
       return NS_ERROR_OUT_OF_MEMORY;
     }
@@ -1415,7 +1435,7 @@ VerifySignedDirectory(AppTrustedRoot aTrustedRoot,
   }
 
   sigBuffer.type = siBuffer;
-  ScopedCERTCertList builtChain;
+  UniqueCERTCertList builtChain;
   rv = VerifySignature(aTrustedRoot, sigBuffer, sfCalculatedDigest.get(),
                        builtChain);
   if (NS_FAILED(rv)) {
@@ -1425,7 +1445,7 @@ VerifySignedDirectory(AppTrustedRoot aTrustedRoot,
   // Get the expected manifest hash from the signed .sf file
 
   ScopedAutoSECItem mfDigest;
-  rv = ParseSF(char_ptr_cast(sfBuffer.data), mfDigest);
+  rv = ParseSF(BitwiseCast<char*, unsigned char*>(sfBuffer.data), mfDigest);
   if (NS_FAILED(rv)) {
     return NS_ERROR_SIGNED_JAR_MANIFEST_INVALID;
   }
@@ -1452,7 +1472,7 @@ VerifySignedDirectory(AppTrustedRoot aTrustedRoot,
   ScopedAutoSECItem buf(128 * 1024);
 
   nsTHashtable<nsStringHashKey> items;
-  rv = ParseMFUnpacked(char_ptr_cast(manifestBuffer.data),
+  rv = ParseMFUnpacked(BitwiseCast<char*, unsigned char*>(manifestBuffer.data),
                        aDirectory, items, buf);
   if (NS_FAILED(rv)){
     return rv;
@@ -1478,9 +1498,13 @@ VerifySignedDirectory(AppTrustedRoot aTrustedRoot,
   // Return the signer's certificate to the reader if they want it.
   // XXX: We should return an nsIX509CertList with the whole validated chain.
   if (aSignerCert) {
-    MOZ_ASSERT(CERT_LIST_HEAD(builtChain));
+    CERTCertListNode* signerCertNode = CERT_LIST_HEAD(builtChain);
+    if (!signerCertNode || CERT_LIST_END(signerCertNode, builtChain) ||
+        !signerCertNode->cert) {
+      return NS_ERROR_FAILURE;
+    }
     nsCOMPtr<nsIX509Cert> signerCert =
-      nsNSSCertificate::Create(CERT_LIST_HEAD(builtChain)->cert);
+      nsNSSCertificate::Create(signerCertNode->cert);
     NS_ENSURE_TRUE(signerCert, NS_ERROR_OUT_OF_MEMORY);
     signerCert.forget(aSignerCert);
   }

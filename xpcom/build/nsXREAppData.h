@@ -12,6 +12,12 @@
 
 class nsIFile;
 
+#if defined(XP_WIN) && defined(MOZ_SANDBOX)
+namespace sandbox {
+class BrokerServices;
+}
+#endif
+
 /**
  * Application-specific data needed to start the apprunner.
  *
@@ -128,6 +134,13 @@ struct nsXREAppData
    * The application name to use in the User Agent string.
    */
   const char* UAName;
+
+#if defined(XP_WIN) && defined(MOZ_SANDBOX)
+  /**
+   * Chromium sandbox BrokerServices.
+   */
+  sandbox::BrokerServices* sandboxBrokerServices;
+#endif
 };
 
 /**
@@ -135,6 +148,13 @@ struct nsXREAppData
  * invoked at startup when creating a profile.
  */
 #define NS_XRE_ENABLE_PROFILE_MIGRATOR (1 << 1)
+
+/**
+ * Indicates the Windows DLL Blocklist initialized properly. For testing
+ * purposes only. Set in nsBrowserApp on startup, automated tests then
+ * check the result.
+ */
+#define NS_XRE_DLL_BLOCKLIST_ENABLED (1 << 2)
 
 /**
  * Indicates whether or not to use Breakpad crash reporting.

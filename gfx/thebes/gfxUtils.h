@@ -7,6 +7,7 @@
 #define GFX_UTILS_H
 
 #include "gfxTypes.h"
+#include "ImageTypes.h"
 #include "imgIContainer.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/RefPtr.h"
@@ -41,6 +42,7 @@ public:
     typedef mozilla::gfx::SourceSurface SourceSurface;
     typedef mozilla::gfx::SurfaceFormat SurfaceFormat;
     typedef mozilla::image::ImageRegion ImageRegion;
+    typedef mozilla::YUVColorSpace YUVColorSpace;
 
     /*
      * Premultiply or Unpremultiply aSourceSurface, writing the result
@@ -49,7 +51,7 @@ public:
      * If aDestSurface is given, it must have identical format, dimensions, and
      * stride as the source.
      *
-     * If the source is not gfxImageFormat::ARGB32, no operation is performed.  If
+     * If the source is not SurfaceFormat::A8R8G8B8_UINT32, no operation is performed.  If
      * aDestSurface is given, the data is copied over.
      */
     static bool PremultiplyDataSurface(DataSourceSurface* srcSurf,
@@ -82,7 +84,7 @@ public:
                                  const gfxSize&     aImageSize,
                                  const ImageRegion& aRegion,
                                  const mozilla::gfx::SurfaceFormat aFormat,
-                                 mozilla::gfx::Filter aFilter,
+                                 mozilla::gfx::SamplingFilter aSamplingFilter,
                                  uint32_t           aImageFlags = imgIContainer::FLAG_NONE,
                                  gfxFloat           aOpacity = 1.0);
 
@@ -95,11 +97,6 @@ public:
      * Clip aTarget to the region aRegion.
      */
     static void ClipToRegion(mozilla::gfx::DrawTarget* aTarget, const nsIntRegion& aRegion);
-
-    /**
-     * Create a path consisting of rectangles in |aRegion|.
-     */
-    static void PathFromRegion(gfxContext* aContext, const nsIntRegion& aRegion);
 
     /*
      * Convert image format to depth value
@@ -135,35 +132,16 @@ public:
     static gfxFloat ClampToScaleFactor(gfxFloat aVal);
 
     /**
-     * Helper function for ConvertYCbCrToRGB that finds the
-     * RGB buffer size and format for given YCbCrImage.
-     * @param aSuggestedFormat will be set to gfxImageFormat::RGB24
-     *   if the desired format is not supported.
-     * @param aSuggestedSize will be set to the picture size from aData
-     *   if either the suggested size was {0,0}
-     *   or simultaneous scaling and conversion is not supported.
-     */
-    static void
-    GetYCbCrToRGBDestFormatAndSize(const mozilla::layers::PlanarYCbCrData& aData,
-                                   gfxImageFormat& aSuggestedFormat,
-                                   mozilla::gfx::IntSize& aSuggestedSize);
-
-    /**
-     * Convert YCbCrImage into RGB aDestBuffer
-     * Format and Size parameters must have
-     *   been passed to GetYCbCrToRGBDestFormatAndSize
-     */
-    static void
-    ConvertYCbCrToRGB(const mozilla::layers::PlanarYCbCrData& aData,
-                      const gfxImageFormat& aDestFormat,
-                      const mozilla::gfx::IntSize& aDestSize,
-                      unsigned char* aDestBuffer,
-                      int32_t aStride);
-
-    /**
      * Clears surface to aColor (which defaults to transparent black).
      */
     static void ClearThebesSurface(gfxASurface* aSurface);
+
+    /**
+     * Get array of yuv to rgb conversion matrix.
+     */
+    static float* Get4x3YuvColorMatrix(YUVColorSpace aYUVColorSpace);
+
+    static float* Get3x3YuvColorMatrix(YUVColorSpace aYUVColorSpace);
 
     /**
      * Creates a copy of aSurface, but having the SurfaceFormat aFormat.
@@ -296,7 +274,13 @@ public:
 
     static nsresult ThreadSafeGetFeatureStatus(const nsCOMPtr<nsIGfxInfo>& gfxInfo,
                                                int32_t feature,
+                                               nsACString& failureId,
                                                int32_t* status);
+
+    // Can pass `nullptr` for gfxInfo.
+    // If FAILED(ThreadSafeGetFeatureStatus), out_blacklistId will be empty.
+    static bool IsFeatureBlacklisted(nsCOMPtr<nsIGfxInfo> gfxInfo, int32_t feature,
+                                     nsACString* const out_blacklistId);
 
     /**
      * Copy to the clipboard as a PNG encoded Data URL.
@@ -321,39 +305,6 @@ namespace gfx {
  */
 Color ToDeviceColor(Color aColor);
 Color ToDeviceColor(nscolor aColor);
-
-/* These techniques are suggested by "Bit Twiddling Hacks"
- */
-
-/**
- * Returns true if |aNumber| is a power of two
- * 0 is incorreclty considered a power of two
- */
-static inline bool
-IsPowerOfTwo(int aNumber)
-{
-    return (aNumber & (aNumber - 1)) == 0;
-}
-
-/**
- * Returns the first integer greater than or equal to |aNumber| which is a
- * power of two. Undefined for |aNumber| < 0.
- */
-static inline int
-NextPowerOfTwo(int aNumber)
-{
-#if defined(__arm__)
-    return 1 << (32 - __builtin_clz(aNumber - 1));
-#else
-    --aNumber;
-    aNumber |= aNumber >> 1;
-    aNumber |= aNumber >> 2;
-    aNumber |= aNumber >> 4;
-    aNumber |= aNumber >> 8;
-    aNumber |= aNumber >> 16;
-    return ++aNumber;
-#endif
-}
 
 /**
  * Performs a checked multiply of the given width, height, and bytes-per-pixel

@@ -97,7 +97,7 @@ this.PropertyListUtils = Object.freeze({
           if (!file.exists())
             throw new Error("The file pointed by aFile does not exist");
 
-          file = new File(file);
+          file = File.createFromNsIFile(file);
         }
 
         let fileReader = new FileReader();
@@ -117,7 +117,7 @@ this.PropertyListUtils = Object.freeze({
         fileReader.addEventListener("loadend", onLoadEnd, false);
         fileReader.readAsArrayBuffer(file);
       }
-      catch(ex) {
+      catch (ex) {
         aCallback(null);
         throw ex;
       }
@@ -142,10 +142,9 @@ this.PropertyListUtils = Object.freeze({
                                           "application/xml");
       return new XMLPropertyListReader(doc).root;
     }
-    catch(ex) {
+    catch (ex) {
       throw new Error("aBuffer cannot be parsed as a DOM document: " + ex);
     }
-    return null;
   },
 
   TYPE_PRIMITIVE:    0,
@@ -238,7 +237,7 @@ this.PropertyListUtils = Object.freeze({
 function BinaryPropertyListReader(aBuffer) {
   this._dataView = new DataView(aBuffer);
 
-  const JS_MAX_INT = Math.pow(2,53);
+  const JS_MAX_INT = Math.pow(2, 53);
   this._JS_MAX_INT_SIGNED = ctypes.Int64(JS_MAX_INT);
   this._JS_MAX_INT_UNSIGNED = ctypes.UInt64(JS_MAX_INT);
   this._JS_MIN_INT = ctypes.Int64(-JS_MAX_INT);
@@ -247,7 +246,7 @@ function BinaryPropertyListReader(aBuffer) {
     this._readTrailerInfo();
     this._readObjectsOffsets();
   }
-  catch(ex) {
+  catch (ex) {
     throw new Error("Could not read aBuffer as a binary property list");
   }
   this._objects = [];

@@ -43,7 +43,7 @@ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_CLASS(LegacyMozTCPSocket)
 
-  explicit LegacyMozTCPSocket(nsPIDOMWindow* aWindow);
+  explicit LegacyMozTCPSocket(nsPIDOMWindowInner* aWindow);
 
   already_AddRefed<TCPServerSocket>
   Listen(uint16_t aPort,
@@ -99,6 +99,7 @@ public:
   void Suspend();
   void Resume(ErrorResult& aRv);
   void Close();
+  void CloseImmediately();
   bool Send(JSContext* aCx, const nsACString& aData, ErrorResult& aRv);
   bool Send(JSContext* aCx,
             const ArrayBuffer& aData,
@@ -183,6 +184,12 @@ private:
   void SaveNetworkStats(bool aEnforce);
 #endif
 
+  // Helper for FireDataStringEvent/FireDataArrayEvent.
+  nsresult FireDataEvent(JSContext* aCx, const nsAString& aType,
+                         JS::Handle<JS::Value> aData);
+  // Helper for Close/CloseImmediately
+  void CloseHelper(bool waitForUnsentData);
+
   TCPReadyState mReadyState;
   // Whether to use strings or array buffers for the "data" event.
   bool mUseArrayBuffers;
@@ -235,6 +242,11 @@ private:
   // The buffered data awaiting the TLS upgrade to finish.
   nsTArray<nsCOMPtr<nsIInputStream>> mPendingDataAfterStartTLS;
 
+  // The data to be sent while AsyncCopier is still active.
+  nsTArray<nsCOMPtr<nsIInputStream>> mPendingDataWhileCopierActive;
+
+  bool mObserversActive;
+
 #ifdef MOZ_WIDGET_GONK
   // Number of bytes sent.
   uint32_t mTxBytes;
@@ -242,8 +254,8 @@ private:
   uint32_t mRxBytes;
   // The app that owns this socket.
   uint32_t mAppId;
-  // Was this socket created inside of a mozbrowser frame?
-  bool mInBrowser;
+  // Was this socket created inside of an isolated browser frame?
+  bool mInIsolatedMozBrowser;
   // The name of the active network used by this socket.
   nsCOMPtr<nsINetworkInfo> mActiveNetworkInfo;
 #endif

@@ -13,7 +13,7 @@
 namespace mozilla {
 namespace dom {
 
-class PlayingRefChangeHandler final : public nsRunnable
+class PlayingRefChangeHandler final : public Runnable
 {
 public:
   enum ChangeType { ADDREF, RELEASE };
@@ -23,7 +23,7 @@ public:
   {
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     RefPtr<AudioNode> node = mStream->Engine()->NodeMainThread();
     if (node) {

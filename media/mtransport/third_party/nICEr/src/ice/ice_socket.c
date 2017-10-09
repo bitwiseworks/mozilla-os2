@@ -39,6 +39,7 @@ static char *RCSSTRING __UNUSED__="$Id: ice_socket.c,v 1.2 2008/04/28 17:59:01 e
 #include "nr_api.h"
 #include "ice_ctx.h"
 #include "stun.h"
+#include "nr_socket_buffered_stun.h"
 #include "nr_socket_multi_tcp.h"
 
 static void nr_ice_socket_readable_cb(NR_SOCKET s, int how, void *cb_arg)
@@ -46,7 +47,7 @@ static void nr_ice_socket_readable_cb(NR_SOCKET s, int how, void *cb_arg)
     int r;
     nr_ice_stun_ctx *sc1,*sc2;
     nr_ice_socket *sock=cb_arg;
-    UCHAR buf[8192];
+    UCHAR buf[9216];
     char string[256];
     nr_transport_addr addr;
     int len;
@@ -61,14 +62,15 @@ static void nr_ice_socket_readable_cb(NR_SOCKET s, int how, void *cb_arg)
     r_log(LOG_ICE,LOG_DEBUG,"ICE(%s): Socket ready to read",sock->ctx->label);
 
     /* Re-arm first! */
-    if (sock->type != NR_ICE_SOCKET_TYPE_STREAM_TCP)
+    if (sock->type != NR_ICE_SOCKET_TYPE_STREAM_TCP) {
+      r_log(LOG_ICE,LOG_DEBUG,"ICE(%s): rearming",sock->ctx->label);
       NR_ASYNC_WAIT(s,how,nr_ice_socket_readable_cb,cb_arg);
+    }
 
     if(r=nr_socket_recvfrom(sock->sock,buf,sizeof(buf),&len_s,0,&addr)){
-      if (r != R_WOULDBLOCK && (sock->type == NR_ICE_SOCKET_TYPE_STREAM_TURN)) {
+      if (r != R_WOULDBLOCK && (sock->type != NR_ICE_SOCKET_TYPE_DGRAM)) {
         /* Report this error upward. Bug 946423 */
-        r_log(LOG_ICE,LOG_ERR,"ICE(%s): Error %d on reliable socket. Abandoning.",sock->ctx->label, r);
-        NR_ASYNC_CANCEL(s, NR_ASYNC_WAIT_READ);
+        r_log(LOG_ICE,LOG_ERR,"ICE(%s): Error %d on reliable socket(%p). Abandoning.",sock->ctx->label, r, s);
       }
       return;
     }
@@ -220,12 +222,17 @@ int nr_ice_socket_create(nr_ice_ctx *ctx,nr_ice_component *comp, nr_socket *nsoc
     TAILQ_INIT(&sock->candidates);
     TAILQ_INIT(&sock->stun_ctxs);
 
-    if (sock->type != NR_ICE_SOCKET_TYPE_STREAM_TCP){
+    if (sock->type == NR_ICE_SOCKET_TYPE_DGRAM){
       if((r=nr_socket_getfd(nsock,&fd)))
         ABORT(r);
       NR_ASYNC_WAIT(fd,NR_ASYNC_WAIT_READ,nr_ice_socket_readable_cb,sock);
     }
-    else {
+    else if (sock->type == NR_ICE_SOCKET_TYPE_STREAM_TURN) {
+      /* some OS's (e.g. Linux) don't like to see un-connected TCP sockets in
+       * the poll socket set. */
+      nr_socket_buffered_stun_set_readable_cb(nsock,nr_ice_socket_readable_cb,sock);
+    }
+    else if (sock->type == NR_ICE_SOCKET_TYPE_STREAM_TCP) {
       /* in this case we can't hook up using NR_ASYNC_WAIT, because nr_socket_multi_tcp
          consists of multiple nr_sockets and file descriptors. */
       if((r=nr_socket_multi_tcp_set_readable_cb(nsock,nr_ice_socket_readable_cb,sock)))

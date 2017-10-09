@@ -29,10 +29,15 @@
  */
 
 'use strict';
+/* eslint-disable no-undef */
 
 const { classes: Cc, interfaces: Ci, manager: Cm, results: Cr,
         utils: Cu } = Components;
 
+/* global INSTALL_LOCALE, MOZ_APP_NAME, BIN_SUFFIX, MOZ_APP_VENDOR */
+/* global MOZ_APP_BASENAME, APP_BIN_SUFFIX, APP_INFO_NAME, APP_INFO_VENDOR */
+/* global IS_WIN, IS_MACOSX, IS_UNIX, MOZ_VERIFY_MAR_SIGNATURE */
+/* global IS_AUTHENTICODE_CHECK_ENABLED */
 load("../data/xpcshellConstantsPP.js");
 
 function getLogSuffix() {
@@ -41,9 +46,6 @@ function getLogSuffix() {
   }
   if (IS_MACOSX) {
     return "_mac";
-  }
-  if (IS_TOOLKIT_GONK) {
-    return "_gonk";
   }
   return "_linux";
 }
@@ -65,11 +67,6 @@ const COMPARE_LOG_SUFFIX = getLogSuffix();
 const LOG_COMPLETE_SUCCESS = "complete_log_success" + COMPARE_LOG_SUFFIX;
 const LOG_PARTIAL_SUCCESS = "partial_log_success" + COMPARE_LOG_SUFFIX;
 const LOG_PARTIAL_FAILURE = "partial_log_failure" + COMPARE_LOG_SUFFIX;
-// Gonk sorts differently when applying and staging an update.
-const LOG_COMPLETE_SUCCESS_STAGE = LOG_COMPLETE_SUCCESS +
-                                   (IS_TOOLKIT_GONK ? "_stage" : "");
-const LOG_PARTIAL_SUCCESS_STAGE = LOG_PARTIAL_SUCCESS +
-                                  (IS_TOOLKIT_GONK ? "_stage" : "");
 const LOG_REPLACE_SUCCESS = "replace_log_success";
 
 const USE_EXECV = IS_UNIX && !IS_MACOSX;
@@ -122,11 +119,16 @@ const HELPER_SLEEP_TIMEOUT = 180;
 // the test will try to kill it.
 const APP_TIMER_TIMEOUT = 120000;
 
+// How many of do_timeout calls using FILE_IN_USE_TIMEOUT_MS to wait before the
+// test is aborted.
+const FILE_IN_USE_MAX_TIMEOUT_RUNS = 60;
 const FILE_IN_USE_TIMEOUT_MS = 1000;
 
 const PIPE_TO_NULL = IS_WIN ? ">nul" : "> /dev/null 2>&1";
 
 const LOG_FUNCTION = do_print;
+
+const gHTTPHandlerPath = "updates.xml";
 
 // This default value will be overridden when using the http server.
 var gURLData = URL_HOST + "/";
@@ -155,16 +157,12 @@ var gGREDirOrig;
 var gGREBinDirOrig;
 var gAppDirOrig;
 
-var gApplyToDirOverride;
-
-var gServiceLaunchedCallbackLog = null;
-var gServiceLaunchedCallbackArgs = null;
-
 // Variables are used instead of contants so tests can override these values if
 // necessary.
 var gCallbackBinFile = "callback_app" + BIN_SUFFIX;
 var gCallbackArgs = ["./", "callback.log", "Test Arg 2", "Test Arg 3"];
 var gPostUpdateBinFile = "postup_app" + BIN_SUFFIX;
+var gSvcOriginalLogContents;
 var gUseTestAppDir = true;
 // Some update staging failures can remove the update. This allows tests to
 // specify that the status file and the active update should not be checked
@@ -172,6 +170,7 @@ var gUseTestAppDir = true;
 var gStagingRemovedUpdate = false;
 
 var gTimeoutRuns = 0;
+var gFileInUseTimeoutRuns = 0;
 
 // Environment related globals
 var gShouldResetEnv = undefined;
@@ -180,23 +179,15 @@ var gEnvXPCOMDebugBreak;
 var gEnvXPCOMMemLeakLog;
 var gEnvDyldLibraryPath;
 var gEnvLdLibraryPath;
+var gASanOptions;
 
 // Set to true to log additional information for debugging. To log additional
 // information for an individual test set DEBUG_AUS_TEST to true in the test's
 // run_test function.
 var DEBUG_AUS_TEST = true;
-// Never set DEBUG_TEST_LOG to true except when running tests locally or on the
-// try server since this will force a test that failed a parallel run to fail
-// when the same test runs non-parallel so the log from parallel test run can
-// be displayed in the log.
-var DEBUG_TEST_LOG = false;
-// Set to false to keep the log file from the failed parallel test run.
-var gDeleteLogFile = true;
-var gRealDump;
-var gTestLogText = "";
-var gPassed;
 
 const DATA_URI_SPEC = Services.io.newFileURI(do_get_file("../data", false)).spec;
+/* import-globals-from ../data/shared.js */
 Services.scriptloader.loadSubScript(DATA_URI_SPEC + "shared.js", this);
 
 var gTestFiles = [];
@@ -204,228 +195,222 @@ var gTestDirs = [];
 
 // Common files for both successful and failed updates.
 var gTestFilesCommon = [
-{
-  description      : "Should never change",
-  fileName         : FILE_UPDATE_SETTINGS_INI,
-  relPathDir       : DIR_RESOURCES,
-  originalContents : UPDATE_SETTINGS_CONTENTS,
-  compareContents  : UPDATE_SETTINGS_CONTENTS,
-  originalFile     : null,
-  compareFile      : null,
-  originalPerms    : 0o767,
-  comparePerms     : 0o767
-}, {
-  description      : "Should never change",
-  fileName         : "channel-prefs.js",
-  relPathDir       : DIR_RESOURCES + "defaults/pref/",
-  originalContents : "ShouldNotBeReplaced\n",
-  compareContents  : "ShouldNotBeReplaced\n",
-  originalFile     : null,
-  compareFile      : null,
-  originalPerms    : 0o767,
-  comparePerms     : 0o767
-}];
+  {
+    description: "Should never change",
+    fileName: FILE_UPDATE_SETTINGS_INI,
+    relPathDir: DIR_RESOURCES,
+    originalContents: UPDATE_SETTINGS_CONTENTS,
+    compareContents: UPDATE_SETTINGS_CONTENTS,
+    originalFile: null,
+    compareFile: null,
+    originalPerms: 0o767,
+    comparePerms: 0o767
+  }, {
+    description: "Should never change",
+    fileName: "channel-prefs.js",
+    relPathDir: DIR_RESOURCES + "defaults/pref/",
+    originalContents: "ShouldNotBeReplaced\n",
+    compareContents: "ShouldNotBeReplaced\n",
+    originalFile: null,
+    compareFile: null,
+    originalPerms: 0o767,
+    comparePerms: 0o767
+  }];
 
-// Files for a complete successful update. This can be used for a complete
-// failed update by calling setTestFilesAndDirsForFailure.
+  // Files for a complete successful update. This can be used for a complete
+  // failed update by calling setTestFilesAndDirsForFailure.
 var gTestFilesCompleteSuccess = [
-{
-  description      : "Added by update.manifest (add)",
-  fileName         : "precomplete",
-  relPathDir       : DIR_RESOURCES,
-  originalContents : null,
-  compareContents  : null,
-  originalFile     : FILE_PARTIAL_PRECOMPLETE,
-  compareFile      : FILE_COMPLETE_PRECOMPLETE,
-  originalPerms    : 0o666,
-  comparePerms     : 0o644
-}, {
-  description      : "Added by update.manifest (add)",
-  fileName         : "searchpluginstext0",
-  relPathDir       : DIR_RESOURCES + "searchplugins/",
-  originalContents : "ToBeReplacedWithFromComplete\n",
-  compareContents  : "FromComplete\n",
-  originalFile     : null,
-  compareFile      : null,
-  originalPerms    : 0o775,
-  comparePerms     : 0o644
-}, {
-  description      : "Added by update.manifest (add)",
-  fileName         : "searchpluginspng1.png",
-  relPathDir       : DIR_RESOURCES + "searchplugins/",
-  originalContents : null,
-  compareContents  : null,
-  originalFile     : null,
-  compareFile      : "complete.png",
-  originalPerms    : null,
-  comparePerms     : 0o644
-}, {
-  description      : "Added by update.manifest (add)",
-  fileName         : "searchpluginspng0.png",
-  relPathDir       : DIR_RESOURCES + "searchplugins/",
-  originalContents : null,
-  compareContents  : null,
-  originalFile     : "partial.png",
-  compareFile      : "complete.png",
-  originalPerms    : 0o666,
-  comparePerms     : 0o644
-}, {
-  description      : "Added by update.manifest (add)",
-  fileName         : "removed-files",
-  relPathDir       : DIR_RESOURCES,
-  originalContents : null,
-  compareContents  : null,
-  originalFile     : FILE_PARTIAL_REMOVEDFILES,
-  compareFile      : FILE_COMPLETE_REMOVEDFILES,
-  originalPerms    : 0o666,
-  comparePerms     : 0o644
-}, {
-  description      : "Added by update.manifest if the parent directory " +
-                     "exists (add-if)",
-  fileName         : "extensions1text0",
-  relPathDir       : DIR_RESOURCES + "distribution/extensions/extensions1/",
-  originalContents : null,
-  compareContents  : "FromComplete\n",
-  originalFile     : null,
-  compareFile      : null,
-  originalPerms    : null,
-  comparePerms     : 0o644
-}, {
-  description      : "Added by update.manifest if the parent directory " +
-                     "exists (add-if)",
-  fileName         : "extensions1png1.png",
-  relPathDir       : DIR_RESOURCES + "distribution/extensions/extensions1/",
-  originalContents : null,
-  compareContents  : null,
-  originalFile     : "partial.png",
-  compareFile      : "complete.png",
-  originalPerms    : 0o666,
-  comparePerms     : 0o644
-}, {
-  description      : "Added by update.manifest if the parent directory " +
-                     "exists (add-if)",
-  fileName         : "extensions1png0.png",
-  relPathDir       : DIR_RESOURCES + "distribution/extensions/extensions1/",
-  originalContents : null,
-  compareContents  : null,
-  originalFile     : null,
-  compareFile      : "complete.png",
-  originalPerms    : null,
-  comparePerms     : 0o644
-}, {
-  description      : "Added by update.manifest if the parent directory " +
-                     "exists (add-if)",
-  fileName         : "extensions0text0",
-  relPathDir       : DIR_RESOURCES + "distribution/extensions/extensions0/",
-  originalContents : "ToBeReplacedWithFromComplete\n",
-  compareContents  : "FromComplete\n",
-  originalFile     : null,
-  compareFile      : null,
-  originalPerms    : null,
-  comparePerms     : 0o644
-}, {
-  description      : "Added by update.manifest if the parent directory " +
-                     "exists (add-if)",
-  fileName         : "extensions0png1.png",
-  relPathDir       : DIR_RESOURCES + "distribution/extensions/extensions0/",
-  originalContents : null,
-  compareContents  : null,
-  originalFile     : null,
-  compareFile      : "complete.png",
-  originalPerms    : null,
-  comparePerms     : 0o644
-}, {
-  description      : "Added by update.manifest if the parent directory " +
-                     "exists (add-if)",
-  fileName         : "extensions0png0.png",
-  relPathDir       : DIR_RESOURCES + "distribution/extensions/extensions0/",
-  originalContents : null,
-  compareContents  : null,
-  originalFile     : null,
-  compareFile      : "complete.png",
-  originalPerms    : null,
-  comparePerms     : 0o644
-}, {
-  description      : "Added by update.manifest (add)",
-  fileName         : "exe0.exe",
-  relPathDir       : DIR_MACOS,
-  originalContents : null,
-  compareContents  : null,
-  originalFile     : FILE_HELPER_BIN,
-  compareFile      : FILE_COMPLETE_EXE,
-  originalPerms    : 0o777,
-  comparePerms     : 0o755
-}, {
-  description      : "Added by update.manifest (add)",
-  fileName         : "10text0",
-  relPathDir       : DIR_RESOURCES + "1/10/",
-  originalContents : "ToBeReplacedWithFromComplete\n",
-  compareContents  : "FromComplete\n",
-  originalFile     : null,
-  compareFile      : null,
-  originalPerms    : 0o767,
-  comparePerms     : 0o644
-}, {
-  description      : "Added by update.manifest (add)",
-  fileName         : "0exe0.exe",
-  relPathDir       : DIR_RESOURCES + "0/",
-  originalContents : null,
-  compareContents  : null,
-  originalFile     : FILE_HELPER_BIN,
-  compareFile      : FILE_COMPLETE_EXE,
-  originalPerms    : 0o777,
-  comparePerms     : 0o755
-}, {
-  description      : "Added by update.manifest (add)",
-  fileName         : "00text1",
-  relPathDir       : DIR_RESOURCES + "0/00/",
-  originalContents : "ToBeReplacedWithFromComplete\n",
-  compareContents  : "FromComplete\n",
-  originalFile     : null,
-  compareFile      : null,
-  originalPerms    : 0o677,
-  comparePerms     : 0o644
-}, {
-  description      : "Added by update.manifest (add)",
-  fileName         : "00text0",
-  relPathDir       : DIR_RESOURCES + "0/00/",
-  originalContents : "ToBeReplacedWithFromComplete\n",
-  compareContents  : "FromComplete\n",
-  originalFile     : null,
-  compareFile      : null,
-  originalPerms    : 0o775,
-  comparePerms     : 0o644
-}, {
-  description      : "Added by update.manifest (add)",
-  fileName         : "00png0.png",
-  relPathDir       : DIR_RESOURCES + "0/00/",
-  originalContents : null,
-  compareContents  : null,
-  originalFile     : null,
-  compareFile      : "complete.png",
-  originalPerms    : 0o776,
-  comparePerms     : 0o644
-}, {
-  description      : "Removed by precomplete (remove)",
-  fileName         : "20text0",
-  relPathDir       : DIR_RESOURCES + "2/20/",
-  originalContents : "ToBeDeleted\n",
-  compareContents  : null,
-  originalFile     : null,
-  compareFile      : null,
-  originalPerms    : null,
-  comparePerms     : null
-}, {
-  description      : "Removed by precomplete (remove)",
-  fileName         : "20png0.png",
-  relPathDir       : DIR_RESOURCES + "2/20/",
-  originalContents : "ToBeDeleted\n",
-  compareContents  : null,
-  originalFile     : null,
-  compareFile      : null,
-  originalPerms    : null,
-  comparePerms     : null
-}];
+  {
+    description: "Added by update.manifest (add)",
+    fileName: "precomplete",
+    relPathDir: DIR_RESOURCES,
+    originalContents: null,
+    compareContents: null,
+    originalFile: FILE_PARTIAL_PRECOMPLETE,
+    compareFile: FILE_COMPLETE_PRECOMPLETE,
+    originalPerms: 0o666,
+    comparePerms: 0o644
+  }, {
+    description: "Added by update.manifest (add)",
+    fileName: "searchpluginstext0",
+    relPathDir: DIR_RESOURCES + "searchplugins/",
+    originalContents: "ToBeReplacedWithFromComplete\n",
+    compareContents: "FromComplete\n",
+    originalFile: null,
+    compareFile: null,
+    originalPerms: 0o775,
+    comparePerms: 0o644
+  }, {
+    description: "Added by update.manifest (add)",
+    fileName: "searchpluginspng1.png",
+    relPathDir: DIR_RESOURCES + "searchplugins/",
+    originalContents: null,
+    compareContents: null,
+    originalFile: null,
+    compareFile: "complete.png",
+    originalPerms: null,
+    comparePerms: 0o644
+  }, {
+    description: "Added by update.manifest (add)",
+    fileName: "searchpluginspng0.png",
+    relPathDir: DIR_RESOURCES + "searchplugins/",
+    originalContents: null,
+    compareContents: null,
+    originalFile: "partial.png",
+    compareFile: "complete.png",
+    originalPerms: 0o666,
+    comparePerms: 0o644
+  }, {
+    description: "Added by update.manifest (add)",
+    fileName: "removed-files",
+    relPathDir: DIR_RESOURCES,
+    originalContents: null,
+    compareContents: null,
+    originalFile: FILE_PARTIAL_REMOVEDFILES,
+    compareFile: FILE_COMPLETE_REMOVEDFILES,
+    originalPerms: 0o666,
+    comparePerms: 0o644
+  }, {
+    description: "Added by update.manifest if the parent directory exists (add-if)",
+    fileName: "extensions1text0",
+    relPathDir: DIR_RESOURCES + "distribution/extensions/extensions1/",
+    originalContents: null,
+    compareContents: "FromComplete\n",
+    originalFile: null,
+    compareFile: null,
+    originalPerms: null,
+    comparePerms: 0o644
+  }, {
+    description: "Added by update.manifest if the parent directory exists (add-if)",
+    fileName: "extensions1png1.png",
+    relPathDir: DIR_RESOURCES + "distribution/extensions/extensions1/",
+    originalContents: null,
+    compareContents: null,
+    originalFile: "partial.png",
+    compareFile: "complete.png",
+    originalPerms: 0o666,
+    comparePerms: 0o644
+  }, {
+    description: "Added by update.manifest if the parent directory exists (add-if)",
+    fileName: "extensions1png0.png",
+    relPathDir: DIR_RESOURCES + "distribution/extensions/extensions1/",
+    originalContents: null,
+    compareContents: null,
+    originalFile: null,
+    compareFile: "complete.png",
+    originalPerms: null,
+    comparePerms: 0o644
+  }, {
+    description: "Added by update.manifest if the parent directory exists (add-if)",
+    fileName: "extensions0text0",
+    relPathDir: DIR_RESOURCES + "distribution/extensions/extensions0/",
+    originalContents: "ToBeReplacedWithFromComplete\n",
+    compareContents: "FromComplete\n",
+    originalFile: null,
+    compareFile: null,
+    originalPerms: null,
+    comparePerms: 0o644
+  }, {
+    description: "Added by update.manifest if the parent directory exists (add-if)",
+    fileName: "extensions0png1.png",
+    relPathDir: DIR_RESOURCES + "distribution/extensions/extensions0/",
+    originalContents: null,
+    compareContents: null,
+    originalFile: null,
+    compareFile: "complete.png",
+    originalPerms: null,
+    comparePerms: 0o644
+  }, {
+    description: "Added by update.manifest if the parent directory exists (add-if)",
+    fileName: "extensions0png0.png",
+    relPathDir: DIR_RESOURCES + "distribution/extensions/extensions0/",
+    originalContents: null,
+    compareContents: null,
+    originalFile: null,
+    compareFile: "complete.png",
+    originalPerms: null,
+    comparePerms: 0o644
+  }, {
+    description: "Added by update.manifest (add)",
+    fileName: "exe0.exe",
+    relPathDir: DIR_MACOS,
+    originalContents: null,
+    compareContents: null,
+    originalFile: FILE_HELPER_BIN,
+    compareFile: FILE_COMPLETE_EXE,
+    originalPerms: 0o777,
+    comparePerms: 0o755
+  }, {
+    description: "Added by update.manifest (add)",
+    fileName: "10text0",
+    relPathDir: DIR_RESOURCES + "1/10/",
+    originalContents: "ToBeReplacedWithFromComplete\n",
+    compareContents: "FromComplete\n",
+    originalFile: null,
+    compareFile: null,
+    originalPerms: 0o767,
+    comparePerms: 0o644
+  }, {
+    description: "Added by update.manifest (add)",
+    fileName: "0exe0.exe",
+    relPathDir: DIR_RESOURCES + "0/",
+    originalContents: null,
+    compareContents: null,
+    originalFile: FILE_HELPER_BIN,
+    compareFile: FILE_COMPLETE_EXE,
+    originalPerms: 0o777,
+    comparePerms: 0o755
+  }, {
+    description: "Added by update.manifest (add)",
+    fileName: "00text1",
+    relPathDir: DIR_RESOURCES + "0/00/",
+    originalContents: "ToBeReplacedWithFromComplete\n",
+    compareContents: "FromComplete\n",
+    originalFile: null,
+    compareFile: null,
+    originalPerms: 0o677,
+    comparePerms: 0o644
+  }, {
+    description: "Added by update.manifest (add)",
+    fileName: "00text0",
+    relPathDir: DIR_RESOURCES + "0/00/",
+    originalContents: "ToBeReplacedWithFromComplete\n",
+    compareContents: "FromComplete\n",
+    originalFile: null,
+    compareFile: null,
+    originalPerms: 0o775,
+    comparePerms: 0o644
+  }, {
+    description: "Added by update.manifest (add)",
+    fileName: "00png0.png",
+    relPathDir: DIR_RESOURCES + "0/00/",
+    originalContents: null,
+    compareContents: null,
+    originalFile: null,
+    compareFile: "complete.png",
+    originalPerms: 0o776,
+    comparePerms: 0o644
+  }, {
+    description: "Removed by precomplete (remove)",
+    fileName: "20text0",
+    relPathDir: DIR_RESOURCES + "2/20/",
+    originalContents: "ToBeDeleted\n",
+    compareContents: null,
+    originalFile: null,
+    compareFile: null,
+    originalPerms: null,
+    comparePerms: null
+  }, {
+    description: "Removed by precomplete (remove)",
+    fileName: "20png0.png",
+    relPathDir: DIR_RESOURCES + "2/20/",
+    originalContents: "ToBeDeleted\n",
+    compareContents: null,
+    originalFile: null,
+    compareFile: null,
+    originalPerms: null,
+    comparePerms: null
+  }];
 
 // Concatenate the common files to the end of the array.
 gTestFilesCompleteSuccess = gTestFilesCompleteSuccess.concat(gTestFilesCommon);
@@ -433,321 +418,313 @@ gTestFilesCompleteSuccess = gTestFilesCompleteSuccess.concat(gTestFilesCommon);
 // Files for a partial successful update. This can be used for a partial failed
 // update by calling setTestFilesAndDirsForFailure.
 var gTestFilesPartialSuccess = [
-{
-  description      : "Added by update.manifest (add)",
-  fileName         : "precomplete",
-  relPathDir       : DIR_RESOURCES,
-  originalContents : null,
-  compareContents  : null,
-  originalFile     : FILE_COMPLETE_PRECOMPLETE,
-  compareFile      : FILE_PARTIAL_PRECOMPLETE,
-  originalPerms    : 0o666,
-  comparePerms     : 0o644
-}, {
-  description      : "Added by update.manifest (add)",
-  fileName         : "searchpluginstext0",
-  relPathDir       : DIR_RESOURCES + "searchplugins/",
-  originalContents : "ToBeReplacedWithFromPartial\n",
-  compareContents  : "FromPartial\n",
-  originalFile     : null,
-  compareFile      : null,
-  originalPerms    : 0o775,
-  comparePerms     : 0o644
-}, {
-  description      : "Patched by update.manifest if the file exists " +
-                     "(patch-if)",
-  fileName         : "searchpluginspng1.png",
-  relPathDir       : DIR_RESOURCES + "searchplugins/",
-  originalContents : null,
-  compareContents  : null,
-  originalFile     : "complete.png",
-  compareFile      : "partial.png",
-  originalPerms    : 0o666,
-  comparePerms     : 0o666
-}, {
-  description      : "Patched by update.manifest if the file exists " +
-                     "(patch-if)",
-  fileName         : "searchpluginspng0.png",
-  relPathDir       : DIR_RESOURCES + "searchplugins/",
-  originalContents : null,
-  compareContents  : null,
-  originalFile     : "complete.png",
-  compareFile      : "partial.png",
-  originalPerms    : 0o666,
-  comparePerms     : 0o666
-}, {
-  description      : "Added by update.manifest if the parent directory " +
-                     "exists (add-if)",
-  fileName         : "extensions1text0",
-  relPathDir       : DIR_RESOURCES + "distribution/extensions/extensions1/",
-  originalContents : null,
-  compareContents  : "FromPartial\n",
-  originalFile     : null,
-  compareFile      : null,
-  originalPerms    : null,
-  comparePerms     : 0o644
-}, {
-  description      : "Patched by update.manifest if the parent directory " +
-                     "exists (patch-if)",
-  fileName         : "extensions1png1.png",
-  relPathDir       : DIR_RESOURCES + "distribution/extensions/extensions1/",
-  originalContents : null,
-  compareContents  : null,
-  originalFile     : "complete.png",
-  compareFile      : "partial.png",
-  originalPerms    : 0o666,
-  comparePerms     : 0o666
-}, {
-  description      : "Patched by update.manifest if the parent directory " +
-                     "exists (patch-if)",
-  fileName         : "extensions1png0.png",
-  relPathDir       : DIR_RESOURCES + "distribution/extensions/extensions1/",
-  originalContents : null,
-  compareContents  : null,
-  originalFile     : "complete.png",
-  compareFile      : "partial.png",
-  originalPerms    : 0o666,
-  comparePerms     : 0o666
-}, {
-  description      : "Added by update.manifest if the parent directory " +
-                     "exists (add-if)",
-  fileName         : "extensions0text0",
-  relPathDir       : DIR_RESOURCES + "distribution/extensions/extensions0/",
-  originalContents : "ToBeReplacedWithFromPartial\n",
-  compareContents  : "FromPartial\n",
-  originalFile     : null,
-  compareFile      : null,
-  originalPerms    : 0o644,
-  comparePerms     : 0o644
-}, {
-  description      : "Patched by update.manifest if the parent directory " +
-                     "exists (patch-if)",
-  fileName         : "extensions0png1.png",
-  relPathDir       : DIR_RESOURCES + "distribution/extensions/extensions0/",
-  originalContents : null,
-  compareContents  : null,
-  originalFile     : "complete.png",
-  compareFile      : "partial.png",
-  originalPerms    : 0o644,
-  comparePerms     : 0o644
-}, {
-  description      : "Patched by update.manifest if the parent directory " +
-                     "exists (patch-if)",
-  fileName         : "extensions0png0.png",
-  relPathDir       : DIR_RESOURCES + "distribution/extensions/extensions0/",
-  originalContents : null,
-  compareContents  : null,
-  originalFile     : "complete.png",
-  compareFile      : "partial.png",
-  originalPerms    : 0o644,
-  comparePerms     : 0o644
-}, {
-  description      : "Patched by update.manifest (patch)",
-  fileName         : "exe0.exe",
-  relPathDir       : DIR_MACOS,
-  originalContents : null,
-  compareContents  : null,
-  originalFile     : FILE_COMPLETE_EXE,
-  compareFile      : FILE_PARTIAL_EXE,
-  originalPerms    : 0o755,
-  comparePerms     : 0o755
-}, {
-  description      : "Patched by update.manifest (patch)",
-  fileName         : "0exe0.exe",
-  relPathDir       : DIR_RESOURCES + "0/",
-  originalContents : null,
-  compareContents  : null,
-  originalFile     : FILE_COMPLETE_EXE,
-  compareFile      : FILE_PARTIAL_EXE,
-  originalPerms    : 0o755,
-  comparePerms     : 0o755
-}, {
-  description      : "Added by update.manifest (add)",
-  fileName         : "00text0",
-  relPathDir       : DIR_RESOURCES + "0/00/",
-  originalContents : "ToBeReplacedWithFromPartial\n",
-  compareContents  : "FromPartial\n",
-  originalFile     : null,
-  compareFile      : null,
-  originalPerms    : 0o644,
-  comparePerms     : 0o644
-}, {
-  description      : "Patched by update.manifest (patch)",
-  fileName         : "00png0.png",
-  relPathDir       : DIR_RESOURCES + "0/00/",
-  originalContents : null,
-  compareContents  : null,
-  originalFile     : "complete.png",
-  compareFile      : "partial.png",
-  originalPerms    : 0o666,
-  comparePerms     : 0o666
-}, {
-  description      : "Added by update.manifest (add)",
-  fileName         : "20text0",
-  relPathDir       : DIR_RESOURCES + "2/20/",
-  originalContents : null,
-  compareContents  : "FromPartial\n",
-  originalFile     : null,
-  compareFile      : null,
-  originalPerms    : null,
-  comparePerms     : 0o644
-}, {
-  description      : "Added by update.manifest (add)",
-  fileName         : "20png0.png",
-  relPathDir       : DIR_RESOURCES + "2/20/",
-  originalContents : null,
-  compareContents  : null,
-  originalFile     : null,
-  compareFile      : "partial.png",
-  originalPerms    : null,
-  comparePerms     : 0o644
-}, {
-  description      : "Added by update.manifest (add)",
-  fileName         : "00text2",
-  relPathDir       : DIR_RESOURCES + "0/00/",
-  originalContents : null,
-  compareContents  : "FromPartial\n",
-  originalFile     : null,
-  compareFile      : null,
-  originalPerms    : null,
-  comparePerms     : 0o644
-}, {
-  description      : "Removed by update.manifest (remove)",
-  fileName         : "10text0",
-  relPathDir       : DIR_RESOURCES + "1/10/",
-  originalContents : "ToBeDeleted\n",
-  compareContents  : null,
-  originalFile     : null,
-  compareFile      : null,
-  originalPerms    : null,
-  comparePerms     : null
-}, {
-  description      : "Removed by update.manifest (remove)",
-  fileName         : "00text1",
-  relPathDir       : DIR_RESOURCES + "0/00/",
-  originalContents : "ToBeDeleted\n",
-  compareContents  : null,
-  originalFile     : null,
-  compareFile      : null,
-  originalPerms    : null,
-  comparePerms     : null
-}];
+  {
+    description: "Added by update.manifest (add)",
+    fileName: "precomplete",
+    relPathDir: DIR_RESOURCES,
+    originalContents: null,
+    compareContents: null,
+    originalFile: FILE_COMPLETE_PRECOMPLETE,
+    compareFile: FILE_PARTIAL_PRECOMPLETE,
+    originalPerms: 0o666,
+    comparePerms: 0o644
+  }, {
+    description: "Added by update.manifest (add)",
+    fileName: "searchpluginstext0",
+    relPathDir: DIR_RESOURCES + "searchplugins/",
+    originalContents: "ToBeReplacedWithFromPartial\n",
+    compareContents: "FromPartial\n",
+    originalFile: null,
+    compareFile: null,
+    originalPerms: 0o775,
+    comparePerms: 0o644
+  }, {
+    description: "Patched by update.manifest if the file exists (patch-if)",
+    fileName: "searchpluginspng1.png",
+    relPathDir: DIR_RESOURCES + "searchplugins/",
+    originalContents: null,
+    compareContents: null,
+    originalFile: "complete.png",
+    compareFile: "partial.png",
+    originalPerms: 0o666,
+    comparePerms: 0o666
+  }, {
+    description: "Patched by update.manifest if the file exists (patch-if)",
+    fileName: "searchpluginspng0.png",
+    relPathDir: DIR_RESOURCES + "searchplugins/",
+    originalContents: null,
+    compareContents: null,
+    originalFile: "complete.png",
+    compareFile: "partial.png",
+    originalPerms: 0o666,
+    comparePerms: 0o666
+  }, {
+    description: "Added by update.manifest if the parent directory exists (add-if)",
+    fileName: "extensions1text0",
+    relPathDir: DIR_RESOURCES + "distribution/extensions/extensions1/",
+    originalContents: null,
+    compareContents: "FromPartial\n",
+    originalFile: null,
+    compareFile: null,
+    originalPerms: null,
+    comparePerms: 0o644
+  }, {
+    description: "Patched by update.manifest if the parent directory exists (patch-if)",
+    fileName: "extensions1png1.png",
+    relPathDir: DIR_RESOURCES + "distribution/extensions/extensions1/",
+    originalContents: null,
+    compareContents: null,
+    originalFile: "complete.png",
+    compareFile: "partial.png",
+    originalPerms: 0o666,
+    comparePerms: 0o666
+  }, {
+    description: "Patched by update.manifest if the parent directory exists (patch-if)",
+    fileName: "extensions1png0.png",
+    relPathDir: DIR_RESOURCES + "distribution/extensions/extensions1/",
+    originalContents: null,
+    compareContents: null,
+    originalFile: "complete.png",
+    compareFile: "partial.png",
+    originalPerms: 0o666,
+    comparePerms: 0o666
+  }, {
+    description: "Added by update.manifest if the parent directory exists (add-if)",
+    fileName: "extensions0text0",
+    relPathDir: DIR_RESOURCES + "distribution/extensions/extensions0/",
+    originalContents: "ToBeReplacedWithFromPartial\n",
+    compareContents: "FromPartial\n",
+    originalFile: null,
+    compareFile: null,
+    originalPerms: 0o644,
+    comparePerms: 0o644
+  }, {
+    description: "Patched by update.manifest if the parent directory exists (patch-if)",
+    fileName: "extensions0png1.png",
+    relPathDir: DIR_RESOURCES + "distribution/extensions/extensions0/",
+    originalContents: null,
+    compareContents: null,
+    originalFile: "complete.png",
+    compareFile: "partial.png",
+    originalPerms: 0o644,
+    comparePerms: 0o644
+  }, {
+    description: "Patched by update.manifest if the parent directory exists (patch-if)",
+    fileName: "extensions0png0.png",
+    relPathDir: DIR_RESOURCES + "distribution/extensions/extensions0/",
+    originalContents: null,
+    compareContents: null,
+    originalFile: "complete.png",
+    compareFile: "partial.png",
+    originalPerms: 0o644,
+    comparePerms: 0o644
+  }, {
+    description: "Patched by update.manifest (patch)",
+    fileName: "exe0.exe",
+    relPathDir: DIR_MACOS,
+    originalContents: null,
+    compareContents: null,
+    originalFile: FILE_COMPLETE_EXE,
+    compareFile: FILE_PARTIAL_EXE,
+    originalPerms: 0o755,
+    comparePerms: 0o755
+  }, {
+    description: "Patched by update.manifest (patch)",
+    fileName: "0exe0.exe",
+    relPathDir: DIR_RESOURCES + "0/",
+    originalContents: null,
+    compareContents: null,
+    originalFile: FILE_COMPLETE_EXE,
+    compareFile: FILE_PARTIAL_EXE,
+    originalPerms: 0o755,
+    comparePerms: 0o755
+  }, {
+    description: "Added by update.manifest (add)",
+    fileName: "00text0",
+    relPathDir: DIR_RESOURCES + "0/00/",
+    originalContents: "ToBeReplacedWithFromPartial\n",
+    compareContents: "FromPartial\n",
+    originalFile: null,
+    compareFile: null,
+    originalPerms: 0o644,
+    comparePerms: 0o644
+  }, {
+    description: "Patched by update.manifest (patch)",
+    fileName: "00png0.png",
+    relPathDir: DIR_RESOURCES + "0/00/",
+    originalContents: null,
+    compareContents: null,
+    originalFile: "complete.png",
+    compareFile: "partial.png",
+    originalPerms: 0o666,
+    comparePerms: 0o666
+  }, {
+    description: "Added by update.manifest (add)",
+    fileName: "20text0",
+    relPathDir: DIR_RESOURCES + "2/20/",
+    originalContents: null,
+    compareContents: "FromPartial\n",
+    originalFile: null,
+    compareFile: null,
+    originalPerms: null,
+    comparePerms: 0o644
+  }, {
+    description: "Added by update.manifest (add)",
+    fileName: "20png0.png",
+    relPathDir: DIR_RESOURCES + "2/20/",
+    originalContents: null,
+    compareContents: null,
+    originalFile: null,
+    compareFile: "partial.png",
+    originalPerms: null,
+    comparePerms: 0o644
+  }, {
+    description: "Added by update.manifest (add)",
+    fileName: "00text2",
+    relPathDir: DIR_RESOURCES + "0/00/",
+    originalContents: null,
+    compareContents: "FromPartial\n",
+    originalFile: null,
+    compareFile: null,
+    originalPerms: null,
+    comparePerms: 0o644
+  }, {
+    description: "Removed by update.manifest (remove)",
+    fileName: "10text0",
+    relPathDir: DIR_RESOURCES + "1/10/",
+    originalContents: "ToBeDeleted\n",
+    compareContents: null,
+    originalFile: null,
+    compareFile: null,
+    originalPerms: null,
+    comparePerms: null
+  }, {
+    description: "Removed by update.manifest (remove)",
+    fileName: "00text1",
+    relPathDir: DIR_RESOURCES + "0/00/",
+    originalContents: "ToBeDeleted\n",
+    compareContents: null,
+    originalFile: null,
+    compareFile: null,
+    originalPerms: null,
+    comparePerms: null
+  }];
 
 // Concatenate the common files to the end of the array.
 gTestFilesPartialSuccess = gTestFilesPartialSuccess.concat(gTestFilesCommon);
 
 var gTestDirsCommon = [
-{
-  relPathDir   : DIR_RESOURCES + "3/",
-  dirRemoved   : false,
-  files        : ["3text0", "3text1"],
-  filesRemoved : true
-}, {
-  relPathDir   : DIR_RESOURCES + "4/",
-  dirRemoved   : true,
-  files        : ["4text0", "4text1"],
-  filesRemoved : true
-}, {
-  relPathDir   : DIR_RESOURCES + "5/",
-  dirRemoved   : true,
-  files        : ["5test.exe", "5text0", "5text1"],
-  filesRemoved : true
-}, {
-  relPathDir   : DIR_RESOURCES + "6/",
-  dirRemoved   : true
-}, {
-  relPathDir   : DIR_RESOURCES + "7/",
-  dirRemoved   : true,
-  files        : ["7text0", "7text1"],
-  subDirs      : ["70/", "71/"],
-  subDirFiles  : ["7xtest.exe", "7xtext0", "7xtext1"]
-}, {
-  relPathDir   : DIR_RESOURCES + "8/",
-  dirRemoved   : false
-}, {
-  relPathDir   : DIR_RESOURCES + "8/80/",
-  dirRemoved   : true
-}, {
-  relPathDir   : DIR_RESOURCES + "8/81/",
-  dirRemoved   : false,
-  files        : ["81text0", "81text1"]
-}, {
-  relPathDir   : DIR_RESOURCES + "8/82/",
-  dirRemoved   : false,
-  subDirs      : ["820/", "821/"]
-}, {
-  relPathDir   : DIR_RESOURCES + "8/83/",
-  dirRemoved   : true
-}, {
-  relPathDir   : DIR_RESOURCES + "8/84/",
-  dirRemoved   : true
-}, {
-  relPathDir   : DIR_RESOURCES + "8/85/",
-  dirRemoved   : true
-}, {
-  relPathDir   : DIR_RESOURCES + "8/86/",
-  dirRemoved   : true,
-  files        : ["86text0", "86text1"]
-}, {
-  relPathDir   : DIR_RESOURCES + "8/87/",
-  dirRemoved   : true,
-  subDirs      : ["870/", "871/"],
-  subDirFiles  : ["87xtext0", "87xtext1"]
-}, {
-  relPathDir   : DIR_RESOURCES + "8/88/",
-  dirRemoved   : true
-}, {
-  relPathDir   : DIR_RESOURCES + "8/89/",
-  dirRemoved   : true
-}, {
-  relPathDir   : DIR_RESOURCES + "9/90/",
-  dirRemoved   : true
-}, {
-  relPathDir   : DIR_RESOURCES + "9/91/",
-  dirRemoved   : false,
-  files        : ["91text0", "91text1"]
-}, {
-  relPathDir   : DIR_RESOURCES + "9/92/",
-  dirRemoved   : false,
-  subDirs      : ["920/", "921/"]
-}, {
-  relPathDir   : DIR_RESOURCES + "9/93/",
-  dirRemoved   : true
-}, {
-  relPathDir   : DIR_RESOURCES + "9/94/",
-  dirRemoved   : true
-}, {
-  relPathDir   : DIR_RESOURCES + "9/95/",
-  dirRemoved   : true
-}, {
-  relPathDir   : DIR_RESOURCES + "9/96/",
-  dirRemoved   : true,
-  files        : ["96text0", "96text1"]
-}, {
-  relPathDir   : DIR_RESOURCES + "9/97/",
-  dirRemoved   : true,
-  subDirs      : ["970/", "971/"],
-  subDirFiles  : ["97xtext0", "97xtext1"]
-}, {
-  relPathDir   : DIR_RESOURCES + "9/98/",
-  dirRemoved   : true
-}, {
-  relPathDir   : DIR_RESOURCES + "9/99/",
-  dirRemoved   : true
-}];
+  {
+    relPathDir: DIR_RESOURCES + "3/",
+    dirRemoved: false,
+    files: ["3text0", "3text1"],
+    filesRemoved: true
+  }, {
+    relPathDir: DIR_RESOURCES + "4/",
+    dirRemoved: true,
+    files: ["4text0", "4text1"],
+    filesRemoved: true
+  }, {
+    relPathDir: DIR_RESOURCES + "5/",
+    dirRemoved: true,
+    files: ["5test.exe", "5text0", "5text1"],
+    filesRemoved: true
+  }, {
+    relPathDir: DIR_RESOURCES + "6/",
+    dirRemoved: true
+  }, {
+    relPathDir: DIR_RESOURCES + "7/",
+    dirRemoved: true,
+    files: ["7text0", "7text1"],
+    subDirs: ["70/", "71/"],
+    subDirFiles: ["7xtest.exe", "7xtext0", "7xtext1"]
+  }, {
+    relPathDir: DIR_RESOURCES + "8/",
+    dirRemoved: false
+  }, {
+    relPathDir: DIR_RESOURCES + "8/80/",
+    dirRemoved: true
+  }, {
+    relPathDir: DIR_RESOURCES + "8/81/",
+    dirRemoved: false,
+    files: ["81text0", "81text1"]
+  }, {
+    relPathDir: DIR_RESOURCES + "8/82/",
+    dirRemoved: false,
+    subDirs: ["820/", "821/"]
+  }, {
+    relPathDir: DIR_RESOURCES + "8/83/",
+    dirRemoved: true
+  }, {
+    relPathDir: DIR_RESOURCES + "8/84/",
+    dirRemoved: true
+  }, {
+    relPathDir: DIR_RESOURCES + "8/85/",
+    dirRemoved: true
+  }, {
+    relPathDir: DIR_RESOURCES + "8/86/",
+    dirRemoved: true,
+    files: ["86text0", "86text1"]
+  }, {
+    relPathDir: DIR_RESOURCES + "8/87/",
+    dirRemoved: true,
+    subDirs: ["870/", "871/"],
+    subDirFiles: ["87xtext0", "87xtext1"]
+  }, {
+    relPathDir: DIR_RESOURCES + "8/88/",
+    dirRemoved: true
+  }, {
+    relPathDir: DIR_RESOURCES + "8/89/",
+    dirRemoved: true
+  }, {
+    relPathDir: DIR_RESOURCES + "9/90/",
+    dirRemoved: true
+  }, {
+    relPathDir: DIR_RESOURCES + "9/91/",
+    dirRemoved: false,
+    files: ["91text0", "91text1"]
+  }, {
+    relPathDir: DIR_RESOURCES + "9/92/",
+    dirRemoved: false,
+    subDirs: ["920/", "921/"]
+  }, {
+    relPathDir: DIR_RESOURCES + "9/93/",
+    dirRemoved: true
+  }, {
+    relPathDir: DIR_RESOURCES + "9/94/",
+    dirRemoved: true
+  }, {
+    relPathDir: DIR_RESOURCES + "9/95/",
+    dirRemoved: true
+  }, {
+    relPathDir: DIR_RESOURCES + "9/96/",
+    dirRemoved: true,
+    files: ["96text0", "96text1"]
+  }, {
+    relPathDir: DIR_RESOURCES + "9/97/",
+    dirRemoved: true,
+    subDirs: ["970/", "971/"],
+    subDirFiles: ["97xtext0", "97xtext1"]
+  }, {
+    relPathDir: DIR_RESOURCES + "9/98/",
+    dirRemoved: true
+  }, {
+    relPathDir: DIR_RESOURCES + "9/99/",
+    dirRemoved: true
+  }];
 
 // Directories for a complete successful update. This array can be used for a
 // complete failed update by calling setTestFilesAndDirsForFailure.
 var gTestDirsCompleteSuccess = [
-{
-  description  : "Removed by precomplete (rmdir)",
-  relPathDir   : DIR_RESOURCES + "2/20/",
-  dirRemoved   : true
-}, {
-  description  : "Removed by precomplete (rmdir)",
-  relPathDir   : DIR_RESOURCES + "2/",
-  dirRemoved   : true
-}];
+  {
+    description: "Removed by precomplete (rmdir)",
+    relPathDir: DIR_RESOURCES + "2/20/",
+    dirRemoved: true
+  }, {
+    description: "Removed by precomplete (rmdir)",
+    relPathDir: DIR_RESOURCES + "2/",
+    dirRemoved: true
+  }];
 
 // Concatenate the common files to the beginning of the array.
 gTestDirsCompleteSuccess = gTestDirsCommon.concat(gTestDirsCompleteSuccess);
@@ -755,15 +732,15 @@ gTestDirsCompleteSuccess = gTestDirsCommon.concat(gTestDirsCompleteSuccess);
 // Directories for a partial successful update. This array can be used for a
 // partial failed update by calling setTestFilesAndDirsForFailure.
 var gTestDirsPartialSuccess = [
-{
-  description  : "Removed by update.manifest (rmdir)",
-  relPathDir   : DIR_RESOURCES + "1/10/",
-  dirRemoved   : true
-}, {
-  description  : "Removed by update.manifest (rmdir)",
-  relPathDir   : DIR_RESOURCES + "1/",
-  dirRemoved   : true
-}];
+  {
+    description: "Removed by update.manifest (rmdir)",
+    relPathDir: DIR_RESOURCES + "1/10/",
+    dirRemoved: true
+  }, {
+    description: "Removed by update.manifest (rmdir)",
+    relPathDir: DIR_RESOURCES + "1/",
+    dirRemoved: true
+  }];
 
 // Concatenate the common files to the beginning of the array.
 gTestDirsPartialSuccess = gTestDirsCommon.concat(gTestDirsPartialSuccess);
@@ -844,25 +821,6 @@ function setupTestCommon() {
     }
   }
 
-  if (DEBUG_TEST_LOG) {
-    let logFile = do_get_file(gTestID + ".log", true);
-    if (logFile.exists()) {
-      gPassed = false;
-      logTestInfo("start - dumping previous test run log");
-      logTestInfo("\n" + readFile(logFile) + "\n");
-      logTestInfo("finish - dumping previous test run log");
-      if (gDeleteLogFile) {
-        logFile.remove(false);
-      }
-      do_throw("The parallel run of this test failed. Failing non-parallel " +
-               "test so the log from the parallel run can be displayed in " +
-               "non-parallel log.");
-    } else {
-      gRealDump = dump;
-      dump = dumpOverride;
-    }
-  }
-
   if (IS_WIN) {
     Services.prefs.setBoolPref(PREF_APP_UPDATE_SERVICE_ENABLED,
                                IS_SERVICE_TEST ? true : false);
@@ -871,6 +829,9 @@ function setupTestCommon() {
   // adjustGeneralPaths registers a cleanup function that calls end_test when
   // it is defined as a function.
   adjustGeneralPaths();
+  // Logged once here instead of in the mock directory provider to lessen test
+  // log spam.
+  debugDump("Updates Directory (UpdRootD) Path: " + getMockUpdRootD().path);
 
   // This prevents a warning about not being able to find the greprefs.js file
   // from being logged.
@@ -958,9 +919,9 @@ function cleanupTestCommon() {
     }
   }
 
-  // The updates directory is located outside of the application directory on
-  // Windows, Mac OS X, and GONK and needs to be removed.
-  if (IS_WIN || IS_MACOSX || IS_TOOLKIT_GONK) {
+  // The updates directory is located outside of the application directory and
+  // needs to be removed on Windows and Mac OS X.
+  if (IS_WIN || IS_MACOSX) {
     let updatesDir = getMockUpdRootD();
     // Try to remove the directory used to apply updates. Since the test has
     // already finished this is non-fatal for the test.
@@ -1015,42 +976,6 @@ function cleanupTestCommon() {
   resetEnvironment();
 
   debugDump("finish - general test cleanup");
-
-  if (gRealDump) {
-    dump = gRealDump;
-    gRealDump = null;
-  }
-
-  if (DEBUG_TEST_LOG && !gPassed) {
-    let fos = Cc["@mozilla.org/network/file-output-stream;1"].
-              createInstance(Ci.nsIFileOutputStream);
-    let logFile = do_get_file(gTestID + ".log", true);
-    if (!logFile.exists()) {
-      logFile.create(Ci.nsILocalFile.NORMAL_FILE_TYPE, PERMS_FILE);
-    }
-    fos.init(logFile, MODE_WRONLY | MODE_CREATE | MODE_APPEND, PERMS_FILE, 0);
-    fos.write(gTestLogText, gTestLogText.length);
-    fos.close();
-  }
-
-  if (DEBUG_TEST_LOG) {
-    gTestLogText = null;
-  } else {
-    let logFile = do_get_file(gTestID + ".log", true);
-    if (logFile.exists()) {
-      logFile.remove(false);
-    }
-  }
-}
-
-/**
- * Helper function to store the log output of calls to dump in a variable so the
- * values can be written to a file for a parallel run of a test and printed to
- * the log file when the test runs synchronously.
- */
-function dumpOverride(aText) {
-  gTestLogText += aText;
-  gRealDump(aText);
 }
 
 /**
@@ -1059,9 +984,6 @@ function dumpOverride(aText) {
  * inspected.
  */
 function doTestFinish() {
-  if (gPassed === undefined) {
-    gPassed = true;
-  }
   if (DEBUG_AUS_TEST) {
     // This prevents do_print errors from being printed by the xpcshell test
     // harness due to nsUpdateService.js logging to the console when the
@@ -1077,14 +999,11 @@ function doTestFinish() {
  */
 function setDefaultPrefs() {
   Services.prefs.setBoolPref(PREF_APP_UPDATE_ENABLED, true);
-  // Don't display UI for a successful installation. Some apps may not set this
-  // pref to false like Firefox does.
-  Services.prefs.setBoolPref(PREF_APP_UPDATE_SHOW_INSTALLED_UI, false);
   if (DEBUG_AUS_TEST) {
     // Enable Update logging
     Services.prefs.setBoolPref(PREF_APP_UPDATE_LOG, true);
   } else {
-    // Some apps (e.g. gonk) set this preference to true by default
+    // Some apps set this preference to true by default
     Services.prefs.setBoolPref(PREF_APP_UPDATE_LOG, false);
   }
   // In case telemetry is enabled for xpcshell tests.
@@ -1188,20 +1107,6 @@ function standardInit() {
 }
 
 /**
- * Custom path handler for the http server
- *
- * @param   aMetadata
- *          The http metadata for the request.
- * @param   aResponse
- *          The http response for the request.
- */
-function pathHandler(aMetadata, aResponse) {
-  aResponse.setHeader("Content-Type", "text/xml", false);
-  aResponse.setStatusLine(aMetadata.httpVersion, gResponseStatusCode, "OK");
-  aResponse.bodyOutputStream.write(gResponseBody, gResponseBody.length);
-}
-
-/**
  * Helper function for getting the application version from the application.ini
  * file. This will look in both the GRE and the application directories for the
  * application.ini file.
@@ -1222,18 +1127,6 @@ function getAppVersion() {
                   getService(Ci.nsIINIParserFactory).
                   createINIParser(iniFile);
   return iniParser.getString("App", "Version");
-}
-
-/**
- * Override the apply-to directory parameter to be passed to the updater.
- * This ought to cause the updater to fail when using any value that isn't the
- * default, automatically computed one.
- *
- * @param dir
- *        Complete string to use as the apply-to directory parameter.
- */
-function overrideApplyToDir(dir) {
-  gApplyToDirOverride = dir;
 }
 
 /**
@@ -1426,8 +1319,7 @@ function getSpecialFolderDir(aCSIDL) {
   return dir;
 }
 
-XPCOMUtils.defineLazyGetter(this, "gInstallDirPathHash",
-                            function test_gInstallDirPathHash() {
+XPCOMUtils.defineLazyGetter(this, "gInstallDirPathHash", function test_gIDPH() {
   if (!IS_WIN) {
     do_throw("Windows only function called by a different platform!");
   }
@@ -1465,8 +1357,7 @@ XPCOMUtils.defineLazyGetter(this, "gInstallDirPathHash",
   return null;
 });
 
-XPCOMUtils.defineLazyGetter(this, "gLocalAppDataDir",
-                            function test_gLocalAppDataDir() {
+XPCOMUtils.defineLazyGetter(this, "gLocalAppDataDir", function test_gLADD() {
   if (!IS_WIN) {
     do_throw("Windows only function called by a different platform!");
   }
@@ -1475,8 +1366,7 @@ XPCOMUtils.defineLazyGetter(this, "gLocalAppDataDir",
   return getSpecialFolderDir(CSIDL_LOCAL_APPDATA);
 });
 
-XPCOMUtils.defineLazyGetter(this, "gProgFilesDir",
-                            function test_gProgFilesDir() {
+XPCOMUtils.defineLazyGetter(this, "gProgFilesDir", function test_gPFD() {
   if (!IS_WIN) {
     do_throw("Windows only function called by a different platform!");
   }
@@ -1498,12 +1388,6 @@ function getMockUpdRootD() {
 
   if (IS_MACOSX) {
     return getMockUpdRootDMac();
-  }
-
-  // The gonk updates directory is under /data/local but for the updater tests
-  // we use the following directory so the tests can run in parallel.
-  if (IS_TOOLKIT_GONK) {
-    return do_get_file(gTestID + "/", true);
   }
 
   return getApplyDirFile(DIR_MACOS, true);
@@ -1556,12 +1440,10 @@ function getMockUpdRootDWin() {
   let updatesDir = Cc["@mozilla.org/file/local;1"].
                    createInstance(Ci.nsILocalFile);
   updatesDir.initWithPath(localAppDataDir.path + "\\" + relPathUpdates);
-  debugDump("returning UpdRootD Path: " + updatesDir.path);
   return updatesDir;
 }
 
-XPCOMUtils.defineLazyGetter(this, "gUpdatesRootDir",
-                            function test_gUpdatesRootDir() {
+XPCOMUtils.defineLazyGetter(this, "gUpdatesRootDir", function test_gURD() {
   if (!IS_MACOSX) {
     do_throw("Mac OS X only function called by a different platform!");
   }
@@ -1597,7 +1479,6 @@ function getMockUpdRootDMac() {
   let updatesDir = Cc["@mozilla.org/file/local;1"].
                    createInstance(Ci.nsILocalFile);
   updatesDir.initWithPath(pathUpdates);
-  debugDump("returning UpdRootD Path: " + updatesDir.path);
   return updatesDir;
 }
 
@@ -1702,16 +1583,17 @@ function copyTestUpdaterForRunUsingUpdater() {
   if (IS_MACOSX) {
     updater.append("Contents");
     updater.append("MacOS");
-    updater.append("updater");
+    updater.append("org.mozilla.updater");
   }
   return updater;
 }
 
 /**
- * Logs the contents of an update log.
+ * Logs the contents of an update log and for maintenance service tests this
+ * will log the contents of the latest maintenanceservice.log.
  *
  * @param   aLogLeafName
- *          The leaf name of the log.
+ *          The leaf name of the update log.
  */
 function logUpdateLog(aLogLeafName) {
   let updateLog = getUpdateLog(aLogLeafName);
@@ -1727,12 +1609,39 @@ function logUpdateLog(aLogLeafName) {
   } else {
     logTestInfo("update log doesn't exist, path: " + updateLog.path);
   }
+
+  if (IS_SERVICE_TEST) {
+    let serviceLog = getMaintSvcDir();
+    serviceLog.append("logs");
+    serviceLog.append("maintenanceservice.log");
+    if (serviceLog.exists()) {
+      // xpcshell tests won't display the entire contents so log each line.
+      let serviceLogContents = readFileBytes(serviceLog).replace(/\r\n/g, "\n");
+      serviceLogContents = replaceLogPaths(serviceLogContents);
+      let aryLogContents = serviceLogContents.split("\n");
+      logTestInfo("contents of " + serviceLog.path + ":");
+      aryLogContents.forEach(function RU_LC_FE(aLine) {
+        logTestInfo(aLine);
+      });
+    } else {
+      logTestInfo("maintenance service log doesn't exist, path: " +
+                  serviceLog.path);
+    }
+  }
 }
 
 /**
- * Launches the updater binary or the service to apply an update for updater
- * tests. For non-service tests runUpdateUsingUpdater will be called and for
- * service tests runUpdateUsingService will be called.
+ * Gets the maintenance service log contents.
+ */
+function readServiceLogFile() {
+  let file = getMaintSvcDir();
+  file.append("logs");
+  file.append("maintenanceservice.log");
+  return readFile(file);
+}
+
+/**
+ * Launches the updater binary to apply an update for updater tests.
  *
  * @param   aExpectedStatus
  *          The expected value of update.status when the test finishes. For
@@ -1747,81 +1656,88 @@ function logUpdateLog(aLogLeafName) {
  *          tests.
  * @param   aCheckSvcLog
  *          Whether the service log should be checked for service tests.
+ * @param   aPatchDirPath (optional)
+ *          When specified the patch directory path to use for invalid argument
+ *          tests otherwise the normal path will be used.
+ * @param   aInstallDirPath (optional)
+ *          When specified the install directory path to use for invalid
+ *          argument tests otherwise the normal path will be used.
+ * @param   aApplyToDirPath (optional)
+ *          When specified the apply to / working directory path to use for
+ *          invalid argument tests otherwise the normal path will be used.
+ * @param   aCallbackPath (optional)
+ *          When specified the callback path to use for invalid argument tests
+ *          otherwise the normal path will be used.
  */
-function runUpdate(aExpectedStatus, aSwitchApp, aExpectedExitValue,
-                   aCheckSvcLog) {
-  if (IS_SERVICE_TEST) {
-    let expectedStatus = aExpectedStatus;
-    if (aExpectedStatus == STATE_PENDING) {
-      expectedStatus = STATE_PENDING_SVC;
-    } else if (aExpectedStatus == STATE_APPLIED) {
-      expectedStatus = STATE_APPLIED_SVC;
-    }
-    runUpdateUsingService(expectedStatus, aSwitchApp, aCheckSvcLog);
-  } else {
-    runUpdateUsingUpdater(aExpectedStatus, aSwitchApp, aExpectedExitValue);
-  }
-}
+function runUpdate(aExpectedStatus, aSwitchApp, aExpectedExitValue, aCheckSvcLog,
+                   aPatchDirPath, aInstallDirPath, aApplyToDirPath,
+                   aCallbackPath) {
+  let isInvalidArgTest = !!aPatchDirPath || !!aInstallDirPath ||
+                         !!aApplyToDirPath || aCallbackPath;
 
-/**
- * Launches the updater binary or the service to apply an update for updater
- * tests. When completed runUpdateFinished will be called.
- *
- * @param   aExpectedStatus
- *          The expected value of update.status when the test finishes.
- * @param   aSwitchApp
- *          If true the update should switch the application with an updated
- *          staged application and if false the update should be applied to the
- *          installed application.
- * @param   aExpectedExitValue
- *          The expected exit value from the updater binary.
- */
-function runUpdateUsingUpdater(aExpectedStatus, aSwitchApp, aExpectedExitValue) {
+  let svcOriginalLog;
+  if (IS_SERVICE_TEST) {
+    copyFileToTestAppDir(FILE_MAINTENANCE_SERVICE_BIN, false);
+    copyFileToTestAppDir(FILE_MAINTENANCE_SERVICE_INSTALLER_BIN, false);
+    if (aCheckSvcLog) {
+      svcOriginalLog = readServiceLogFile();
+    }
+  }
+
   // Copy the updater binary to the directory where it will apply updates.
   let updateBin = copyTestUpdaterForRunUsingUpdater();
   Assert.ok(updateBin.exists(),
             MSG_SHOULD_EXIST + getMsgPath(updateBin.path));
 
-  let updatesDir = getUpdatesPatchDir();
-  let updatesDirPath = updatesDir.path;
-
-  let applyToDir = getApplyDirFile(null, true);
-  let applyToDirPath = applyToDir.path;
-
-  let stageDir = getStageDirFile(null, true);
-  let stageDirPath = stageDir.path;
-
-  if (IS_WIN) {
-    // Convert to native path
-    updatesDirPath = updatesDirPath.replace(/\//g, "\\");
-    applyToDirPath = applyToDirPath.replace(/\//g, "\\");
-    stageDirPath = stageDirPath.replace(/\//g, "\\");
-  }
+  let updatesDirPath = aPatchDirPath || getUpdatesPatchDir().path;
+  let installDirPath = aInstallDirPath || getApplyDirFile(null, true).path;
+  let applyToDirPath = aApplyToDirPath || getApplyDirFile(null, true).path;
+  let stageDirPath = aApplyToDirPath || getStageDirFile(null, true).path;
 
   let callbackApp = getApplyDirFile(DIR_RESOURCES + gCallbackBinFile);
   callbackApp.permissions = PERMS_DIRECTORY;
 
   setAppBundleModTime();
 
-  let args = [updatesDirPath, applyToDirPath];
+  let args = [updatesDirPath, installDirPath];
   if (aSwitchApp) {
-    args[2] = gApplyToDirOverride || stageDirPath;
+    args[2] = stageDirPath;
     args[3] = "0/replace";
   } else {
-    args[2] = gApplyToDirOverride || applyToDirPath;
+    args[2] = applyToDirPath;
     args[3] = "0";
   }
-  args = args.concat([callbackApp.parent.path, callbackApp.path]);
-  args = args.concat(gCallbackArgs);
-  debugDump("running the updater: " + updateBin.path + " " + args.join(" "));
+
+  let launchBin = IS_SERVICE_TEST && isInvalidArgTest ? callbackApp : updateBin;
+
+  if (!isInvalidArgTest) {
+    args = args.concat([callbackApp.parent.path, callbackApp.path]);
+    args = args.concat(gCallbackArgs);
+  } else if (IS_SERVICE_TEST) {
+    args = ["launch-service", updateBin.path].concat(args);
+  } else if (aCallbackPath) {
+    args = args.concat([callbackApp.parent.path, aCallbackPath]);
+  }
+
+  debugDump("launching the program: " + launchBin.path + " " + args.join(" "));
+
+  if (aSwitchApp && !isInvalidArgTest) {
+    // We want to set the env vars again
+    gShouldResetEnv = undefined;
+  }
+
+  setEnvironment();
 
   let process = Cc["@mozilla.org/process/util;1"].
                 createInstance(Ci.nsIProcess);
-  process.init(updateBin);
+  process.init(launchBin);
   process.run(true, args, args.length);
 
+  resetEnvironment();
+
   let status = readStatusFile();
-  if (process.exitValue != aExpectedExitValue || status != aExpectedStatus) {
+  if ((!IS_SERVICE_TEST && process.exitValue != aExpectedExitValue) ||
+      status != aExpectedStatus) {
     if (process.exitValue != aExpectedExitValue) {
       logTestInfo("updater exited with unexpected value! Got: " +
                   process.exitValue + ", Expected: " + aExpectedExitValue);
@@ -1832,10 +1748,25 @@ function runUpdateUsingUpdater(aExpectedStatus, aSwitchApp, aExpectedExitValue) 
     }
     logUpdateLog(FILE_LAST_UPDATE_LOG);
   }
-  Assert.equal(process.exitValue, aExpectedExitValue,
-               "the process exit value" + MSG_SHOULD_EQUAL);
+
+  if (!IS_SERVICE_TEST) {
+    Assert.equal(process.exitValue, aExpectedExitValue,
+                 "the process exit value" + MSG_SHOULD_EQUAL);
+  }
   Assert.equal(status, aExpectedStatus,
                "the update status" + MSG_SHOULD_EQUAL);
+
+  if (IS_SERVICE_TEST && aCheckSvcLog) {
+    let contents = readServiceLogFile();
+    Assert.notEqual(contents, svcOriginalLog,
+                    "the contents of the maintenanceservice.log should not " +
+                    "be the same as the original contents");
+    if (!isInvalidArgTest) {
+      Assert.notEqual(contents.indexOf(LOG_SVC_SUCCESSFUL_LAUNCH), -1,
+                      "the contents of the maintenanceservice.log should " +
+                      "contain the successful launch string");
+    }
+  }
 
   do_execute_soon(runUpdateFinished);
 }
@@ -1911,8 +1842,7 @@ function setupActiveUpdate() {
   let patches = getLocalPatchString(null, null, null, null, null, "true",
                                     state);
   let updates = getLocalUpdateString(patches, null, null, null, null, null,
-                                     null, null, null, null, null, null,
-                                     "true", channel);
+                                     null, null, null, null, "true", channel);
   writeUpdatesToXMLFile(getLocalUpdatesXMLString(updates), true);
   writeVersionFile(DEFAULT_UPDATE_VERSION);
   writeStatusFile(state);
@@ -1938,13 +1868,37 @@ function getUpdateLog(aLogLeafName) {
 }
 
 /**
- * Stages an update using nsIUpdateProcessor:processUpdate for updater tests.
+ * The update-staged observer for the call to nsIUpdateProcessor:processUpdate.
  */
-function stageUpdate() {
+const gUpdateStagedObserver = {
+  observe: function(aSubject, aTopic, aData) {
+    debugDump("observe called with topic: " + aTopic + ", data: " + aData);
+    if (aTopic == "update-staged") {
+      Services.obs.removeObserver(gUpdateStagedObserver, "update-staged");
+      // The environment is reset after the update-staged observer topic because
+      // processUpdate in nsIUpdateProcessor uses a new thread and clearing the
+      // environment immediately after calling processUpdate can clear the
+      // environment before the updater is launched.
+      resetEnvironment();
+      // Use do_execute_soon to prevent any failures from propagating to the
+      // update service.
+      do_execute_soon(checkUpdateStagedState.bind(null, aData));
+    }
+  },
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver])
+};
+
+/**
+ * Stages an update using nsIUpdateProcessor:processUpdate for updater tests.
+ *
+ * @param   aCheckSvcLog
+ *          Whether the service log should be checked for service tests.
+ */
+function stageUpdate(aCheckSvcLog) {
   debugDump("start - attempting to stage update");
 
-  if (IS_TOOLKIT_GONK) {
-    copyTestUpdaterToBinDir();
+  if (IS_SERVICE_TEST && aCheckSvcLog) {
+    gSvcOriginalLogContents = readServiceLogFile();
   }
 
   Services.obs.addObserver(gUpdateStagedObserver, "update-staged", false);
@@ -2023,6 +1977,16 @@ function checkUpdateStagedState(aUpdateState) {
   } else {
     Assert.ok(!stageDir.exists(),
               MSG_SHOULD_NOT_EXIST + getMsgPath(stageDir.path));
+  }
+
+  if (IS_SERVICE_TEST && gSvcOriginalLogContents !== undefined) {
+    let contents = readServiceLogFile();
+    Assert.notEqual(contents, gSvcOriginalLogContents,
+                    "the contents of the maintenanceservice.log should not " +
+                    "be the same as the original contents");
+    Assert.notEqual(contents.indexOf(LOG_SVC_SUCCESSFUL_LAUNCH), -1,
+                    "the contents of the maintenanceservice.log should " +
+                    "contain the successful launch string");
   }
 
   do_execute_soon(stageUpdateFinished);
@@ -2160,17 +2124,17 @@ function setupAppFiles() {
 
   // Required files for the application or the test that aren't listed in the
   // dependentlibs.list file.
-  let appFiles = [ { relPath  : FILE_APP_BIN,
-                     inGreDir : false },
-                   { relPath  : FILE_APPLICATION_INI,
-                     inGreDir : true },
-                   { relPath  : "dependentlibs.list",
-                     inGreDir : true } ];
+  let appFiles = [{relPath: FILE_APP_BIN,
+                   inGreDir: false},
+                  {relPath: FILE_APPLICATION_INI,
+                   inGreDir: true},
+                  {relPath: "dependentlibs.list",
+                   inGreDir: true}];
 
   // On Linux the updater.png must also be copied
-  if (IS_UNIX && !IS_MACOSX && !IS_TOOLKIT_GONK) {
-    appFiles.push( { relPath  : "icons/updater.png",
-                     inGreDir : true } );
+  if (IS_UNIX && !IS_MACOSX) {
+    appFiles.push({relPath: "icons/updater.png",
+                   inGreDir: true});
   }
 
   // Read the dependent libs file leafnames from the dependentlibs.list file
@@ -2186,8 +2150,8 @@ function setupAppFiles() {
   let line = {};
   do {
     hasMore = fis.readLine(line);
-    appFiles.push( { relPath  : line.value,
-                     inGreDir : false } );
+    appFiles.push({relPath: line.value,
+                   inGreDir: false});
   } while (hasMore);
 
   fis.close();
@@ -2253,8 +2217,7 @@ function copyFileToTestAppDir(aFileRelPath, aInGreDir) {
   let shouldSymlink = (pathParts[pathParts.length - 1] == "XUL" ||
                        fileRelPath.substr(fileRelPath.length - 3) == ".so" ||
                        fileRelPath.substr(fileRelPath.length - 6) == ".dylib");
-  // The tests don't support symlinks on gonk.
-  if (!shouldSymlink || IS_TOOLKIT_GONK) {
+  if (!shouldSymlink) {
     if (!destFile.exists()) {
       try {
         srcFile.copyToFollowingLinks(destFile.parent, destFile.leafName);
@@ -2263,13 +2226,13 @@ function copyFileToTestAppDir(aFileRelPath, aInGreDir) {
         if (destFile.exists()) {
           try {
             destFile.remove(true);
-          } catch (e) {
+          } catch (ex) {
             logTestInfo("unable to remove file that failed to copy! Path: " +
                         destFile.path);
           }
         }
         do_throw("Unable to copy file! Path: " + srcFile.path +
-                 ", Exception: " + e);
+                 ", Exception: " + ex);
       }
     }
   } else {
@@ -2414,156 +2377,6 @@ function waitForApplicationStop(aApplication) {
                aApplication);
 }
 
-/**
- * Helper function for updater tests for launching the updater using the
- * maintenance service to apply a mar file. When complete runUpdateFinished
- * will be called.
- *
- * @param   aExpectedStatus
- *          The expected value of update.status when the test finishes.
- * @param   aSwitchApp
- *          If true the update should switch the application with an updated
- *          staged application and if false the update should be applied to the
- *          installed application.
- * @param   aCheckSvcLog
- *          Whether the service log should be checked.
- */
-function runUpdateUsingService(aExpectedStatus, aSwitchApp, aCheckSvcLog) {
-  if (!IS_WIN) {
-    do_throw("Windows only function called by a different platform!");
-  }
-
-  // Check the service logs for a successful update
-  function checkServiceLogs(aOriginalContents) {
-    let contents = readServiceLogFile();
-    Assert.notEqual(contents, aOriginalContents,
-                    "the contents of the maintenanceservice.log should not " +
-                    "be the same as the original contents");
-    Assert.notEqual(contents.indexOf(LOG_SVC_SUCCESSFUL_LAUNCH), -1,
-                    "the contents of the maintenanceservice.log should " +
-                    "contain the successful launch string");
-  }
-
-  function readServiceLogFile() {
-    let file = getMaintSvcDir();
-    file.append("logs");
-    file.append("maintenanceservice.log");
-    return readFile(file);
-  }
-
-  function checkServiceUpdateFinished() {
-    waitForApplicationStop(FILE_MAINTENANCE_SERVICE_BIN);
-    waitForApplicationStop(FILE_UPDATER_BIN);
-
-    // Wait for the expected status
-    let status;
-    try {
-      status = readStatusFile();
-    } catch (e) {
-      do_execute_soon(checkServiceUpdateFinished);
-      return;
-    }
-    // The status will probably always be equal to STATE_APPLYING but there is a
-    // race condition where it would be possible on slower machines where status
-    // could be equal to STATE_PENDING_SVC.
-    if (status == STATE_APPLYING) {
-      debugDump("still waiting to see the " + aExpectedStatus +
-                " status, got " + status + " for now...");
-      do_execute_soon(checkServiceUpdateFinished);
-      return;
-    }
-
-    // Make sure all of the logs are written out.
-    waitForServiceStop(false);
-    resetEnvironment();
-
-    if (status != aExpectedStatus) {
-      logTestInfo("update status is not the expected status! Got: " + status +
-                  ", Expected: " + aExpectedStatus);
-      logTestInfo("update.status contents: " + readStatusFile());
-      logUpdateLog(FILE_UPDATE_LOG);
-    }
-    Assert.equal(status, aExpectedStatus,
-                 "the update status" + MSG_SHOULD_EQUAL);
-
-    if (aCheckSvcLog) {
-      checkServiceLogs(svcOriginalLog);
-    }
-
-    do_execute_soon(runUpdateFinished);
-  }
-
-  // Make sure the service from the previous test is already stopped.
-  waitForServiceStop(true);
-
-  // Prevent the cleanup function from begin run more than once
-  if (gRegisteredServiceCleanup === undefined) {
-    gRegisteredServiceCleanup = true;
-
-    do_register_cleanup(function RUUS_cleanup() {
-      resetEnvironment();
-
-      // This will delete the app arguments log file if it exists.
-      try {
-        getAppArgsLogPath();
-      } catch (e) {
-        logTestInfo("unable to remove file during cleanup. Exception: " + e);
-      }
-    });
-  }
-
-  let svcOriginalLog;
-  if (aCheckSvcLog) {
-    svcOriginalLog = readServiceLogFile();
-  }
-
-  let appArgsLogPath = getAppArgsLogPath();
-  gServiceLaunchedCallbackLog = appArgsLogPath.replace(/^"|"$/g, "");
-
-  gServiceLaunchedCallbackArgs = [
-    "-no-remote",
-    "-test-process-updates",
-    "-dump-args",
-    appArgsLogPath
-  ];
-
-  if (aSwitchApp) {
-    // We want to set the env vars again
-    gShouldResetEnv = undefined;
-  }
-
-  setEnvironment();
-
-  let updater = getTestDirFile(FILE_UPDATER_BIN);
-  if (!updater.exists()) {
-    do_throw("Unable to find the updater binary!");
-  }
-  let testBinDir = getGREBinDir();
-  updater.copyToFollowingLinks(testBinDir, updater.leafName);
-
-  // The service will execute maintenanceservice_installer.exe and
-  // will copy maintenanceservice.exe out of the same directory from
-  // the installation directory.  So we need to make sure both of those
-  // bins always exist in the installation directory.
-  copyFileToTestAppDir(FILE_MAINTENANCE_SERVICE_BIN, false);
-  copyFileToTestAppDir(FILE_MAINTENANCE_SERVICE_INSTALLER_BIN, false);
-
-  let launchBin = getLaunchBin();
-  let args = getProcessArgs(["-dump-args", appArgsLogPath]);
-
-  let process = Cc["@mozilla.org/process/util;1"].
-                createInstance(Ci.nsIProcess);
-  process.init(launchBin);
-  debugDump("launching " + launchBin.path + " " + args.join(" "));
-  // Firefox does not wait for the service command to finish, but
-  // we still launch the process sync to avoid intermittent failures with
-  // the log file not being written out yet.
-  // We will rely on watching the update.status file and waiting for the service
-  // to stop to know the service command is done.
-  process.run(true, args, args.length);
-
-  do_execute_soon(checkServiceUpdateFinished);
-}
 
 /**
  * Gets the platform specific shell binary that is launched using nsIProcess and
@@ -2589,6 +2402,7 @@ function getLaunchBin() {
 
   return launchBin;
 }
+
 
 /**
  * Locks a Windows directory.
@@ -2695,7 +2509,8 @@ function waitForHelperSleep() {
       do_throw("Exceeded MAX_TIMEOUT_RUNS while waiting for the helper to " +
                "finish its operation. Path: " + output.path);
     }
-    do_execute_soon(waitForHelperSleep);
+    // Uses do_timeout instead of do_execute_soon to lessen log spew.
+    do_timeout(FILE_IN_USE_TIMEOUT_MS, waitForHelperSleep);
     return;
   }
   try {
@@ -2706,7 +2521,8 @@ function waitForHelperSleep() {
                "message file to no longer be in use. Path: " + output.path);
     }
     debugDump("failed to remove file. Path: " + output.path);
-    do_execute_soon(waitForHelperSleep);
+    // Uses do_timeout instead of do_execute_soon to lessen log spew.
+    do_timeout(FILE_IN_USE_TIMEOUT_MS, waitForHelperSleep);
     return;
   }
   waitForHelperSleepFinished();
@@ -2722,7 +2538,8 @@ function waitForHelperFinished() {
   // this test can fail intermittently on Windows debug builds.
   let output = getApplyDirFile(DIR_RESOURCES + "output", true);
   if (readFile(output) != "finished\n") {
-    do_execute_soon(waitForHelperFinished);
+    // Uses do_timeout instead of do_execute_soon to lessen log spew.
+    do_timeout(FILE_IN_USE_TIMEOUT_MS, waitForHelperFinished);
     return;
   }
   // Give the lock file process time to unlock the file before deleting the
@@ -2771,8 +2588,12 @@ function waitForHelperExit() {
  * @param   aPostUpdateAsync
  *          When null the updater.ini is not created otherwise this parameter
  *          is passed to createUpdaterINI.
+ * @param   aPostUpdateExeRelPathPrefix
+ *          When aPostUpdateAsync null this value is ignored otherwise it is
+ *          passed to createUpdaterINI.
  */
-function setupUpdaterTest(aMarFile, aPostUpdateAsync) {
+function setupUpdaterTest(aMarFile, aPostUpdateAsync,
+                          aPostUpdateExeRelPathPrefix = "") {
   let updatesPatchDir = getUpdatesPatchDir();
   if (!updatesPatchDir.exists()) {
     updatesPatchDir.create(Ci.nsIFile.DIRECTORY_TYPE, PERMS_DIRECTORY);
@@ -2857,15 +2678,10 @@ function setupUpdaterTest(aMarFile, aPostUpdateAsync) {
   setupActiveUpdate();
 
   if (aPostUpdateAsync !== null) {
-    createUpdaterINI(aPostUpdateAsync);
+    createUpdaterINI(aPostUpdateAsync, aPostUpdateExeRelPathPrefix);
   }
 
-  if (IS_TOOLKIT_GONK) {
-    // Gonk doesn't use the app files in any of the tests.
-    do_execute_soon(setupUpdaterTestFinished);
-  } else {
-    setupAppFilesAsync();
-  }
+  setupAppFilesAsync();
 }
 
 /**
@@ -2885,8 +2701,10 @@ function createUpdateSettingsINI() {
  *          True or undefined if the post update process should be async. If
  *          undefined ExeAsync will not be added to the updater.ini file in
  *          order to test the default launch behavior which is async.
+ * @param   aExeRelPathPrefix
+ *          A string to prefix the ExeRelPath values in the updater.ini.
  */
-function createUpdaterINI(aIsExeAsync) {
+function createUpdaterINI(aIsExeAsync, aExeRelPathPrefix) {
   let exeArg = "ExeArg=post-update-async\n";
   let exeAsync = "";
   if (aIsExeAsync !== undefined) {
@@ -2898,16 +2716,23 @@ function createUpdaterINI(aIsExeAsync) {
     }
   }
 
+  if (aExeRelPathPrefix && IS_WIN) {
+    aExeRelPathPrefix = aExeRelPathPrefix.replace("/", "\\");
+  }
+
+  let exeRelPathMac = "ExeRelPath=" + aExeRelPathPrefix + DIR_RESOURCES +
+                      gPostUpdateBinFile + "\n";
+  let exeRelPathWin = "ExeRelPath=" + aExeRelPathPrefix + gPostUpdateBinFile + "\n";
   let updaterIniContents = "[Strings]\n" +
                            "Title=Update Test\n" +
                            "Info=Running update test " + gTestID + "\n\n" +
                            "[PostUpdateMac]\n" +
-                           "ExeRelPath=" + DIR_RESOURCES + gPostUpdateBinFile + "\n" +
+                           exeRelPathMac +
                            exeArg +
                            exeAsync +
                            "\n" +
                            "[PostUpdateWin]\n" +
-                           "ExeRelPath=" + gPostUpdateBinFile + "\n" +
+                           exeRelPathWin +
                            exeArg +
                            exeAsync;
   let updaterIni = getApplyDirFile(DIR_RESOURCES + FILE_UPDATER_INI, true);
@@ -3363,29 +3188,8 @@ function checkFilesAfterUpdateCommon(aGetFileFunc, aStageDirExists,
   if (stageDir.exists()) {
     debugDump("testing backup files should not be left behind in the " +
               "staging directory");
-    let applyToDir = getApplyDirFile(null, true);
+    applyToDir = getApplyDirFile(null, true);
     checkFilesInDirRecursive(stageDir, checkForBackupFiles);
-  }
-
-  debugDump("testing patch files should not be left behind");
-  let updatesDir = getUpdatesPatchDir();
-  let entries = updatesDir.QueryInterface(Ci.nsIFile).directoryEntries;
-  while (entries.hasMoreElements()) {
-    let entry = entries.getNext().QueryInterface(Ci.nsIFile);
-    Assert.notEqual(getFileExtension(entry), "patch",
-                    "the file's extension should not equal patch" +
-                    getMsgPath(entry.path));
-  }
-}
-
-/**
- * Calls the appropriate callback log check for service and non-service tests.
- */
-function checkCallbackLog() {
-  if (IS_SERVICE_TEST) {
-    checkCallbackServiceLog();
-  } else {
-    checkCallbackAppLog();
   }
 }
 
@@ -3394,10 +3198,11 @@ function checkCallbackLog() {
  * updater callback application log which should contain the arguments passed to
  * the callback application.
  */
-function checkCallbackAppLog() {
+function checkCallbackLog() {
   let appLaunchLog = getApplyDirFile(DIR_RESOURCES + gCallbackArgs[1], true);
   if (!appLaunchLog.exists()) {
-    do_execute_soon(checkCallbackAppLog);
+    // Uses do_timeout instead of do_execute_soon to lessen log spew.
+    do_timeout(FILE_IN_USE_TIMEOUT_MS, checkCallbackLog);
     return;
   }
 
@@ -3433,7 +3238,8 @@ function checkCallbackAppLog() {
       // This should never happen!
       do_throw("Unable to find incorrect callback log contents!");
     }
-    do_execute_soon(checkCallbackAppLog);
+    // Uses do_timeout instead of do_execute_soon to lessen log spew.
+    do_timeout(FILE_IN_USE_TIMEOUT_MS, checkCallbackLog);
     return;
   }
   Assert.ok(true, "the callback log contents" + MSG_SHOULD_EQUAL);
@@ -3495,55 +3301,6 @@ function checkPostUpdateAppLog() {
 }
 
 /**
- * Helper function for updater service tests for verifying the contents of the
- * updater callback application log which should contain the arguments passed to
- * the callback application.
- */
-function checkCallbackServiceLog() {
-  Assert.ok(!!gServiceLaunchedCallbackLog,
-            "gServiceLaunchedCallbackLog should be defined");
-
-  let expectedLogContents = gServiceLaunchedCallbackArgs.join("\n") + "\n";
-  let logFile = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsILocalFile);
-  logFile.initWithPath(gServiceLaunchedCallbackLog);
-  let logContents = readFile(logFile);
-  // It is possible for the log file contents check to occur before the log file
-  // contents are completely written so wait until the contents are the expected
-  // value. If the contents are never the expected value then the test will
-  // fail by timing out after gTimeoutRuns is greater than MAX_TIMEOUT_RUNS or
-  // the test harness times out the test.
-  if (logContents != expectedLogContents) {
-    gTimeoutRuns++;
-    if (gTimeoutRuns > MAX_TIMEOUT_RUNS) {
-      logTestInfo("callback service log contents are not correct");
-      let aryLog = logContents.split("\n");
-      let aryCompare = expectedLogContents.split("\n");
-      // Pushing an empty string to both arrays makes it so either array's length
-      // can be used in the for loop below without going out of bounds.
-      aryLog.push("");
-      aryCompare.push("");
-      // xpcshell tests won't display the entire contents so log the incorrect
-      // line.
-      for (let i = 0; i < aryLog.length; ++i) {
-        if (aryLog[i] != aryCompare[i]) {
-          logTestInfo("the first incorrect line in the service callback log " +
-                      "is: " + aryLog[i]);
-          Assert.equal(aryLog[i], aryCompare[i],
-                       "the service callback log contents" + MSG_SHOULD_EQUAL);
-        }
-      }
-      // This should never happen!
-      do_throw("Unable to find incorrect service callback log contents!");
-    }
-    do_execute_soon(checkCallbackServiceLog);
-    return;
-  }
-  Assert.ok(true, "the callback service log contents" + MSG_SHOULD_EQUAL);
-
-  waitForFilesInUse();
-}
-
-/**
  * Helper function to check if a file is in use on Windows by making a copy of
  * a file and attempting to delete the original file. If the deletion is
  * successful the copy of the original file is renamed to the original file's
@@ -3581,9 +3338,9 @@ function isFileInUse(aFile) {
       if (fileBak.exists()) {
         fileBak.remove(false);
       }
-    } catch (e) {
+    } catch (ex) {
       logTestInfo("unable to remove backup file, path: " +
-                  fileBak.path + ", exception: " + e);
+                  fileBak.path + ", exception: " + ex);
     }
   }
   return true;
@@ -3653,82 +3410,6 @@ function checkFilesInDirRecursive(aDir, aCallback) {
   }
 }
 
-/**
- * Sets up the bare bones XMLHttpRequest implementation below.
- *
- * @param   aCallback
- *          The callback function that will call the nsIDomEventListener's
- *          handleEvent method.
- *
- *          Example of the callback function
- *
- *            function callHandleEvent(aXHR) {
- *              aXHR.status = gExpectedStatus;
- *              let e = { target: aXHR };
- *              aXHR.onload.handleEvent(e);
- *            }
- */
-function overrideXHR(aCallback) {
-  Cu.import("resource://testing-common/MockRegistrar.jsm");
-  MockRegistrar.register("@mozilla.org/xmlextras/xmlhttprequest;1", xhr, [aCallback]);
-}
-
-/**
- * Bare bones XMLHttpRequest implementation for testing onprogress, onerror,
- * and onload nsIDomEventListener handleEvent.
- */
-function makeHandler(aVal) {
-  if (typeof aVal == "function") {
-    return { handleEvent: aVal };
-  }
-  return aVal;
-}
-function xhr(aCallback) {
-  this._callback = aCallback;
-}
-xhr.prototype = {
-  overrideMimeType: function(aMimetype) { },
-  setRequestHeader: function(aHeader, aValue) { },
-  status: null,
-  channel: {
-    set notificationCallbacks(aVal) { },
-    QueryInterface: XPCOMUtils.generateQI([Ci.nsIChannel])
-  },
-  _url: null,
-  _method: null,
-  open: function(aMethod, aUrl) {
-    this.channel.originalURI = Services.io.newURI(aUrl, null, null);
-    this._method = aMethod; this._url = aUrl;
-  },
-  responseXML: null,
-  responseText: null,
-  send: function(aBody) {
-    do_execute_soon(function() {
-      this._callback(this);
-    }.bind(this)); // Use a timeout so the XHR completes
-  },
-  _onprogress: null,
-  set onprogress(aValue) { this._onprogress = makeHandler(aValue); },
-  get onprogress() { return this._onprogress; },
-  _onerror: null,
-  set onerror(aValue) { this._onerror = makeHandler(aValue); },
-  get onerror() { return this._onerror; },
-  _onload: null,
-  set onload(aValue) { this._onload = makeHandler(aValue); },
-  get onload() { return this._onload; },
-  addEventListener: function(aEvent, aValue, aCapturing) {
-    eval("this._on" + aEvent + " = aValue");
-  },
-  flags: Ci.nsIClassInfo.SINGLETON,
-  getScriptableHelper: () => null,
-  getInterfaces: function(aCount) {
-    let interfaces = [Ci.nsISupports];
-    aCount.value = interfaces.length;
-    return interfaces;
-  },
-  get wrappedJSObject() { return this; },
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIClassInfo])
-};
 
 /**
  * Helper function to override the update prompt component to verify whether it
@@ -3761,7 +3442,7 @@ function UpdatePrompt(aCallback) {
 
       callback.apply(this._callback,
                      Array.prototype.slice.call(arguments));
-    }
+    };
   });
 }
 
@@ -3795,6 +3476,9 @@ const updateCheckListener = {
   onError: function UCL_onError(aRequest, aUpdate) {
     gRequestURL = aRequest.channel.originalURI.spec;
     gStatusCode = aRequest.status;
+    if (gStatusCode == 0) {
+      gStatusCode = aRequest.channel.QueryInterface(Ci.nsIRequest).status;
+    }
     gStatusText = aUpdate.statusText ? aUpdate.statusText : null;
     debugDump("url = " + gRequestURL + ", " +
               "request.status = " + gStatusCode + ", " +
@@ -3842,10 +3526,25 @@ function start_httpserver() {
   let { HttpServer } = Cu.import("resource://testing-common/httpd.js", {});
   gTestserver = new HttpServer();
   gTestserver.registerDirectory("/", dir);
+  gTestserver.registerPathHandler("/" + gHTTPHandlerPath, pathHandler);
   gTestserver.start(-1);
   let testserverPort = gTestserver.identity.primaryPort;
   gURLData = URL_HOST + ":" + testserverPort + "/";
   debugDump("http server port = " + testserverPort);
+}
+
+/**
+ * Custom path handler for the http server
+ *
+ * @param   aMetadata
+ *          The http metadata for the request.
+ * @param   aResponse
+ *          The http response for the request.
+ */
+function pathHandler(aMetadata, aResponse) {
+  aResponse.setHeader("Content-Type", "text/xml", false);
+  aResponse.setStatusLine(aMetadata.httpVersion, gResponseStatusCode, "OK");
+  aResponse.bodyOutputStream.write(gResponseBody, gResponseBody.length);
 }
 
 /**
@@ -4052,8 +3751,8 @@ function adjustGeneralPaths() {
         debugDump("start - closing handle");
         let kernel32 = ctypes.open("kernel32");
         let CloseHandle = kernel32.declare("CloseHandle", ctypes.default_abi,
-                                           ctypes.bool, /*return*/
-                                           ctypes.voidptr_t /*handle*/);
+                                           ctypes.bool, /* return*/
+                                           ctypes.voidptr_t /* handle*/);
         if (!CloseHandle(gHandle)) {
           debugDump("call to CloseHandle failed");
         }
@@ -4066,7 +3765,7 @@ function adjustGeneralPaths() {
     }
 
     // Call end_test first before the directory provider is unregistered
-    if (typeof(end_test) == typeof(Function)) {
+    if (typeof end_test == typeof Function) {
       debugDump("calling end_test");
       end_test();
     }
@@ -4077,6 +3776,21 @@ function adjustGeneralPaths() {
     debugDump("finish - unregistering directory provider");
   });
 }
+
+/**
+ * The timer callback to kill the process if it takes too long.
+ */
+const gAppTimerCallback = {
+  notify: function TC_notify(aTimer) {
+    gAppTimer = null;
+    if (gProcess.isRunning) {
+      logTestInfo("attempting to kill process");
+      gProcess.kill();
+    }
+    Assert.ok(false, "launch application timer expired");
+  },
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsITimerCallback])
+};
 
 /**
  * Launches an application to apply an update.
@@ -4121,7 +3835,7 @@ function runUpdateUsingApp(aExpectedStatus) {
     try {
       status = readStatusFile();
     } catch (e) {
-      logTestInfo("error reading status file, exception: "+ e);
+      logTestInfo("error reading status file, exception: " + e);
     }
     // Don't proceed until the update's status is the expected value.
     if (status != aExpectedStatus) {
@@ -4132,20 +3846,27 @@ function runUpdateUsingApp(aExpectedStatus) {
                  aExpectedStatus +
                  ", current status: " + status);
       } else {
-        do_execute_soon(afterAppExits);
+        do_timeout(FILE_IN_USE_TIMEOUT_MS, afterAppExits);
       }
       return;
     }
 
-    // Don't proceed until the update log has been created.
-    let log = getUpdateLog(FILE_UPDATE_LOG);
-    if (!log.exists()) {
-      if (gTimeoutRuns > MAX_TIMEOUT_RUNS) {
-        do_throw("Exceeded MAX_TIMEOUT_RUNS while waiting for the update log " +
-                 "to be created. Path: " + log.path);
+    // Don't check for an update log when the code in nsUpdateDriver.cpp skips
+    // updating.
+    if (aExpectedStatus != STATE_PENDING &&
+        aExpectedStatus != STATE_PENDING_SVC &&
+        aExpectedStatus != STATE_APPLIED &&
+        aExpectedStatus != STATE_APPLIED_SVC) {
+      // Don't proceed until the update log has been created.
+      let log = getUpdateLog(FILE_UPDATE_LOG);
+      if (!log.exists()) {
+        if (gTimeoutRuns > MAX_TIMEOUT_RUNS) {
+          do_throw("Exceeded MAX_TIMEOUT_RUNS while waiting for the update " +
+                   "log to be created. Path: " + log.path);
+        }
+        do_timeout(FILE_IN_USE_TIMEOUT_MS, afterAppExits);
+        return;
       }
-      do_execute_soon(afterAppExits);
-      return;
     }
 
     do_execute_soon(runUpdateFinished);
@@ -4175,42 +3896,6 @@ function runUpdateUsingApp(aExpectedStatus) {
 }
 
 /**
- * The timer callback to kill the process if it takes too long.
- */
-const gAppTimerCallback = {
-  notify: function TC_notify(aTimer) {
-    gAppTimer = null;
-    if (gProcess.isRunning) {
-      logTestInfo("attempting to kill process");
-      gProcess.kill();
-    }
-    Assert.ok(false, "launch application timer expired");
-  },
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsITimerCallback])
-};
-
-/**
- * The update-staged observer for the call to nsIUpdateProcessor:processUpdate.
- */
-const gUpdateStagedObserver = {
-  observe: function(aSubject, aTopic, aData) {
-    debugDump("observe called with topic: " + aTopic + ", data: " + aData);
-    if (aTopic == "update-staged") {
-      Services.obs.removeObserver(gUpdateStagedObserver, "update-staged");
-      // The environment is reset after the update-staged observer topic because
-      // processUpdate in nsIUpdateProcessor uses a new thread and clearing the
-      // environment immediately after calling processUpdate can clear the
-      // environment before the updater is launched.
-      resetEnvironment();
-      // Use do_execute_soon to prevent any failures from propagating to the
-      // update service.
-      do_execute_soon(checkUpdateStagedState.bind(null, aData));
-    }
-  },
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver])
-};
-
-/**
  * Sets the environment that will be used by the application process when it is
  * launched.
  */
@@ -4221,6 +3906,14 @@ function setEnvironment() {
   }
 
   gShouldResetEnv = true;
+
+  // See bug 1279108.
+  if (gEnv.exists("ASAN_OPTIONS")) {
+    gASanOptions = gEnv.get("ASAN_OPTIONS");
+    gEnv.set("ASAN_OPTIONS", gASanOptions + ":detect_leaks=0");
+  } else {
+    gEnv.set("ASAN_OPTIONS", "detect_leaks=0");
+  }
 
   if (IS_WIN && !gEnv.exists("XRE_NO_WINDOWS_CRASH_DIALOG")) {
     gAddedEnvXRENoWindowsCrashDialog = true;
@@ -4285,8 +3978,10 @@ function setEnvironment() {
 
   gEnv.set("XPCOM_DEBUG_BREAK", "warn");
 
-  debugDump("setting MOZ_NO_SERVICE_FALLBACK environment variable to 1");
-  gEnv.set("MOZ_NO_SERVICE_FALLBACK", "1");
+  if (IS_SERVICE_TEST) {
+    debugDump("setting MOZ_NO_SERVICE_FALLBACK environment variable to 1");
+    gEnv.set("MOZ_NO_SERVICE_FALLBACK", "1");
+  }
 }
 
 /**
@@ -4300,6 +3995,9 @@ function resetEnvironment() {
   }
 
   gShouldResetEnv = false;
+
+  // Restore previous ASAN_OPTIONS if there were any.
+  gEnv.set("ASAN_OPTIONS", gASanOptions ? gASanOptions : "");
 
   if (gEnvXPCOMMemLeakLog) {
     debugDump("setting the XPCOM_MEM_LEAK_LOG environment variable back to " +
@@ -4326,15 +4024,13 @@ function resetEnvironment() {
         debugDump("removing DYLD_LIBRARY_PATH environment variable");
         gEnv.set("DYLD_LIBRARY_PATH", "");
       }
-    } else {
-      if (gEnvLdLibraryPath) {
-        debugDump("setting LD_LIBRARY_PATH environment variable value back " +
-                  "to " + gEnvLdLibraryPath);
-        gEnv.set("LD_LIBRARY_PATH", gEnvLdLibraryPath);
-      } else if (gEnvLdLibraryPath !== null) {
-        debugDump("removing LD_LIBRARY_PATH environment variable");
-        gEnv.set("LD_LIBRARY_PATH", "");
-      }
+    } else if (gEnvLdLibraryPath) {
+      debugDump("setting LD_LIBRARY_PATH environment variable value back " +
+                "to " + gEnvLdLibraryPath);
+      gEnv.set("LD_LIBRARY_PATH", gEnvLdLibraryPath);
+    } else if (gEnvLdLibraryPath !== null) {
+      debugDump("removing LD_LIBRARY_PATH environment variable");
+      gEnv.set("LD_LIBRARY_PATH", "");
     }
   }
 
@@ -4344,6 +4040,8 @@ function resetEnvironment() {
     gEnv.set("XRE_NO_WINDOWS_CRASH_DIALOG", "");
   }
 
-  debugDump("removing MOZ_NO_SERVICE_FALLBACK environment variable");
-  gEnv.set("MOZ_NO_SERVICE_FALLBACK", "");
+  if (IS_SERVICE_TEST) {
+    debugDump("removing MOZ_NO_SERVICE_FALLBACK environment variable");
+    gEnv.set("MOZ_NO_SERVICE_FALLBACK", "");
+  }
 }

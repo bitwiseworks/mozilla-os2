@@ -20,6 +20,14 @@
 namespace js {
 namespace jit {
 
+// Does this architecture support SIMD conversions between Uint32x4 and Float32x4?
+static constexpr bool SupportsUint32x4FloatConversions = false;
+
+// Does this architecture support comparisons of unsigned integer vectors?
+static constexpr bool SupportsUint8x16Compares = false;
+static constexpr bool SupportsUint16x8Compares = false;
+static constexpr bool SupportsUint32x4Compares = false;
+
 #if defined(JS_CODEGEN_X86)
 // In bytes: slots needed for potential memory->memory move spills.
 //   +8 for cycles
@@ -50,6 +58,8 @@ static const uint32_t ShadowStackSpace = 32;
 #else
 static const uint32_t ShadowStackSpace = 0;
 #endif
+
+static const uint32_t JumpImmediateRange = INT32_MAX;
 
 class Registers {
   public:
@@ -251,6 +261,7 @@ class FloatRegisters {
     static const SetType AllPhysMask = ((1 << TotalPhys) - 1);
     static const SetType AllMask = AllPhysMask * Spread;
     static const SetType AllDoubleMask = AllPhysMask * SpreadDouble;
+    static const SetType AllSingleMask = AllPhysMask * SpreadSingle;
 
 #if defined(JS_CODEGEN_X86)
     static const SetType NonAllocatableMask =
@@ -339,13 +350,13 @@ struct FloatRegister {
     static const size_t RegMask = (1 << RegSize) - 1;
 
   public:
-    MOZ_CONSTEXPR FloatRegister()
+    constexpr FloatRegister()
         : reg_(Codes::Encoding(0)), type_(Codes::Single), isInvalid_(true)
     { }
-    MOZ_CONSTEXPR FloatRegister(uint32_t r, Codes::ContentType k)
+    constexpr FloatRegister(uint32_t r, Codes::ContentType k)
         : reg_(Codes::Encoding(r)), type_(k), isInvalid_(false)
     { }
-    MOZ_CONSTEXPR FloatRegister(Codes::Encoding r, Codes::ContentType k)
+    constexpr FloatRegister(Codes::Encoding r, Codes::ContentType k)
         : reg_(r), type_(k), isInvalid_(false)
     { }
 
@@ -445,11 +456,6 @@ hasMultiAlias()
 {
     return false;
 }
-
-// Support some constant-offset addressing.
-// See the comments above AsmJSMappedSize in AsmJSValidate.h for more info.
-static const size_t AsmJSCheckedImmediateRange = 4096;
-static const size_t AsmJSImmediateRange = UINT32_C(0x80000000);
 
 } // namespace jit
 } // namespace js

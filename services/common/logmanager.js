@@ -132,13 +132,12 @@ FlushableStorageAppender.prototype = {
 
 // The public LogManager object.
 function LogManager(prefRoot, logNames, logFilePrefix) {
+  this._prefObservers = [];
   this.init(prefRoot, logNames, logFilePrefix);
 }
 
 LogManager.prototype = {
   _cleaningUpFileLogs: false,
-
-  _prefObservers: [],
 
   init(prefRoot, logNames, logFilePrefix) {
     if (prefRoot instanceof Preferences) {
@@ -196,12 +195,6 @@ LogManager.prototype = {
     // now attach the appenders to all our logs.
     for (let logName of logNames) {
       let log = Log.repository.getLogger(logName);
-      // Set all of the logs themselves to log all messages, and rely on the
-      // more restrictive levels on the appenders to restrict what is seen.
-      // (We possibly could find the smallest appender level and set the logs
-      // to that, but that gets tricky when we consider a singe log might end
-      // up being managed by multiple log managers - so this is fine for now.)
-      log.level = Log.Level.All;
       for (let appender of [fapp, dumpAppender, consoleAppender]) {
         log.addAppender(appender);
       }
@@ -230,6 +223,10 @@ LogManager.prototype = {
     // This returns an array of the the relative directory entries below the
     // profile dir, and is the directory about:sync-log uses.
     return ["weave", "logs"];
+  },
+
+  get sawError() {
+    return this._fileAppender.sawError;
   },
 
   // Result values for resetFileLog.
@@ -303,8 +300,11 @@ LogManager.prototype = {
 
     this._log.debug("Log cleanup threshold time: " + threshold);
     yield iterator.forEach(Task.async(function* (entry) {
-      if (!entry.name.startsWith("error-" + this.logFilePrefix + "-") &&
-          !entry.name.startsWith("success-" + this.logFilePrefix + "-")) {
+      // Note that we don't check this.logFilePrefix is in the name - we cleanup
+      // all files in this directory regardless of that prefix so old logfiles
+      // for prefixes no longer in use are still cleaned up. See bug 1279145.
+      if (!entry.name.startsWith("error-") &&
+          !entry.name.startsWith("success-")) {
         return;
       }
       try {
@@ -322,6 +322,7 @@ LogManager.prototype = {
                         + entry.name, ex);
       }
     }.bind(this)));
+    iterator.close();
     this._cleaningUpFileLogs = false;
     this._log.debug("Done deleting files.");
     // This notification is used only for tests.

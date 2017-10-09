@@ -14,14 +14,13 @@
  */
 
 interface Element : Node {
-/*
-  We haven't moved these from Node to Element like the spec wants.
-
-  [Throws]
+  [Constant]
   readonly attribute DOMString? namespaceURI;
+  [Constant]
   readonly attribute DOMString? prefix;
+  [Constant]
   readonly attribute DOMString localName;
-*/
+
   // Not [Constant] because it depends on which document we're in
   [Pure]
   readonly attribute DOMString tagName;
@@ -30,7 +29,7 @@ interface Element : Node {
            attribute DOMString id;
   [Pure]
            attribute DOMString className;
-  [Constant]
+  [Constant, PutForwards=value]
   readonly attribute DOMTokenList classList;
 
   [SameObject]
@@ -71,6 +70,12 @@ interface Element : Node {
   [Pure]
   HTMLCollection getElementsByClassName(DOMString classNames);
 
+  [Throws, Pure]
+  Element? insertAdjacentElement(DOMString where, Element element); // historical
+
+  [Throws]
+  void insertAdjacentText(DOMString where, DOMString data); // historical
+
   /**
    * The ratio of font-size-inflated text font size to computed font
    * size for this element. This will query the element for its primary frame,
@@ -106,6 +111,9 @@ interface Element : Node {
   [Throws, Pref="dom.w3c_pointer_events.enabled"]
   void releasePointerCapture(long pointerId);
 
+  [Pref="dom.w3c_pointer_events.enabled"]
+  boolean hasPointerCapture(long pointerId);
+
   // Proprietary extensions
   /**
    * Set this during a mousedown event to grab and retarget all mouse events
@@ -124,26 +132,6 @@ interface Element : Node {
   void releaseCapture();
 
   // Mozilla extensions
-  /**
-   * Requests that this element be made the full-screen element, as per the DOM
-   * full-screen api.
-   *
-   * The options parameter is non-standard. In Gecko, it can be:
-   *  a RequestFullscreenOptions object
-   *
-   * @see <https://wiki.mozilla.org/index.php?title=Gecko:FullScreenAPI>
-   */
-  [Throws, UnsafeInPrerendering]
-  void mozRequestFullScreen(optional any options);
-
-  /**
-   * Requests that this element be made the pointer-locked element, as per the DOM
-   * pointer lock api.
-   *
-   * @see <http://dvcs.w3.org/hg/pointerlock/raw-file/default/index.html>
-   */
-  [UnsafeInPrerendering]
-  void mozRequestPointerLock();
 
   // Obsolete methods.
   Attr? getAttributeNode(DOMString name);
@@ -161,6 +149,16 @@ interface Element : Node {
    * layout flushing.
    */
   boolean scrollByNoFlush(long dx, long dy);
+
+  // Support reporting of Grid properties
+
+  /**
+   * If this element has a display:grid or display:inline-grid style,
+   * this property returns an object with computed values for grid
+   * tracks and lines.
+   */
+  [ChromeOnly, Pure]
+  sequence<Grid> getGridFragments();
 };
 
 // http://dev.w3.org/csswg/cssom-view/
@@ -210,14 +208,6 @@ partial interface Element {
                readonly attribute long scrollLeftMax;
 };
 
-// http://dvcs.w3.org/hg/undomanager/raw-file/tip/undomanager.html
-partial interface Element {
-  [Pref="dom.undo_manager.enabled"]
-  readonly attribute UndoManager? undoManager;
-  [SetterThrows,Pref="dom.undo_manager.enabled"]
-  attribute boolean undoScope;
-};
-
 // http://domparsing.spec.whatwg.org/#extensions-to-the-element-interface
 partial interface Element {
   [Pure,SetterThrows,TreatNullAs=EmptyString]
@@ -252,9 +242,18 @@ Element implements ParentNode;
 Element implements Animatable;
 Element implements GeometryUtils;
 
-// non-standard: allows passing options to Element.requestFullScreen
-dictionary RequestFullscreenOptions {
-  // Which HMDVRDevice to go full screen on; also enables VR rendering.
-  // If null, normal fullscreen is entered.
-  HMDVRDevice? vrDisplay = null;
+// https://fullscreen.spec.whatwg.org/#api
+partial interface Element {
+  [Throws, UnsafeInPrerendering, Func="nsDocument::IsUnprefixedFullscreenEnabled"]
+  void requestFullscreen();
+  [Throws, UnsafeInPrerendering, BinaryName="requestFullscreen"]
+  void mozRequestFullScreen();
+};
+
+// https://w3c.github.io/pointerlock/#extensions-to-the-element-interface
+partial interface Element {
+  [UnsafeInPrerendering]
+  void requestPointerLock();
+  [UnsafeInPrerendering, BinaryName="requestPointerLock", Pref="pointer-lock-api.prefixed.enabled"]
+  void mozRequestPointerLock();
 };

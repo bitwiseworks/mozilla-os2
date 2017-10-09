@@ -23,10 +23,6 @@ XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
                                    "@mozilla.org/childprocessmessagemanager;1",
                                    "nsIMessageSender");
 
-XPCOMUtils.defineLazyServiceGetter(this, "appsService",
-                                   "@mozilla.org/AppsService;1",
-                                   "nsIAppsService");
-
 const kMessageNotificationGetAllOk = "Notification:GetAll:Return:OK";
 const kMessageNotificationGetAllKo = "Notification:GetAll:Return:KO";
 const kMessageNotificationSaveKo   = "Notification:Save:Return:KO";
@@ -76,15 +72,8 @@ NotificationStorage.prototype = {
     }
   },
 
-  canPut: function(aOrigin) {
-    if (DEBUG) debug("Querying appService for: " + aOrigin);
-    let rv = !!appsService.getAppByManifestURL(aOrigin);
-    if (DEBUG) debug("appService returned: " + rv);
-    return rv;
-  },
-
   put: function(origin, id, title, dir, lang, body, tag, icon, alertName,
-                data, behavior, serviceWorkerRegistrationID) {
+                data, behavior, serviceWorkerRegistrationScope) {
     if (DEBUG) { debug("PUT: " + origin + " " + id + ": " + title); }
     var notification = {
       id: id,
@@ -99,7 +88,7 @@ NotificationStorage.prototype = {
       origin: origin,
       data: data,
       mozbehavior: behavior,
-      serviceWorkerRegistrationID: serviceWorkerRegistrationID,
+      serviceWorkerRegistrationScope: serviceWorkerRegistrationScope,
     };
 
     this._notifications[id] = notification;
@@ -118,7 +107,7 @@ NotificationStorage.prototype = {
       this._byTag[origin][tag] = notification;
     };
 
-    if (this.canPut(origin)) {
+    if (serviceWorkerRegistrationScope) {
       cpmm.sendAsyncMessage("Notification:Save", {
         origin: origin,
         notification: notification
@@ -141,9 +130,9 @@ NotificationStorage.prototype = {
       this.searchID = id;
       this.originalCallback = originalCallback;
       var self = this;
-      this.handle = function(id, title, dir, lang, body, tag, icon, data, behavior, serviceWorkerRegistrationID) {
+      this.handle = function(id, title, dir, lang, body, tag, icon, data, behavior, serviceWorkerRegistrationScope) {
         if (id == this.searchID) {
-          self.originalCallback.handle(id, title, dir, lang, body, tag, icon, data, behavior, serviceWorkerRegistrationID);
+          self.originalCallback.handle(id, title, dir, lang, body, tag, icon, data, behavior, serviceWorkerRegistrationScope);
         }
       };
       this.done = function() {
@@ -246,7 +235,7 @@ NotificationStorage.prototype = {
                                notification.icon,
                                notification.data,
                                notification.mozbehavior,
-                               notification.serviceWorkerRegistrationID),
+                               notification.serviceWorkerRegistrationScope),
           Ci.nsIThread.DISPATCH_NORMAL);
       } catch (e) {
         if (DEBUG) { debug("Error calling callback handle: " + e); }

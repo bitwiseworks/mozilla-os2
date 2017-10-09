@@ -3,10 +3,11 @@ config = {
     "log_name": "updates_beta",
     "repo": {
         "repo": "https://hg.mozilla.org/build/tools",
-        "revision": "default",
+        "branch": "default",
         "dest": "tools",
         "vcs": "hg",
     },
+    "vcs_share_base": "/builds/hg-shared",
     "push_dest": "ssh://hg.mozilla.org/build/tools",
     "shipped-locales-url": "https://hg.mozilla.org/releases/mozilla-beta/raw-file/{revision}/browser/locales/shipped-locales",
     "ignore_no_changes": True,
@@ -17,16 +18,14 @@ config = {
     "previous_archive_prefix": "https://archive.mozilla.org/pub",
     "download_domain": "download.mozilla.org",
     "balrog_url": "https://aus5.mozilla.org",
-    "balrog_username": "ffxbld",
+    "balrog_username": "balrog-ffxbld",
     "update_channels": {
         "beta": {
             "version_regex": r"^(\d+\.\d+(b\d+)?)$",
             "requires_mirrors": True,
             "patcher_config": "mozBeta-branch-patcher2.cfg",
             "update_verify_channel": "beta-localtest",
-            "mar_channel_ids": [
-                "firefox-mozilla-beta", "firefox-mozilla-release",
-            ],
+            "mar_channel_ids": [],
             "channel_names": ["beta", "beta-localtest", "beta-cdntest"],
             "rules_to_update": ["firefox-beta-cdntest", "firefox-beta-localtest"],
             "publish_rules": ["firefox-beta"],

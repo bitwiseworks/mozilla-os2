@@ -5,39 +5,61 @@
 
 package org.mozilla.gecko.db;
 
+import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
+import org.mozilla.gecko.AboutPages;
+import org.mozilla.gecko.GeckoProfile;
+import org.mozilla.gecko.R;
+import org.mozilla.gecko.db.BrowserContract.ActivityStreamBlocklist;
 import org.mozilla.gecko.db.BrowserContract.Bookmarks;
 import org.mozilla.gecko.db.BrowserContract.Combined;
 import org.mozilla.gecko.db.BrowserContract.FaviconColumns;
 import org.mozilla.gecko.db.BrowserContract.Favicons;
+import org.mozilla.gecko.db.BrowserContract.Highlights;
 import org.mozilla.gecko.db.BrowserContract.History;
+import org.mozilla.gecko.db.BrowserContract.Visits;
 import org.mozilla.gecko.db.BrowserContract.Schema;
 import org.mozilla.gecko.db.BrowserContract.Tabs;
 import org.mozilla.gecko.db.BrowserContract.Thumbnails;
+import org.mozilla.gecko.db.BrowserContract.TopSites;
+import org.mozilla.gecko.db.BrowserContract.UrlAnnotations;
+import org.mozilla.gecko.db.BrowserContract.PageMetadata;
 import org.mozilla.gecko.db.DBUtils.UpdateOperation;
+import org.mozilla.gecko.icons.IconsHelper;
 import org.mozilla.gecko.sync.Utils;
+import org.mozilla.gecko.util.ThreadUtils;
 
+import android.content.BroadcastReceiver;
 import android.content.ContentProviderOperation;
 import android.content.ContentProviderResult;
 import android.content.ContentUris;
 import android.content.ContentValues;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.OperationApplicationException;
 import android.content.UriMatcher;
 import android.database.Cursor;
 import android.database.DatabaseUtils;
 import android.database.MatrixCursor;
+import android.database.MergeCursor;
 import android.database.SQLException;
+import android.database.sqlite.SQLiteCursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteQueryBuilder;
 import android.net.Uri;
+import android.support.v4.content.LocalBroadcastManager;
 import android.text.TextUtils;
 import android.util.Log;
 
 public class BrowserProvider extends SharedBrowserDatabaseProvider {
+    public static final String ACTION_SHRINK_MEMORY = "org.mozilla.gecko.db.intent.action.SHRINK_MEMORY";
+
     private static final String LOGTAG = "GeckoBrowserProvider";
 
     // How many records to reposition in a single query.
@@ -50,6 +72,9 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
     static final int DEFAULT_EXPIRY_RETAIN_COUNT = 2000;
     static final int AGGRESSIVE_EXPIRY_RETAIN_COUNT = 500;
 
+    // Factor used to determine the minimum number of records to keep when expiring the activity stream blocklist
+    static final int ACTIVITYSTREAM_BLOCKLIST_EXPIRY_FACTOR = 5;
+
     // Minimum duration to keep when expiring.
     static final long DEFAULT_EXPIRY_PRESERVE_WINDOW = 1000L * 60L * 60L * 24L * 28L;     // Four weeks.
     // Minimum number of thumbnails to keep around.
@@ -57,12 +82,17 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
 
     static final String TABLE_BOOKMARKS = Bookmarks.TABLE_NAME;
     static final String TABLE_HISTORY = History.TABLE_NAME;
+    static final String TABLE_VISITS = Visits.TABLE_NAME;
     static final String TABLE_FAVICONS = Favicons.TABLE_NAME;
     static final String TABLE_THUMBNAILS = Thumbnails.TABLE_NAME;
     static final String TABLE_TABS = Tabs.TABLE_NAME;
+    static final String TABLE_URL_ANNOTATIONS = UrlAnnotations.TABLE_NAME;
+    static final String TABLE_ACTIVITY_STREAM_BLOCKLIST = ActivityStreamBlocklist.TABLE_NAME;
+    static final String TABLE_PAGE_METADATA = PageMetadata.TABLE_NAME;
 
     static final String VIEW_COMBINED = Combined.VIEW_NAME;
     static final String VIEW_BOOKMARKS_WITH_FAVICONS = Bookmarks.VIEW_WITH_FAVICONS;
+    static final String VIEW_BOOKMARKS_WITH_ANNOTATIONS = Bookmarks.VIEW_WITH_ANNOTATIONS;
     static final String VIEW_HISTORY_WITH_FAVICONS = History.VIEW_WITH_FAVICONS;
     static final String VIEW_COMBINED_WITH_FAVICONS = Combined.VIEW_WITH_FAVICONS;
 
@@ -98,11 +128,26 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
     static final int THUMBNAILS = 800;
     static final int THUMBNAIL_ID = 801;
 
+    static final int URL_ANNOTATIONS = 900;
+
+    static final int TOPSITES = 1000;
+
+    static final int VISITS = 1100;
+
+    static final int METADATA = 1200;
+
+    static final int HIGHLIGHTS = 1300;
+
+    static final int ACTIVITY_STREAM_BLOCKLIST = 1400;
+
+    static final int PAGE_METADATA = 1500;
+
     static final String DEFAULT_BOOKMARKS_SORT_ORDER = Bookmarks.TYPE
             + " ASC, " + Bookmarks.POSITION + " ASC, " + Bookmarks._ID
             + " ASC";
 
     static final String DEFAULT_HISTORY_SORT_ORDER = History.DATE_LAST_VISITED + " DESC";
+    static final String DEFAULT_VISITS_SORT_ORDER = Visits.DATE_VISITED + " DESC";
 
     static final UriMatcher URI_MATCHER = new UriMatcher(UriMatcher.NO_MATCH);
 
@@ -112,6 +157,9 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
     static final Map<String, String> SCHEMA_PROJECTION_MAP;
     static final Map<String, String> FAVICONS_PROJECTION_MAP;
     static final Map<String, String> THUMBNAILS_PROJECTION_MAP;
+    static final Map<String, String> URL_ANNOTATIONS_PROJECTION_MAP;
+    static final Map<String, String> VISIT_PROJECTION_MAP;
+    static final Map<String, String> PAGE_METADATA_PROJECTION_MAP;
     static final Table[] sTables;
 
     static {
@@ -161,12 +209,27 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
         map.put(History.FAVICON_ID, History.FAVICON_ID);
         map.put(History.FAVICON_URL, History.FAVICON_URL);
         map.put(History.VISITS, History.VISITS);
+        map.put(History.LOCAL_VISITS, History.LOCAL_VISITS);
+        map.put(History.REMOTE_VISITS, History.REMOTE_VISITS);
         map.put(History.DATE_LAST_VISITED, History.DATE_LAST_VISITED);
+        map.put(History.LOCAL_DATE_LAST_VISITED, History.LOCAL_DATE_LAST_VISITED);
+        map.put(History.REMOTE_DATE_LAST_VISITED, History.REMOTE_DATE_LAST_VISITED);
         map.put(History.DATE_CREATED, History.DATE_CREATED);
         map.put(History.DATE_MODIFIED, History.DATE_MODIFIED);
         map.put(History.GUID, History.GUID);
         map.put(History.IS_DELETED, History.IS_DELETED);
         HISTORY_PROJECTION_MAP = Collections.unmodifiableMap(map);
+
+        // Visits
+        URI_MATCHER.addURI(BrowserContract.AUTHORITY, "visits", VISITS);
+
+        map = new HashMap<String, String>();
+        map.put(Visits._ID, Visits._ID);
+        map.put(Visits.HISTORY_GUID, Visits.HISTORY_GUID);
+        map.put(Visits.VISIT_TYPE, Visits.VISIT_TYPE);
+        map.put(Visits.DATE_VISITED, Visits.DATE_VISITED);
+        map.put(Visits.IS_LOCAL, Visits.IS_LOCAL);
+        VISIT_PROJECTION_MAP = Collections.unmodifiableMap(map);
 
         // Favicons
         URI_MATCHER.addURI(BrowserContract.AUTHORITY, "favicons", FAVICONS);
@@ -190,6 +253,19 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
         map.put(Thumbnails.DATA, Thumbnails.DATA);
         THUMBNAILS_PROJECTION_MAP = Collections.unmodifiableMap(map);
 
+        // Url annotations
+        URI_MATCHER.addURI(BrowserContract.AUTHORITY, TABLE_URL_ANNOTATIONS, URL_ANNOTATIONS);
+
+        map = new HashMap<>();
+        map.put(UrlAnnotations._ID, UrlAnnotations._ID);
+        map.put(UrlAnnotations.URL, UrlAnnotations.URL);
+        map.put(UrlAnnotations.KEY, UrlAnnotations.KEY);
+        map.put(UrlAnnotations.VALUE, UrlAnnotations.VALUE);
+        map.put(UrlAnnotations.DATE_CREATED, UrlAnnotations.DATE_CREATED);
+        map.put(UrlAnnotations.DATE_MODIFIED, UrlAnnotations.DATE_MODIFIED);
+        map.put(UrlAnnotations.SYNC_STATUS, UrlAnnotations.SYNC_STATUS);
+        URL_ANNOTATIONS_PROJECTION_MAP = Collections.unmodifiableMap(map);
+
         // Combined bookmarks and history
         URI_MATCHER.addURI(BrowserContract.AUTHORITY, "combined", COMBINED);
 
@@ -204,7 +280,21 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
         map.put(Combined.FAVICON, Combined.FAVICON);
         map.put(Combined.FAVICON_ID, Combined.FAVICON_ID);
         map.put(Combined.FAVICON_URL, Combined.FAVICON_URL);
+        map.put(Combined.LOCAL_DATE_LAST_VISITED, Combined.LOCAL_DATE_LAST_VISITED);
+        map.put(Combined.REMOTE_DATE_LAST_VISITED, Combined.REMOTE_DATE_LAST_VISITED);
+        map.put(Combined.LOCAL_VISITS_COUNT, Combined.LOCAL_VISITS_COUNT);
+        map.put(Combined.REMOTE_VISITS_COUNT, Combined.REMOTE_VISITS_COUNT);
         COMBINED_PROJECTION_MAP = Collections.unmodifiableMap(map);
+
+        map = new HashMap<>();
+        map.put(PageMetadata._ID, PageMetadata._ID);
+        map.put(PageMetadata.HISTORY_GUID, PageMetadata.HISTORY_GUID);
+        map.put(PageMetadata.DATE_CREATED, PageMetadata.DATE_CREATED);
+        map.put(PageMetadata.HAS_IMAGE, PageMetadata.HAS_IMAGE);
+        map.put(PageMetadata.JSON, PageMetadata.JSON);
+        PAGE_METADATA_PROJECTION_MAP = Collections.unmodifiableMap(map);
+
+        URI_MATCHER.addURI(BrowserContract.AUTHORITY, "page_metadata", PAGE_METADATA);
 
         // Schema
         URI_MATCHER.addURI(BrowserContract.AUTHORITY, "schema", SCHEMA);
@@ -222,6 +312,60 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
                 URI_MATCHER.addURI(BrowserContract.AUTHORITY, type.name, type.id);
             }
         }
+
+        // Combined pinned sites, top visited sites, and suggested sites
+        URI_MATCHER.addURI(BrowserContract.AUTHORITY, "topsites", TOPSITES);
+
+        URI_MATCHER.addURI(BrowserContract.AUTHORITY, "highlights", HIGHLIGHTS);
+
+        URI_MATCHER.addURI(BrowserContract.AUTHORITY, ActivityStreamBlocklist.TABLE_NAME, ACTIVITY_STREAM_BLOCKLIST);
+    }
+
+    private static class ShrinkMemoryReceiver extends BroadcastReceiver {
+        private final WeakReference<BrowserProvider> mBrowserProviderWeakReference;
+
+        public ShrinkMemoryReceiver(final BrowserProvider browserProvider) {
+            mBrowserProviderWeakReference = new WeakReference<>(browserProvider);
+        }
+
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            final BrowserProvider browserProvider = mBrowserProviderWeakReference.get();
+            if (browserProvider == null) {
+                return;
+            }
+            final PerProfileDatabases<BrowserDatabaseHelper> databases = browserProvider.getDatabases();
+            if (databases == null) {
+                return;
+            }
+            ThreadUtils.postToBackgroundThread(new Runnable() {
+                @Override
+                public void run() {
+                    databases.shrinkMemory();
+                }
+            });
+        }
+    }
+
+    private final ShrinkMemoryReceiver mShrinkMemoryReceiver = new ShrinkMemoryReceiver(this);
+
+    @Override
+    public boolean onCreate() {
+        if (!super.onCreate()) {
+            return false;
+        }
+
+        LocalBroadcastManager.getInstance(getContext()).registerReceiver(mShrinkMemoryReceiver,
+                new IntentFilter(ACTION_SHRINK_MEMORY));
+
+        return true;
+    }
+
+    @Override
+    public void shutdown() {
+        LocalBroadcastManager.getInstance(getContext()).unregisterReceiver(mShrinkMemoryReceiver);
+
+        super.shutdown();
     }
 
     // Convenience accessor.
@@ -258,12 +402,36 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
     }
 
     /**
+     * Remove enough activity stream blocklist items to bring the database count below <code>retain</code>.
+     *
+     * Items will be removed according to their creation date, oldest being removed first.
+     */
+    private void expireActivityStreamBlocklist(final SQLiteDatabase db, final int retain) {
+        Log.d(LOGTAG, "Expiring highlights blocklist.");
+        final long rows = DatabaseUtils.queryNumEntries(db, TABLE_ACTIVITY_STREAM_BLOCKLIST);
+
+        if (retain >= rows) {
+            debug("Not expiring highlights blocklist: only have " + rows + " rows.");
+            return;
+        }
+
+        final long toRemove = rows - retain;
+
+        final String statement = "DELETE FROM " + TABLE_ACTIVITY_STREAM_BLOCKLIST + " WHERE " + ActivityStreamBlocklist._ID + " IN " +
+                " ( SELECT " + ActivityStreamBlocklist._ID + " FROM " + TABLE_ACTIVITY_STREAM_BLOCKLIST + " " +
+                "ORDER BY " + ActivityStreamBlocklist.CREATED + " ASC LIMIT " + toRemove + ")";
+
+        beginWrite(db);
+        db.execSQL(statement);
+    }
+
+    /**
      * Remove enough history items to bring the database count below <code>retain</code>,
      * removing no items with a modified time after <code>keepAfter</code>.
      *
      * Provide <code>keepAfter</code> less than or equal to zero to skip that check.
      *
-     * Items will be removed according to an approximate frecency calculation.
+     * Items will be removed according to last visited date.
      */
     private void expireHistory(final SQLiteDatabase db, final int retain, final long keepAfter) {
         Log.d(LOGTAG, "Expiring history.");
@@ -274,22 +442,21 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
             return;
         }
 
-        final String sortOrder = BrowserContract.getFrecencySortOrder(false, true);
         final long toRemove = rows - retain;
         debug("Expiring at most " + toRemove + " rows earlier than " + keepAfter + ".");
 
         final String sql;
         if (keepAfter > 0) {
             sql = "DELETE FROM " + TABLE_HISTORY + " " +
-                  "WHERE MAX(" + History.DATE_LAST_VISITED + ", " + History.DATE_MODIFIED +") < " + keepAfter + " " +
+                  "WHERE MAX(" + History.DATE_LAST_VISITED + ", " + History.DATE_MODIFIED + ") < " + keepAfter + " " +
                   " AND " + History._ID + " IN ( SELECT " +
                     History._ID + " FROM " + TABLE_HISTORY + " " +
-                    "ORDER BY " + sortOrder + " LIMIT " + toRemove +
+                    "ORDER BY " + History.DATE_LAST_VISITED + " ASC LIMIT " + toRemove +
                   ")";
         } else {
             sql = "DELETE FROM " + TABLE_HISTORY + " WHERE " + History._ID + " " +
                   "IN ( SELECT " + History._ID + " FROM " + TABLE_HISTORY + " " +
-                  "ORDER BY " + sortOrder + " LIMIT " + toRemove + ")";
+                  "ORDER BY " + History.DATE_LAST_VISITED + " ASC LIMIT " + toRemove + ")";
         }
         trace("Deleting using query: " + sql);
 
@@ -305,7 +472,7 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
      */
     private void expireThumbnails(final SQLiteDatabase db) {
         Log.d(LOGTAG, "Expiring thumbnails.");
-        final String sortOrder = BrowserContract.getFrecencySortOrder(true, false);
+        final String sortOrder = BrowserContract.getCombinedFrecencySortOrder(true, false);
         final String sql = "DELETE FROM " + TABLE_THUMBNAILS +
                            " WHERE " + Thumbnails.URL + " NOT IN ( " +
                              " SELECT " + Combined.URL +
@@ -327,6 +494,11 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
     private boolean shouldIncrementVisits(Uri uri) {
         String incrementVisits = uri.getQueryParameter(BrowserContract.PARAM_INCREMENT_VISITS);
         return Boolean.parseBoolean(incrementVisits);
+    }
+
+    private boolean shouldIncrementRemoteAggregates(Uri uri) {
+        final String incrementRemoteAggregates = uri.getQueryParameter(BrowserContract.PARAM_INCREMENT_REMOTE_AGGREGATES);
+        return Boolean.parseBoolean(incrementRemoteAggregates);
     }
 
     @Override
@@ -394,10 +566,29 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
             case HISTORY: {
                 trace("Deleting history: " + uri);
                 beginWrite(db);
-                deleted = deleteHistory(uri, selection, selectionArgs);
+                /**
+                 * Deletes from Sync are actual DELETE statements, which will cascade delete relevant visits.
+                 * Fennec's deletes mark records as deleted and wipe out all information (except for GUID).
+                 * Eventually, Fennec will purge history records that were marked as deleted for longer than some
+                 * period of time (e.g. 20 days).
+                 * See {@link SharedBrowserDatabaseProvider#cleanUpSomeDeletedRecords(Uri, String)}.
+                 */
+                final ArrayList<String> historyGUIDs = getHistoryGUIDsFromSelection(db, uri, selection, selectionArgs);
+
+                if (!isCallerSync(uri)) {
+                    deleteVisitsForHistory(db, historyGUIDs);
+                }
+                deletePageMetadataForHistory(db, historyGUIDs);
+                deleted = deleteHistory(db, uri, selection, selectionArgs);
                 deleteUnusedImages(uri);
                 break;
             }
+
+            case VISITS:
+                trace("Deleting visits: " + uri);
+                beginWrite(db);
+                deleted = deleteVisits(uri, selection, selectionArgs);
+                break;
 
             case HISTORY_OLD: {
                 String priority = uri.getQueryParameter(BrowserContract.PARAM_EXPIRE_PRIORITY);
@@ -409,6 +600,7 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
                     retainCount = AGGRESSIVE_EXPIRY_RETAIN_COUNT;
                 }
                 expireHistory(db, retainCount, keepAfter);
+                expireActivityStreamBlocklist(db, retainCount / ACTIVITYSTREAM_BLOCKLIST_EXPIRY_FACTOR);
                 expireThumbnails(db);
                 deleteUnusedImages(uri);
                 break;
@@ -441,6 +633,16 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
                 deleted = deleteThumbnails(uri, selection, selectionArgs);
                 break;
             }
+
+            case URL_ANNOTATIONS:
+                trace("Delete on URL_ANNOTATIONS: " + uri);
+                deleteUrlAnnotation(uri, selection, selectionArgs);
+                break;
+
+            case PAGE_METADATA:
+                trace("Delete on PAGE_METADATA: " + uri);
+                deleted = deletePageMetadata(uri, selection, selectionArgs);
+                break;
 
             default: {
                 Table table = findTableFor(match);
@@ -478,6 +680,12 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
                 break;
             }
 
+            case VISITS: {
+                trace("Insert on VISITS: " + uri);
+                id = insertVisit(uri, values);
+                break;
+            }
+
             case FAVICONS: {
                 trace("Insert on FAVICONS: " + uri);
                 id = insertFavicon(uri, values);
@@ -487,6 +695,24 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
             case THUMBNAILS: {
                 trace("Insert on THUMBNAILS: " + uri);
                 id = insertThumbnail(uri, values);
+                break;
+            }
+
+            case URL_ANNOTATIONS: {
+                trace("Insert on URL_ANNOTATIONS: " + uri);
+                id = insertUrlAnnotation(uri, values);
+                break;
+            }
+
+            case ACTIVITY_STREAM_BLOCKLIST: {
+                trace("Insert on ACTIVITY_STREAM_BLOCKLIST: " + uri);
+                id = insertActivityStreamBlocklistSite(uri, values);
+                break;
+            }
+
+            case PAGE_METADATA: {
+                trace("Insert on PAGE_METADATA: " + uri);
+                id = insertPageMetadata(uri, values);
                 break;
             }
 
@@ -577,6 +803,9 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
                 } else {
                     updated = updateHistory(uri, values, selection, selectionArgs);
                 }
+                if (shouldIncrementVisits(uri)) {
+                    insertVisitForHistory(uri, values, selection, selectionArgs);
+                }
                 break;
             }
 
@@ -618,6 +847,10 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
                 break;
             }
 
+            case URL_ANNOTATIONS:
+                updateUrlAnnotation(uri, values, selection, selectionArgs);
+                break;
+
             default: {
                 Table table = findTableFor(match);
                 if (table == null) {
@@ -639,11 +872,432 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
         return updated;
     }
 
+    /**
+     * Get topsites by themselves, without the inclusion of pinned sites. Suggested sites
+     * will be appended (if necessary) to the end of the list in order to provide up to PARAM_LIMIT items.
+     */
+    private Cursor getPlainTopSites(final Uri uri) {
+        final SQLiteDatabase db = getReadableDatabase(uri);
+
+        final String limitParam = uri.getQueryParameter(BrowserContract.PARAM_LIMIT);
+        final int limit;
+        if (limitParam != null) {
+            limit = Integer.parseInt(limitParam);
+        } else {
+            limit = 12;
+        }
+
+        // Filter out: unvisited pages (history_id == -1) pinned (and other special) sites, deleted sites,
+        // and about: pages.
+        final String ignoreForTopSitesWhereClause =
+                "(" + Combined.HISTORY_ID + " IS NOT -1)" +
+                " AND " +
+                Combined.URL + " NOT IN (SELECT " +
+                Bookmarks.URL + " FROM " + TABLE_BOOKMARKS + " WHERE " +
+                DBUtils.qualifyColumn(TABLE_BOOKMARKS, Bookmarks.PARENT) + " < " + Bookmarks.FIXED_ROOT_ID + " AND " +
+                DBUtils.qualifyColumn(TABLE_BOOKMARKS, Bookmarks.IS_DELETED) + " == 0)" +
+                " AND " +
+                "(" + Combined.URL + " NOT LIKE ?)";
+
+        final String[] ignoreForTopSitesArgs = new String[] {
+                AboutPages.URL_FILTER
+        };
+
+        final Cursor c = db.rawQuery("SELECT " +
+                   Bookmarks._ID + ", " +
+                   Combined.BOOKMARK_ID + ", " +
+                   Combined.HISTORY_ID + ", " +
+                   Bookmarks.URL + ", " +
+                   Bookmarks.TITLE + ", " +
+                   Combined.HISTORY_ID + ", " +
+                   TopSites.TYPE_TOP + " AS " + TopSites.TYPE +
+                   " FROM " + Combined.VIEW_NAME +
+                   " WHERE " + ignoreForTopSitesWhereClause +
+                   " ORDER BY " + BrowserContract.getCombinedFrecencySortOrder(true, false) +
+                   " LIMIT " + limit,
+                ignoreForTopSitesArgs);
+
+        c.setNotificationUri(getContext().getContentResolver(),
+                BrowserContract.AUTHORITY_URI);
+
+        if (c.getCount() == limit) {
+            return c;
+        }
+
+        // If we don't have enough data: get suggested sites too
+        final SuggestedSites suggestedSites = BrowserDB.from(GeckoProfile.get(
+                getContext(), uri.getQueryParameter(BrowserContract.PARAM_PROFILE))).getSuggestedSites();
+
+        final Cursor suggestedSitesCursor = suggestedSites.get(limit - c.getCount());
+
+        return new MergeCursor(new Cursor[]{
+                c,
+                suggestedSitesCursor
+        });
+    }
+
+    private Cursor getTopSites(final Uri uri) {
+        // In order to correctly merge the top and pinned sites we:
+        //
+        // 1. Generate a list of free ids for topsites - this is the positions that are NOT used by pinned sites.
+        //    We do this using a subquery with a self-join in order to generate rowids, that allow us to join with
+        //    the list of topsites.
+        // 2. Generate the list of topsites in order of frecency.
+        // 3. Join these, so that each topsite is given its resulting position
+        // 4. UNION all with the pinned sites, and order by position
+        //
+        // Suggested sites are placed after the topsites, but might still be interspersed with the suggested sites,
+        // hence we append these to the topsite list, and treat these identically to topsites from this point on.
+        //
+        // We require rowids to join the two lists, however subqueries aren't given rowids - hence we use two different
+        // tricks to generate these:
+        // 1. The list of free ids is small, hence we can do a self-join to generate rowids.
+        // 2. The topsites list is larger, hence we use a temporary table, which automatically provides rowids.
+
+        final SQLiteDatabase db = getWritableDatabase(uri);
+
+        final String TABLE_TOPSITES = "topsites";
+
+        final String limitParam = uri.getQueryParameter(BrowserContract.PARAM_LIMIT);
+        final String gridLimitParam = uri.getQueryParameter(BrowserContract.PARAM_SUGGESTEDSITES_LIMIT);
+
+        final int totalLimit;
+        final int suggestedGridLimit;
+
+        if (limitParam == null) {
+            totalLimit = 50;
+        } else {
+            totalLimit = Integer.parseInt(limitParam, 10);
+        }
+
+        if (gridLimitParam == null) {
+            suggestedGridLimit = getContext().getResources().getInteger(R.integer.number_of_top_sites);
+        } else {
+            suggestedGridLimit = Integer.parseInt(gridLimitParam, 10);
+        }
+
+        final String pinnedSitesFromClause = "FROM " + TABLE_BOOKMARKS + " WHERE " +
+                                             Bookmarks.PARENT + " == " + Bookmarks.FIXED_PINNED_LIST_ID +
+                                             " AND " + Bookmarks.IS_DELETED + " IS NOT 1";
+
+        // Ideally we'd use a recursive CTE to generate our sequence, e.g. something like this worked at one point:
+        // " WITH RECURSIVE" +
+        // " cnt(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM cnt WHERE x < 6)" +
+        // However that requires SQLite >= 3.8.3 (available on Android >= 5.0), so in the meantime
+        // we use a temporary numbers table.
+        // Note: SQLite rowids are 1-indexed, whereas we're expecting 0-indexed values for the position. Our numbers
+        // table starts at position = 0, which ensures the correct results here.
+        final String freeIDSubquery =
+                " SELECT count(free_ids.position) + 1 AS rowid, numbers.position AS " + Bookmarks.POSITION +
+                " FROM (SELECT position FROM numbers WHERE position NOT IN (SELECT " + Bookmarks.POSITION + " " + pinnedSitesFromClause + ")) AS numbers" +
+                " LEFT OUTER JOIN " +
+                " (SELECT position FROM numbers WHERE position NOT IN (SELECT " + Bookmarks.POSITION + " " + pinnedSitesFromClause + ")) AS free_ids" +
+                " ON numbers.position > free_ids.position" +
+                " GROUP BY numbers.position" +
+                " ORDER BY numbers.position ASC" +
+                " LIMIT " + suggestedGridLimit;
+
+        // Filter out: unvisited pages (history_id == -1) pinned (and other special) sites, deleted sites,
+        // and about: pages.
+        final String ignoreForTopSitesWhereClause =
+                "(" + Combined.HISTORY_ID + " IS NOT -1)" +
+                " AND " +
+                Combined.URL + " NOT IN (SELECT " +
+                Bookmarks.URL + " FROM bookmarks WHERE " +
+                DBUtils.qualifyColumn("bookmarks", Bookmarks.PARENT) + " < " + Bookmarks.FIXED_ROOT_ID + " AND " +
+                DBUtils.qualifyColumn("bookmarks", Bookmarks.IS_DELETED) + " == 0)" +
+                " AND " +
+                "(" + Combined.URL + " NOT LIKE ?)";
+
+        final String[] ignoreForTopSitesArgs = new String[] {
+                AboutPages.URL_FILTER
+        };
+
+        // Stuff the suggested sites into SQL: this allows us to filter pinned and topsites out of the suggested
+        // sites list as part of the final query (as opposed to walking cursors in java)
+        final SuggestedSites suggestedSites = BrowserDB.from(GeckoProfile.get(
+                getContext(), uri.getQueryParameter(BrowserContract.PARAM_PROFILE))).getSuggestedSites();
+
+        StringBuilder suggestedSitesBuilder = new StringBuilder();
+        // We could access the underlying data here, however SuggestedSites also performs filtering on the suggested
+        // sites list, which means we'd need to process the lists within SuggestedSites in any case. If we're doing
+        // that processing, there is little real between us using a MatrixCursor, or a Map (or List) instead of the
+        // MatrixCursor.
+        final Cursor suggestedSitesCursor = suggestedSites.get(suggestedGridLimit);
+
+        String[] suggestedSiteArgs = new String[0];
+
+        boolean hasProcessedAnySuggestedSites = false;
+
+        final int idColumnIndex = suggestedSitesCursor.getColumnIndexOrThrow(Bookmarks._ID);
+        final int urlColumnIndex = suggestedSitesCursor.getColumnIndexOrThrow(Bookmarks.URL);
+        final int titleColumnIndex = suggestedSitesCursor.getColumnIndexOrThrow(Bookmarks.TITLE);
+
+        while (suggestedSitesCursor.moveToNext()) {
+            // We'll be using this as a subquery, hence we need to avoid the preceding UNION ALL
+            if (hasProcessedAnySuggestedSites) {
+                suggestedSitesBuilder.append(" UNION ALL");
+            } else {
+                hasProcessedAnySuggestedSites = true;
+            }
+            suggestedSitesBuilder.append(" SELECT" +
+                                         " ? AS " + Bookmarks._ID + "," +
+                                         " ? AS " + Bookmarks.URL + "," +
+                                         " ? AS " + Bookmarks.TITLE);
+
+            suggestedSiteArgs = DBUtils.appendSelectionArgs(suggestedSiteArgs,
+                                                            new String[] {
+                                                                    suggestedSitesCursor.getString(idColumnIndex),
+                                                                    suggestedSitesCursor.getString(urlColumnIndex),
+                                                                    suggestedSitesCursor.getString(titleColumnIndex)
+                                                            });
+        }
+        suggestedSitesCursor.close();
+
+        boolean hasPreparedBlankTiles = false;
+
+        // We can somewhat reduce the number of blanks we produce by eliminating suggested sites.
+        // We do the actual limit calculation in SQL (since we need to take into account the number
+        // of pinned sites too), but this might avoid producing 5 or so additional blank tiles
+        // that would then need to be filtered out.
+        final int maxBlanksNeeded = suggestedGridLimit - suggestedSitesCursor.getCount();
+
+        final StringBuilder blanksBuilder = new StringBuilder();
+        for (int i = 0; i < maxBlanksNeeded; i++) {
+            if (hasPreparedBlankTiles) {
+                blanksBuilder.append(" UNION ALL");
+            } else {
+                hasPreparedBlankTiles = true;
+            }
+
+            blanksBuilder.append(" SELECT" +
+                                 " -1 AS " + Bookmarks._ID + "," +
+                                 " '' AS " + Bookmarks.URL + "," +
+                                 " '' AS " + Bookmarks.TITLE);
+        }
+
+
+
+        // To restrict suggested sites to the grid, we simply subtract the number of topsites (which have already had
+        // the pinned sites filtered out), and the number of pinned sites.
+        // SQLite completely ignores negative limits, hence we need to manually limit to 0 in this case.
+        final String suggestedLimitClause = " LIMIT MAX(0, (" + suggestedGridLimit + " - (SELECT COUNT(*) FROM " + TABLE_TOPSITES + ") - (SELECT COUNT(*) " + pinnedSitesFromClause + "))) ";
+
+        // Pinned site positions are zero indexed, but we need to get the maximum 1-indexed position.
+        // Hence to correctly calculate the largest pinned position (which should be 0 if there are
+        // no sites, or 1-6 if we have at least one pinned site), we coalesce the DB position (0-5)
+        // with -1 to represent no-sites, which allows us to directly add 1 to obtain the expected value
+        // regardless of whether a position was actually retrieved.
+        final String blanksLimitClause = " LIMIT MAX(0, " +
+                            "COALESCE((SELECT " + Bookmarks.POSITION + " " + pinnedSitesFromClause + "), -1) + 1" +
+                            " - (SELECT COUNT(*) " + pinnedSitesFromClause + ")" +
+                            " - (SELECT COUNT(*) FROM " + TABLE_TOPSITES + ")" +
+                            ")";
+
+        db.beginTransaction();
+        try {
+            db.execSQL("DROP TABLE IF EXISTS " + TABLE_TOPSITES);
+
+            db.execSQL("CREATE TEMP TABLE " + TABLE_TOPSITES + " AS" +
+                       " SELECT " +
+                       Bookmarks._ID + ", " +
+                       Combined.BOOKMARK_ID + ", " +
+                       Combined.HISTORY_ID + ", " +
+                       Bookmarks.URL + ", " +
+                       Bookmarks.TITLE + ", " +
+                       Combined.HISTORY_ID + ", " +
+                       TopSites.TYPE_TOP + " AS " + TopSites.TYPE +
+                       " FROM " + Combined.VIEW_NAME +
+                       " WHERE " + ignoreForTopSitesWhereClause +
+                       " ORDER BY " + BrowserContract.getCombinedFrecencySortOrder(true, false) +
+                       " LIMIT " + totalLimit,
+
+                       ignoreForTopSitesArgs);
+
+            if (hasProcessedAnySuggestedSites) {
+                db.execSQL("INSERT INTO " + TABLE_TOPSITES +
+                           // We need to LIMIT _after_ selecting the relevant suggested sites, which requires us to
+                           // use an additional internal subquery, since we cannot LIMIT a subquery that is part of UNION ALL.
+                           // Hence the weird SELECT * FROM (SELECT ...relevant suggested sites... LIMIT ?)
+                           " SELECT * FROM (SELECT " +
+                           Bookmarks._ID + ", " +
+                           Bookmarks._ID + " AS " + Combined.BOOKMARK_ID + ", " +
+                           " -1 AS " + Combined.HISTORY_ID + ", " +
+                           Bookmarks.URL + ", " +
+                           Bookmarks.TITLE + ", " +
+                           "NULL AS " + Combined.HISTORY_ID + ", " +
+                           TopSites.TYPE_SUGGESTED + " as " + TopSites.TYPE +
+                           " FROM ( " + suggestedSitesBuilder.toString() + " )" +
+                           " WHERE " +
+                           Bookmarks.URL + " NOT IN (SELECT url FROM " + TABLE_TOPSITES + ")" +
+                           " AND " +
+                           Bookmarks.URL + " NOT IN (SELECT url " + pinnedSitesFromClause + ")" +
+                           suggestedLimitClause + " )",
+
+                           suggestedSiteArgs);
+            }
+
+            if (hasPreparedBlankTiles) {
+                db.execSQL("INSERT INTO " + TABLE_TOPSITES +
+                           // We need to LIMIT _after_ selecting the relevant suggested sites, which requires us to
+                           // use an additional internal subquery, since we cannot LIMIT a subquery that is part of UNION ALL.
+                           // Hence the weird SELECT * FROM (SELECT ...relevant suggested sites... LIMIT ?)
+                           " SELECT * FROM (SELECT " +
+                           Bookmarks._ID + ", " +
+                           Bookmarks._ID + " AS " + Combined.BOOKMARK_ID + ", " +
+                           " -1 AS " + Combined.HISTORY_ID + ", " +
+                           Bookmarks.URL + ", " +
+                           Bookmarks.TITLE + ", " +
+                           "NULL AS " + Combined.HISTORY_ID + ", " +
+                           TopSites.TYPE_BLANK + " as " + TopSites.TYPE +
+                           " FROM ( " + blanksBuilder.toString() + " )" +
+                           blanksLimitClause + " )");
+            }
+
+            // If we retrieve more topsites than we have free positions for in the freeIdSubquery,
+            // we will have topsites that don't receive a position when joining TABLE_TOPSITES
+            // with freeIdSubquery. Hence we need to coalesce the position with a generated position.
+            // We know that the difference in positions will be at most suggestedGridLimit, hence we
+            // can add that to the rowid to generate a safe position.
+            // I.e. if we have 6 pinned sites then positions 0..5 are filled, the JOIN results in
+            // the first N rows having positions 6..(N+6), so row N+1 should receive a position that is at
+            // least N+1+6, which is equal to rowid + 6.
+            final SQLiteCursor c = (SQLiteCursor) db.rawQuery(
+                        "SELECT " +
+                        Bookmarks._ID + ", " +
+                        TopSites.BOOKMARK_ID + ", " +
+                        TopSites.HISTORY_ID + ", " +
+                        Bookmarks.URL + ", " +
+                        Bookmarks.TITLE + ", " +
+                        "COALESCE(" + Bookmarks.POSITION + ", " +
+                            DBUtils.qualifyColumn(TABLE_TOPSITES, "rowid") + " + " + suggestedGridLimit +
+                        ")" + " AS " + Bookmarks.POSITION + ", " +
+                        Combined.HISTORY_ID + ", " +
+                        TopSites.TYPE +
+                        " FROM " + TABLE_TOPSITES +
+                        " LEFT OUTER JOIN " + // TABLE_IDS +
+                        "(" + freeIDSubquery + ") AS id_results" +
+                        " ON " + DBUtils.qualifyColumn(TABLE_TOPSITES, "rowid") +
+                        " = " + DBUtils.qualifyColumn("id_results", "rowid") +
+
+                        " UNION ALL " +
+
+                        "SELECT " +
+                        Bookmarks._ID + ", " +
+                        Bookmarks._ID + " AS " + TopSites.BOOKMARK_ID + ", " +
+                        " -1 AS " + TopSites.HISTORY_ID + ", " +
+                        Bookmarks.URL + ", " +
+                        Bookmarks.TITLE + ", " +
+                        Bookmarks.POSITION + ", " +
+                        "NULL AS " + Combined.HISTORY_ID + ", " +
+                        TopSites.TYPE_PINNED + " as " + TopSites.TYPE +
+                        " " + pinnedSitesFromClause +
+
+                        " ORDER BY " + Bookmarks.POSITION,
+
+                        null);
+
+            c.setNotificationUri(getContext().getContentResolver(),
+                                 BrowserContract.AUTHORITY_URI);
+
+            // Force the cursor to be compiled and the cursor-window filled now:
+            // (A) without compiling the cursor now we won't have access to the TEMP table which
+            // is removed as soon as we close our connection.
+            // (B) this might also mitigate the situation causing this crash where we're accessing
+            // a cursor and crashing in fillWindow.
+            c.moveToFirst();
+
+            db.setTransactionSuccessful();
+            return c;
+        } finally {
+            db.endTransaction();
+        }
+    }
+
+    /**
+     * Obtain a set of links for highlights (from bookmarks and history).
+     *
+     * Based on the query for Activity^ Stream (desktop):
+     * https://github.com/mozilla/activity-stream/blob/9eb9f451b553bb62ae9b8d6b41a8ef94a2e020ea/addon/PlacesProvider.js#L578
+     */
+    public Cursor getHighlights(final SQLiteDatabase db, String limit) {
+        final int totalLimit = limit == null ? 20 : Integer.parseInt(limit);
+
+        final long threeDaysAgo = System.currentTimeMillis() - (1000 * 60 * 60 * 24 * 3);
+        final long bookmarkLimit = 1;
+
+        // Select recent bookmarks that have not been visited much
+        final String bookmarksQuery = "SELECT * FROM (SELECT " +
+                "-1 AS " + Combined.HISTORY_ID + ", " +
+                DBUtils.qualifyColumn(Bookmarks.TABLE_NAME, Bookmarks._ID) + " AS " + Combined.BOOKMARK_ID + ", " +
+                DBUtils.qualifyColumn(Bookmarks.TABLE_NAME, Bookmarks.URL) + ", " +
+                DBUtils.qualifyColumn(Bookmarks.TABLE_NAME, Bookmarks.TITLE) + ", " +
+                DBUtils.qualifyColumn(Bookmarks.TABLE_NAME, Bookmarks.DATE_CREATED) + " AS " + Highlights.DATE + " " +
+                "FROM " + Bookmarks.TABLE_NAME + " " +
+                "LEFT JOIN " + History.TABLE_NAME + " ON " +
+                    DBUtils.qualifyColumn(Bookmarks.TABLE_NAME, Bookmarks.URL) + " = " +
+                    DBUtils.qualifyColumn(History.TABLE_NAME, History.URL) + " " +
+                "WHERE " + DBUtils.qualifyColumn(Bookmarks.TABLE_NAME, Bookmarks.DATE_CREATED) + " > " + threeDaysAgo + " " +
+                "AND (" + DBUtils.qualifyColumn(History.TABLE_NAME, History.VISITS) + " <= 3 " +
+                  "OR " + DBUtils.qualifyColumn(History.TABLE_NAME, History.VISITS) + " IS NULL) " +
+                "AND " + DBUtils.qualifyColumn(Bookmarks.TABLE_NAME, Bookmarks.IS_DELETED)  + " = 0 " +
+                "AND " + DBUtils.qualifyColumn(Bookmarks.TABLE_NAME, Bookmarks.TYPE) + " = " + Bookmarks.TYPE_BOOKMARK + " " +
+                "AND " + DBUtils.qualifyColumn(Bookmarks.TABLE_NAME, Bookmarks.URL) + " NOT IN (SELECT " + ActivityStreamBlocklist.URL + " FROM " + ActivityStreamBlocklist.TABLE_NAME + " )" +
+                "ORDER BY " + DBUtils.qualifyColumn(Bookmarks.TABLE_NAME, Bookmarks.DATE_CREATED) + " DESC " +
+                "LIMIT " + bookmarkLimit + ")";
+
+        final long last30Minutes = System.currentTimeMillis() - (1000 * 60 * 30);
+        final long historyLimit = totalLimit - bookmarkLimit;
+
+        // Select recent history that has not been visited much.
+        final String historyQuery = "SELECT * FROM (SELECT " +
+                History._ID + " AS " + Combined.HISTORY_ID + ", " +
+                "-1 AS " + Combined.BOOKMARK_ID + ", " +
+                History.URL + ", " +
+                History.TITLE + ", " +
+                History.DATE_LAST_VISITED + " AS " + Highlights.DATE + " " +
+                "FROM " + History.TABLE_NAME + " " +
+                "WHERE " + History.DATE_LAST_VISITED + " < " + last30Minutes + " " +
+                "AND " + History.VISITS + " <= 3 " +
+                "AND " + History.TITLE + " NOT NULL AND " + History.TITLE + " != '' " +
+                "AND " + History.IS_DELETED + " = 0 " +
+                "AND " + History.URL + " NOT IN (SELECT " + ActivityStreamBlocklist.URL + " FROM " + ActivityStreamBlocklist.TABLE_NAME + " )" +
+                // TODO: Implement domain black list (bug 1298786)
+                // TODO: Group by host (bug 1298785)
+                "ORDER BY " + History.DATE_LAST_VISITED + " DESC " +
+                "LIMIT " + historyLimit + ")";
+
+        final String query = "SELECT DISTINCT * " +
+                "FROM (" + bookmarksQuery + " " +
+                "UNION ALL " + historyQuery + ") " +
+                "GROUP BY " + Combined.URL + ";";
+
+        final Cursor cursor = db.rawQuery(query, null);
+
+        cursor.setNotificationUri(getContext().getContentResolver(),
+                BrowserContract.AUTHORITY_URI);
+
+        return cursor;
+    }
+
     @Override
     public Cursor query(Uri uri, String[] projection, String selection,
             String[] selectionArgs, String sortOrder) {
-        SQLiteDatabase db = getReadableDatabase(uri);
         final int match = URI_MATCHER.match(uri);
+
+        // Handle only queries requiring a writable DB connection here: most queries need only a readable
+        // connection, hence we can get a readable DB once, and then handle most queries within a switch.
+        // TopSites requires a writable connection (because of the temporary tables it uses), hence
+        // we handle that separately, i.e. before retrieving a readable connection.
+        if (match == TOPSITES) {
+            if (uri.getBooleanQueryParameter(BrowserContract.PARAM_TOPSITES_DISABLE_PINNED, false)) {
+                return getPlainTopSites(uri);
+            } else {
+                return getTopSites(uri);
+            }
+        }
+
+        SQLiteDatabase db = getReadableDatabase(uri);
 
         SQLiteQueryBuilder qb = new SQLiteQueryBuilder();
         String limit = uri.getQueryParameter(BrowserContract.PARAM_LIMIT);
@@ -676,10 +1330,15 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
 
                 qb.setProjectionMap(BOOKMARKS_PROJECTION_MAP);
 
-                if (hasFaviconsInProjection(projection))
+                if (hasFaviconsInProjection(projection)) {
                     qb.setTables(VIEW_BOOKMARKS_WITH_FAVICONS);
-                else
+                } else if (selection != null && selection.contains(Bookmarks.ANNOTATION_KEY)) {
+                    qb.setTables(VIEW_BOOKMARKS_WITH_ANNOTATIONS);
+
+                    groupBy = uri.getQueryParameter(BrowserContract.PARAM_GROUP_BY);
+                } else {
                     qb.setTables(TABLE_BOOKMARKS);
+                }
 
                 break;
             }
@@ -707,6 +1366,16 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
 
                 break;
             }
+
+            case VISITS:
+                debug("Query is on visits: " + uri);
+                qb.setProjectionMap(VISIT_PROJECTION_MAP);
+                qb.setTables(TABLE_VISITS);
+
+                if (TextUtils.isEmpty(sortOrder)) {
+                    sortOrder = DEFAULT_VISITS_SORT_ORDER;
+                }
+                break;
 
             case FAVICON_ID:
                 selection = DBUtils.concatenateWhere(selection, Favicons._ID + " = ?");
@@ -736,6 +1405,13 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
                 break;
             }
 
+            case URL_ANNOTATIONS:
+                debug("Query is on url annotations: " + uri);
+
+                qb.setProjectionMap(URL_ANNOTATIONS_PROJECTION_MAP);
+                qb.setTables(TABLE_URL_ANNOTATIONS);
+                break;
+
             case SCHEMA: {
                 debug("Query is on schema.");
                 MatrixCursor schemaCursor = new MatrixCursor(new String[] { Schema.VERSION });
@@ -761,6 +1437,20 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
                 else
                     qb.setTables(Combined.VIEW_NAME);
 
+                break;
+            }
+
+            case HIGHLIGHTS: {
+                debug("Highlights query: " + uri);
+
+                return getHighlights(db, limit);
+            }
+
+            case PAGE_METADATA: {
+                debug("PageMetadata query: " + uri);
+
+                qb.setProjectionMap(PAGE_METADATA_PROJECTION_MAP);
+                qb.setTables(TABLE_PAGE_METADATA);
                 break;
             }
 
@@ -954,7 +1644,7 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
 
         // Compute matching IDs.
         final Cursor cursor = db.query(TABLE_BOOKMARKS, bookmarksProjection,
-                                       selection, selectionArgs, null, null, null);
+                selection, selectionArgs, null, null, null);
 
         // Now that we're done reading, open a transaction.
         final String inClause;
@@ -993,9 +1683,15 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
             return updated;
         }
 
-        // Insert a new entry if necessary
+        // Insert a new entry if necessary, setting visit and date aggregate values.
         if (!values.containsKey(History.VISITS)) {
             values.put(History.VISITS, 1);
+            values.put(History.LOCAL_VISITS, 1);
+        } else {
+            values.put(History.LOCAL_VISITS, values.getAsInteger(History.VISITS));
+        }
+        if (values.containsKey(History.DATE_LAST_VISITED)) {
+            values.put(History.LOCAL_DATE_LAST_VISITED, values.getAsLong(History.DATE_LAST_VISITED));
         }
         if (!values.containsKey(History.TITLE)) {
             values.put(History.TITLE, values.getAsString(History.URL));
@@ -1019,37 +1715,111 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
         }
 
         // Use the simple code path for easy updates.
-        if (!shouldIncrementVisits(uri)) {
+        if (!shouldIncrementVisits(uri) && !shouldIncrementRemoteAggregates(uri)) {
             trace("Updating history meta data only");
             return db.update(TABLE_HISTORY, values, selection, selectionArgs);
         }
 
         trace("Updating history meta data and incrementing visits");
 
-        // We might be altering the ContentValues, so let's use a copy.
-        final ContentValues valuesForUpdate = new ContentValues(values);
-
-        // Update data and increment visits by 1.
-        long incVisits = 1;
-        if (valuesForUpdate.containsKey(History.VISITS)) {
-            // Use a given visit count, if found.
-            Long additional = valuesForUpdate.getAsLong(History.VISITS);
-            if (additional != null) {
-                incVisits = additional;
-            }
-            // Remove the visits from this set of values so we can pass the visits
-            // as an expression.
-            valuesForUpdate.remove(History.VISITS);
+        if (values.containsKey(History.DATE_LAST_VISITED)) {
+            values.put(History.LOCAL_DATE_LAST_VISITED, values.getAsLong(History.DATE_LAST_VISITED));
         }
 
         // Create a separate set of values that will be updated as an expression.
         final ContentValues visits = new ContentValues();
-        visits.put(History.VISITS, History.VISITS + " + " + incVisits);
+        if (shouldIncrementVisits(uri)) {
+            // Update data and increment visits by 1.
+            final long incVisits = 1;
 
-        final ContentValues[] valuesAndVisits = { valuesForUpdate,  visits };
+            visits.put(History.VISITS, History.VISITS + " + " + incVisits);
+            visits.put(History.LOCAL_VISITS, History.LOCAL_VISITS + " + " + incVisits);
+        }
+
+        if (shouldIncrementRemoteAggregates(uri)) {
+            // Let's fail loudly instead of trying to assume what users of this API meant to do.
+            if (!values.containsKey(History.REMOTE_VISITS)) {
+                throw new IllegalArgumentException(
+                        "Tried incrementing History.REMOTE_VISITS by unknown value");
+            }
+            visits.put(
+                    History.REMOTE_VISITS,
+                    History.REMOTE_VISITS + " + " + values.getAsInteger(History.REMOTE_VISITS)
+            );
+            // Need to remove passed in value, so that we increment REMOTE_VISITS, and not just set it.
+            values.remove(History.REMOTE_VISITS);
+        }
+
+        final ContentValues[] valuesAndVisits = { values,  visits };
         final UpdateOperation[] ops = { UpdateOperation.ASSIGN, UpdateOperation.EXPRESSION };
 
         return DBUtils.updateArrays(db, TABLE_HISTORY, valuesAndVisits, ops, selection, selectionArgs);
+    }
+
+    private long insertVisitForHistory(Uri uri, ContentValues values, String selection, String[] selectionArgs) {
+        trace("Inserting visit for history on URI: " + uri);
+
+        final SQLiteDatabase db = getReadableDatabase(uri);
+
+        final Cursor cursor = db.query(
+                History.TABLE_NAME, new String[] {History.GUID}, selection, selectionArgs,
+                null, null, null);
+        if (cursor == null) {
+            Log.e(LOGTAG, "Null cursor while trying to insert visit for history URI: " + uri);
+            return 0;
+        }
+        final ContentValues[] visitValues;
+        try {
+            visitValues = new ContentValues[cursor.getCount()];
+
+            if (!cursor.moveToFirst()) {
+                Log.e(LOGTAG, "No history records found while inserting visit(s) for history URI: " + uri);
+                return 0;
+            }
+
+            // Sync works in microseconds, so we store visit timestamps in microseconds as well.
+            // History timestamps are in milliseconds.
+            // This is the conversion point for locally generated visits.
+            final long visitDate;
+            if (values.containsKey(History.DATE_LAST_VISITED)) {
+                visitDate = values.getAsLong(History.DATE_LAST_VISITED) * 1000;
+            } else {
+                visitDate = System.currentTimeMillis() * 1000;
+            }
+
+            final int guidColumn = cursor.getColumnIndexOrThrow(History.GUID);
+            while (!cursor.isAfterLast()) {
+                final ContentValues visit = new ContentValues();
+                visit.put(Visits.HISTORY_GUID, cursor.getString(guidColumn));
+                visit.put(Visits.DATE_VISITED, visitDate);
+                visitValues[cursor.getPosition()] = visit;
+                cursor.moveToNext();
+            }
+        } finally {
+            cursor.close();
+        }
+
+        if (visitValues.length == 1) {
+            return insertVisit(Visits.CONTENT_URI, visitValues[0]);
+        } else {
+            return bulkInsert(Visits.CONTENT_URI, visitValues);
+        }
+    }
+
+    private long insertVisit(Uri uri, ContentValues values) {
+        final SQLiteDatabase db = getWritableDatabase(uri);
+
+        debug("Inserting history in database with URL: " + uri);
+        beginWrite(db);
+
+        // We ignore insert conflicts here to simplify inserting visits records coming in from Sync.
+        // Visits table has a unique index on (history_guid,date), so a conflict might arise when we're
+        // trying to insert history record visits coming in from sync which are already present locally
+        // as a result of previous sync operations.
+        // An alternative to doing this is to filter out already present records when we're doing history inserts
+        // from Sync, which is a costly operation to do en masse.
+        return db.insertWithOnConflict(
+                TABLE_VISITS, null, values, SQLiteDatabase.CONFLICT_IGNORE);
     }
 
     private void updateFaviconIdsForUrl(SQLiteDatabase db, String pageUrl, Long faviconId) {
@@ -1085,7 +1855,7 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
 
         // If no URL is provided, insert using the default one.
         if (TextUtils.isEmpty(faviconUrl) && !TextUtils.isEmpty(pageUrl)) {
-            values.put(Favicons.URL, org.mozilla.gecko.favicons.Favicons.guessDefaultFaviconURL(pageUrl));
+            values.put(Favicons.URL, IconsHelper.guessDefaultFaviconURL(pageUrl));
         }
 
         final long now = System.currentTimeMillis();
@@ -1188,6 +1958,62 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
         return db.insertOrThrow(TABLE_THUMBNAILS, null, values);
     }
 
+    private long insertActivityStreamBlocklistSite(final Uri uri, final ContentValues values) {
+        final String url = values.getAsString(ActivityStreamBlocklist.URL);
+        trace("Inserting url into highlights blocklist, URL: " + url);
+
+        final SQLiteDatabase db = getWritableDatabase(uri);
+        values.put(ActivityStreamBlocklist.CREATED, System.currentTimeMillis());
+
+        beginWrite(db);
+        return db.insertOrThrow(TABLE_ACTIVITY_STREAM_BLOCKLIST, null, values);
+    }
+
+    private long insertPageMetadata(final Uri uri, final ContentValues values) {
+        final SQLiteDatabase db = getWritableDatabase(uri);
+
+        if (!values.containsKey(PageMetadata.DATE_CREATED)) {
+            values.put(PageMetadata.DATE_CREATED, System.currentTimeMillis());
+        }
+
+        beginWrite(db);
+
+        // Perform INSERT OR REPLACE, there might be page metadata present and we want to replace it.
+        // Depends on a conflict arising from unique foreign key (history_guid) constraint violation.
+        return db.insertWithOnConflict(
+                TABLE_PAGE_METADATA, null, values, SQLiteDatabase.CONFLICT_REPLACE);
+    }
+
+    private long insertUrlAnnotation(final Uri uri, final ContentValues values) {
+        final String url = values.getAsString(UrlAnnotations.URL);
+        trace("Inserting url annotations for URL: " + url);
+
+        final SQLiteDatabase db = getWritableDatabase(uri);
+        beginWrite(db);
+        return db.insertOrThrow(TABLE_URL_ANNOTATIONS, null, values);
+    }
+
+    private void deleteUrlAnnotation(final Uri uri, final String selection, final String[] selectionArgs) {
+        trace("Deleting url annotation for URI: " + uri);
+
+        final SQLiteDatabase db = getWritableDatabase(uri);
+        db.delete(TABLE_URL_ANNOTATIONS, selection, selectionArgs);
+    }
+
+    private int deletePageMetadata(final Uri uri, final String selection, final String[] selectionArgs) {
+        trace("Deleting page metadata for URI: " + uri);
+
+        final SQLiteDatabase db = getWritableDatabase(uri);
+        return db.delete(TABLE_PAGE_METADATA, selection, selectionArgs);
+    }
+
+    private void updateUrlAnnotation(final Uri uri, final ContentValues values, final String selection, final String[] selectionArgs) {
+        trace("Updating url annotation for URI: " + uri);
+
+        final SQLiteDatabase db = getWritableDatabase(uri);
+        db.update(TABLE_URL_ANNOTATIONS, values, selection, selectionArgs);
+    }
+
     private int updateOrInsertThumbnail(Uri uri, ContentValues values, String selection,
             String[] selectionArgs) {
         return updateThumbnail(uri, values, selection, selectionArgs,
@@ -1226,10 +2052,8 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
      * transaction will guarantee that a read does not need to be upgraded to
      * a write.
      */
-    private int deleteHistory(Uri uri, String selection, String[] selectionArgs) {
+    private int deleteHistory(SQLiteDatabase db, Uri uri, String selection, String[] selectionArgs) {
         debug("Deleting history entry for URI: " + uri);
-
-        final SQLiteDatabase db = getWritableDatabase(uri);
 
         if (isCallerSync(uri)) {
             return db.delete(TABLE_HISTORY, selection, selectionArgs);
@@ -1262,6 +2086,72 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
             Log.e(LOGTAG, "Unable to clean up deleted history records: ", e);
         }
         return updated;
+    }
+
+    private ArrayList<String> getHistoryGUIDsFromSelection(SQLiteDatabase db, Uri uri, String selection, String[] selectionArgs) {
+        final ArrayList<String> historyGUIDs = new ArrayList<>();
+
+        final Cursor cursor = db.query(
+                History.TABLE_NAME, new String[] {History.GUID}, selection, selectionArgs,
+                null, null, null);
+        if (cursor == null) {
+            Log.e(LOGTAG, "Null cursor while trying to delete visits for history URI: " + uri);
+            return historyGUIDs;
+        }
+
+        try {
+            if (!cursor.moveToFirst()) {
+                trace("No history items for which to remove visits matched for URI: " + uri);
+                return historyGUIDs;
+            }
+            final int historyColumn = cursor.getColumnIndexOrThrow(History.GUID);
+            while (!cursor.isAfterLast()) {
+                historyGUIDs.add(cursor.getString(historyColumn));
+                cursor.moveToNext();
+            }
+        } finally {
+            cursor.close();
+        }
+
+        return historyGUIDs;
+    }
+
+    private int deletePageMetadataForHistory(SQLiteDatabase db, ArrayList<String> historyGUIDs) {
+        return bulkDeleteByHistoryGUID(db, historyGUIDs, PageMetadata.TABLE_NAME, PageMetadata.HISTORY_GUID);
+    }
+
+    private int deleteVisitsForHistory(SQLiteDatabase db, ArrayList<String> historyGUIDs) {
+        return bulkDeleteByHistoryGUID(db, historyGUIDs, Visits.TABLE_NAME, Visits.HISTORY_GUID);
+    }
+
+    private int bulkDeleteByHistoryGUID(SQLiteDatabase db, ArrayList<String> historyGUIDs, String table, String historyGUIDColumn) {
+        // Due to SQLite's maximum variable limitation, we need to chunk our delete statements.
+        // For example, if there were 1200 GUIDs, this will perform 2 delete statements.
+        int deleted = 0;
+        for (int chunk = 0; chunk <= historyGUIDs.size() / DBUtils.SQLITE_MAX_VARIABLE_NUMBER; chunk++) {
+            final int chunkStart = chunk * DBUtils.SQLITE_MAX_VARIABLE_NUMBER;
+            int chunkEnd = (chunk + 1) * DBUtils.SQLITE_MAX_VARIABLE_NUMBER;
+            if (chunkEnd > historyGUIDs.size()) {
+                chunkEnd = historyGUIDs.size();
+            }
+            final List<String> chunkGUIDs = historyGUIDs.subList(chunkStart, chunkEnd);
+            deleted += db.delete(
+                    table,
+                    DBUtils.computeSQLInClause(chunkGUIDs.size(), historyGUIDColumn),
+                    chunkGUIDs.toArray(new String[chunkGUIDs.size()])
+            );
+        }
+
+        return deleted;
+    }
+
+    private int deleteVisits(Uri uri, String selection, String[] selectionArgs) {
+        debug("Deleting visits for URI: " + uri);
+
+        final SQLiteDatabase db = getWritableDatabase(uri);
+
+        beginWrite(db);
+        return db.delete(TABLE_VISITS, selection, selectionArgs);
     }
 
     private int deleteBookmarks(Uri uri, String selection, String[] selectionArgs) {

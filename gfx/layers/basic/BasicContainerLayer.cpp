@@ -10,7 +10,6 @@
 #include "basic/BasicLayers.h"          // for BasicLayerManager
 #include "mozilla/gfx/BaseRect.h"       // for BaseRect
 #include "mozilla/mozalloc.h"           // for operator new
-#include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsCOMPtr.h"                   // for already_AddRefed
 #include "nsISupportsImpl.h"            // for Layer::AddRef, etc
 #include "nsPoint.h"                    // for nsIntPoint
@@ -38,23 +37,38 @@ BasicContainerLayer::ComputeEffectiveTransforms(const Matrix4x4& aTransformToSur
   // are aligned in device space, so it doesn't really matter how we snap
   // containers.
   Matrix residual;
-  Matrix4x4 idealTransform = GetLocalTransform() * aTransformToSurface;
-  idealTransform.ProjectTo2D();
+  Matrix4x4 transformToSurface = aTransformToSurface;
+  bool participate3DCtx = Extend3DContext() || Is3DContextLeaf();
+  if (!participate3DCtx &&
+      GetContentFlags() & CONTENT_BACKFACE_HIDDEN) {
+    // For backface-hidden layers
+    transformToSurface.ProjectTo2D();
+  }
+  Matrix4x4 idealTransform = GetLocalTransform() * transformToSurface;
+  if (!participate3DCtx &&
+      !(GetContentFlags() & CONTENT_BACKFACE_HIDDEN)) {
+    // For non-backface-hidden layers,
+    // 3D components are required to handle CONTENT_BACKFACE_HIDDEN.
+    idealTransform.ProjectTo2D();
+  }
 
   if (!idealTransform.CanDraw2D()) {
+    if (!Extend3DContext()) {
+      mEffectiveTransform = idealTransform;
+      ComputeEffectiveTransformsForChildren(Matrix4x4());
+      ComputeEffectiveTransformForMaskLayers(Matrix4x4());
+      mUseIntermediateSurface = true;
+      return;
+    }
+
     mEffectiveTransform = idealTransform;
-    ComputeEffectiveTransformsForChildren(Matrix4x4());
-    ComputeEffectiveTransformForMaskLayers(Matrix4x4());
-    mUseIntermediateSurface = true;
+    ComputeEffectiveTransformsForChildren(idealTransform);
+    ComputeEffectiveTransformForMaskLayers(idealTransform);
+    mUseIntermediateSurface = false;
     return;
   }
 
-  mEffectiveTransform = SnapTransformTranslation(idealTransform, &residual);
-  // We always pass the ideal matrix down to our children, so there is no
-  // need to apply any compensation using the residual from SnapTransformTranslation.
-  ComputeEffectiveTransformsForChildren(idealTransform);
-
-  ComputeEffectiveTransformForMaskLayers(aTransformToSurface);
+  // With 2D transform or extended 3D context.
 
   Layer* child = GetFirstChild();
   bool hasSingleBlendingChild = false;
@@ -73,7 +87,21 @@ BasicContainerLayer::ComputeEffectiveTransforms(const Matrix4x4& aTransformToSur
     GetMaskLayer() ||
     GetForceIsolatedGroup() ||
     (GetMixBlendMode() != CompositionOp::OP_OVER && HasMultipleChildren()) ||
-    (GetEffectiveOpacity() != 1.0 && (HasMultipleChildren() || hasSingleBlendingChild));
+    (GetEffectiveOpacity() != 1.0 && ((HasMultipleChildren() && !Extend3DContext()) || hasSingleBlendingChild));
+
+  mEffectiveTransform =
+    !mUseIntermediateSurface ?
+    idealTransform :
+    (!(GetContentFlags() & CONTENT_BACKFACE_HIDDEN) ?
+     SnapTransformTranslation(idealTransform, &residual) :
+     SnapTransformTranslation3D(idealTransform, &residual));
+  Matrix4x4 childTransformToSurface =
+    (!mUseIntermediateSurface ||
+     (mUseIntermediateSurface && !Extend3DContext() /* 2D */)) ?
+    idealTransform : Matrix4x4::From2D(residual);
+  ComputeEffectiveTransformsForChildren(childTransformToSurface);
+
+  ComputeEffectiveTransformForMaskLayers(aTransformToSurface);
 }
 
 bool
@@ -85,7 +113,7 @@ BasicContainerLayer::ChildrenPartitionVisibleRegion(const gfx::IntRect& aInRect)
     return false;
 
   nsIntPoint offset(int32_t(transform._31), int32_t(transform._32));
-  gfx::IntRect rect = aInRect.Intersect(GetEffectiveVisibleRegion().ToUnknownRegion().GetBounds() + offset);
+  gfx::IntRect rect = aInRect.Intersect(GetLocalVisibleRegion().ToUnknownRegion().GetBounds() + offset);
   nsIntRegion covered;
 
   for (Layer* l = mFirstChild; l; l = l->GetNextSibling()) {
@@ -97,7 +125,7 @@ BasicContainerLayer::ChildrenPartitionVisibleRegion(const gfx::IntRect& aInRect)
         ThebesMatrix(childTransform).HasNonIntegerTranslation() ||
         l->GetEffectiveOpacity() != 1.0)
       return false;
-    nsIntRegion childRegion = l->GetEffectiveVisibleRegion().ToUnknownRegion();
+    nsIntRegion childRegion = l->GetLocalVisibleRegion().ToUnknownRegion();
     childRegion.MoveBy(int32_t(childTransform._31), int32_t(childTransform._32));
     childRegion.And(childRegion, rect);
     if (l->GetClipRect()) {

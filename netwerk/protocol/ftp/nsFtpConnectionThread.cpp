@@ -42,6 +42,8 @@
 #include "nsIURI.h"
 #include "nsILoadInfo.h"
 #include "nsNullPrincipal.h"
+#include "nsIAuthPrompt2.h"
+#include "nsIFTPChannelParentInternal.h"
 
 #ifdef MOZ_WIDGET_GONK
 #include "NetStatistics.h"
@@ -260,10 +262,10 @@ nsFtpState::EstablishControlConnection()
     LOG(("FTP:(%x) trying cached control\n", this));
         
     // Look to see if we can use a cached control connection:
-    nsFtpControlConnection *connection = nullptr;
+    RefPtr<nsFtpControlConnection> connection;
     // Don't use cached control if anonymous (bug #473371)
     if (!mChannel->HasLoadFlag(nsIRequest::LOAD_ANONYMOUS))
-        gFtpHandler->RemoveConnection(mChannel->URI(), &connection);
+        gFtpHandler->RemoveConnection(mChannel->URI(), getter_AddRefs(connection));
 
     if (connection) {
         mControlConnection.swap(connection);
@@ -1788,7 +1790,7 @@ nsFtpState::KillControlConnection()
     mControlConnection = nullptr;
 }
 
-class nsFtpAsyncAlert : public nsRunnable
+class nsFtpAsyncAlert : public Runnable
 {
 public:
     nsFtpAsyncAlert(nsIPrompt *aPrompter, nsString aResponseMsg)
@@ -1803,7 +1805,7 @@ protected:
         MOZ_COUNT_DTOR(nsFtpAsyncAlert);
     }
 public:
-    NS_IMETHOD Run()
+    NS_IMETHOD Run() override
     {
         if (mPrompter) {
             mPrompter->Alert(nullptr, mResponseMsg.get());
@@ -1826,10 +1828,6 @@ nsFtpState::StopProcessing()
 
     LOG_INFO(("FTP:(%x) nsFtpState stopping", this));
 
-#ifdef DEBUG_dougt
-    printf("FTP Stopped: [response code %d] [response msg follows:]\n%s\n", mResponseCode, mResponseMsg.get());
-#endif
-
     if (NS_FAILED(mInternalError) && !mResponseMsg.IsEmpty()) {
         // check to see if the control status is bad.
         // web shell wont throw an alert.  we better:
@@ -1847,6 +1845,11 @@ nsFtpState::StopProcessing()
                     NS_ConvertASCIItoUTF16(mResponseMsg));
             }
             NS_DispatchToMainThread(alertEvent);
+        }
+        nsCOMPtr<nsIFTPChannelParentInternal> ftpChanP;
+        mChannel->GetCallback(ftpChanP);
+        if (ftpChanP) {
+          ftpChanP->SetErrorMsg(mResponseMsg.get(), mUseUTF8);
         }
     }
 
@@ -2124,7 +2127,7 @@ nsFtpState::SaveNetworkStats(bool enforce)
 
     // Create the event to save the network statistics.
     // the event is then dispathed to the main thread.
-    RefPtr<nsRunnable> event =
+    RefPtr<Runnable> event =
         new SaveNetworkStatsEvent(appId, isInBrowser, mActiveNetworkInfo,
                                   mCountRecv, 0, false);
     NS_DispatchToMainThread(event);

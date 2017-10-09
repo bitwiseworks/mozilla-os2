@@ -17,7 +17,8 @@
 #include "nsWeakReference.h"
 #include "mozilla/SHA1.h"
 #include "mozilla/StaticMutex.h"
-#include "mozilla/Endian.h"
+#include "mozilla/StaticPtr.h"
+#include "mozilla/EndianUtils.h"
 #include "mozilla/TimeStamp.h"
 
 class nsIFile;
@@ -55,31 +56,42 @@ typedef struct {
   uint32_t mIsDirty;
 } CacheIndexHeader;
 
+static_assert(
+  sizeof(CacheIndexHeader::mVersion) + sizeof(CacheIndexHeader::mTimeStamp) +
+  sizeof(CacheIndexHeader::mIsDirty) == sizeof(CacheIndexHeader),
+  "Unexpected sizeof(CacheIndexHeader)!");
+
 struct CacheIndexRecord {
-  SHA1Sum::Hash mHash;
-  uint32_t      mFrecency;
-  uint32_t      mExpirationTime;
-  uint32_t      mAppId;
+  SHA1Sum::Hash   mHash;
+  uint32_t        mFrecency;
+  OriginAttrsHash mOriginAttrsHash;
+  uint32_t        mExpirationTime;
 
   /*
    *    1000 0000 0000 0000 0000 0000 0000 0000 : initialized
    *    0100 0000 0000 0000 0000 0000 0000 0000 : anonymous
-   *    0010 0000 0000 0000 0000 0000 0000 0000 : inBrowser
-   *    0001 0000 0000 0000 0000 0000 0000 0000 : removed
-   *    0000 1000 0000 0000 0000 0000 0000 0000 : dirty
-   *    0000 0100 0000 0000 0000 0000 0000 0000 : fresh
+   *    0010 0000 0000 0000 0000 0000 0000 0000 : removed
+   *    0001 0000 0000 0000 0000 0000 0000 0000 : dirty
+   *    0000 1000 0000 0000 0000 0000 0000 0000 : fresh
+   *    0000 0100 0000 0000 0000 0000 0000 0000 : pinned
    *    0000 0011 0000 0000 0000 0000 0000 0000 : reserved
    *    0000 0000 1111 1111 1111 1111 1111 1111 : file size (in kB)
    */
-  uint32_t      mFlags;
+  uint32_t        mFlags;
 
   CacheIndexRecord()
     : mFrecency(0)
+    , mOriginAttrsHash(0)
     , mExpirationTime(nsICacheEntry::NO_EXPIRATION_TIME)
-    , mAppId(nsILoadContextInfo::NO_APP_ID)
     , mFlags(0)
   {}
 };
+
+static_assert(
+  sizeof(CacheIndexRecord::mHash) + sizeof(CacheIndexRecord::mFrecency) +
+  sizeof(CacheIndexRecord::mOriginAttrsHash) + sizeof(CacheIndexRecord::mExpirationTime) +
+  sizeof(CacheIndexRecord::mFlags) == sizeof(CacheIndexRecord),
+  "Unexpected sizeof(CacheIndexRecord)!");
 
 class CacheIndexEntry : public PLDHashEntryHdr
 {
@@ -135,7 +147,7 @@ public:
                sizeof(SHA1Sum::Hash)) == 0);
     mRec->mFrecency = aOther.mRec->mFrecency;
     mRec->mExpirationTime = aOther.mRec->mExpirationTime;
-    mRec->mAppId = aOther.mRec->mAppId;
+    mRec->mOriginAttrsHash = aOther.mRec->mOriginAttrsHash;
     mRec->mFlags = aOther.mRec->mFlags;
     return *this;
   }
@@ -144,25 +156,22 @@ public:
   {
     mRec->mFrecency = 0;
     mRec->mExpirationTime = nsICacheEntry::NO_EXPIRATION_TIME;
-    mRec->mAppId = nsILoadContextInfo::NO_APP_ID;
+    mRec->mOriginAttrsHash = 0;
     mRec->mFlags = 0;
   }
 
-  void Init(uint32_t aAppId, bool aAnonymous, bool aInBrowser, bool aPinned)
+  void Init(OriginAttrsHash aOriginAttrsHash, bool aAnonymous, bool aPinned)
   {
     MOZ_ASSERT(mRec->mFrecency == 0);
     MOZ_ASSERT(mRec->mExpirationTime == nsICacheEntry::NO_EXPIRATION_TIME);
-    MOZ_ASSERT(mRec->mAppId == nsILoadContextInfo::NO_APP_ID);
+    MOZ_ASSERT(mRec->mOriginAttrsHash == 0);
     // When we init the entry it must be fresh and may be dirty
     MOZ_ASSERT((mRec->mFlags & ~kDirtyMask) == kFreshMask);
 
-    mRec->mAppId = aAppId;
+    mRec->mOriginAttrsHash = aOriginAttrsHash;
     mRec->mFlags |= kInitializedMask;
     if (aAnonymous) {
       mRec->mFlags |= kAnonymousMask;
-    }
-    if (aInBrowser) {
-      mRec->mFlags |= kInBrowserMask;
     }
     if (aPinned) {
       mRec->mFlags |= kPinnedMask;
@@ -173,9 +182,9 @@ public:
 
   bool IsInitialized() const { return !!(mRec->mFlags & kInitializedMask); }
 
-  uint32_t AppId() const { return mRec->mAppId; }
-  bool     Anonymous() const { return !!(mRec->mFlags & kAnonymousMask); }
-  bool     InBrowser() const { return !!(mRec->mFlags & kInBrowserMask); }
+  mozilla::net::OriginAttrsHash OriginAttrsHash() const { return mRec->mOriginAttrsHash; }
+
+  bool Anonymous() const { return !!(mRec->mFlags & kAnonymousMask); }
 
   bool IsRemoved() const { return !!(mRec->mFlags & kRemovedMask); }
   void MarkRemoved() { mRec->mFlags |= kRemovedMask; }
@@ -223,44 +232,32 @@ public:
 
   void WriteToBuf(void *aBuf)
   {
-    CacheIndexRecord *dst = reinterpret_cast<CacheIndexRecord *>(aBuf);
-
-    // Copy the whole record to the buffer.
-    memcpy(aBuf, mRec, sizeof(CacheIndexRecord));
-
+    uint8_t* ptr = static_cast<uint8_t*>(aBuf);
+    memcpy(ptr, mRec->mHash, sizeof(SHA1Sum::Hash)); ptr += sizeof(SHA1Sum::Hash);
+    NetworkEndian::writeUint32(ptr, mRec->mFrecency); ptr += sizeof(uint32_t);
+    NetworkEndian::writeUint64(ptr, mRec->mOriginAttrsHash); ptr += sizeof(uint64_t);
+    NetworkEndian::writeUint32(ptr, mRec->mExpirationTime); ptr += sizeof(uint32_t);
     // Dirty and fresh flags should never go to disk, since they make sense only
     // during current session.
-    dst->mFlags &= ~kDirtyMask;
-    dst->mFlags &= ~kFreshMask;
-
-#if defined(IS_LITTLE_ENDIAN)
-    // Data in the buffer are in machine byte order and we want them in network
-    // byte order.
-    NetworkEndian::writeUint32(&dst->mFrecency, dst->mFrecency);
-    NetworkEndian::writeUint32(&dst->mExpirationTime, dst->mExpirationTime);
-    NetworkEndian::writeUint32(&dst->mAppId, dst->mAppId);
-    NetworkEndian::writeUint32(&dst->mFlags, dst->mFlags);
-#endif
+    NetworkEndian::writeUint32(ptr, mRec->mFlags & ~(kDirtyMask | kFreshMask));
   }
 
   void ReadFromBuf(void *aBuf)
   {
-    CacheIndexRecord *src= reinterpret_cast<CacheIndexRecord *>(aBuf);
-    MOZ_ASSERT(memcmp(&mRec->mHash, &src->mHash,
-               sizeof(SHA1Sum::Hash)) == 0);
-
-    mRec->mFrecency = NetworkEndian::readUint32(&src->mFrecency);
-    mRec->mExpirationTime = NetworkEndian::readUint32(&src->mExpirationTime);
-    mRec->mAppId = NetworkEndian::readUint32(&src->mAppId);
-    mRec->mFlags = NetworkEndian::readUint32(&src->mFlags);
+    const uint8_t* ptr = static_cast<const uint8_t*>(aBuf);
+    MOZ_ASSERT(memcmp(&mRec->mHash, ptr, sizeof(SHA1Sum::Hash)) == 0); ptr += sizeof(SHA1Sum::Hash);
+    mRec->mFrecency = NetworkEndian::readUint32(ptr); ptr += sizeof(uint32_t);
+    mRec->mOriginAttrsHash = NetworkEndian::readUint64(ptr); ptr += sizeof(uint64_t);
+    mRec->mExpirationTime = NetworkEndian::readUint32(ptr); ptr += sizeof(uint32_t);
+    mRec->mFlags = NetworkEndian::readUint32(ptr);
   }
 
   void Log() const {
     LOG(("CacheIndexEntry::Log() [this=%p, hash=%08x%08x%08x%08x%08x, fresh=%u,"
-         " initialized=%u, removed=%u, dirty=%u, anonymous=%u, inBrowser=%u, "
-         "appId=%u, frecency=%u, expirationTime=%u, size=%u]",
+         " initialized=%u, removed=%u, dirty=%u, anonymous=%u, "
+         "originAttrsHash=%llx, frecency=%u, expirationTime=%u, size=%u]",
          this, LOGSHA1(mRec->mHash), IsFresh(), IsInitialized(), IsRemoved(),
-         IsDirty(), Anonymous(), InBrowser(), AppId(), GetFrecency(),
+         IsDirty(), Anonymous(), OriginAttrsHash(), GetFrecency(),
          GetExpirationTime(), GetFileSize()));
   }
 
@@ -268,9 +265,8 @@ public:
                                            nsILoadContextInfo *aInfo)
   {
     if (!aInfo->IsPrivate() &&
-        aInfo->OriginAttributesPtr()->mAppId == aRec->mAppId &&
-        aInfo->IsAnonymous() == !!(aRec->mFlags & kAnonymousMask) &&
-        aInfo->OriginAttributesPtr()->mInBrowser == !!(aRec->mFlags & kInBrowserMask)) {
+        GetOriginAttrsHash(*aInfo->OriginAttributesPtr()) == aRec->mOriginAttrsHash &&
+        aInfo->IsAnonymous() == !!(aRec->mFlags & kAnonymousMask)) {
       return true;
     }
 
@@ -295,25 +291,24 @@ private:
 
   static const uint32_t kInitializedMask = 0x80000000;
   static const uint32_t kAnonymousMask   = 0x40000000;
-  static const uint32_t kInBrowserMask   = 0x20000000;
 
   // This flag is set when the entry was removed. We need to keep this
   // information in memory until we write the index file.
-  static const uint32_t kRemovedMask     = 0x10000000;
+  static const uint32_t kRemovedMask     = 0x20000000;
 
   // This flag is set when the information in memory is not in sync with the
   // information in index file on disk.
-  static const uint32_t kDirtyMask       = 0x08000000;
+  static const uint32_t kDirtyMask       = 0x10000000;
 
   // This flag is set when the information about the entry is fresh, i.e.
   // we've created or opened this entry during this session, or we've seen
   // this entry during update or build process.
-  static const uint32_t kFreshMask       = 0x04000000;
+  static const uint32_t kFreshMask       = 0x08000000;
 
   // Indicates a pinned entry.
-  static const uint32_t kPinnedMask      = 0x02000000;
+  static const uint32_t kPinnedMask      = 0x04000000;
 
-  static const uint32_t kReservedMask    = 0x01000000;
+  static const uint32_t kReservedMask    = 0x03000000;
 
   // FileSize in kilobytes
   static const uint32_t kFileSizeMask    = 0x00FFFFFF;
@@ -380,7 +375,7 @@ public:
     if (mUpdateFlags & kExpirationUpdatedMask) {
       aDst->mRec->mExpirationTime = mRec->mExpirationTime;
     }
-    aDst->mRec->mAppId = mRec->mAppId;
+    aDst->mRec->mOriginAttrsHash = mRec->mOriginAttrsHash;
     if (mUpdateFlags & kFileSizeUpdatedMask) {
       aDst->mRec->mFlags = mRec->mFlags;
     } else {
@@ -620,9 +615,8 @@ public:
   // Initialize the entry. It MUST be present in index. Call to AddEntry() or
   // EnsureEntryExists() must precede the call to this method.
   static nsresult InitEntry(const SHA1Sum::Hash *aHash,
-                            uint32_t             aAppId,
+                            OriginAttrsHash      aOriginAttrsHash,
                             bool                 aAnonymous,
-                            bool                 aInBrowser,
                             bool                 aPinned);
 
   // Remove entry from index. The entry should be present in index.
@@ -690,6 +684,10 @@ public:
   // READY or WRITING and mIndexNeedsUpdate as well as mShuttingDown is false.
   static nsresult IsUpToDate(bool *_retval);
 
+  // Called from CacheStorageService::Clear() and CacheFileContextEvictor::EvictEntries(),
+  // sets a flag that blocks notification to AsyncGetDiskConsumption.
+  static void OnAsyncEviction(bool aEvicting);
+
   // Memory reporting
   static size_t SizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf);
   static size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf);
@@ -717,14 +715,13 @@ private:
   // This method returns false when index is not initialized or is shut down.
   bool IsIndexUsable();
 
-  // This method checks whether the entry has the same values of appId,
-  // isAnonymous and isInBrowser. We don't expect to find a collision since
-  // these values are part of the key that we hash and we use a strong hash
-  // function.
+  // This method checks whether the entry has the same values of
+  // originAttributes and isAnonymous. We don't expect to find a collision
+  // since these values are part of the key that we hash and we use a strong
+  // hash function.
   static bool IsCollision(CacheIndexEntry *aEntry,
-                          uint32_t         aAppId,
-                          bool             aAnonymous,
-                          bool             aInBrowser);
+                          OriginAttrsHash  aOriginAttrsHash,
+                          bool             aAnonymous);
 
   // Checks whether any of the information about the entry has changed.
   static bool HasEntryChanged(CacheIndexEntry *aEntry,
@@ -763,7 +760,8 @@ private:
   // cleared.
   nsresult GetFile(const nsACString &aName, nsIFile **_retval);
   nsresult RemoveFile(const nsACString &aName);
-  void     RemoveIndexFromDisk();
+  void     RemoveAllIndexFiles();
+  void     RemoveJournalAndTempFile();
   // Writes journal to the disk and clears dirty flag in index header.
   nsresult WriteLogToDisk();
 
@@ -827,6 +825,7 @@ private:
   // Following methods perform updating and building of the index.
   // Timer callback that starts update or build process.
   static void DelayedUpdate(nsITimer *aTimer, void *aClosure);
+  void DelayedUpdateLocked();
   // Posts timer event that start update or build process.
   nsresult ScheduleUpdateTimer(uint32_t aDelay);
   nsresult SetupDirectoryEnumerator();
@@ -904,14 +903,11 @@ private:
 
   static char const * StateString(EState aState);
   void ChangeState(EState aNewState);
+  void NotifyAsyncGetDiskConsumptionCallbacks();
 
   // Allocates and releases buffer used for reading and writing index.
   void AllocBuffer();
   void ReleaseBuffer();
-
-  // Methods used by CacheIndexEntryAutoManage to keep the arrays up to date.
-  void InsertRecordToFrecencyArray(CacheIndexRecord *aRecord);
-  void RemoveRecordFromFrecencyArray(CacheIndexRecord *aRecord);
 
   // Methods used by CacheIndexEntryAutoManage to keep the iterators up to date.
   void AddRecordToIterators(CacheIndexRecord *aRecord);
@@ -924,7 +920,7 @@ private:
 
   void ReportHashStats();
 
-  static CacheIndex *gInstance;
+  static mozilla::StaticRefPtr<CacheIndex> gInstance;
   static StaticMutex sLock;
 
   nsCOMPtr<nsIFile> mCacheDirectory;
@@ -982,6 +978,10 @@ private:
   uint32_t                  mRWBufPos;
   RefPtr<CacheHash>         mRWHash;
 
+  // True if read or write operation is pending. It is used to ensure that
+  // mRWBuf is not freed until OnDataRead or OnDataWritten is called.
+  bool                      mRWPending;
+
   // Reading of journal succeeded if true.
   bool                      mJournalReadSuccessfully;
 
@@ -1015,15 +1015,88 @@ private:
   // of the journal fails or the hash does not match.
   nsTHashtable<CacheIndexEntry> mTmpJournal;
 
-  // An array that keeps entry records ordered by eviction preference; we take
-  // the entry with lowest valid frecency. Zero frecency is an initial value
-  // and such entries are stored at the end of the array. Uninitialized entries
-  // and entries marked as deleted are not present in this array.
-  nsTArray<CacheIndexRecord *>  mFrecencyArray;
+  // FrecencyArray maintains order of entry records for eviction. Ideally, the
+  // records would be ordered by frecency all the time, but since this would be
+  // quite expensive, we allow certain amount of entries to be out of order.
+  // When the frecency is updated the new value is always bigger than the old
+  // one. Instead of keeping updated entries at the same position, we move them
+  // at the end of the array. This protects recently updated entries from
+  // eviction. The array is sorted once we hit the limit of maximum unsorted
+  // entries.
+  class FrecencyArray
+  {
+    class Iterator
+    {
+    public:
+      explicit Iterator(nsTArray<CacheIndexRecord *> *aRecs)
+        : mRecs(aRecs)
+        , mIdx(0)
+      {
+        while (!Done() && !(*mRecs)[mIdx]) {
+          mIdx++;
+        }
+      }
+
+      bool Done() const { return mIdx == mRecs->Length(); }
+
+      CacheIndexRecord* Get() const
+      {
+        MOZ_ASSERT(!Done());
+        return (*mRecs)[mIdx];
+      }
+
+      void Next()
+      {
+        MOZ_ASSERT(!Done());
+        ++mIdx;
+        while (!Done() && !(*mRecs)[mIdx]) {
+          mIdx++;
+        }
+      }
+
+    private:
+      nsTArray<CacheIndexRecord *> *mRecs;
+      uint32_t mIdx;
+    };
+
+  public:
+    Iterator Iter() { return Iterator(&mRecs); }
+
+    FrecencyArray() : mUnsortedElements(0)
+                    , mRemovedElements(0) {}
+
+    // Methods used by CacheIndexEntryAutoManage to keep the array up to date.
+    void AppendRecord(CacheIndexRecord *aRecord);
+    void RemoveRecord(CacheIndexRecord *aRecord);
+    void ReplaceRecord(CacheIndexRecord *aOldRecord,
+                       CacheIndexRecord *aNewRecord);
+    void SortIfNeeded();
+
+    size_t Length() const { return mRecs.Length() - mRemovedElements; }
+    void Clear() { mRecs.Clear(); }
+
+  private:
+    friend class CacheIndex;
+
+    nsTArray<CacheIndexRecord *> mRecs;
+    uint32_t                     mUnsortedElements;
+    // Instead of removing elements from the array immediately, we null them out
+    // and the iterator skips them when accessing the array. The null pointers
+    // are placed at the end during sorting and we strip them out all at once.
+    // This saves moving a lot of memory in nsTArray::RemoveElementsAt.
+    uint32_t                     mRemovedElements;
+  };
+
+  FrecencyArray mFrecencyArray;
 
   nsTArray<CacheIndexIterator *> mIterators;
 
-  class DiskConsumptionObserver : public nsRunnable
+  // This flag is true iff we are between CacheStorageService:Clear() and processing
+  // all contexts to be evicted.  It will make UI to show "calculating" instead of
+  // any intermediate cache size.
+  bool mAsyncGetDiskConsumptionBlocked;
+
+  class DiskConsumptionObserver : public Runnable
   {
   public:
     static DiskConsumptionObserver* Init(nsICacheStorageConsumptionObserver* aObserver)
@@ -1046,20 +1119,11 @@ private:
       : mObserver(aWeakObserver) { }
     virtual ~DiskConsumptionObserver() {
       if (mObserver && !NS_IsMainThread()) {
-        nsIWeakReference *obs;
-        mObserver.forget(&obs);
-
-        nsCOMPtr<nsIThread> mainThread = do_GetMainThread();
-        if (mainThread) {
-          NS_ProxyRelease(mainThread, obs);
-        } else {
-          NS_WARNING("Cannot get main thread, leaking weak reference to "
-                     "CacheStorageConsumptionObserver.");
-        }
+        NS_ReleaseOnMainThread(mObserver.forget());
       }
     }
 
-    NS_IMETHODIMP Run()
+    NS_IMETHOD Run() override
     {
       MOZ_ASSERT(NS_IsMainThread());
 

@@ -12,6 +12,10 @@ this.EXPORTED_SYMBOLS = ["ExtensionContent"];
  * This file handles the content process side of extensions. It mainly
  * takes care of content script injection, content script APIs, and
  * messaging.
+ *
+ * This file is also the initial entry point for addon processes.
+ * ExtensionChild.jsm is responsible for functionality specific to addon
+ * processes.
  */
 
 const Ci = Components.interfaces;
@@ -25,20 +29,48 @@ Cu.import("resource://gre/modules/AppConstants.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "ExtensionManagement",
                                   "resource://gre/modules/ExtensionManagement.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "LanguageDetector",
+                                  "resource:///modules/translation/LanguageDetector.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "MatchPattern",
                                   "resource://gre/modules/MatchPattern.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
-                                  "resource://gre/modules/PrivateBrowsingUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "MatchGlobs",
+                                  "resource://gre/modules/MatchPattern.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "MessageChannel",
+                                  "resource://gre/modules/MessageChannel.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "PromiseUtils",
+                                  "resource://gre/modules/PromiseUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Schemas",
+                                  "resource://gre/modules/Schemas.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "WebNavigationFrames",
+                                  "resource://gre/modules/WebNavigationFrames.jsm");
 
+Cu.import("resource://gre/modules/ExtensionChild.jsm");
+Cu.import("resource://gre/modules/ExtensionCommon.jsm");
 Cu.import("resource://gre/modules/ExtensionUtils.jsm");
-var {
-  runSafeSyncWithoutClone,
+
+const {
+  EventEmitter,
   LocaleData,
-  MessageBroker,
-  Messenger,
-  injectAPI,
+  defineLazyGetter,
   flushJarCache,
+  getInnerWindowID,
+  promiseDocumentReady,
+  runSafeSyncWithoutClone,
 } = ExtensionUtils;
+
+const {
+  BaseContext,
+  SchemaAPIManager,
+} = ExtensionCommon;
+
+const {
+  ChildAPIManager,
+  Messenger,
+} = ExtensionChild;
+
+XPCOMUtils.defineLazyGetter(this, "console", ExtensionUtils.getConsole);
+
+const CATEGORY_EXTENSION_SCRIPTS_CONTENT = "webextension-scripts-content";
 
 function isWhenBeforeOrSame(when1, when2) {
   let table = {"document_start": 0,
@@ -47,88 +79,90 @@ function isWhenBeforeOrSame(when1, when2) {
   return table[when1] <= table[when2];
 }
 
-// This is the fairly simple API that we inject into content
-// scripts.
-var api = context => {
-  return {
-    runtime: {
-      connect: function(extensionId, connectInfo) {
-        if (!connectInfo) {
-          connectInfo = extensionId;
-          extensionId = null;
-        }
-        let name = connectInfo && connectInfo.name || "";
-        let recipient = extensionId ? {extensionId} : {extensionId: context.extensionId};
-        return context.messenger.connect(context.messageManager, name, recipient);
-      },
+var apiManager = new class extends SchemaAPIManager {
+  constructor() {
+    super("content");
+    this.initialized = false;
+  }
 
-      getManifest: function() {
-        return Cu.cloneInto(context.extension.manifest, context.cloneScope);
-      },
+  generateAPIs(...args) {
+    if (!this.initialized) {
+      this.initialized = true;
+      for (let [/* name */, value] of XPCOMUtils.enumerateCategoryEntries(CATEGORY_EXTENSION_SCRIPTS_CONTENT)) {
+        this.loadScript(value);
+      }
+    }
+    return super.generateAPIs(...args);
+  }
 
-      getURL: function(url) {
-        return context.extension.baseURI.resolve(url);
-      },
-
-      onConnect: context.messenger.onConnect("runtime.onConnect"),
-
-      onMessage: context.messenger.onMessage("runtime.onMessage"),
-
-      sendMessage: function(...args) {
-        let options; // eslint-disable-line no-unused-vars
-        let extensionId, message, responseCallback;
-        if (args.length == 1) {
-          message = args[0];
-        } else if (args.length == 2) {
-          [message, responseCallback] = args;
-        } else {
-          [extensionId, message, options, responseCallback] = args;
-        }
-
-        let recipient = extensionId ? {extensionId} : {extensionId: context.extensionId};
-        context.messenger.sendMessage(context.messageManager, message, recipient, responseCallback);
-      },
-    },
-
-    extension: {
-      getURL: function(url) {
-        return context.extension.baseURI.resolve(url);
-      },
-
-      inIncognitoContext: PrivateBrowsingUtils.isContentWindowPrivate(context.contentWindow),
-    },
-
-    i18n: {
-      getMessage: function(messageName, substitutions) {
-        return context.extension.localizeMessage(messageName, substitutions);
-      },
-    },
-  };
-};
+  registerSchemaAPI(namespace, envType, getAPI) {
+    if (envType == "content_child") {
+      super.registerSchemaAPI(namespace, envType, getAPI);
+    }
+  }
+}();
 
 // Represents a content script.
-function Script(options) {
+function Script(extension, options, deferred = PromiseUtils.defer()) {
+  this.extension = extension;
   this.options = options;
   this.run_at = this.options.run_at;
   this.js = this.options.js || [];
   this.css = this.options.css || [];
+  this.remove_css = this.options.remove_css;
+  this.match_about_blank = this.options.match_about_blank;
+
+  this.deferred = deferred;
 
   this.matches_ = new MatchPattern(this.options.matches);
   this.exclude_matches_ = new MatchPattern(this.options.exclude_matches || null);
   // TODO: MatchPattern should pre-mangle host-only patterns so that we
   // don't need to call a separate match function.
   this.matches_host_ = new MatchPattern(this.options.matchesHost || null);
+  this.include_globs_ = new MatchGlobs(this.options.include_globs);
+  this.exclude_globs_ = new MatchGlobs(this.options.exclude_globs);
 
-  // TODO: Support glob patterns.
+  this.requiresCleanup = !this.remove_css && (this.css.length > 0 || options.cssCode);
 }
 
 Script.prototype = {
+  get cssURLs() {
+    // We can handle CSS urls (css) and CSS code (cssCode).
+    let urls = [];
+    for (let url of this.css) {
+      urls.push(this.extension.baseURI.resolve(url));
+    }
+
+    if (this.options.cssCode) {
+      let url = "data:text/css;charset=utf-8," + encodeURIComponent(this.options.cssCode);
+      urls.push(url);
+    }
+
+    return urls;
+  },
+
   matches(window) {
     let uri = window.document.documentURIObject;
+    let principal = window.document.nodePrincipal;
 
-    // Documents from data: URIs inherit the principal.
+    // If mozAddonManager is present on this page, don't allow
+    // content scripts.
+    if (window.navigator.mozAddonManager !== undefined) {
+      return false;
+    }
+
+    if (this.match_about_blank && ["about:blank", "about:srcdoc"].includes(uri.spec)) {
+      // When matching about:blank/srcdoc documents, the checks below
+      // need to be performed against the "owner" document's URI.
+      uri = principal.URI;
+    }
+
+    // Documents from data: URIs also inherit the principal.
     if (Services.netUtils.URIChainHasFlags(uri, Ci.nsIProtocolHandler.URI_INHERITS_SECURITY_CONTEXT)) {
-      uri = window.document.nodePrincipal.URI;
+      if (!this.match_about_blank) {
+        return false;
+      }
+      uri = principal.URI;
     }
 
     if (!(this.matches_.matches(uri) || this.matches_host_.matchesIgnoringPath(uri))) {
@@ -139,67 +173,110 @@ Script.prototype = {
       return false;
     }
 
-    if (!this.options.all_frames && window.top != window) {
-      return false;
-    }
-
-    if ("innerWindowID" in this.options) {
-      let innerWindowID = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                                .getInterface(Ci.nsIDOMWindowUtils)
-                                .currentInnerWindowID;
-
-      if (innerWindowID !== this.options.innerWindowID) {
+    if (this.options.include_globs != null) {
+      if (!this.include_globs_.matches(uri.spec)) {
         return false;
       }
     }
 
-    // TODO: match_about_blank.
+    if (this.exclude_globs_.matches(uri.spec)) {
+      return false;
+    }
+
+    if (this.options.frame_id != null) {
+      if (WebNavigationFrames.getFrameId(window) != this.options.frame_id) {
+        return false;
+      }
+    } else if (!this.options.all_frames && window.top != window) {
+      return false;
+    }
 
     return true;
   },
 
-  tryInject(extension, window, sandbox, shouldRun) {
-    if (!this.matches(window)) {
-      return;
-    }
-
-    if (shouldRun("document_start")) {
+  cleanup(window) {
+    if (!this.remove_css) {
       let winUtils = window.QueryInterface(Ci.nsIInterfaceRequestor)
                            .getInterface(Ci.nsIDOMWindowUtils);
 
-      for (let url of this.css) {
-        url = extension.baseURI.resolve(url);
-        runSafeSyncWithoutClone(winUtils.loadSheetUsingURIString, url, winUtils.AUTHOR_SHEET);
+      for (let url of this.cssURLs) {
+        runSafeSyncWithoutClone(winUtils.removeSheetUsingURIString, url, winUtils.AUTHOR_SHEET);
       }
+    }
+  },
 
-      if (this.options.cssCode) {
-        let url = "data:text/css;charset=utf-8," + encodeURIComponent(this.options.cssCode);
-        runSafeSyncWithoutClone(winUtils.loadSheetUsingURIString, url, winUtils.AUTHOR_SHEET);
+  /**
+   * Tries to inject this script into the given window and sandbox, if
+   * there are pending operations for the window's current load state.
+   *
+   * @param {Window} window
+   *        The DOM Window to inject the scripts and CSS into.
+   * @param {Sandbox} sandbox
+   *        A Sandbox inheriting from `window` in which to evaluate the
+   *        injected scripts.
+   * @param {function} shouldRun
+   *        A function which, when passed the document load state that a
+   *        script is expected to run at, returns `true` if we should
+   *        currently be injecting scripts for that load state.
+   *
+   *        For initial injection of a script, this function should
+   *        return true if the document is currently in or has already
+   *        passed through the given state. For injections triggered by
+   *        document state changes, it should only return true if the
+   *        given state exactly matches the state that triggered the
+   *        change.
+   * @param {string} when
+   *        The document's current load state, or if triggered by a
+   *        document state change, the new document state that triggered
+   *        the injection.
+   */
+  tryInject(window, sandbox, shouldRun, when) {
+    if (shouldRun("document_start")) {
+      let {cssURLs} = this;
+      if (cssURLs.length > 0) {
+        let winUtils = window.QueryInterface(Ci.nsIInterfaceRequestor)
+                             .getInterface(Ci.nsIDOMWindowUtils);
+
+        let method = this.remove_css ? winUtils.removeSheetUsingURIString : winUtils.loadSheetUsingURIString;
+        for (let url of cssURLs) {
+          runSafeSyncWithoutClone(method, url, winUtils.AUTHOR_SHEET);
+        }
+
+        this.deferred.resolve();
       }
     }
 
+    let result;
     let scheduled = this.run_at || "document_idle";
     if (shouldRun(scheduled)) {
-      for (let url of this.js) {
-        // On gonk we need to load the resources asynchronously because the
-        // app: channels only support asyncOpen. This is safe only in the
-        // `document_idle` state.
-        if (AppConstants.platform == "gonk" && scheduled != "document_idle") {
-          Cu.reportError(`Script injection: ignoring ${url} at ${scheduled}`);
-        }
-        url = extension.baseURI.resolve(url);
-
+      for (let [i, url] of this.js.entries()) {
         let options = {
           target: sandbox,
           charset: "UTF-8",
-          async: AppConstants.platform == "gonk",
+          // Inject the last script asynchronously unless we're expected to
+          // inject before any page scripts have run, and we haven't already
+          // missed that boat.
+          async: (i === this.js.length - 1) &&
+                 (this.run_at !== "document_start" || when !== "document_start"),
         };
-        runSafeSyncWithoutClone(Services.scriptloader.loadSubScriptWithOptions, url, options);
+        try {
+          result = Services.scriptloader.loadSubScriptWithOptions(url, options);
+        } catch (e) {
+          Cu.reportError(e);
+          this.deferred.reject(e);
+        }
       }
 
       if (this.options.jsCode) {
-        Cu.evalInSandbox(this.options.jsCode, sandbox, "latest");
+        try {
+          result = Cu.evalInSandbox(this.options.jsCode, sandbox, "latest");
+        } catch (e) {
+          Cu.reportError(e);
+          this.deferred.reject(e);
+        }
       }
+
+      this.deferred.resolve(result);
     }
   },
 };
@@ -216,118 +293,259 @@ function getWindowMessageManager(contentWindow) {
   }
 }
 
+var DocumentManager;
 var ExtensionManager;
 
-// Scope in which extension content script code can run. It uses
-// Cu.Sandbox to run the code. There is a separate scope for each
-// frame.
-function ExtensionContext(extensionId, contentWindow) {
-  this.extension = ExtensionManager.get(extensionId);
-  this.extensionId = extensionId;
-  this.contentWindow = contentWindow;
+/**
+ * An execution context for semi-privileged extension content scripts.
+ *
+ * This is the child side of the ContentScriptContextParent class
+ * defined in ExtensionParent.jsm.
+ */
+class ContentScriptContextChild extends BaseContext {
+  constructor(extension, contentWindow, contextOptions = {}) {
+    super("content_child", extension);
 
-  this.onClose = new Set();
+    let {isExtensionPage} = contextOptions;
 
-  let utils = contentWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                           .getInterface(Ci.nsIDOMWindowUtils);
-  let outerWindowId = utils.outerWindowID;
-  let frameId = contentWindow == contentWindow.top ? 0 : outerWindowId;
-  this.frameId = frameId;
+    this.isExtensionPage = isExtensionPage;
 
-  let mm = getWindowMessageManager(contentWindow);
-  this.messageManager = mm;
+    this.setContentWindow(contentWindow);
 
-  let prin = [contentWindow];
-  if (Services.scriptSecurityManager.isSystemPrincipal(contentWindow.document.nodePrincipal)) {
-    // Make sure we don't hand out the system principal by accident.
-    prin = Cc["@mozilla.org/nullprincipal;1"].createInstance(Ci.nsIPrincipal);
+    let frameId = WebNavigationFrames.getFrameId(contentWindow);
+    this.frameId = frameId;
+
+    this.scripts = [];
+
+    let contentPrincipal = contentWindow.document.nodePrincipal;
+    let ssm = Services.scriptSecurityManager;
+
+    // copy origin attributes from the content window origin attributes to
+    // preserve the user context id. overwrite the addonId.
+    let attrs = contentPrincipal.originAttributes;
+    attrs.addonId = this.extension.id;
+    let extensionPrincipal = ssm.createCodebasePrincipal(this.extension.baseURI, attrs);
+
+    let principal;
+    if (ssm.isSystemPrincipal(contentPrincipal)) {
+      // Make sure we don't hand out the system principal by accident.
+      // also make sure that the null principal has the right origin attributes
+      principal = ssm.createNullPrincipal(attrs);
+    } else {
+      principal = [contentPrincipal, extensionPrincipal];
+    }
+
+    if (isExtensionPage) {
+      if (ExtensionManagement.getAddonIdForWindow(this.contentWindow) != this.extension.id) {
+        throw new Error("Invalid target window for this extension context");
+      }
+      // This is an iframe with content script API enabled and its principal should be the
+      // contentWindow itself. (we create a sandbox with the contentWindow as principal and with X-rays disabled
+      // because it enables us to create the APIs object in this sandbox object and then copying it
+      // into the iframe's window, see Bug 1214658 for rationale)
+      this.sandbox = Cu.Sandbox(contentWindow, {
+        sandboxPrototype: contentWindow,
+        sameZoneAs: contentWindow,
+        wantXrays: false,
+        isWebExtensionContentScript: true,
+      });
+    } else {
+      // This metadata is required by the Developer Tools, in order for
+      // the content script to be associated with both the extension and
+      // the tab holding the content page.
+      let metadata = {
+        "inner-window-id": this.innerWindowID,
+        addonId: attrs.addonId,
+      };
+
+      this.sandbox = Cu.Sandbox(principal, {
+        metadata,
+        sandboxPrototype: contentWindow,
+        sameZoneAs: contentWindow,
+        wantXrays: true,
+        isWebExtensionContentScript: true,
+        wantExportHelpers: true,
+        wantGlobalProperties: ["XMLHttpRequest", "fetch"],
+        originAttributes: attrs,
+      });
+
+      Cu.evalInSandbox(`
+        window.JSON = JSON;
+        window.XMLHttpRequest = XMLHttpRequest;
+        window.fetch = fetch;
+      `, this.sandbox);
+    }
+
+    Object.defineProperty(this, "principal", {
+      value: Cu.getObjectPrincipal(this.sandbox),
+      enumerable: true,
+      configurable: true,
+    });
+
+    this.url = contentWindow.location.href;
+
+    defineLazyGetter(this, "chromeObj", () => {
+      let chromeObj = Cu.createObjectIn(this.sandbox);
+
+      Schemas.inject(chromeObj, this.childManager);
+      return chromeObj;
+    });
+
+    Schemas.exportLazyGetter(this.sandbox, "browser", () => this.chromeObj);
+    Schemas.exportLazyGetter(this.sandbox, "chrome", () => this.chromeObj);
+
+    // This is an iframe with content script API enabled (bug 1214658)
+    if (isExtensionPage) {
+      Schemas.exportLazyGetter(this.contentWindow,
+                               "browser", () => this.chromeObj);
+      Schemas.exportLazyGetter(this.contentWindow,
+                               "chrome", () => this.chromeObj);
+    }
   }
 
-  this.sandbox = Cu.Sandbox(prin, {sandboxPrototype: contentWindow, wantXrays: true, isWebExtensionContentScript: true});
-
-  let delegate = {
-    getSender(context, target, sender) {
-      // Nothing to do here.
-    },
-  };
-
-  let url = contentWindow.location.href;
-  let broker = ExtensionContent.getBroker(mm);
-  this.messenger = new Messenger(this, broker, {id: extensionId, frameId, url},
-                                 {id: extensionId, frameId}, delegate);
-
-  let chromeObj = Cu.createObjectIn(this.sandbox, {defineAs: "browser"});
-
-  // Sandboxes don't get Xrays for some weird compatibility
-  // reason. However, we waive here anyway in case that changes.
-  Cu.waiveXrays(this.sandbox).chrome = Cu.waiveXrays(this.sandbox).browser;
-  injectAPI(api(this), chromeObj);
-}
-
-ExtensionContext.prototype = {
   get cloneScope() {
     return this.sandbox;
-  },
+  }
 
-  execute(script, shouldRun) {
-    script.tryInject(this.extension, this.contentWindow, this.sandbox, shouldRun);
-  },
+  execute(script, shouldRun, when) {
+    script.tryInject(this.contentWindow, this.sandbox, shouldRun, when);
+  }
 
-  callOnClose(obj) {
-    this.onClose.add(obj);
-  },
+  addScript(script, when) {
+    let state = DocumentManager.getWindowState(this.contentWindow);
+    this.execute(script, scheduled => isWhenBeforeOrSame(scheduled, state), when);
 
-  forgetOnClose(obj) {
-    this.onClose.delete(obj);
-  },
+    // Save the script in case it has pending operations in later load
+    // states, but only if we're before document_idle, or require cleanup.
+    if (state != "document_idle" || script.requiresCleanup) {
+      this.scripts.push(script);
+    }
+  }
+
+  triggerScripts(documentState) {
+    for (let script of this.scripts) {
+      this.execute(script, scheduled => scheduled == documentState, documentState);
+    }
+    if (documentState == "document_idle") {
+      // Don't bother saving scripts after document_idle.
+      this.scripts = this.scripts.filter(script => script.requiresCleanup);
+    }
+  }
 
   close() {
-    for (let obj of this.onClose) {
-      obj.close();
+    super.unload();
+
+    if (this.contentWindow) {
+      for (let script of this.scripts) {
+        if (script.requiresCleanup) {
+          script.cleanup(this.contentWindow);
+        }
+      }
+
+      // Overwrite the content script APIs with an empty object if the APIs objects are still
+      // defined in the content window (bug 1214658).
+      if (this.isExtensionPage) {
+        Cu.createObjectIn(this.contentWindow, {defineAs: "browser"});
+        Cu.createObjectIn(this.contentWindow, {defineAs: "chrome"});
+      }
     }
     Cu.nukeSandbox(this.sandbox);
-  },
-};
-
-function windowId(window) {
-  return window.QueryInterface(Ci.nsIInterfaceRequestor)
-               .getInterface(Ci.nsIDOMWindowUtils)
-               .currentInnerWindowID;
+    this.sandbox = null;
+  }
 }
+
+defineLazyGetter(ContentScriptContextChild.prototype, "messenger", function() {
+  // The |sender| parameter is passed directly to the extension.
+  let sender = {id: this.extension.uuid, frameId: this.frameId, url: this.url};
+  let filter = {extensionId: this.extension.id};
+  let optionalFilter = {frameId: this.frameId};
+
+  return new Messenger(this, [this.messageManager], sender, filter, optionalFilter);
+});
+
+defineLazyGetter(ContentScriptContextChild.prototype, "childManager", function() {
+  let localApis = {};
+  apiManager.generateAPIs(this, localApis);
+
+  let childManager = new ChildAPIManager(this, this.messageManager, localApis, {
+    envType: "content_parent",
+    url: this.url,
+  });
+
+  this.callOnClose(childManager);
+
+  return childManager;
+});
 
 // Responsible for creating ExtensionContexts and injecting content
 // scripts into them when new documents are created.
-var DocumentManager = {
+DocumentManager = {
   extensionCount: 0,
 
-  // Map[windowId -> Map[extensionId -> ExtensionContext]]
-  windows: new Map(),
+  // Map[windowId -> Map[extensionId -> ContentScriptContextChild]]
+  contentScriptWindows: new Map(),
+
+  // Map[windowId -> ContentScriptContextChild]
+  extensionPageWindows: new Map(),
 
   init() {
+    Services.obs.addObserver(this, "content-document-global-created", false);
     Services.obs.addObserver(this, "document-element-inserted", false);
     Services.obs.addObserver(this, "inner-window-destroyed", false);
   },
 
   uninit() {
+    Services.obs.removeObserver(this, "content-document-global-created");
     Services.obs.removeObserver(this, "document-element-inserted");
     Services.obs.removeObserver(this, "inner-window-destroyed");
   },
 
   getWindowState(contentWindow) {
     let readyState = contentWindow.document.readyState;
-    if (readyState == "loading") {
-      return "document_start";
-    } else if (readyState == "interactive") {
-      return "document_end";
-    } else {
+    if (readyState == "complete") {
       return "document_idle";
+    }
+    if (readyState == "interactive") {
+      return "document_end";
+    }
+    return "document_start";
+  },
+
+  loadInto(window) {
+    // Enable the content script APIs should be available in subframes' window
+    // if it is recognized as a valid addon id (see Bug 1214658 for rationale).
+    const {
+      NO_PRIVILEGES,
+      CONTENTSCRIPT_PRIVILEGES,
+      FULL_PRIVILEGES,
+    } = ExtensionManagement.API_LEVELS;
+    let extensionId = ExtensionManagement.getAddonIdForWindow(window);
+    let apiLevel = ExtensionManagement.getAPILevelForWindow(window, extensionId);
+
+    if (apiLevel != NO_PRIVILEGES) {
+      let extension = ExtensionManager.get(extensionId);
+      if (extension) {
+        if (apiLevel == CONTENTSCRIPT_PRIVILEGES) {
+          DocumentManager.getExtensionPageContext(extension, window);
+        } else if (apiLevel == FULL_PRIVILEGES) {
+          ExtensionChild.createExtensionContext(extension, window);
+        }
+      }
     }
   },
 
   observe: function(subject, topic, data) {
-    if (topic == "document-element-inserted") {
+    // For some types of documents (about:blank), we only see the first
+    // notification, for others (data: URIs) we only observe the second.
+    if (topic == "content-document-global-created" || topic == "document-element-inserted") {
       let document = subject;
       let window = document && document.defaultView;
+
+      if (topic == "content-document-global-created") {
+        window = subject;
+        document = window && window.document;
+      }
+
       if (!document || !document.location || !window) {
         return;
       }
@@ -339,23 +557,40 @@ var DocumentManager = {
         return;
       }
 
-      this.trigger("document_start", window);
+      // Load on document-element-inserted, except for about:blank which doesn't
+      // see it, and needs special late handling on DOMContentLoaded event.
+      if (topic === "document-element-inserted") {
+        this.loadInto(window);
+        this.trigger("document_start", window);
+      }
+
       /* eslint-disable mozilla/balanced-listeners */
       window.addEventListener("DOMContentLoaded", this, true);
       window.addEventListener("load", this, true);
       /* eslint-enable mozilla/balanced-listeners */
     } else if (topic == "inner-window-destroyed") {
-      let id = subject.QueryInterface(Ci.nsISupportsPRUint64).data;
-      if (!this.windows.has(id)) {
-        return;
+      let windowId = subject.QueryInterface(Ci.nsISupportsPRUint64).data;
+
+      MessageChannel.abortResponses({innerWindowID: windowId});
+
+      // Close any existent content-script context for the destroyed window.
+      if (this.contentScriptWindows.has(windowId)) {
+        let extensions = this.contentScriptWindows.get(windowId);
+        for (let [, context] of extensions) {
+          context.close();
+        }
+
+        this.contentScriptWindows.delete(windowId);
       }
 
-      let extensions = this.windows.get(id);
-      for (let [, context] of extensions) {
+      // Close any existent iframe extension page context for the destroyed window.
+      if (this.extensionPageWindows.has(windowId)) {
+        let context = this.extensionPageWindows.get(windowId);
         context.close();
+        this.extensionPageWindows.delete(windowId);
       }
 
-      this.windows.delete(id);
+      ExtensionChild.destroyExtensionContext(windowId);
     }
   },
 
@@ -372,31 +607,57 @@ var DocumentManager = {
     // Need to check if we're still on the right page? Greasemonkey does this.
 
     if (event.type == "DOMContentLoaded") {
+      // By this time, we can be sure if this is an explicit about:blank
+      // document, and if it needs special late loading and fake trigger.
+      if (window.location.href === "about:blank") {
+        this.loadInto(window);
+        this.trigger("document_start", window);
+      }
       this.trigger("document_end", window);
     } else if (event.type == "load") {
       this.trigger("document_idle", window);
     }
   },
 
-  executeScript(global, extensionId, script) {
-    let window = global.content;
-    let context = this.getContext(extensionId, window);
-    if (!context) {
-      return;
+  // Used to executeScript, insertCSS and removeCSS.
+  executeScript(global, extensionId, options) {
+    let extension = ExtensionManager.get(extensionId);
+
+    let executeInWin = (window) => {
+      let deferred = PromiseUtils.defer();
+      let script = new Script(extension, options, deferred);
+
+      if (script.matches(window)) {
+        let context = this.getContentScriptContext(extension, window);
+        context.addScript(script);
+        return deferred.promise;
+      }
+      return null;
+    };
+
+    let promises = Array.from(this.enumerateWindows(global.docShell), executeInWin)
+                        .filter(promise => promise);
+
+    if (!promises.length) {
+      let details = {};
+      for (let key of ["all_frames", "frame_id", "matches_about_blank", "matchesHost"]) {
+        if (key in options) {
+          details[key] = options[key];
+        }
+      }
+
+      return Promise.reject({message: `No window matching ${JSON.stringify(details)}`});
     }
-
-    // TODO: Somehow make sure we have the right permissions for this origin!
-
-    // FIXME: Script should be executed only if current state has
-    // already reached its run_at state, or we have to keep it around
-    // somewhere to execute later.
-    context.execute(script, scheduled => true);
+    if (!options.all_frames && promises.length > 1) {
+      return Promise.reject({message: `Internal error: Script matched multiple windows`});
+    }
+    return Promise.all(promises);
   },
 
-  enumerateWindows: function*(docShell) {
+  enumerateWindows: function* (docShell) {
     let window = docShell.QueryInterface(Ci.nsIInterfaceRequestor)
                          .getInterface(Ci.nsIDOMWindow);
-    yield [window, this.getWindowState(window)];
+    yield window;
 
     for (let i = 0; i < docShell.childCount; i++) {
       let child = docShell.getChildAt(i).QueryInterface(Ci.nsIDocShell);
@@ -404,17 +665,42 @@ var DocumentManager = {
     }
   },
 
-  getContext(extensionId, window) {
-    let winId = windowId(window);
-    if (!this.windows.has(winId)) {
-      this.windows.set(winId, new Map());
+  getContentScriptGlobalsForWindow(window) {
+    let winId = getInnerWindowID(window);
+    let extensions = this.contentScriptWindows.get(winId);
+
+    if (extensions) {
+      return Array.from(extensions.values(), ctx => ctx.sandbox);
     }
-    let extensions = this.windows.get(winId);
-    if (!extensions.has(extensionId)) {
-      let context = new ExtensionContext(extensionId, window);
-      extensions.set(extensionId, context);
+
+    return [];
+  },
+
+  getContentScriptContext(extension, window) {
+    let winId = getInnerWindowID(window);
+    if (!this.contentScriptWindows.has(winId)) {
+      this.contentScriptWindows.set(winId, new Map());
     }
-    return extensions.get(extensionId);
+
+    let extensions = this.contentScriptWindows.get(winId);
+    if (!extensions.has(extension.id)) {
+      let context = new ContentScriptContextChild(extension, window);
+      extensions.set(extension.id, context);
+    }
+
+    return extensions.get(extension.id);
+  },
+
+  getExtensionPageContext(extension, window) {
+    let winId = getInnerWindowID(window);
+
+    let context = this.extensionPageWindows.get(winId);
+    if (!context) {
+      let context = new ContentScriptContextChild(extension, window, {isExtensionPage: true});
+      this.extensionPageWindows.set(winId, context);
+    }
+
+    return context;
   },
 
   startupExtension(extensionId) {
@@ -428,11 +714,11 @@ var DocumentManager = {
       // Note that we miss windows in the bfcache here. In theory we
       // could execute content scripts on a pageshow event for that
       // window, but that seems extreme.
-      for (let [window, state] of this.enumerateWindows(global.docShell)) {
+      for (let window of this.enumerateWindows(global.docShell)) {
         for (let script of extension.scripts) {
           if (script.matches(window)) {
-            let context = this.getContext(extensionId, window);
-            context.execute(script, scheduled => isWhenBeforeOrSame(scheduled, state));
+            let context = this.getContentScriptContext(extension, window);
+            context.addScript(script);
           }
         }
       }
@@ -440,13 +726,26 @@ var DocumentManager = {
   },
 
   shutdownExtension(extensionId) {
-    for (let [, extensions] of this.windows) {
+    // Clean up content-script contexts on extension shutdown.
+    for (let [, extensions] of this.contentScriptWindows) {
       let context = extensions.get(extensionId);
       if (context) {
         context.close();
         extensions.delete(extensionId);
       }
     }
+
+    // Clean up iframe extension page contexts on extension shutdown.
+    for (let [winId, context] of this.extensionPageWindows) {
+      if (context.extension.id == extensionId) {
+        context.close();
+        this.extensionPageWindows.delete(winId);
+      }
+    }
+
+    ExtensionChild.shutdownExtension(extensionId);
+
+    MessageChannel.abortResponses({extensionId});
 
     this.extensionCount--;
     if (this.extensionCount == 0) {
@@ -455,61 +754,104 @@ var DocumentManager = {
   },
 
   trigger(when, window) {
-    let state = this.getWindowState(window);
-    for (let [extensionId, extension] of ExtensionManager.extensions) {
-      for (let script of extension.scripts) {
-        if (script.matches(window)) {
-          let context = this.getContext(extensionId, window);
-          context.execute(script, scheduled => scheduled == state);
+    if (when === "document_start") {
+      for (let extension of ExtensionManager.extensions.values()) {
+        for (let script of extension.scripts) {
+          if (script.matches(window)) {
+            let context = this.getContentScriptContext(extension, window);
+            context.addScript(script, when);
+          }
         }
+      }
+    } else {
+      let contexts = this.contentScriptWindows.get(getInnerWindowID(window)) || new Map();
+      for (let context of contexts.values()) {
+        context.triggerScripts(when);
       }
     }
   },
 };
 
 // Represents a browser extension in the content process.
-function BrowserExtensionContent(data) {
-  this.id = data.id;
-  this.uuid = data.uuid;
-  this.data = data;
-  this.scripts = data.content_scripts.map(scriptData => new Script(scriptData));
-  this.webAccessibleResources = data.webAccessibleResources;
-  this.whiteListedHosts = data.whiteListedHosts;
+class BrowserExtensionContent extends EventEmitter {
+  constructor(data) {
+    super();
 
-  this.localeData = new LocaleData(data.localeData);
+    this.id = data.id;
+    this.uuid = data.uuid;
+    this.data = data;
+    this.instanceId = data.instanceId;
 
-  this.manifest = data.manifest;
-  this.baseURI = Services.io.newURI(data.baseURL, null, null);
+    this.MESSAGE_EMIT_EVENT = `Extension:EmitEvent:${this.instanceId}`;
+    Services.cpmm.addMessageListener(this.MESSAGE_EMIT_EVENT, this);
 
-  let uri = Services.io.newURI(data.resourceURL, null, null);
+    this.scripts = data.content_scripts.map(scriptData => new Script(this, scriptData));
+    this.webAccessibleResources = new MatchGlobs(data.webAccessibleResources);
+    this.whiteListedHosts = new MatchPattern(data.whiteListedHosts);
+    this.permissions = data.permissions;
+    this.principal = data.principal;
 
-  if (Services.appinfo.processType == Services.appinfo.PROCESS_TYPE_CONTENT) {
-    // Extension.jsm takes care of this in the parent.
-    ExtensionManagement.startupExtension(this.uuid, uri, this);
+    this.localeData = new LocaleData(data.localeData);
+
+    this.manifest = data.manifest;
+    this.baseURI = Services.io.newURI(data.baseURL, null, null);
+
+    // Only used in addon processes.
+    this.views = new Set();
+
+    let uri = Services.io.newURI(data.resourceURL, null, null);
+
+    if (Services.appinfo.processType == Services.appinfo.PROCESS_TYPE_CONTENT) {
+      // Extension.jsm takes care of this in the parent.
+      ExtensionManagement.startupExtension(this.uuid, uri, this);
+    }
   }
-}
 
-BrowserExtensionContent.prototype = {
   shutdown() {
+    Services.cpmm.removeMessageListener(this.MESSAGE_EMIT_EVENT, this);
+
     if (Services.appinfo.processType == Services.appinfo.PROCESS_TYPE_CONTENT) {
       ExtensionManagement.shutdownExtension(this.uuid);
     }
-  },
+  }
+
+  emit(event, ...args) {
+    Services.cpmm.sendAsyncMessage(this.MESSAGE_EMIT_EVENT, {event, args});
+
+    super.emit(event, ...args);
+  }
+
+  receiveMessage({name, data}) {
+    if (name === this.MESSAGE_EMIT_EVENT) {
+      super.emit(data.event, ...data.args);
+    }
+  }
 
   localizeMessage(...args) {
     return this.localeData.localizeMessage(...args);
-  },
+  }
 
   localize(...args) {
     return this.localeData.localize(...args);
-  },
-};
+  }
+
+  hasPermission(perm) {
+    let match = /^manifest:(.*)/.exec(perm);
+    if (match) {
+      return this.manifest[match[1]] != null;
+    }
+    return this.permissions.has(perm);
+  }
+}
 
 ExtensionManager = {
   // Map[extensionId, BrowserExtensionContent]
   extensions: new Map(),
 
   init() {
+    Schemas.init();
+    ExtensionChild.initOnce();
+
     Services.cpmm.addMessageListener("Extension:Startup", this);
     Services.cpmm.addMessageListener("Extension:Shutdown", this);
     Services.cpmm.addMessageListener("Extension:FlushJarCache", this);
@@ -532,8 +874,11 @@ ExtensionManager = {
     switch (name) {
       case "Extension:Startup": {
         extension = new BrowserExtensionContent(data);
+
         this.extensions.set(data.id, extension);
+
         DocumentManager.startupExtension(data.id);
+
         Services.cpmm.sendAsyncMessage("Extension:StartupComplete");
         break;
       }
@@ -541,7 +886,9 @@ ExtensionManager = {
       case "Extension:Shutdown": {
         extension = this.extensions.get(data.id);
         extension.shutdown();
+
         DocumentManager.shutdownExtension(data.id);
+
         this.extensions.delete(data.id);
         break;
       }
@@ -558,44 +905,143 @@ ExtensionManager = {
   },
 };
 
+class ExtensionGlobal {
+  constructor(global) {
+    this.global = global;
+
+    MessageChannel.addListener(global, "Extension:Capture", this);
+    MessageChannel.addListener(global, "Extension:DetectLanguage", this);
+    MessageChannel.addListener(global, "Extension:Execute", this);
+    MessageChannel.addListener(global, "WebNavigation:GetFrame", this);
+    MessageChannel.addListener(global, "WebNavigation:GetAllFrames", this);
+
+    this.windowId = global.content
+                          .QueryInterface(Ci.nsIInterfaceRequestor)
+                          .getInterface(Ci.nsIDOMWindowUtils)
+                          .outerWindowID;
+
+    global.sendAsyncMessage("Extension:TopWindowID", {windowId: this.windowId});
+  }
+
+  uninit() {
+    this.global.sendAsyncMessage("Extension:RemoveTopWindowID", {windowId: this.windowId});
+  }
+
+  get messageFilterStrict() {
+    return {
+      innerWindowID: getInnerWindowID(this.global.content),
+    };
+  }
+
+  receiveMessage({target, messageName, recipient, data}) {
+    switch (messageName) {
+      case "Extension:Capture":
+        return this.handleExtensionCapture(data.width, data.height, data.options);
+      case "Extension:DetectLanguage":
+        return this.handleDetectLanguage(target);
+      case "Extension:Execute":
+        return this.handleExtensionExecute(target, recipient.extensionId, data.options);
+      case "WebNavigation:GetFrame":
+        return this.handleWebNavigationGetFrame(data.options);
+      case "WebNavigation:GetAllFrames":
+        return this.handleWebNavigationGetAllFrames();
+    }
+  }
+
+  handleExtensionCapture(width, height, options) {
+    let win = this.global.content;
+
+    const XHTML_NS = "http://www.w3.org/1999/xhtml";
+    let canvas = win.document.createElementNS(XHTML_NS, "canvas");
+    canvas.width = width;
+    canvas.height = height;
+    canvas.mozOpaque = true;
+
+    let ctx = canvas.getContext("2d");
+
+    // We need to scale the image to the visible size of the browser,
+    // in order for the result to appear as the user sees it when
+    // settings like full zoom come into play.
+    ctx.scale(canvas.width / win.innerWidth, canvas.height / win.innerHeight);
+
+    ctx.drawWindow(win, win.scrollX, win.scrollY, win.innerWidth, win.innerHeight, "#fff");
+
+    return canvas.toDataURL(`image/${options.format}`, options.quality / 100);
+  }
+
+  handleDetectLanguage(target) {
+    let doc = target.content.document;
+
+    return promiseDocumentReady(doc).then(() => {
+      let elem = doc.documentElement;
+
+      let language = (elem.getAttribute("xml:lang") || elem.getAttribute("lang") ||
+                      doc.contentLanguage || null);
+
+      // We only want the last element of the TLD here.
+      // Only country codes have any effect on the results, but other
+      // values cause no harm.
+      let tld = doc.location.hostname.match(/[a-z]*$/)[0];
+
+      // The CLD2 library used by the language detector is capable of
+      // analyzing raw HTML. Unfortunately, that takes much more memory,
+      // and since it's hosted by emscripten, and therefore can't shrink
+      // its heap after it's grown, it has a performance cost.
+      // So we send plain text instead.
+      let encoder = Cc["@mozilla.org/layout/documentEncoder;1?type=text/plain"].createInstance(Ci.nsIDocumentEncoder);
+      encoder.init(doc, "text/plain", encoder.SkipInvisibleContent);
+      let text = encoder.encodeToStringWithMaxLength(60 * 1024);
+
+      let encoding = doc.characterSet;
+
+      return LanguageDetector.detectLanguage({language, tld, text, encoding})
+        .then(result => result.language === "un" ? "und" : result.language);
+    });
+  }
+
+  // Used to executeScript, insertCSS and removeCSS.
+  handleExtensionExecute(target, extensionId, options) {
+    return DocumentManager.executeScript(target, extensionId, options).then(result => {
+      try {
+        // Make sure we can structured-clone the result value before
+        // we try to send it back over the message manager.
+        Cu.cloneInto(result, target);
+      } catch (e) {
+        return Promise.reject({message: "Script returned non-structured-clonable data"});
+      }
+      return result;
+    });
+  }
+
+  handleWebNavigationGetFrame({frameId}) {
+    return WebNavigationFrames.getFrame(this.global.docShell, frameId);
+  }
+
+  handleWebNavigationGetAllFrames() {
+    return WebNavigationFrames.getAllFrames(this.global.docShell);
+  }
+}
+
 this.ExtensionContent = {
   globals: new Map(),
 
   init(global) {
-    let broker = new MessageBroker([global]);
-    this.globals.set(global, broker);
-
-    global.addMessageListener("Extension:Execute", this);
-
-    let windowId = global.content
-                         .QueryInterface(Ci.nsIInterfaceRequestor)
-                         .getInterface(Ci.nsIDOMWindowUtils)
-                         .outerWindowID;
-    global.sendAsyncMessage("Extension:TopWindowID", {windowId});
+    this.globals.set(global, new ExtensionGlobal(global));
+    ExtensionChild.init(global);
   },
 
   uninit(global) {
+    ExtensionChild.uninit(global);
+    this.globals.get(global).uninit();
     this.globals.delete(global);
-
-    let windowId = global.content
-                         .QueryInterface(Ci.nsIInterfaceRequestor)
-                         .getInterface(Ci.nsIDOMWindowUtils)
-                         .outerWindowID;
-    global.sendAsyncMessage("Extension:RemoveTopWindowID", {windowId});
   },
 
-  getBroker(messageManager) {
-    return this.globals.get(messageManager);
-  },
-
-  receiveMessage({target, name, data}) {
-    switch (name) {
-      case "Extension:Execute":
-        let script = new Script(data.options);
-        let {extensionId} = data;
-        DocumentManager.executeScript(target, extensionId, script);
-        break;
-    }
+  // This helper is exported to be integrated in the devtools RDP actors,
+  // that can use it to retrieve the existent WebExtensions ContentScripts
+  // of a target window and be able to show the ContentScripts source in the
+  // DevTools Debugger panel.
+  getContentScriptGlobalsForWindow(window) {
+    return DocumentManager.getContentScriptGlobalsForWindow(window);
   },
 };
 

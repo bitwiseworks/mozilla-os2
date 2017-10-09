@@ -6,7 +6,7 @@
 #include "GMPDecryptorParent.h"
 #include "GMPContentParent.h"
 #include "MediaData.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 
 namespace mozilla {
 
@@ -40,8 +40,21 @@ GMPDecryptorParent::~GMPDecryptorParent()
 {
 }
 
+bool
+GMPDecryptorParent::RecvSetDecryptorId(const uint32_t& aId)
+{
+  if (!mIsOpen) {
+    NS_WARNING("Trying to use a dead GMP decrypter!");
+    return false;
+  }
+  mCallback->SetDecryptorId(aId);
+  return true;
+}
+
 nsresult
-GMPDecryptorParent::Init(GMPDecryptorProxyCallback* aCallback)
+GMPDecryptorParent::Init(GMPDecryptorProxyCallback* aCallback,
+                         bool aDistinctiveIdentifierRequired,
+                         bool aPersistentStateRequired)
 {
   LOGD(("GMPDecryptorParent[%p]::Init()", this));
 
@@ -50,7 +63,7 @@ GMPDecryptorParent::Init(GMPDecryptorProxyCallback* aCallback)
     return NS_ERROR_FAILURE;
   }
   mCallback = aCallback;
-  if (!SendInit()) {
+  if (!SendInit(aDistinctiveIdentifierRequired, aPersistentStateRequired)) {
     return NS_ERROR_FAILURE;
   }
   mIsOpen = true;
@@ -169,15 +182,20 @@ GMPDecryptorParent::Decrypt(uint32_t aId,
   }
 
   // Caller should ensure parameters passed in are valid.
-  MOZ_ASSERT(!aBuffer.IsEmpty() && aCrypto.mValid);
+  MOZ_ASSERT(!aBuffer.IsEmpty());
 
-  GMPDecryptionData data(aCrypto.mKeyId,
-                         aCrypto.mIV,
-                         aCrypto.mPlainSizes,
-                         aCrypto.mEncryptedSizes,
-                         aCrypto.mSessionIds);
+  if (aCrypto.mValid) {
+    GMPDecryptionData data(aCrypto.mKeyId,
+                           aCrypto.mIV,
+                           aCrypto.mPlainSizes,
+                           aCrypto.mEncryptedSizes,
+                           aCrypto.mSessionIds);
 
-  Unused << SendDecrypt(aId, aBuffer, data);
+    Unused << SendDecrypt(aId, aBuffer, data);
+  } else {
+    GMPDecryptionData data;
+    Unused << SendDecrypt(aId, aBuffer, data);
+  }
 }
 
 bool
@@ -238,6 +256,7 @@ GMPExToNsresult(GMPDOMException aDomException) {
     case kGMPAbortError: return NS_ERROR_DOM_ABORT_ERR;
     case kGMPQuotaExceededError: return NS_ERROR_DOM_QUOTA_EXCEEDED_ERR;
     case kGMPTimeoutError: return NS_ERROR_DOM_TIMEOUT_ERR;
+    case kGMPTypeError: return NS_ERROR_DOM_TYPE_ERR;
     default: return NS_ERROR_DOM_UNKNOWN_ERR;
   }
 }
@@ -258,6 +277,18 @@ GMPDecryptorParent::RecvRejectPromise(const uint32_t& aPromiseId,
   return true;
 }
 
+
+static dom::MediaKeyMessageType
+ToMediaKeyMessageType(GMPSessionMessageType aMessageType) {
+  switch (aMessageType) {
+    case kGMPLicenseRequest: return dom::MediaKeyMessageType::License_request;
+    case kGMPLicenseRenewal: return dom::MediaKeyMessageType::License_renewal;
+    case kGMPLicenseRelease: return dom::MediaKeyMessageType::License_release;
+    case kGMPIndividualizationRequest: return dom::MediaKeyMessageType::Individualization_request;
+    default: return dom::MediaKeyMessageType::License_request;
+  };
+};
+
 bool
 GMPDecryptorParent::RecvSessionMessage(const nsCString& aSessionId,
                                        const GMPSessionMessageType& aMessageType,
@@ -270,7 +301,7 @@ GMPDecryptorParent::RecvSessionMessage(const nsCString& aSessionId,
     NS_WARNING("Trying to use a dead GMP decrypter!");
     return false;
   }
-  mCallback->SessionMessage(aSessionId, aMessageType, aMessage);
+  mCallback->SessionMessage(aSessionId, ToMediaKeyMessageType(aMessageType), aMessage);
   return true;
 }
 
@@ -324,31 +355,55 @@ GMPDecryptorParent::RecvSessionError(const nsCString& aSessionId,
   return true;
 }
 
+static dom::MediaKeyStatus
+ToMediaKeyStatus(GMPMediaKeyStatus aStatus) {
+  switch (aStatus) {
+    case kGMPUsable: return dom::MediaKeyStatus::Usable;
+    case kGMPExpired: return dom::MediaKeyStatus::Expired;
+    case kGMPOutputDownscaled: return dom::MediaKeyStatus::Output_downscaled;
+    case kGMPOutputRestricted: return dom::MediaKeyStatus::Output_restricted;
+    case kGMPInternalError: return dom::MediaKeyStatus::Internal_error;
+    case kGMPReleased: return dom::MediaKeyStatus::Released;
+    case kGMPStatusPending: return dom::MediaKeyStatus::Status_pending;
+    default: return dom::MediaKeyStatus::Internal_error;
+  }
+}
+
 bool
-GMPDecryptorParent::RecvKeyStatusChanged(const nsCString& aSessionId,
-                                         InfallibleTArray<uint8_t>&& aKeyId,
-                                         const GMPMediaKeyStatus& aStatus)
+GMPDecryptorParent::RecvBatchedKeyStatusChanged(const nsCString& aSessionId,
+                                                InfallibleTArray<GMPKeyInformation>&& aKeyInfos)
 {
-  LOGD(("GMPDecryptorParent[%p]::RecvKeyStatusChanged(sessionId='%s', keyId=%s, status=%d)",
-        this, aSessionId.get(), ToBase64(aKeyId).get(), aStatus));
+  LOGD(("GMPDecryptorParent[%p]::RecvBatchedKeyStatusChanged(sessionId='%s', KeyInfos len='%d')",
+        this, aSessionId.get(), aKeyInfos.Length()));
 
   if (mIsOpen) {
-    mCallback->KeyStatusChanged(aSessionId, aKeyId, aStatus);
+    nsTArray<CDMKeyInfo> cdmKeyInfos(aKeyInfos.Length());
+    for (uint32_t i = 0; i < aKeyInfos.Length(); i++) {
+      LOGD(("GMPDecryptorParent[%p]::RecvBatchedKeyStatusChanged(keyId=%s, gmp-status=%d)",
+            this, ToBase64(aKeyInfos[i].keyId()).get(), aKeyInfos[i].status()));
+      // If the status is kGMPUnknown, we're going to forget(remove) that key info.
+      if (aKeyInfos[i].status() != kGMPUnknown) {
+        auto status = ToMediaKeyStatus(aKeyInfos[i].status());
+        cdmKeyInfos.AppendElement(CDMKeyInfo(aKeyInfos[i].keyId(),
+                                             dom::Optional<dom::MediaKeyStatus>(status)));
+      } else {
+        cdmKeyInfos.AppendElement(CDMKeyInfo(aKeyInfos[i].keyId()));
+      }
+    }
+    mCallback->BatchedKeyStatusChanged(aSessionId, cdmKeyInfos);
   }
   return true;
 }
 
-bool
-GMPDecryptorParent::RecvSetCaps(const uint64_t& aCaps)
+DecryptStatus
+ToDecryptStatus(GMPErr aError)
 {
-  LOGD(("GMPDecryptorParent[%p]::RecvSetCaps(caps=0x%llx)", this, aCaps));
-
-  if (!mIsOpen) {
-    NS_WARNING("Trying to use a dead GMP decrypter!");
-    return false;
+  switch (aError) {
+    case GMPNoErr: return Ok;
+    case GMPNoKeyErr: return NoKeyErr;
+    case GMPAbortedErr: return AbortedErr;
+    default: return GenericErr;
   }
-  mCallback->SetCaps(aCaps);
-  return true;
 }
 
 bool
@@ -363,7 +418,7 @@ GMPDecryptorParent::RecvDecrypted(const uint32_t& aId,
     NS_WARNING("Trying to use a dead GMP decrypter!");
     return false;
   }
-  mCallback->Decrypted(aId, aErr, aBuffer);
+  mCallback->Decrypted(aId, ToDecryptStatus(aErr), aBuffer);
   return true;
 }
 
@@ -434,6 +489,7 @@ GMPDecryptorParent::ActorDestroy(ActorDestroyReason aWhy)
     mPlugin->DecryptorDestroyed(this);
     mPlugin = nullptr;
   }
+  MaybeDisconnect(aWhy == AbnormalShutdown);
 }
 
 bool

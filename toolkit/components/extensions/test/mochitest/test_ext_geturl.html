@@ -10,12 +10,13 @@
 </head>
 <body>
 
-<script type="application/javascript;version=1.8">
+<script type="text/javascript">
+"use strict";
 
-function backgroundScript() {
+function background() {
   browser.runtime.onMessage.addListener(([url1, url2]) => {
-    var url3 = browser.runtime.getURL("test_file.html");
-    var url4 = browser.extension.getURL("test_file.html");
+    let url3 = browser.runtime.getURL("test_file.html");
+    let url4 = browser.extension.getURL("test_file.html");
 
     browser.test.assertTrue(url1 !== undefined, "url1 defined");
 
@@ -31,30 +32,29 @@ function backgroundScript() {
 }
 
 function contentScript() {
-  var url1 = browser.runtime.getURL("test_file.html");
-  var url2 = browser.extension.getURL("test_file.html");
+  let url1 = browser.runtime.getURL("test_file.html");
+  let url2 = browser.extension.getURL("test_file.html");
   browser.runtime.sendMessage([url1, url2]);
 }
 
 let extensionData = {
-  background: "(" + backgroundScript.toString() + ")()",
+  background,
   manifest: {
     "content_scripts": [{
       "matches": ["http://mochi.test/*/file_sample.html"],
       "js": ["content_script.js"],
-      "run_at": "document_start"
-    }]
+      "run_at": "document_idle",
+    }],
   },
 
   files: {
-    "content_script.js": "(" + contentScript.toString() + ")()",
+    "content_script.js": contentScript,
   },
 };
 
 add_task(function* test_contentscript() {
   let extension = ExtensionTestUtils.loadExtension(extensionData);
   yield extension.startup();
-  info("extension loaded");
 
   let win = window.open("file_sample.html");
 

@@ -10,7 +10,7 @@
 #include "nsUXThemeData.h"
 #include "nsUXThemeConstants.h"
 #include "gfxFont.h"
-#include "gfxWindowsPlatform.h"
+#include "WinUtils.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/WindowsVersion.h"
 #include "gfxFontConstants.h"
@@ -65,7 +65,9 @@ static int32_t GetSystemParam(long flag, int32_t def)
     return ::SystemParametersInfo(flag, 0, &value, 0) ? value : def;
 }
 
-nsLookAndFeel::nsLookAndFeel() : nsXPLookAndFeel()
+nsLookAndFeel::nsLookAndFeel()
+  : nsXPLookAndFeel()
+  , mUseAccessibilityTheme(0)
 {
   mozilla::Telemetry::Accumulate(mozilla::Telemetry::TOUCH_ENABLED_DEVICE,
                                  WinUtils::IsTouchDeviceSupportPresent());
@@ -359,7 +361,16 @@ nsLookAndFeel::GetIntImpl(IntID aID, int32_t &aResult)
         // High contrast is a misnomer under Win32 -- any theme can be used with it,
         // e.g. normal contrast with large fonts, low contrast, etc.
         // The high contrast flag really means -- use this theme and don't override it.
-        aResult = nsUXThemeData::IsHighContrastOn();
+        if (XRE_IsContentProcess()) {
+          // If we're running in the content process, then the parent should
+          // have sent us the accessibility state when nsLookAndFeel
+          // initialized, and stashed it in the mUseAccessibilityTheme cache.
+          aResult = mUseAccessibilityTheme;
+        } else {
+          // Otherwise, we can ask the OS to see if we're using High Contrast
+          // mode.
+          aResult = nsUXThemeData::IsHighContrastOn();
+        }
         break;
     case eIntID_ScrollArrowStyle:
         aResult = eScrollArrowStyle_Single;
@@ -402,7 +413,6 @@ nsLookAndFeel::GetIntImpl(IntID aID, int32_t &aResult)
     }
 
     case eIntID_MacGraphiteTheme:
-    case eIntID_MacLionTheme:
         aResult = 0;
         res = NS_ERROR_NOT_IMPLEMENTED;
         break;
@@ -584,7 +594,7 @@ GetSysFontInfo(HDC aHDC, LookAndFeel::FontID anID,
   }
 
   // Get scaling factor from physical to logical pixels
-  float pixelScale = 1.0f / gfxWindowsPlatform::GetPlatform()->GetDPIScale();
+  double pixelScale = 1.0 / WinUtils::SystemScaleFactor();
 
   // The lfHeight is in pixels, and it needs to be adjusted for the
   // device it will be displayed on.
@@ -663,3 +673,29 @@ nsLookAndFeel::GetPasswordCharacterImpl()
 #define UNICODE_BLACK_CIRCLE_CHAR 0x25cf
   return UNICODE_BLACK_CIRCLE_CHAR;
 }
+
+nsTArray<LookAndFeelInt>
+nsLookAndFeel::GetIntCacheImpl()
+{
+  nsTArray<LookAndFeelInt> lookAndFeelIntCache =
+    nsXPLookAndFeel::GetIntCacheImpl();
+
+  LookAndFeelInt useAccessibilityTheme;
+  useAccessibilityTheme.id = eIntID_UseAccessibilityTheme;
+  useAccessibilityTheme.value = GetInt(eIntID_UseAccessibilityTheme);
+  lookAndFeelIntCache.AppendElement(useAccessibilityTheme);
+
+  return lookAndFeelIntCache;
+}
+
+void
+nsLookAndFeel::SetIntCacheImpl(const nsTArray<LookAndFeelInt>& aLookAndFeelIntCache)
+{
+  for (auto entry : aLookAndFeelIntCache) {
+    if (entry.id == eIntID_UseAccessibilityTheme) {
+      mUseAccessibilityTheme = entry.value;
+      break;
+    }
+  }
+}
+

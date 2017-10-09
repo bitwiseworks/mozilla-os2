@@ -9,7 +9,6 @@ this.ContentSearchUIController = (function () {
 const MAX_DISPLAYED_SUGGESTIONS = 6;
 const SUGGESTION_ID_PREFIX = "searchSuggestion";
 const ONE_OFF_ID_PREFIX = "oneOff";
-const CSS_URI = "chrome://browser/content/contentSearchUI.css";
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 
@@ -82,6 +81,9 @@ ContentSearchUIController.prototype = {
   },
 
   set defaultEngine(engine) {
+    if (this._defaultEngine && this._defaultEngine.icon) {
+      URL.revokeObjectURL(this._defaultEngine.icon);
+    }
     let icon;
     if (engine.iconBuffer) {
       icon = this._getFaviconURIFromBuffer(engine.iconBuffer);
@@ -252,7 +254,8 @@ ContentSearchUIController.prototype = {
     let searchText = this.input;
     let searchTerms;
     if (this._table.hidden ||
-        aEvent.originalTarget.id == "contentSearchDefaultEngineHeader") {
+        aEvent.originalTarget.id == "contentSearchDefaultEngineHeader" ||
+        aEvent instanceof KeyboardEvent) {
       searchTerms = searchText.value;
     }
     else {
@@ -270,16 +273,22 @@ ContentSearchUIController.prototype = {
         ctrlKey: aEvent.ctrlKey,
         metaKey: aEvent.metaKey,
         altKey: aEvent.altKey,
-        button: aEvent.button,
       },
     };
+    if ("button" in aEvent) {
+      eventData.originalEvent.button = aEvent.button;
+    }
 
     if (this.suggestionAtIndex(this.selectedIndex)) {
       eventData.selection = {
         index: this.selectedIndex,
-        kind: aEvent instanceof MouseEvent ? "mouse" :
-              aEvent instanceof KeyboardEvent ? "key" : undefined,
+        kind: undefined,
       };
+      if (aEvent instanceof MouseEvent) {
+        eventData.selection.kind = "mouse";
+      } else if (aEvent instanceof KeyboardEvent) {
+        eventData.selection.kind = "key";
+      }
     }
 
     this._sendMsg("Search", eventData);
@@ -447,14 +456,12 @@ ContentSearchUIController.prototype = {
 
   _currentEngineIndex: -1,
   _cycleCurrentEngine: function (aReverse) {
-    if ((this._currentEngineIndex == this._oneOffButtons.length - 1 && !aReverse) ||
-        (this._currentEngineIndex < 0 && aReverse)) {
+    if ((this._currentEngineIndex == this._engines.length - 1 && !aReverse) ||
+        (this._currentEngineIndex == 0 && aReverse)) {
       return;
     }
     this._currentEngineIndex += aReverse ? -1 : 1;
-    let engineName = this._currentEngineIndex > -1 ?
-                     this._oneOffButtons[this._currentEngineIndex].engineName :
-                     this._originalDefaultEngine.name;
+    let engineName = this._engines[this._currentEngineIndex].name;
     this._sendMsg("SetCurrentEngine", engineName);
   },
 
@@ -567,6 +574,8 @@ ContentSearchUIController.prototype = {
         this._setUpOneOffButtons();
         delete this._pendingOneOffRefresh;
       }
+      this._currentEngineIndex =
+        this._engines.findIndex(aEngine => aEngine.name == this.defaultEngine.name);
       this._table.hidden = false;
       this.input.setAttribute("aria-expanded", "true");
       this._originalDefaultEngine = {
@@ -824,7 +833,8 @@ ContentSearchUIController.prototype = {
 
     this._oneOffButtons = [];
 
-    let engines = this._engines.filter(aEngine => aEngine.name != this.defaultEngine.name);
+    let engines = this._engines.filter(aEngine => aEngine.name != this.defaultEngine.name)
+                               .filter(aEngine => !aEngine.hidden);
     if (!engines.length) {
       this._oneOffsTable.hidden = true;
       return;
@@ -862,6 +872,10 @@ ContentSearchUIController.prototype = {
           "chrome://browser/skin/search-engine-placeholder.png");
       }
       img.setAttribute("src", uri);
+      img.addEventListener("load", function imgLoad() {
+        img.removeEventListener("load", imgLoad);
+        URL.revokeObjectURL(uri);
+      });
       button.appendChild(img);
       button.style.width = buttonWidth + "px";
       button.setAttribute("title", engine.name);

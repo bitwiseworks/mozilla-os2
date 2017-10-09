@@ -134,17 +134,13 @@ def get_config_defines(buildconfig):
   # Collect defines equivalent to ACDEFINES and add MOZ_DEBUG_DEFINES.
   env = {key: value for key, value in buildconfig.defines.iteritems()
          if key not in buildconfig.non_global_defines}
-  for value in buildconfig.substs['MOZ_DEBUG_DEFINES'].split():
-    assert value[:2] == "-D"
-    pair = value[2:].split('=', 1)
-    if len(pair) == 1:
-      pair.append(1)
-    env[pair[0]] = pair[1]
+  for define in buildconfig.substs['MOZ_DEBUG_DEFINES']:
+    env[define] = 1
   return env
 
 def process_inputs(namespace, c_out, msg_file, inputs):
-  deps = [path for path in inputs if path.endswith(".h")]
-  sources = [path for path in inputs if path.endswith(".js")]
+  deps = [path for path in inputs if path.endswith(".h") or path.endswith(".h.js")]
+  sources = [path for path in inputs if path.endswith(".js") and not path.endswith(".h.js")]
   assert len(deps) + len(sources) == len(inputs)
   cxx = shlex.split(buildconfig.substs['CXX'])
   cxx_option = buildconfig.substs['PREPROCESS_OPTION']

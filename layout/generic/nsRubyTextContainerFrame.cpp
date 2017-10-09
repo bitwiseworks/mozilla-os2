@@ -10,6 +10,7 @@
 
 #include "mozilla/UniquePtr.h"
 #include "mozilla/WritingModes.h"
+#include "nsLineLayout.h"
 #include "nsPresContext.h"
 #include "nsStyleContext.h"
 
@@ -59,22 +60,24 @@ nsRubyTextContainerFrame::IsFrameOfType(uint32_t aFlags) const
   if (aFlags & eSupportsCSSTransforms) {
     return false;
   }
-  return nsRubyTextContainerFrameSuper::IsFrameOfType(aFlags);
+  return nsContainerFrame::IsFrameOfType(aFlags);
 }
 
 /* virtual */ void
 nsRubyTextContainerFrame::SetInitialChildList(ChildListID aListID,
                                               nsFrameList& aChildList)
 {
-  nsRubyTextContainerFrameSuper::SetInitialChildList(aListID, aChildList);
-  UpdateSpanFlag();
+  nsContainerFrame::SetInitialChildList(aListID, aChildList);
+  if (aListID == kPrincipalList) {
+    UpdateSpanFlag();
+  }
 }
 
 /* virtual */ void
 nsRubyTextContainerFrame::AppendFrames(ChildListID aListID,
                                        nsFrameList& aFrameList)
 {
-  nsRubyTextContainerFrameSuper::AppendFrames(aListID, aFrameList);
+  nsContainerFrame::AppendFrames(aListID, aFrameList);
   UpdateSpanFlag();
 }
 
@@ -83,7 +86,7 @@ nsRubyTextContainerFrame::InsertFrames(ChildListID aListID,
                                        nsIFrame* aPrevFrame,
                                        nsFrameList& aFrameList)
 {
-  nsRubyTextContainerFrameSuper::InsertFrames(aListID, aPrevFrame, aFrameList);
+  nsContainerFrame::InsertFrames(aListID, aPrevFrame, aFrameList);
   UpdateSpanFlag();
 }
 
@@ -91,7 +94,7 @@ nsRubyTextContainerFrame::InsertFrames(ChildListID aListID,
 nsRubyTextContainerFrame::RemoveFrame(ChildListID aListID,
                                       nsIFrame* aOldFrame)
 {
-  nsRubyTextContainerFrameSuper::RemoveFrame(aListID, aOldFrame);
+  nsContainerFrame::RemoveFrame(aListID, aOldFrame);
   UpdateSpanFlag();
 }
 
@@ -118,20 +121,20 @@ nsRubyTextContainerFrame::UpdateSpanFlag()
 
 /* virtual */ void
 nsRubyTextContainerFrame::Reflow(nsPresContext* aPresContext,
-                                 nsHTMLReflowMetrics& aDesiredSize,
-                                 const nsHTMLReflowState& aReflowState,
+                                 ReflowOutput& aDesiredSize,
+                                 const ReflowInput& aReflowInput,
                                  nsReflowStatus& aStatus)
 {
   MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("nsRubyTextContainerFrame");
-  DISPLAY_REFLOW(aPresContext, this, aReflowState, aDesiredSize, aStatus);
+  DISPLAY_REFLOW(aPresContext, this, aReflowInput, aDesiredSize, aStatus);
 
   // Although a ruby text container may have continuations, returning
   // NS_FRAME_COMPLETE here is still safe, since its parent, ruby frame,
   // ignores the status, and continuations of the ruby base container
   // will take care of our continuations.
   aStatus = NS_FRAME_COMPLETE;
-  WritingMode lineWM = aReflowState.mLineLayout->GetWritingMode();
+  WritingMode lineWM = aReflowInput.mLineLayout->GetWritingMode();
 
   nscoord minBCoord = nscoord_MAX;
   nscoord maxBCoord = nscoord_MIN;

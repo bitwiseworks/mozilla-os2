@@ -16,7 +16,6 @@
 #include "mozilla/Attributes.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsWrapperCache.h"
-#include "nsAutoPtr.h"
 #include "nsPIDOMWindow.h"
 
 class nsGlobalWindow;
@@ -38,7 +37,7 @@ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(BarProp)
 
-  nsPIDOMWindow* GetParentObject() const;
+  nsPIDOMWindowInner* GetParentObject() const;
 
   virtual JSObject*
   WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;

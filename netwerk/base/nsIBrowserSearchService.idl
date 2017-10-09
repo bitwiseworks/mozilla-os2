@@ -269,6 +269,23 @@ interface nsIBrowserSearchService : nsISupports
   void resetToOriginalDefaultEngine();
 
   /**
+   * Checks if an EngineURL of type URLTYPE_SEARCH_HTML exists for
+   * any engine, with a matching method, template URL, and query params.
+   *
+   * @param method
+   *        The HTTP request method used when submitting a search query.
+   *        Must be a case insensitive value of either "get" or "post".
+   *
+   * @param url
+   *        The URL to which search queries should be sent.
+   *        Must not be null.
+   *
+   * @param formData
+   *        The un-sorted form data used as query params.
+   */
+  boolean hasEngineWithURL(in AString method, in AString url, in jsval formData);
+
+  /**
    * Adds a new search engine from the file at the supplied URI, optionally
    * asking the user for confirmation first.  If a confirmation dialog is
    * shown, it will offer the option to begin using the newly added engine
@@ -420,14 +437,23 @@ interface nsIBrowserSearchService : nsISupports
   void removeEngine(in nsISearchEngine engine);
 
   /**
-   * The default search engine. Returns the first visible engine if the default
-   * engine is hidden. May be null if there are no visible search engines.
+   * The original Engine object that is the default for this region,
+   * ignoring changes the user may have subsequently made.
+   */
+  readonly attribute nsISearchEngine originalDefaultEngine;
+
+  /**
+   * Alias for the currentEngine attribute, kept for add-on compatibility.
    */
   attribute nsISearchEngine defaultEngine;
 
   /**
-   * The currently active search engine. May be null if there are no visible
-   * search engines.
+   * The currently active search engine.
+   * Unless the application doesn't ship any search plugin, this should never
+   * be null. If the currently active engine is removed, this attribute will
+   * fallback first to the original default engine if it's not hidden, then to
+   * the first visible engine, and as a last resort it will unhide the original
+   * default engine.
    */
   attribute nsISearchEngine currentEngine;
 

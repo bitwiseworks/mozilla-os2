@@ -27,9 +27,6 @@ function frameScript() {
     const { utils: Cu, classes: Cc, interfaces: Ci } = Components;
     Cu.import("resource://gre/modules/PerformanceStats.jsm");
     Cu.import("resource://gre/modules/Services.jsm");
-    let performanceStatsService =
-      Cc["@mozilla.org/toolkit/performance-stats-service;1"].
-      getService(Ci.nsIPerformanceStatsService);
 
     // Make sure that the stopwatch is now active.
     let monitor = PerformanceStats.getMonitor(["jank", "cpow", "ticks", "compartments"]);
@@ -60,7 +57,7 @@ function frameScript() {
     });
   } catch (ex) {
     Cu.reportError("Error in content (setup): " + ex);
-    Cu.reportError(ex.stack);    
+    Cu.reportError(ex.stack);
   }
 }
 

@@ -38,6 +38,16 @@
 
 comma := ,
 
+ifdef MACH
+ifndef NO_BUILDSTATUS_MESSAGES
+define BUILDSTATUS
+@echo 'BUILDSTATUS $1'
+
+endef
+endif
+endif
+
+
 CWD := $(CURDIR)
 ifneq (1,$(words $(CWD)))
 $(error The mozilla directory cannot be located in a path with spaces.)
@@ -53,19 +63,6 @@ TOPSRCDIR := $(patsubst %/,%,$(dir $(MAKEFILE_LIST)))
 else
 TOPSRCDIR := $(CWD)
 endif
-endif
-
-# try to find autoconf 2.13 - discard errors from 'which'
-# MacOS X 10.4 sends "no autoconf*" errors to stdout, discard those via grep
-AUTOCONF ?= $(shell which autoconf-2.13 autoconf2.13 autoconf213 2>/dev/null | grep -v '^no autoconf' | head -1)
-
-# See if the autoconf package was installed through fink
-ifeq (,$(strip $(AUTOCONF)))
-AUTOCONF = $(shell which fink >/dev/null 2>&1 && echo `which fink`/../../lib/autoconf2.13/bin/autoconf)
-endif
-
-ifeq (,$(strip $(AUTOCONF)))
-AUTOCONF=$(error Could not find autoconf 2.13)
 endif
 
 SH := /bin/sh
@@ -130,7 +127,9 @@ MOZCONFIG_OUT_FILTERED := $(filter-out $(START_COMMENT)%,$(MOZCONFIG_OUT_LINES))
 ifdef AUTOCLOBBER
 export AUTOCLOBBER=1
 endif
+ifdef MOZ_PGO
 export MOZ_PGO
+endif
 
 ifdef MOZ_PARALLEL_BUILD
   MOZ_MAKE_FLAGS := $(filter-out -j%,$(MOZ_MAKE_FLAGS))
@@ -195,6 +194,9 @@ ifdef WANT_MOZCONFIG_MK
 MOZCONFIG_MK_LINES := $(filter export||% UPLOAD_EXTRA_FILES% %UPLOAD_EXTRA_FILES%,$(MOZCONFIG_OUT_LINES))
 $(OBJDIR)/.mozconfig.mk: $(TOPSRCDIR)/client.mk $(FOUND_MOZCONFIG) $(call mkdir_deps,$(OBJDIR)) $(OBJDIR)/CLOBBER
 	$(if $(MOZCONFIG_MK_LINES),( $(foreach line,$(MOZCONFIG_MK_LINES), echo '$(subst ||, ,$(line))';) )) > $@
+ifdef MOZ_CURRENT_PROJECT
+	echo export MOZ_CURRENT_PROJECT=$(MOZ_CURRENT_PROJECT) >> $@
+endif
 
 # Include that makefile so that it is created. This should not actually change
 # the environment since MOZCONFIG_CONTENT, which MOZCONFIG_OUT_LINES derives
@@ -225,12 +227,23 @@ everything: clean build
 #  is usable in multi-pass builds, where you might not have a runnable
 #  application until all the build passes and postflight scripts have run.
 profiledbuild::
+	$(call BUILDSTATUS,TIERS pgo_profile_generate pgo_package pgo_profile pgo_clobber pgo_profile_use)
+	$(call BUILDSTATUS,TIER_START pgo_profile_generate)
 	$(MAKE) -f $(TOPSRCDIR)/client.mk realbuild MOZ_PROFILE_GENERATE=1 MOZ_PGO_INSTRUMENTED=1 CREATE_MOZCONFIG_JSON=
+	$(call BUILDSTATUS,TIER_FINISH pgo_profile_generate)
+	$(call BUILDSTATUS,TIER_START pgo_package)
 	$(MAKE) -C $(OBJDIR) package MOZ_PGO_INSTRUMENTED=1 MOZ_INTERNAL_SIGNING_FORMAT= MOZ_EXTERNAL_SIGNING_FORMAT=
 	rm -f $(OBJDIR)/jarlog/en-US.log
+	$(call BUILDSTATUS,TIER_FINISH pgo_package)
+	$(call BUILDSTATUS,TIER_START pgo_profile)
 	MOZ_PGO_INSTRUMENTED=1 JARLOG_FILE=jarlog/en-US.log EXTRA_TEST_ARGS=10 $(MAKE) -C $(OBJDIR) pgo-profile-run
+	$(call BUILDSTATUS,TIER_FINISH pgo_profile)
+	$(call BUILDSTATUS,TIER_START pgo_clobber)
 	$(MAKE) -f $(TOPSRCDIR)/client.mk maybe_clobber_profiledbuild CREATE_MOZCONFIG_JSON=
+	$(call BUILDSTATUS,TIER_FINISH pgo_clobber)
+	$(call BUILDSTATUS,TIER_START pgo_profile_use)
 	$(MAKE) -f $(TOPSRCDIR)/client.mk realbuild MOZ_PROFILE_USE=1 CREATE_MOZCONFIG_JSON=
+	$(call BUILDSTATUS,TIER_FINISH pgo_profile_use)
 
 #####################################################
 # Build date unification
@@ -238,7 +251,7 @@ profiledbuild::
 ifdef MOZ_UNIFY_BDATE
 ifndef MOZ_BUILD_DATE
 ifdef MOZ_BUILD_PROJECTS
-MOZ_BUILD_DATE = $(shell $(PYTHON) $(TOPSRCDIR)/toolkit/xre/make-platformini.py --print-buildid)
+MOZ_BUILD_DATE = $(shell $(PYTHON) $(TOPSRCDIR)/build/variables.py buildid_header | awk '{print $$3}')
 export MOZ_BUILD_DATE
 endif
 endif
@@ -291,13 +304,16 @@ CONFIG_CACHE  = $(wildcard $(OBJDIR)/config.cache)
 
 EXTRA_CONFIG_DEPS := \
   $(TOPSRCDIR)/aclocal.m4 \
+  $(TOPSRCDIR)/old-configure.in \
   $(wildcard $(TOPSRCDIR)/build/autoconf/*.m4) \
   $(TOPSRCDIR)/js/src/aclocal.m4 \
+  $(TOPSRCDIR)/js/src/old-configure.in \
   $(NULL)
 
 $(CONFIGURES): %: %.in $(EXTRA_CONFIG_DEPS)
-	@echo Generating $@ using autoconf
-	cd $(@D); $(AUTOCONF)
+	@echo Generating $@
+	cp -f $< $@
+	chmod +x $@
 
 CONFIG_STATUS_DEPS := \
   $(wildcard $(TOPSRCDIR)/*/confvars.sh) \
@@ -356,12 +372,15 @@ ifdef FOUND_MOZCONFIG
 endif
 
 configure:: $(configure-preqs)
+	$(call BUILDSTATUS,TIERS configure)
+	$(call BUILDSTATUS,TIER_START configure)
 	@echo cd $(OBJDIR);
 	@echo $(CONFIGURE) $(CONFIGURE_ARGS)
 	@cd $(OBJDIR) && $(BUILD_PROJECT_ARG) $(CONFIGURE_ENV_ARGS) $(CONFIGURE) $(CONFIGURE_ARGS) \
 	  || ( echo '*** Fix above errors and then restart with\
                "$(MAKE) -f client.mk build"' && exit 1 )
 	@touch $(OBJDIR)/Makefile
+	$(call BUILDSTATUS,TIER_FINISH configure)
 
 ifneq (,$(MAKEFILE))
 $(OBJDIR)/Makefile: $(OBJDIR)/config.status
@@ -418,6 +437,15 @@ endif # MOZ_CURRENT_PROJECT
 ####################################
 # Postflight, after building all projects
 
+ifdef MOZ_AUTOMATION
+ifndef MOZ_CURRENT_PROJECT
+$(if $(MOZ_PGO),profiledbuild,realbuild)::
+# Only run the automation/build target for the first project.
+# (i.e. first platform of universal builds)
+	$(MAKE) -f $(TOPSRCDIR)/client.mk automation/build $(addprefix MOZ_CURRENT_PROJECT=,$(firstword $(MOZ_BUILD_PROJECTS)))
+endif
+endif
+
 realbuild postflight_all::
 ifeq (,$(MOZ_CURRENT_PROJECT)$(if $(MOZ_POSTFLIGHT_ALL),,1))
 # Don't run postflight_all for individual projects in multi-project builds
@@ -438,18 +466,6 @@ else
 endif
 endif
 
-cleansrcdir:
-	@cd $(TOPSRCDIR); \
-	if [ -f Makefile ]; then \
-	  $(MAKE) distclean ; \
-	else \
-	  echo 'Removing object files from srcdir...'; \
-	  rm -fr `find . -type d \( -name .deps -print -o -name CVS \
-	          -o -exec test ! -d {}/CVS \; \) -prune \
-	          -o \( -name '*.[ao]' -o -name '*.so' \) -type f -print`; \
-	   build/autoconf/clean-config.sh; \
-	fi;
-
 echo-variable-%:
 	@echo $($*)
 
@@ -463,7 +479,6 @@ echo-variable-%:
     realbuild \
     build \
     profiledbuild \
-    cleansrcdir \
     pull_all \
     build_all \
     clobber \

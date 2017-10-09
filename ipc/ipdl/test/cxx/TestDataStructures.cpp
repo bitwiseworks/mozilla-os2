@@ -1,6 +1,6 @@
 #include "TestDataStructures.h"
 
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 
 #include "IPDLUnitTests.h"      // fail etc.
 
@@ -166,7 +166,7 @@ TestDataStructuresParent::RecvTest7_0(const ActorWrapper& i1,
     o1->actorParent() = mKids[0];
     // malicious behavior
     o1->actorChild() =
-        reinterpret_cast<PTestDataStructuresSubChild*>(0xdeadbeef);
+        reinterpret_cast<PTestDataStructuresSubChild*>(uintptr_t(0xdeadbeef));
     return true;
 }
 
@@ -448,13 +448,12 @@ bool TestDataStructuresParent::RecvTest17(InfallibleTArray<Op>&& sa)
 bool TestDataStructuresParent::RecvTest18(RegionArray&& ra)
 {
     for (RegionArray::index_type i = 0; i < ra.Length(); ++i) {
-        nsIntRegionRectIterator it(ra[i]);
         // if |ra| has been realloc()d and given a different allocator
-        // chunk, this next line will nondeterministically crash or
-        // iloop
-        while (const nsIntRect* sr = it.Next()) Unused << sr;
+        // chunk, this loop will nondeterministically crash or iloop.
+        for (auto iter = ra[i].RectIter(); !iter.Done(); iter.Next()) {
+            Unused << iter.Get();
+        }
     }
-
     return true;
 }
 

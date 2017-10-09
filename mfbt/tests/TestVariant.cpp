@@ -129,8 +129,6 @@ struct Describer
   static const char* medium;
   static const char* big;
 
-  using ReturnType = const char*;
-
   const char* match(const uint8_t&) { return little; }
   const char* match(const uint32_t&) { return medium; }
   const char* match(const uint64_t&) { return big; }
@@ -165,6 +163,15 @@ testMatching()
   MOZ_RELEASE_ASSERT(constRef3.match(desc) == Describer::big);
 }
 
+static void
+testRvalueMatcher()
+{
+  printf("testRvalueMatcher\n");
+  using V = Variant<uint8_t, uint32_t, uint64_t>;
+  V v(uint8_t(1));
+  MOZ_RELEASE_ASSERT(v.match(Describer()) == Describer::little);
+}
+
 int
 main()
 {
@@ -174,6 +181,7 @@ main()
   testDestructor();
   testEquality();
   testMatching();
+  testRvalueMatcher();
 
   printf("TestVariant OK!\n");
   return 0;

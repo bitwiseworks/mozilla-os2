@@ -9,6 +9,7 @@
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/ToJSValue.h"
+#include "nsAutoPtr.h"
 #include "nsXULAppAPI.h"
 
 #define NS_NETWORKWORKER_CID \
@@ -29,7 +30,7 @@ StaticRefPtr<NetworkWorker> gNetworkWorker;
 static nsAutoPtr<NetworkUtils> gNetworkUtils;
 
 // Runnable used dispatch command result on the main thread.
-class NetworkResultDispatcher : public nsRunnable
+class NetworkResultDispatcher : public Runnable
 {
 public:
   NetworkResultDispatcher(const NetworkResultOptions& aResult)
@@ -38,7 +39,7 @@ public:
     MOZ_ASSERT(!NS_IsMainThread());
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(NS_IsMainThread());
 
@@ -52,7 +53,7 @@ private:
 };
 
 // Runnable used dispatch netd command on the worker thread.
-class NetworkCommandDispatcher : public nsRunnable
+class NetworkCommandDispatcher : public Runnable
 {
 public:
   NetworkCommandDispatcher(const NetworkParams& aParams)
@@ -61,7 +62,7 @@ public:
     MOZ_ASSERT(NS_IsMainThread());
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(!NS_IsMainThread());
 
@@ -75,7 +76,7 @@ private:
 };
 
 // Runnable used dispatch netd result on the worker thread.
-class NetdEventRunnable : public nsRunnable
+class NetdEventRunnable : public Runnable
 {
 public:
   NetdEventRunnable(NetdCommand* aCommand)
@@ -84,7 +85,7 @@ public:
     MOZ_ASSERT(!NS_IsMainThread());
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(!NS_IsMainThread());
 

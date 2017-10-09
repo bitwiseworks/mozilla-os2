@@ -29,41 +29,18 @@ const ORGANIZER_FOLDER_ANNO = "PlacesOrganizer/OrganizerFolder";
 const ORGANIZER_QUERY_ANNO = "PlacesOrganizer/OrganizerQuery";
 
 // Needed by some test that relies on having an app registered.
-var XULAppInfo = {
-  vendor: "Mozilla",
+Cu.import("resource://testing-common/AppInfo.jsm", this);
+updateAppInfo({
   name: "PlacesTest",
   ID: "{230de50e-4cd1-11dc-8314-0800200c9a66}",
   version: "1",
-  appBuildID: "2007010101",
   platformVersion: "",
-  platformBuildID: "2007010101",
-  inSafeMode: false,
-  logConsoleErrors: true,
-  OS: "XPCShell",
-  XPCOMABI: "noarch-spidermonkey",
-
-  QueryInterface: XPCOMUtils.generateQI([
-    Ci.nsIXULAppInfo,
-    Ci.nsIXULRuntime,
-  ])
-};
-
-var XULAppInfoFactory = {
-  createInstance: function (outer, iid) {
-    if (outer != null)
-      throw Cr.NS_ERROR_NO_AGGREGATION;
-    return XULAppInfo.QueryInterface(iid);
-  }
-};
-var registrar = Components.manager.QueryInterface(Ci.nsIComponentRegistrar);
-registrar.registerFactory(Components.ID("{fbfae60b-64a4-44ef-a911-08ceb70b9f31}"),
-                          "XULAppInfo", "@mozilla.org/xre/app-info;1",
-                          XULAppInfoFactory);
+});
 
 // Smart bookmarks constants.
-const SMART_BOOKMARKS_VERSION = 7;
+const SMART_BOOKMARKS_VERSION = 8;
 const SMART_BOOKMARKS_ON_TOOLBAR = 1;
-const SMART_BOOKMARKS_ON_MENU =  3; // Takes into account the additional separator.
+const SMART_BOOKMARKS_ON_MENU =  2; // Takes into account the additional separator.
 
 // Default bookmarks constants.
 const DEFAULT_BOOKMARKS_ON_TOOLBAR = 1;
@@ -101,6 +78,10 @@ var createCorruptDB = Task.async(function* () {
 function rebuildSmartBookmarks() {
   let consoleListener = {
     observe(aMsg) {
+      if (aMsg.message.startsWith("[JavaScript Warning:")) {
+        // TODO (Bug 1300416): Ignore spurious strict warnings.
+        return;
+      }
       do_throw("Got console message: " + aMsg.message);
     },
     QueryInterface: XPCOMUtils.generateQI([ Ci.nsIConsoleListener ]),
@@ -148,5 +129,5 @@ var waitForResolvedPromise = Task.async(function* (promiseFn, timeoutMsg, tryCou
     } catch (ex) {}
     yield new Promise(resolve => do_timeout(SINGLE_TRY_TIMEOUT, resolve));
   } while (++tries <= tryCount);
-  throw(timeoutMsg);
+  throw new Error(timeoutMsg);
 });

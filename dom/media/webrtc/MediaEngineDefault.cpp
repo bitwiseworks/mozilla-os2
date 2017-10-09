@@ -13,13 +13,13 @@
 #include "ImageTypes.h"
 #include "prmem.h"
 #include "nsContentUtils.h"
+#include "MediaStreamGraph.h"
 
 #include "nsIFilePicker.h"
 #include "nsIPrefService.h"
 #include "nsIPrefBranch.h"
 
 #ifdef MOZ_WIDGET_ANDROID
-#include "AndroidBridge.h"
 #include "nsISupportsUtils.h"
 #endif
 
@@ -33,37 +33,37 @@ namespace mozilla {
 
 using namespace mozilla::gfx;
 
-// Enable the testing flag fakeTracks and fake in MediaStreamConstraints, will
-// return you a MediaStream with additional fake video tracks and audio tracks.
-static const int kFakeVideoTrackCount = 2;
-static const int kFakeAudioTrackCount = 3;
-
 NS_IMPL_ISUPPORTS(MediaEngineDefaultVideoSource, nsITimerCallback)
 /**
  * Default video source.
  */
 
 MediaEngineDefaultVideoSource::MediaEngineDefaultVideoSource()
-  : MediaEngineVideoSource(kReleased)
+#ifdef MOZ_WEBRTC
+  : MediaEngineCameraVideoSource("FakeVideo.Monitor")
+#else
+  : MediaEngineVideoSource()
+#endif
   , mTimer(nullptr)
   , mMonitor("Fake video")
   , mCb(16), mCr(16)
 {
-  mImageContainer = layers::LayerManager::CreateImageContainer();
+  mImageContainer =
+    layers::LayerManager::CreateImageContainer(layers::ImageContainer::ASYNCHRONOUS);
 }
 
 MediaEngineDefaultVideoSource::~MediaEngineDefaultVideoSource()
 {}
 
 void
-MediaEngineDefaultVideoSource::GetName(nsAString& aName)
+MediaEngineDefaultVideoSource::GetName(nsAString& aName) const
 {
-  aName.AssignLiteral(MOZ_UTF16("Default Video Device"));
+  aName.AssignLiteral(u"Default Video Device");
   return;
 }
 
 void
-MediaEngineDefaultVideoSource::GetUUID(nsACString& aUUID)
+MediaEngineDefaultVideoSource::GetUUID(nsACString& aUUID) const
 {
   aUUID.AssignLiteral("1041FCBD-3F12-4F7B-9E9B-1EC556DD5676");
   return;
@@ -71,13 +71,13 @@ MediaEngineDefaultVideoSource::GetUUID(nsACString& aUUID)
 
 uint32_t
 MediaEngineDefaultVideoSource::GetBestFitnessDistance(
-    const nsTArray<const dom::MediaTrackConstraintSet*>& aConstraintSets,
-    const nsString& aDeviceId)
+    const nsTArray<const NormalizedConstraintSet*>& aConstraintSets,
+    const nsString& aDeviceId) const
 {
   uint32_t distance = 0;
 #ifdef MOZ_WEBRTC
-  for (const dom::MediaTrackConstraintSet* cs : aConstraintSets) {
-    distance = GetMinimumFitnessDistance(*cs, false, aDeviceId);
+  for (const auto* cs : aConstraintSets) {
+    distance = GetMinimumFitnessDistance(*cs, aDeviceId);
     break; // distance is read from first entry only
   }
 #endif
@@ -87,26 +87,54 @@ MediaEngineDefaultVideoSource::GetBestFitnessDistance(
 nsresult
 MediaEngineDefaultVideoSource::Allocate(const dom::MediaTrackConstraints &aConstraints,
                                         const MediaEnginePrefs &aPrefs,
-                                        const nsString& aDeviceId)
+                                        const nsString& aDeviceId,
+                                        const nsACString& aOrigin,
+                                        AllocationHandle** aOutHandle,
+                                        const char** aOutBadConstraint)
 {
   if (mState != kReleased) {
     return NS_ERROR_FAILURE;
   }
 
+  FlattenedConstraints c(aConstraints);
+
+  // Mock failure for automated tests.
+  if (c.mDeviceId.mIdeal.find(NS_LITERAL_STRING("bad device")) !=
+      c.mDeviceId.mIdeal.end()) {
+    return NS_ERROR_FAILURE;
+  }
+
+
+  // emulator debug is very, very slow; reduce load on it with smaller/slower fake video
   mOpts = aPrefs;
-  mOpts.mWidth = mOpts.mWidth ? mOpts.mWidth : MediaEngine::DEFAULT_43_VIDEO_WIDTH;
-  mOpts.mHeight = mOpts.mHeight ? mOpts.mHeight : MediaEngine::DEFAULT_43_VIDEO_HEIGHT;
+  mOpts.mWidth = c.mWidth.Get(aPrefs.mWidth ? aPrefs.mWidth :
+#ifdef DEBUG
+                              MediaEngine::DEFAULT_43_VIDEO_WIDTH/2
+#else
+                              MediaEngine::DEFAULT_43_VIDEO_WIDTH
+#endif
+                              );
+  mOpts.mHeight = c.mHeight.Get(aPrefs.mHeight ? aPrefs.mHeight :
+#ifdef DEBUG
+                                MediaEngine::DEFAULT_43_VIDEO_HEIGHT/2
+#else
+                                MediaEngine::DEFAULT_43_VIDEO_HEIGHT
+#endif
+                                );
   mState = kAllocated;
+  *aOutHandle = nullptr;
   return NS_OK;
 }
 
 nsresult
-MediaEngineDefaultVideoSource::Deallocate()
+MediaEngineDefaultVideoSource::Deallocate(AllocationHandle* aHandle)
 {
+  MOZ_ASSERT(!aHandle);
   if (mState != kStopped && mState != kAllocated) {
     return NS_ERROR_FAILURE;
   }
   mState = kReleased;
+  mImage = nullptr;
   return NS_OK;
 }
 
@@ -144,7 +172,8 @@ static void ReleaseFrame(layers::PlanarYCbCrData& aData)
 }
 
 nsresult
-MediaEngineDefaultVideoSource::Start(SourceMediaStream* aStream, TrackID aID)
+MediaEngineDefaultVideoSource::Start(SourceMediaStream* aStream, TrackID aID,
+                                     const PrincipalHandle& aPrincipalHandle)
 {
   if (mState != kAllocated) {
     return NS_ERROR_FAILURE;
@@ -157,18 +186,12 @@ MediaEngineDefaultVideoSource::Start(SourceMediaStream* aStream, TrackID aID)
 
   aStream->AddTrack(aID, 0, new VideoSegment(), SourceMediaStream::ADDTRACK_QUEUED);
 
-  if (mHasFakeTracks) {
-    for (int i = 0; i < kFakeVideoTrackCount; ++i) {
-      aStream->AddTrack(kTrackCount + i, 0, new VideoSegment(), SourceMediaStream::ADDTRACK_QUEUED);
-    }
-  }
-
   // Remember TrackID so we can end it later
   mTrackID = aID;
 
   // Start timer for subsequent frames
-#if defined(MOZ_WIDGET_GONK) && defined(DEBUG)
-// B2G emulator debug is very, very slow and has problems dealing with realtime audio inputs
+#if (defined(MOZ_WIDGET_GONK) || defined(MOZ_WIDGET_ANDROID)) && defined(DEBUG)
+// emulator debug is very, very slow and has problems dealing with realtime audio inputs
   mTimer->InitWithCallback(this, (1000 / mOpts.mFPS)*10, nsITimer::TYPE_REPEATING_SLACK);
 #else
   mTimer->InitWithCallback(this, 1000 / mOpts.mFPS, nsITimer::TYPE_REPEATING_SLACK);
@@ -192,20 +215,19 @@ MediaEngineDefaultVideoSource::Stop(SourceMediaStream *aSource, TrackID aID)
   mTimer = nullptr;
 
   aSource->EndTrack(aID);
-  if (mHasFakeTracks) {
-    for (int i = 0; i < kFakeVideoTrackCount; ++i) {
-      aSource->EndTrack(kTrackCount + i);
-    }
-  }
 
   mState = kStopped;
+  mImage = nullptr;
   return NS_OK;
 }
 
 nsresult
-MediaEngineDefaultVideoSource::Restart(const dom::MediaTrackConstraints& aConstraints,
-                                       const MediaEnginePrefs &aPrefs,
-                                       const nsString& aDeviceId)
+MediaEngineDefaultVideoSource::Restart(
+    AllocationHandle* aHandle,
+    const dom::MediaTrackConstraints& aConstraints,
+    const MediaEnginePrefs &aPrefs,
+    const nsString& aDeviceId,
+    const char** aOutBadConstraint)
 {
   return NS_OK;
 }
@@ -249,7 +271,7 @@ MediaEngineDefaultVideoSource::Notify(nsITimer* aTimer)
 		     0, 0);
 #endif
 
-  bool setData = ycbcr_image->SetData(data);
+  bool setData = ycbcr_image->CopyData(data);
   MOZ_ASSERT(setData);
 
   // SetData copies data, so we can free the frame
@@ -271,7 +293,8 @@ void
 MediaEngineDefaultVideoSource::NotifyPull(MediaStreamGraph* aGraph,
                                           SourceMediaStream *aSource,
                                           TrackID aID,
-                                          StreamTime aDesiredTime)
+                                          StreamTime aDesiredTime,
+                                          const PrincipalHandle& aPrincipalHandle)
 {
   // AddTrack takes ownership of segment
   VideoSegment segment;
@@ -287,18 +310,10 @@ MediaEngineDefaultVideoSource::NotifyPull(MediaStreamGraph* aGraph,
   if (delta > 0) {
     // nullptr images are allowed
     IntSize size(image ? mOpts.mWidth : 0, image ? mOpts.mHeight : 0);
-    segment.AppendFrame(image.forget(), delta, size);
+    segment.AppendFrame(image.forget(), delta, size, aPrincipalHandle);
     // This can fail if either a) we haven't added the track yet, or b)
     // we've removed or finished the track.
     aSource->AppendToTrack(aID, &segment);
-    // Generate null data for fake tracks.
-    if (mHasFakeTracks) {
-      for (int i = 0; i < kFakeVideoTrackCount; ++i) {
-        VideoSegment nullSegment;
-        nullSegment.AppendNullData(delta);
-        aSource->AppendToTrack(kTrackCount + i, &nullSegment);
-      }
-    }
   }
 }
 
@@ -353,26 +368,26 @@ private:
 /**
  * Default audio source.
  */
-NS_IMPL_ISUPPORTS(MediaEngineDefaultAudioSource, nsITimerCallback)
+
+NS_IMPL_ISUPPORTS0(MediaEngineDefaultAudioSource)
 
 MediaEngineDefaultAudioSource::MediaEngineDefaultAudioSource()
   : MediaEngineAudioSource(kReleased)
-  , mTimer(nullptr)
-{
-}
+  , mLastNotify(0)
+{}
 
 MediaEngineDefaultAudioSource::~MediaEngineDefaultAudioSource()
 {}
 
 void
-MediaEngineDefaultAudioSource::GetName(nsAString& aName)
+MediaEngineDefaultAudioSource::GetName(nsAString& aName) const
 {
-  aName.AssignLiteral(MOZ_UTF16("Default Audio Device"));
+  aName.AssignLiteral(u"Default Audio Device");
   return;
 }
 
 void
-MediaEngineDefaultAudioSource::GetUUID(nsACString& aUUID)
+MediaEngineDefaultAudioSource::GetUUID(nsACString& aUUID) const
 {
   aUUID.AssignLiteral("B7CBD7C1-53EF-42F9-8353-73F61C70C092");
   return;
@@ -380,13 +395,13 @@ MediaEngineDefaultAudioSource::GetUUID(nsACString& aUUID)
 
 uint32_t
 MediaEngineDefaultAudioSource::GetBestFitnessDistance(
-    const nsTArray<const dom::MediaTrackConstraintSet*>& aConstraintSets,
-    const nsString& aDeviceId)
+    const nsTArray<const NormalizedConstraintSet*>& aConstraintSets,
+    const nsString& aDeviceId) const
 {
   uint32_t distance = 0;
 #ifdef MOZ_WEBRTC
-  for (const dom::MediaTrackConstraintSet* cs : aConstraintSets) {
-    distance = GetMinimumFitnessDistance(*cs, false, aDeviceId);
+  for (const auto* cs : aConstraintSets) {
+    distance = GetMinimumFitnessDistance(*cs, aDeviceId);
     break; // distance is read from first entry only
   }
 #endif
@@ -396,9 +411,18 @@ MediaEngineDefaultAudioSource::GetBestFitnessDistance(
 nsresult
 MediaEngineDefaultAudioSource::Allocate(const dom::MediaTrackConstraints &aConstraints,
                                         const MediaEnginePrefs &aPrefs,
-                                        const nsString& aDeviceId)
+                                        const nsString& aDeviceId,
+                                        const nsACString& aOrigin,
+                                        AllocationHandle** aOutHandle,
+                                        const char** aOutBadConstraint)
 {
   if (mState != kReleased) {
+    return NS_ERROR_FAILURE;
+  }
+
+  // Mock failure for automated tests.
+  if (aConstraints.mDeviceId.IsString() &&
+      aConstraints.mDeviceId.GetAsString().EqualsASCII("bad device")) {
     return NS_ERROR_FAILURE;
   }
 
@@ -406,12 +430,14 @@ MediaEngineDefaultAudioSource::Allocate(const dom::MediaTrackConstraints &aConst
   // generate sine wave (default 1KHz)
   mSineGenerator = new SineWaveGenerator(AUDIO_RATE,
                                          static_cast<uint32_t>(aPrefs.mFreq ? aPrefs.mFreq : 1000));
+  *aOutHandle = nullptr;
   return NS_OK;
 }
 
 nsresult
-MediaEngineDefaultAudioSource::Deallocate()
+MediaEngineDefaultAudioSource::Deallocate(AllocationHandle* aHandle)
 {
+  MOZ_ASSERT(!aHandle);
   if (mState != kStopped && mState != kAllocated) {
     return NS_ERROR_FAILURE;
   }
@@ -420,53 +446,22 @@ MediaEngineDefaultAudioSource::Deallocate()
 }
 
 nsresult
-MediaEngineDefaultAudioSource::Start(SourceMediaStream* aStream, TrackID aID)
+MediaEngineDefaultAudioSource::Start(SourceMediaStream* aStream, TrackID aID,
+                                     const PrincipalHandle& aPrincipalHandle)
 {
   if (mState != kAllocated) {
     return NS_ERROR_FAILURE;
   }
 
-  mTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
-  if (!mTimer) {
-    return NS_ERROR_FAILURE;
-  }
-
-  mSource = aStream;
-
-  // We try to keep the appended data at this size.
-  // Make it two timer intervals to try to avoid underruns.
-  mBufferSize = 2 * (AUDIO_RATE * DEFAULT_AUDIO_TIMER_MS) / 1000;
-
   // AddTrack will take ownership of segment
   AudioSegment* segment = new AudioSegment();
-  AppendToSegment(*segment, mBufferSize);
-  mSource->AddAudioTrack(aID, AUDIO_RATE, 0, segment, SourceMediaStream::ADDTRACK_QUEUED);
-
-  if (mHasFakeTracks) {
-    for (int i = 0; i < kFakeAudioTrackCount; ++i) {
-      segment = new AudioSegment();
-      segment->AppendNullData(mBufferSize);
-      mSource->AddAudioTrack(kTrackCount + kFakeVideoTrackCount+i,
-                             AUDIO_RATE, 0, segment, SourceMediaStream::ADDTRACK_QUEUED);
-    }
-  }
+  aStream->AddAudioTrack(aID, AUDIO_RATE, 0, segment, SourceMediaStream::ADDTRACK_QUEUED);
 
   // Remember TrackID so we can finish later
   mTrackID = aID;
 
-  mLastNotify = TimeStamp::Now();
-
-  // 1 Audio frame per 10ms
-#if defined(MOZ_WIDGET_GONK) && defined(DEBUG)
-// B2G emulator debug is very, very slow and has problems dealing with realtime audio inputs
-  mTimer->InitWithCallback(this, DEFAULT_AUDIO_TIMER_MS*10,
-                           nsITimer::TYPE_REPEATING_PRECISE_CAN_SKIP);
-#else
-  mTimer->InitWithCallback(this, DEFAULT_AUDIO_TIMER_MS,
-                           nsITimer::TYPE_REPEATING_PRECISE_CAN_SKIP);
-#endif
+  mLastNotify = 0;
   mState = kStarted;
-
   return NS_OK;
 }
 
@@ -476,72 +471,51 @@ MediaEngineDefaultAudioSource::Stop(SourceMediaStream *aSource, TrackID aID)
   if (mState != kStarted) {
     return NS_ERROR_FAILURE;
   }
-  if (!mTimer) {
-    return NS_ERROR_FAILURE;
-  }
-
-  mTimer->Cancel();
-  mTimer = nullptr;
-
   aSource->EndTrack(aID);
-  if (mHasFakeTracks) {
-    for (int i = 0; i < kFakeAudioTrackCount; ++i) {
-      aSource->EndTrack(kTrackCount + kFakeVideoTrackCount+i);
-    }
-  }
 
   mState = kStopped;
   return NS_OK;
 }
 
 nsresult
-MediaEngineDefaultAudioSource::Restart(const dom::MediaTrackConstraints& aConstraints,
+MediaEngineDefaultAudioSource::Restart(AllocationHandle* aHandle,
+                                       const dom::MediaTrackConstraints& aConstraints,
                                        const MediaEnginePrefs &aPrefs,
-                                       const nsString& aDeviceId)
+                                       const nsString& aDeviceId,
+                                       const char** aOutBadConstraint)
 {
   return NS_OK;
 }
 
 void
 MediaEngineDefaultAudioSource::AppendToSegment(AudioSegment& aSegment,
-                                               TrackTicks aSamples)
+                                               TrackTicks aSamples,
+                                               const PrincipalHandle& aPrincipalHandle)
 {
   RefPtr<SharedBuffer> buffer = SharedBuffer::Create(aSamples * sizeof(int16_t));
   int16_t* dest = static_cast<int16_t*>(buffer->Data());
 
   mSineGenerator->generate(dest, aSamples);
-  nsAutoTArray<const int16_t*,1> channels;
+  AutoTArray<const int16_t*,1> channels;
   channels.AppendElement(dest);
-  aSegment.AppendFrames(buffer.forget(), channels, aSamples);
+  aSegment.AppendFrames(buffer.forget(), channels, aSamples, aPrincipalHandle);
 }
 
-NS_IMETHODIMP
-MediaEngineDefaultAudioSource::Notify(nsITimer* aTimer)
+void
+MediaEngineDefaultAudioSource::NotifyPull(MediaStreamGraph* aGraph,
+                                          SourceMediaStream *aSource,
+                                          TrackID aID,
+                                          StreamTime aDesiredTime,
+                                          const PrincipalHandle& aPrincipalHandle)
 {
-  TimeStamp now = TimeStamp::Now();
-  TimeDuration timeSinceLastNotify = now - mLastNotify;
-  mLastNotify = now;
-  TrackTicks samplesSinceLastNotify =
-    RateConvertTicksRoundUp(AUDIO_RATE, 1000000, timeSinceLastNotify.ToMicroseconds());
-
-  // If it's been longer since the last Notify() than mBufferSize holds, we
-  // have underrun and the MSG had to append silence while waiting for us
-  // to push more data. In this case we reset to mBufferSize again.
-  TrackTicks samplesToAppend = std::min(samplesSinceLastNotify, mBufferSize);
-
+  MOZ_ASSERT(aID == mTrackID);
   AudioSegment segment;
-  AppendToSegment(segment, samplesToAppend);
-  mSource->AppendToTrack(mTrackID, &segment);
-
-  // Generate null data for fake tracks.
-  if (mHasFakeTracks) {
-    for (int i = 0; i < kFakeAudioTrackCount; ++i) {
-      AudioSegment nullSegment;
-      nullSegment.AppendNullData(samplesToAppend);
-      mSource->AppendToTrack(kTrackCount + kFakeVideoTrackCount+i, &nullSegment);
-    }
-  }
-  return NS_OK;
+  // avoid accumulating rounding errors
+  TrackTicks desired = aSource->TimeToTicksRoundUp(AUDIO_RATE, aDesiredTime);
+  TrackTicks delta = desired - mLastNotify;
+  mLastNotify += delta;
+  AppendToSegment(segment, delta, aPrincipalHandle);
+  aSource->AppendToTrack(mTrackID, &segment);
 }
 
 void
@@ -558,7 +532,6 @@ MediaEngineDefault::EnumerateVideoDevices(dom::MediaSourceEnum aMediaSource,
   // This no longer is possible since the resolution is being set in Allocate().
 
   RefPtr<MediaEngineVideoSource> newSource = new MediaEngineDefaultVideoSource();
-  newSource->SetHasFakeTracks(mHasFakeTracks);
   mVSources.AppendElement(newSource);
   aVSources->AppendElement(newSource);
 
@@ -584,7 +557,6 @@ MediaEngineDefault::EnumerateAudioDevices(dom::MediaSourceEnum aMediaSource,
   if (aASources->Length() == 0) {
     RefPtr<MediaEngineAudioSource> newSource =
       new MediaEngineDefaultAudioSource();
-    newSource->SetHasFakeTracks(mHasFakeTracks);
     mASources.AppendElement(newSource);
     aASources->AppendElement(newSource);
   }

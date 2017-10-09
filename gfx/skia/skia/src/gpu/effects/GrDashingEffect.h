@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2014 Google Inc.
  *
@@ -9,34 +8,29 @@
 #ifndef GrDashingEffect_DEFINED
 #define GrDashingEffect_DEFINED
 
+#include "GrColor.h"
 #include "GrTypesPriv.h"
 #include "SkPathEffect.h"
 
-class GrGpu;
-class GrDrawTarget;
-class GrPaint;
-class GrStrokeInfo;
-
-class GrGLDashingEffect;
-class SkPath;
+class GrClip;
+class GrDrawBatch;
+class GrStyle;
 
 namespace GrDashingEffect {
-    bool DrawDashLine(const SkPoint pts[2], const GrPaint& paint, const GrStrokeInfo& strokeInfo,
-                      GrGpu* gpu, GrDrawTarget* target, const SkMatrix& vm);
-
-    enum DashCap {
-        kRound_DashCap,
-        kNonRound_DashCap,
+    enum class AAMode {
+        kNone,
+        kCoverage,
+        kCoverageWithMSAA,
     };
+    static const int kAAModeCnt = static_cast<int>(AAMode::kCoverageWithMSAA) + 1;
 
-    /**
-     * An effect that renders a dashed line. It is intended to be used as a coverage effect.
-     * The effect is meant for dashed lines that only have a single on/off interval pair.
-     * Bounding geometry is rendered and the effect computes coverage based on the fragment's
-     * position relative to the dashed line.
-     */
-    GrEffect* Create(GrEffectEdgeType edgeType, const SkPathEffect::DashInfo& info,
-                     SkScalar strokeWidth, DashCap cap);
+    GrDrawBatch* CreateDashLineBatch(GrColor,
+                                     const SkMatrix& viewMatrix,
+                                     const SkPoint pts[2],
+                                     AAMode,
+                                     const GrStyle& style);
+    bool CanDrawDashLine(const SkPoint pts[2], const GrStyle& style,
+                         const SkMatrix& viewMatrix);
 }
 
 #endif

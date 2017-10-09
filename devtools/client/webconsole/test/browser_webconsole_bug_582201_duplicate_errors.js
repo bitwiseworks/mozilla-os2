@@ -1,7 +1,7 @@
-/* vim:set ts=2 sw=2 sts=2 et: */
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
+/* Any copyright is dedicated to the Public Domain.
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 // Tests that exceptions thrown by content don't show up twice in the Web
 // Console.
@@ -12,7 +12,7 @@ const INIT_URI = "data:text/html;charset=utf8,hello world";
 const TEST_URI = "http://example.com/browser/devtools/client/webconsole/" +
                  "test/test-duplicate-error.html";
 
-var test = asyncTest(function* () {
+add_task(function* () {
   yield loadTab(INIT_URI);
 
   let hud = yield openConsole();
@@ -23,7 +23,7 @@ var test = asyncTest(function* () {
     expectUncaughtException();
   }
 
-  content.location = TEST_URI;
+  BrowserTestUtils.loadURI(gBrowser.selectedBrowser, TEST_URI);
 
   yield waitForMessages({
     webconsole: hud,

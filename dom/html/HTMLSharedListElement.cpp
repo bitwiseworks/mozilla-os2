@@ -55,7 +55,7 @@ nsAttrValue::EnumTable kListTypeTable[] = {
   { "upper-roman", NS_STYLE_LIST_STYLE_UPPER_ROMAN },
   { "lower-alpha", NS_STYLE_LIST_STYLE_LOWER_ALPHA },
   { "upper-alpha", NS_STYLE_LIST_STYLE_UPPER_ALPHA },
-  { 0 }
+  { nullptr, 0 }
 };
 
 static const nsAttrValue::EnumTable kOldListTypeTable[] = {
@@ -64,7 +64,7 @@ static const nsAttrValue::EnumTable kOldListTypeTable[] = {
   { "a", NS_STYLE_LIST_STYLE_LOWER_ALPHA },
   { "I", NS_STYLE_LIST_STYLE_UPPER_ROMAN },
   { "i", NS_STYLE_LIST_STYLE_LOWER_ROMAN },
-  { 0 }
+  { nullptr, 0 }
 };
 
 bool
@@ -99,11 +99,8 @@ HTMLSharedListElement::MapAttributesIntoRule(const nsMappedAttributes* aAttribut
     if (listStyleType->GetUnit() == eCSSUnit_Null) {
       // type: enum
       const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::type);
-      if (value) {
-        if (value->Type() == nsAttrValue::eEnum)
-          listStyleType->SetIntValue(value->GetEnumValue(), eCSSUnit_Enumerated);
-        else
-          listStyleType->SetIntValue(NS_STYLE_LIST_STYLE_DECIMAL, eCSSUnit_Enumerated);
+      if (value && value->Type() == nsAttrValue::eEnum) {
+        listStyleType->SetIntValue(value->GetEnumValue(), eCSSUnit_Enumerated);
       }
     }
   }

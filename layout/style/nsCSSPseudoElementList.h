@@ -28,6 +28,8 @@
 CSS_PSEUDO_ELEMENT(after, ":after", CSS_PSEUDO_ELEMENT_IS_CSS2)
 CSS_PSEUDO_ELEMENT(before, ":before", CSS_PSEUDO_ELEMENT_IS_CSS2)
 
+CSS_PSEUDO_ELEMENT(backdrop, ":backdrop", 0)
+
 CSS_PSEUDO_ELEMENT(firstLetter, ":first-letter",
                    CSS_PSEUDO_ELEMENT_IS_CSS2 |
                    CSS_PSEUDO_ELEMENT_CONTAINS_ELEMENTS)
@@ -77,6 +79,8 @@ CSS_PSEUDO_ELEMENT(mozRangeThumb, ":-moz-range-thumb",
 CSS_PSEUDO_ELEMENT(mozMeterBar, ":-moz-meter-bar",
                    CSS_PSEUDO_ELEMENT_SUPPORTS_USER_ACTION_STATE)
 CSS_PSEUDO_ELEMENT(mozPlaceholder, ":-moz-placeholder",
+                   CSS_PSEUDO_ELEMENT_SUPPORTS_USER_ACTION_STATE)
+CSS_PSEUDO_ELEMENT(placeholder, ":placeholder",
                    CSS_PSEUDO_ELEMENT_SUPPORTS_USER_ACTION_STATE)
 CSS_PSEUDO_ELEMENT(mozColorSwatch, ":-moz-color-swatch",
                    CSS_PSEUDO_ELEMENT_SUPPORTS_STYLE_ATTRIBUTE |

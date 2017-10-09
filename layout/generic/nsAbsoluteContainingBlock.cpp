@@ -13,12 +13,13 @@
 #include "nsContainerFrame.h"
 #include "nsGkAtoms.h"
 #include "nsIPresShell.h"
-#include "nsHTMLReflowState.h"
+#include "mozilla/CSSAlignUtils.h"
+#include "mozilla/ReflowInput.h"
 #include "nsPresContext.h"
 #include "nsCSSFrameConstructor.h"
 #include "nsGridContainerFrame.h"
 
-#include "mozilla/Snprintf.h"
+#include "mozilla/Sprintf.h"
 
 #ifdef DEBUG
 #include "nsBlockFrame.h"
@@ -38,6 +39,8 @@ static void PrettyUC(nscoord aSize, char* aBuf, int aBufSize)
 #endif
 
 using namespace mozilla;
+
+typedef mozilla::CSSAlignUtils::AlignJustifyFlags AlignJustifyFlags;
 
 void
 nsAbsoluteContainingBlock::SetInitialChildList(nsIFrame*       aDelegatingFrame,
@@ -110,39 +113,30 @@ nsAbsoluteContainingBlock::RemoveFrame(nsIFrame*       aDelegatingFrame,
 void
 nsAbsoluteContainingBlock::Reflow(nsContainerFrame*        aDelegatingFrame,
                                   nsPresContext*           aPresContext,
-                                  const nsHTMLReflowState& aReflowState,
+                                  const ReflowInput& aReflowInput,
                                   nsReflowStatus&          aReflowStatus,
                                   const nsRect&            aContainingBlock,
-                                  bool                     aConstrainHeight,
-                                  bool                     aCBWidthChanged,
-                                  bool                     aCBHeightChanged,
+                                  AbsPosReflowFlags        aFlags,
                                   nsOverflowAreas*         aOverflowAreas)
 {
   nsReflowStatus reflowStatus = NS_FRAME_COMPLETE;
 
-  bool reflowAll = aReflowState.ShouldReflowAllKids();
-
-  // The 'width' check below is an optimization to avoid the virtual GetType()
-  // call in most cases.  'aContainingBlock' isn't used for grid items,
-  // each item has its own CB on a frame property instead.
-  // @see nsGridContainerFrame::ReflowChildren
-  const bool isGrid =
-    aContainingBlock.width == nsGridContainerFrame::VERY_LIKELY_A_GRID_CONTAINER &&
-    aDelegatingFrame->GetType() == nsGkAtoms::gridContainerFrame;
-
+  const bool reflowAll = aReflowInput.ShouldReflowAllKids();
+  const bool isGrid = !!(aFlags & AbsPosReflowFlags::eIsGridContainerCB);
   nsIFrame* kidFrame;
   nsOverflowContinuationTracker tracker(aDelegatingFrame, true);
   for (kidFrame = mAbsoluteFrames.FirstChild(); kidFrame; kidFrame = kidFrame->GetNextSibling()) {
     bool kidNeedsReflow = reflowAll || NS_SUBTREE_DIRTY(kidFrame) ||
-      FrameDependsOnContainer(kidFrame, aCBWidthChanged, aCBHeightChanged);
+      FrameDependsOnContainer(kidFrame,
+                              !!(aFlags & AbsPosReflowFlags::eCBWidthChanged),
+                              !!(aFlags & AbsPosReflowFlags::eCBHeightChanged));
     if (kidNeedsReflow && !aPresContext->HasPendingInterrupt()) {
       // Reflow the frame
       nsReflowStatus  kidStatus = NS_FRAME_COMPLETE;
       const nsRect& cb = isGrid ? nsGridContainerFrame::GridItemCB(kidFrame)
                                 : aContainingBlock;
-      ReflowAbsoluteFrame(aDelegatingFrame, aPresContext, aReflowState, cb,
-                          aConstrainHeight, kidFrame, kidStatus,
-                          aOverflowAreas);
+      ReflowAbsoluteFrame(aDelegatingFrame, aPresContext, aReflowInput, cb,
+                          aFlags, kidFrame, kidStatus, aOverflowAreas);
       nsIFrame* nextFrame = kidFrame->GetNextInFlow();
       if (!NS_FRAME_IS_FULLY_COMPLETE(kidStatus) &&
           aDelegatingFrame->IsFrameOfType(nsIFrame::eCanContainOverflowContainers)) {
@@ -225,7 +219,7 @@ nsAbsoluteContainingBlock::FrameDependsOnContainer(nsIFrame* f,
   // 2) Horizontal positioning.  "left" must be auto and "right" must be auto
   //    (otherwise the horizontal position is completely determined by
   //    whichever of them is not auto and the width).
-  // See nsHTMLReflowState::InitAbsoluteConstraints -- these are the
+  // See ReflowInput::InitAbsoluteConstraints -- these are the
   // only cases when we call CalculateHypotheticalBox().
   if ((pos->mOffset.GetTopUnit() == eStyleUnit_Auto &&
        pos->mOffset.GetBottomUnit() == eStyleUnit_Auto) ||
@@ -341,6 +335,253 @@ nsAbsoluteContainingBlock::DoMarkFramesDirty(bool aMarkAllDirty)
   }
 }
 
+// Given an out-of-flow frame, this method returns the parent frame of
+// its placeholder frame, if that parent is a nsContainerFrame.
+static nsContainerFrame*
+GetPlaceholderContainer(nsPresContext* aPresContext,
+                        nsIFrame* aPositionedFrame)
+{
+  MOZ_ASSERT(aPositionedFrame, "need non-null frame");
+  MOZ_ASSERT(aPositionedFrame->HasAnyStateBits(NS_FRAME_OUT_OF_FLOW),
+             "expecting abspos frame");
+  MOZ_ASSERT(aPresContext && aPresContext == aPositionedFrame->PresContext(),
+             "need non-null pres context which matches our frame");
+
+  nsIFrame* placeholder =
+    aPresContext->PresShell()->GetPlaceholderFrameFor(aPositionedFrame);
+
+  if (!placeholder) {
+    return nullptr;
+  }
+  return do_QueryFrame(placeholder->GetParent());
+}
+
+/**
+ * This function returns the offset of an abs/fixed-pos child's static
+ * position, with respect to the "start" corner of its alignment container,
+ * according to CSS Box Alignment.  This function only operates in a single
+ * axis at a time -- callers can choose which axis via the |aAbsPosCBAxis|
+ * parameter.
+ *
+ * @param aKidReflowInput The ReflowInput for the to-be-aligned abspos child.
+ * @param aKidSizeInAbsPosCBWM The child frame's size (after it's been given
+ *                             the opportunity to reflow), in terms of
+ *                             aAbsPosCBWM.
+ * @param aAbsPosCBSize The abspos CB size, in terms of aAbsPosCBWM.
+ * @param aPlaceholderContainer The parent of the child frame's corresponding
+ *                              placeholder frame, cast to a nsContainerFrame.
+ *                              (This will help us choose which alignment enum
+ *                              we should use for the child.)
+ * @param aAbsPosCBWM The child frame's containing block's WritingMode.
+ * @param aAbsPosCBAxis The axis (of the containing block) that we should
+ *                      be doing this computation for.
+ */
+static nscoord
+OffsetToAlignedStaticPos(const ReflowInput& aKidReflowInput,
+                         const LogicalSize& aKidSizeInAbsPosCBWM,
+                         const LogicalSize& aAbsPosCBSize,
+                         nsContainerFrame* aPlaceholderContainer,
+                         WritingMode aAbsPosCBWM,
+                         LogicalAxis aAbsPosCBAxis)
+{
+  if (!aPlaceholderContainer) {
+    // (The placeholder container should be the thing that kicks this whole
+    // process off, by setting PLACEHOLDER_STATICPOS_NEEDS_CSSALIGN.  So it
+    // should exist... but bail gracefully if it doesn't.)
+    NS_ERROR("Missing placeholder-container when computing a "
+             "CSS Box Alignment static position");
+    return 0;
+  }
+
+  // (Most of this function is simply preparing args that we'll pass to
+  // AlignJustifySelf at the end.)
+
+  // NOTE: Our alignment container is aPlaceholderContainer's content-box
+  // (or an area within it, if aPlaceholderContainer is a grid). So, we'll
+  // perform most of our arithmetic/alignment in aPlaceholderContainer's
+  // WritingMode. For brevity, we use the abbreviation "pc" for "placeholder
+  // container" in variables below.
+  WritingMode pcWM = aPlaceholderContainer->GetWritingMode();
+
+  // Find what axis aAbsPosCBAxis corresponds to, in placeholder's parent's
+  // writing-mode.
+  LogicalAxis pcAxis = (pcWM.IsOrthogonalTo(aAbsPosCBWM)
+                        ? GetOrthogonalAxis(aAbsPosCBAxis)
+                        : aAbsPosCBAxis);
+
+  nsIAtom* parentType = aPlaceholderContainer->GetType();
+  LogicalSize alignAreaSize(pcWM);
+  if (parentType == nsGkAtoms::flexContainerFrame) {
+    // The alignment container is the flex container's content box:
+    alignAreaSize = aPlaceholderContainer->GetLogicalSize(pcWM);
+    LogicalMargin pcBorderPadding =
+      aPlaceholderContainer->GetLogicalUsedBorderAndPadding(pcWM);
+    alignAreaSize -= pcBorderPadding.Size(pcWM);
+  } else if (parentType == nsGkAtoms::gridContainerFrame) {
+    // This abspos elem's parent is a grid container. Per CSS Grid 10.1 & 10.2:
+    //  - If the grid container *also* generates the abspos containing block (a
+    // grid area) for this abspos child, we use that abspos containing block as
+    // the alignment container, too. (And its size is aAbsPosCBSize.)
+    //  - Otherwise, we use the grid's padding box as the alignment container.
+    // https://drafts.csswg.org/css-grid/#static-position
+    if (aPlaceholderContainer == aKidReflowInput.mCBReflowInput->mFrame) {
+      // The alignment container is the grid area that we're using as the
+      // absolute containing block.
+      alignAreaSize = aAbsPosCBSize.ConvertTo(pcWM, aAbsPosCBWM);
+    } else {
+      // The alignment container is a the grid container's padding box (which
+      // we can get by subtracting away its border from frame's size):
+      alignAreaSize = aPlaceholderContainer->GetLogicalSize(pcWM);
+      LogicalMargin pcBorder =
+        aPlaceholderContainer->GetLogicalUsedBorder(pcWM);
+      alignAreaSize -= pcBorder.Size(pcWM);
+    }
+  } else {
+    NS_ERROR("Unsupported container for abpsos CSS Box Alignment");
+    return 0; // (leave the child at the start of its alignment container)
+  }
+
+  nscoord alignAreaSizeInAxis = (pcAxis == eLogicalAxisInline)
+    ? alignAreaSize.ISize(pcWM)
+    : alignAreaSize.BSize(pcWM);
+
+  AlignJustifyFlags flags = AlignJustifyFlags::eIgnoreAutoMargins;
+  uint16_t alignConst =
+    aPlaceholderContainer->CSSAlignmentForAbsPosChild(aKidReflowInput, pcAxis);
+  // XXXdholbert: Handle <overflow-position> in bug 1311892 (by conditionally
+  // setting AlignJustifyFlags::eOverflowSafe in |flags|.)  For now, we behave
+  // as if "unsafe" was the specified value (which is basically equivalent to
+  // the default behavior, when no value is specified -- though the default
+  // behavior also has some [at-risk] extra nuance about scroll containers...)
+  // For now we ignore & strip off <overflow-position> bits, until bug 1311892.
+  alignConst &= ~NS_STYLE_ALIGN_FLAG_BITS;
+
+  // Find out if placeholder-container & the OOF child have the same start-sides
+  // in the placeholder-container's pcAxis.
+  WritingMode kidWM = aKidReflowInput.GetWritingMode();
+  if (pcWM.ParallelAxisStartsOnSameSide(pcAxis, kidWM)) {
+    flags |= AlignJustifyFlags::eSameSide;
+  }
+
+  // (baselineAdjust is unused. CSSAlignmentForAbsPosChild() should've
+  // converted 'baseline'/'last baseline' enums to their fallback values.)
+  const nscoord baselineAdjust = nscoord(0);
+
+  // AlignJustifySelf operates in the kid's writing mode, so we need to
+  // represent the child's size and the desired axis in that writing mode:
+  LogicalSize kidSizeInOwnWM = aKidSizeInAbsPosCBWM.ConvertTo(kidWM,
+                                                              aAbsPosCBWM);
+  LogicalAxis kidAxis = (kidWM.IsOrthogonalTo(aAbsPosCBWM)
+                         ? GetOrthogonalAxis(aAbsPosCBAxis)
+                         : aAbsPosCBAxis);
+
+  nscoord offset =
+    CSSAlignUtils::AlignJustifySelf(alignConst, kidAxis, flags,
+                                    baselineAdjust, alignAreaSizeInAxis,
+                                    aKidReflowInput, kidSizeInOwnWM);
+
+  // "offset" is in terms of the CSS Box Alignment container (i.e. it's in
+  // terms of pcWM). But our return value needs to in terms of the containing
+  // block's writing mode, which might have the opposite directionality in the
+  // given axis. In that case, we just need to negate "offset" when returning,
+  // to make it have the right effect as an offset for coordinates in the
+  // containing block's writing mode.
+  if (!pcWM.ParallelAxisStartsOnSameSide(pcAxis, aAbsPosCBWM)) {
+    return -offset;
+  }
+  return offset;
+}
+
+void
+nsAbsoluteContainingBlock::ResolveSizeDependentOffsets(
+  nsPresContext* aPresContext,
+  ReflowInput& aKidReflowInput,
+  const LogicalSize& aKidSize,
+  const LogicalMargin& aMargin,
+  LogicalMargin* aOffsets,
+  LogicalSize* aLogicalCBSize)
+{
+  WritingMode wm = aKidReflowInput.GetWritingMode();
+  WritingMode outerWM = aKidReflowInput.mParentReflowInput->GetWritingMode();
+
+  // Now that we know the child's size, we resolve any sentinel values in its
+  // IStart/BStart offset coordinates that depend on that size.
+  //  * NS_AUTOOFFSET indicates that the child's position in the given axis
+  // is determined by its end-wards offset property, combined with its size and
+  // available space. e.g.: "top: auto; height: auto; bottom: 50px"
+  //  * m{I,B}OffsetsResolvedAfterSize indicate that the child is using its
+  // static position in that axis, *and* its static position is determined by
+  // the axis-appropriate css-align property (which may require the child's
+  // size, e.g. to center it within the parent).
+  if ((NS_AUTOOFFSET == aOffsets->IStart(outerWM)) ||
+      (NS_AUTOOFFSET == aOffsets->BStart(outerWM)) ||
+      aKidReflowInput.mFlags.mIOffsetsNeedCSSAlign ||
+      aKidReflowInput.mFlags.mBOffsetsNeedCSSAlign) {
+    if (-1 == aLogicalCBSize->ISize(wm)) {
+      // Get the containing block width/height
+      const ReflowInput* parentRI = aKidReflowInput.mParentReflowInput;
+      *aLogicalCBSize =
+        aKidReflowInput.ComputeContainingBlockRectangle(aPresContext,
+                                                        parentRI);
+    }
+
+    const LogicalSize logicalCBSizeOuterWM = aLogicalCBSize->ConvertTo(outerWM,
+                                                                       wm);
+
+    // placeholderContainer is used in each of the m{I,B}OffsetsNeedCSSAlign
+    // clauses. We declare it at this scope so we can avoid having to look
+    // it up twice (and only look it up if it's needed).
+    nsContainerFrame* placeholderContainer = nullptr;
+
+    if (NS_AUTOOFFSET == aOffsets->IStart(outerWM)) {
+      NS_ASSERTION(NS_AUTOOFFSET != aOffsets->IEnd(outerWM),
+                   "Can't solve for both start and end");
+      aOffsets->IStart(outerWM) =
+        logicalCBSizeOuterWM.ISize(outerWM) -
+        aOffsets->IEnd(outerWM) - aMargin.IStartEnd(outerWM) -
+        aKidSize.ISize(outerWM);
+    } else if (aKidReflowInput.mFlags.mIOffsetsNeedCSSAlign) {
+      placeholderContainer = GetPlaceholderContainer(aPresContext,
+                                                     aKidReflowInput.mFrame);
+      nscoord offset = OffsetToAlignedStaticPos(aKidReflowInput, aKidSize,
+                                                logicalCBSizeOuterWM,
+                                                placeholderContainer,
+                                                outerWM, eLogicalAxisInline);
+      // Shift IStart from its current position (at start corner of the
+      // alignment container) by the returned offset.  And set IEnd to the
+      // distance between the kid's end edge to containing block's end edge.
+      aOffsets->IStart(outerWM) += offset;
+      aOffsets->IEnd(outerWM) =
+        logicalCBSizeOuterWM.ISize(outerWM) -
+        (aOffsets->IStart(outerWM) + aKidSize.ISize(outerWM));
+    }
+
+    if (NS_AUTOOFFSET == aOffsets->BStart(outerWM)) {
+      aOffsets->BStart(outerWM) =
+        logicalCBSizeOuterWM.BSize(outerWM) -
+        aOffsets->BEnd(outerWM) - aMargin.BStartEnd(outerWM) -
+        aKidSize.BSize(outerWM);
+    } else if (aKidReflowInput.mFlags.mBOffsetsNeedCSSAlign) {
+      if (!placeholderContainer) {
+        placeholderContainer = GetPlaceholderContainer(aPresContext,
+                                                       aKidReflowInput.mFrame);
+      }
+      nscoord offset = OffsetToAlignedStaticPos(aKidReflowInput, aKidSize,
+                                                logicalCBSizeOuterWM,
+                                                placeholderContainer,
+                                                outerWM, eLogicalAxisBlock);
+      // Shift BStart from its current position (at start corner of the
+      // alignment container) by the returned offset.  And set BEnd to the
+      // distance between the kid's end edge to containing block's end edge.
+      aOffsets->BStart(outerWM) += offset;
+      aOffsets->BEnd(outerWM) =
+        logicalCBSizeOuterWM.BSize(outerWM) -
+        (aOffsets->BStart(outerWM) + aKidSize.BSize(outerWM));
+    }
+    aKidReflowInput.SetComputedLogicalOffsets(aOffsets->ConvertTo(wm, outerWM));
+  }
+}
+
 // XXX Optimize the case where it's a resize reflow and the absolutely
 // positioned child has the exact same size and position and skip the
 // reflow...
@@ -352,9 +593,9 @@ nsAbsoluteContainingBlock::DoMarkFramesDirty(bool aMarkAllDirty)
 void
 nsAbsoluteContainingBlock::ReflowAbsoluteFrame(nsIFrame*                aDelegatingFrame,
                                                nsPresContext*           aPresContext,
-                                               const nsHTMLReflowState& aReflowState,
+                                               const ReflowInput& aReflowInput,
                                                const nsRect&            aContainingBlock,
-                                               bool                     aConstrainBSize,
+                                               AbsPosReflowFlags        aFlags,
                                                nsIFrame*                aKidFrame,
                                                nsReflowStatus&          aStatus,
                                                nsOverflowAreas*         aOverflowAreas)
@@ -363,19 +604,17 @@ nsAbsoluteContainingBlock::ReflowAbsoluteFrame(nsIFrame*                aDelegat
   if (nsBlockFrame::gNoisyReflow) {
     nsFrame::IndentBy(stdout,nsBlockFrame::gNoiseIndent);
     printf("abs pos ");
-    if (aKidFrame) {
-      nsAutoString name;
-      aKidFrame->GetFrameName(name);
-      printf("%s ", NS_LossyConvertUTF16toASCII(name).get());
-    }
+    nsAutoString name;
+    aKidFrame->GetFrameName(name);
+    printf("%s ", NS_LossyConvertUTF16toASCII(name).get());
 
     char width[16];
     char height[16];
-    PrettyUC(aReflowState.AvailableWidth(), width, 16);
-    PrettyUC(aReflowState.AvailableHeight(), height, 16);
+    PrettyUC(aReflowInput.AvailableWidth(), width, 16);
+    PrettyUC(aReflowInput.AvailableHeight(), height, 16);
     printf(" a=%s,%s ", width, height);
-    PrettyUC(aReflowState.ComputedWidth(), width, 16);
-    PrettyUC(aReflowState.ComputedHeight(), height, 16);
+    PrettyUC(aReflowInput.ComputedWidth(), width, 16);
+    PrettyUC(aReflowInput.ComputedHeight(), height, 16);
     printf("c=%s,%s \n", width, height);
   }
   AutoNoisyIndenter indent(nsBlockFrame::gNoisy);
@@ -385,80 +624,82 @@ nsAbsoluteContainingBlock::ReflowAbsoluteFrame(nsIFrame*                aDelegat
   LogicalSize logicalCBSize(wm, aContainingBlock.Size());
   nscoord availISize = logicalCBSize.ISize(wm);
   if (availISize == -1) {
-    NS_ASSERTION(aReflowState.ComputedSize(wm).ISize(wm) !=
+    NS_ASSERTION(aReflowInput.ComputedSize(wm).ISize(wm) !=
                    NS_UNCONSTRAINEDSIZE,
                  "Must have a useful inline-size _somewhere_");
     availISize =
-      aReflowState.ComputedSizeWithPadding(wm).ISize(wm);
+      aReflowInput.ComputedSizeWithPadding(wm).ISize(wm);
   }
 
-  nsHTMLReflowState kidReflowState(aPresContext, aReflowState, aKidFrame,
+  uint32_t rsFlags = 0;
+  if (aFlags & AbsPosReflowFlags::eIsGridContainerCB) {
+    // When a grid container generates the abs.pos. CB for a *child* then
+    // the static position is determined via CSS Box Alignment within the
+    // abs.pos. CB (a grid area, i.e. a piece of the grid). In this scenario,
+    // due to the multiple coordinate spaces in play, we use a convenience flag
+    // to simply have the child's ReflowInput give it a static position at its
+    // abs.pos. CB origin, and then we'll align & offset it from there.
+    nsIFrame* placeholder =
+      aPresContext->PresShell()->GetPlaceholderFrameFor(aKidFrame);
+    if (placeholder && placeholder->GetParent() == aDelegatingFrame) {
+      rsFlags |= ReflowInput::STATIC_POS_IS_CB_ORIGIN;
+    }
+  }
+  ReflowInput kidReflowInput(aPresContext, aReflowInput, aKidFrame,
                                    LogicalSize(wm, availISize,
                                                NS_UNCONSTRAINEDSIZE),
-                                   &logicalCBSize);
+                                   &logicalCBSize, rsFlags);
 
   // Get the border values
-  WritingMode outerWM = aReflowState.GetWritingMode();
+  WritingMode outerWM = aReflowInput.GetWritingMode();
   const LogicalMargin border(outerWM,
-                             aReflowState.mStyleBorder->GetComputedBorder());
-  const LogicalMargin margin =
-    kidReflowState.ComputedLogicalMargin().ConvertTo(outerWM, wm);
-  bool constrainBSize = (aReflowState.AvailableBSize() != NS_UNCONSTRAINEDSIZE)
-    && aConstrainBSize
+                             aReflowInput.mStyleBorder->GetComputedBorder());
+  LogicalMargin margin =
+    kidReflowInput.ComputedLogicalMargin().ConvertTo(outerWM, wm);
+
+  // If we're doing CSS Box Alignment in either axis, that will apply the
+  // margin for us in that axis (since the thing that's aligned is the margin
+  // box).  So, we clear out the margin here to avoid applying it twice.
+  if (kidReflowInput.mFlags.mIOffsetsNeedCSSAlign) {
+    margin.IStart(outerWM) = margin.IEnd(outerWM) = 0;
+  }
+  if (kidReflowInput.mFlags.mBOffsetsNeedCSSAlign) {
+    margin.BStart(outerWM) = margin.BEnd(outerWM) = 0;
+  }
+
+  bool constrainBSize = (aReflowInput.AvailableBSize() != NS_UNCONSTRAINEDSIZE)
+    && (aFlags & AbsPosReflowFlags::eConstrainHeight)
        // Don't split if told not to (e.g. for fixed frames)
     && (aDelegatingFrame->GetType() != nsGkAtoms::inlineFrame)
        //XXX we don't handle splitting frames for inline absolute containing blocks yet
     && (aKidFrame->GetLogicalRect(aContainingBlock.Size()).BStart(wm) <=
-        aReflowState.AvailableBSize());
+        aReflowInput.AvailableBSize());
        // Don't split things below the fold. (Ideally we shouldn't *have*
        // anything totally below the fold, but we can't position frames
        // across next-in-flow breaks yet.
   if (constrainBSize) {
-    kidReflowState.AvailableBSize() =
-      aReflowState.AvailableBSize() - border.ConvertTo(wm, outerWM).BStart(wm) -
-      kidReflowState.ComputedLogicalMargin().BStart(wm);
-    if (NS_AUTOOFFSET != kidReflowState.ComputedLogicalOffsets().BStart(wm)) {
-      kidReflowState.AvailableBSize() -=
-        kidReflowState.ComputedLogicalOffsets().BStart(wm);
+    kidReflowInput.AvailableBSize() =
+      aReflowInput.AvailableBSize() - border.ConvertTo(wm, outerWM).BStart(wm) -
+      kidReflowInput.ComputedLogicalMargin().BStart(wm);
+    if (NS_AUTOOFFSET != kidReflowInput.ComputedLogicalOffsets().BStart(wm)) {
+      kidReflowInput.AvailableBSize() -=
+        kidReflowInput.ComputedLogicalOffsets().BStart(wm);
     }
   }
 
   // Do the reflow
-  nsHTMLReflowMetrics kidDesiredSize(kidReflowState);
-  aKidFrame->Reflow(aPresContext, kidDesiredSize, kidReflowState, aStatus);
+  ReflowOutput kidDesiredSize(kidReflowInput);
+  aKidFrame->Reflow(aPresContext, kidDesiredSize, kidReflowInput, aStatus);
 
   const LogicalSize kidSize = kidDesiredSize.Size(wm).ConvertTo(outerWM, wm);
 
   LogicalMargin offsets =
-    kidReflowState.ComputedLogicalOffsets().ConvertTo(outerWM, wm);
+    kidReflowInput.ComputedLogicalOffsets().ConvertTo(outerWM, wm);
 
   // If we're solving for start in either inline or block direction,
   // then compute it now that we know the dimensions.
-  if ((NS_AUTOOFFSET == offsets.IStart(outerWM)) ||
-      (NS_AUTOOFFSET == offsets.BStart(outerWM))) {
-    if (-1 == logicalCBSize.ISize(wm)) {
-      // Get the containing block width/height
-      logicalCBSize =
-        kidReflowState.ComputeContainingBlockRectangle(aPresContext,
-                                                       &aReflowState);
-    }
-
-    if (NS_AUTOOFFSET == offsets.IStart(outerWM)) {
-      NS_ASSERTION(NS_AUTOOFFSET != offsets.IEnd(outerWM),
-                   "Can't solve for both start and end");
-      offsets.IStart(outerWM) =
-        logicalCBSize.ConvertTo(outerWM, wm).ISize(outerWM) -
-        offsets.IEnd(outerWM) - margin.IStartEnd(outerWM) -
-        kidSize.ISize(outerWM);
-    }
-    if (NS_AUTOOFFSET == offsets.BStart(outerWM)) {
-      offsets.BStart(outerWM) =
-        logicalCBSize.ConvertTo(outerWM, wm).BSize(outerWM) -
-        offsets.BEnd(outerWM) - margin.BStartEnd(outerWM) -
-        kidSize.BSize(outerWM);
-    }
-    kidReflowState.SetComputedLogicalOffsets(offsets.ConvertTo(wm, outerWM));
-  }
+  ResolveSizeDependentOffsets(aPresContext, kidReflowInput, kidSize, margin,
+                              &offsets, &logicalCBSize);
 
   // Position the child relative to our padding edge
   LogicalRect rect(outerWM,
@@ -473,15 +714,18 @@ nsAbsoluteContainingBlock::ReflowAbsoluteFrame(nsIFrame*                aDelegat
 
   // Offset the frame rect by the given origin of the absolute containing block.
   // If the frame is auto-positioned on both sides of an axis, it will be
-  // positioned based on its containing block and we don't need to offset.
+  // positioned based on its containing block and we don't need to offset
+  // (unless the caller demands it (the STATIC_POS_IS_CB_ORIGIN case)).
   if (aContainingBlock.TopLeft() != nsPoint(0, 0)) {
-    const nsStyleSides& offsets = kidReflowState.mStylePosition->mOffset;
+    const nsStyleSides& offsets = kidReflowInput.mStylePosition->mOffset;
     if (!(offsets.GetLeftUnit() == eStyleUnit_Auto &&
-          offsets.GetRightUnit() == eStyleUnit_Auto)) {
+          offsets.GetRightUnit() == eStyleUnit_Auto) ||
+        (rsFlags & ReflowInput::STATIC_POS_IS_CB_ORIGIN)) {
       r.x += aContainingBlock.x;
     }
     if (!(offsets.GetTopUnit() == eStyleUnit_Auto &&
-          offsets.GetBottomUnit() == eStyleUnit_Auto)) {
+          offsets.GetBottomUnit() == eStyleUnit_Auto) ||
+        (rsFlags & ReflowInput::STATIC_POS_IS_CB_ORIGIN)) {
       r.y += aContainingBlock.y;
     }
   }
@@ -498,18 +742,16 @@ nsAbsoluteContainingBlock::ReflowAbsoluteFrame(nsIFrame*                aDelegat
     nsContainerFrame::PositionChildViews(aKidFrame);
   }
 
-  aKidFrame->DidReflow(aPresContext, &kidReflowState,
+  aKidFrame->DidReflow(aPresContext, &kidReflowInput,
                        nsDidReflowStatus::FINISHED);
 
 #ifdef DEBUG
   if (nsBlockFrame::gNoisyReflow) {
     nsFrame::IndentBy(stdout,nsBlockFrame::gNoiseIndent - 1);
     printf("abs pos ");
-    if (aKidFrame) {
-      nsAutoString name;
-      aKidFrame->GetFrameName(name);
-      printf("%s ", NS_LossyConvertUTF16toASCII(name).get());
-    }
+    nsAutoString name;
+    aKidFrame->GetFrameName(name);
+    printf("%s ", NS_LossyConvertUTF16toASCII(name).get());
     printf("%p rect=%d,%d,%d,%d\n", static_cast<void*>(aKidFrame),
            r.x, r.y, r.width, r.height);
   }

@@ -39,6 +39,7 @@ public:
     kCandidateAttribute,
     kConnectionAttribute,
     kDirectionAttribute,
+    kDtlsMessageAttribute,
     kEndOfCandidatesAttribute,
     kExtmapAttribute,
     kFingerprintAttribute,
@@ -219,6 +220,67 @@ inline std::ostream& operator<<(std::ostream& os,
   }
   return os;
 }
+
+///////////////////////////////////////////////////////////////////////////
+// a=dtls-message, draft-rescorla-dtls-in-sdp
+//-------------------------------------------------------------------------
+//   attribute               =/   dtls-message-attribute
+//
+//   dtls-message-attribute  =    "dtls-message" ":" role SP value
+//
+//   role                    =    "client" / "server"
+//
+//   value                   =    1*(ALPHA / DIGIT / "+" / "/" / "=" )
+//                                ; base64 encoded message
+class SdpDtlsMessageAttribute : public SdpAttribute
+{
+public:
+  enum Role {
+    kClient,
+    kServer
+  };
+
+  explicit SdpDtlsMessageAttribute(Role role, const std::string& value)
+    : SdpAttribute(kDtlsMessageAttribute),
+      mRole(role),
+      mValue(value)
+  {}
+
+  explicit SdpDtlsMessageAttribute(const std::string& unparsed)
+    : SdpAttribute(kDtlsMessageAttribute),
+      mRole(kClient)
+  {
+    std::istringstream is(unparsed);
+    std::string error;
+    // We're not really worried about errors here if we don't parse;
+    // this attribute is a pure optimization.
+    Parse(is, &error);
+  }
+
+  virtual void Serialize(std::ostream& os) const override;
+  bool Parse(std::istream& is, std::string* error);
+
+  Role mRole;
+  std::string mValue;
+};
+
+inline std::ostream& operator<<(std::ostream& os,
+                                SdpDtlsMessageAttribute::Role r)
+{
+  switch (r) {
+    case SdpDtlsMessageAttribute::kClient:
+      os << "client";
+      break;
+    case SdpDtlsMessageAttribute::kServer:
+      os << "server";
+      break;
+    default:
+      MOZ_ASSERT(false);
+      os << "?";
+  }
+  return os;
+}
+
 
 ///////////////////////////////////////////////////////////////////////////
 // a=extmap, RFC5285
@@ -942,7 +1004,7 @@ class SdpRtcpFbAttributeList : public SdpAttribute
 public:
   SdpRtcpFbAttributeList() : SdpAttribute(kRtcpFbAttribute) {}
 
-  enum Type { kAck, kApp, kCcm, kNack, kTrrInt };
+  enum Type { kAck, kApp, kCcm, kNack, kTrrInt, kRemb };
 
   static const char* pli;
   static const char* sli;
@@ -993,6 +1055,9 @@ inline std::ostream& operator<<(std::ostream& os,
     case SdpRtcpFbAttributeList::kTrrInt:
       os << "trr-int";
       break;
+    case SdpRtcpFbAttributeList::kRemb:
+      os << "goog-remb";
+      break;
     default:
       MOZ_ASSERT(false);
       os << "?";
@@ -1020,6 +1085,9 @@ public:
     kiLBC,
     kiSAC,
     kH264,
+    kRed,
+    kUlpfec,
+    kTelephoneEvent,
     kOtherCodec
   };
 
@@ -1099,6 +1167,15 @@ inline std::ostream& operator<<(std::ostream& os,
     case SdpRtpmapAttributeList::kH264:
       os << "H264";
       break;
+    case SdpRtpmapAttributeList::kRed:
+      os << "red";
+      break;
+    case SdpRtpmapAttributeList::kUlpfec:
+      os << "ulpfec";
+      break;
+    case SdpRtpmapAttributeList::kTelephoneEvent:
+      os << "telephone-event";
+      break;
     default:
       MOZ_ASSERT(false);
       os << "?";
@@ -1130,6 +1207,32 @@ public:
     virtual void Serialize(std::ostream& os) const = 0;
 
     SdpRtpmapAttributeList::CodecType codec_type;
+  };
+
+  class RedParameters : public Parameters
+  {
+  public:
+    RedParameters()
+        : Parameters(SdpRtpmapAttributeList::kRed)
+    {
+    }
+
+    virtual Parameters*
+    Clone() const override
+    {
+      return new RedParameters(*this);
+    }
+
+    virtual void
+    Serialize(std::ostream& os) const override
+    {
+      for(size_t i = 0; i < encodings.size(); ++i) {
+        os << (i != 0 ? "/" : "")
+           << std::to_string(encodings[i]);
+      }
+    }
+
+    std::vector<uint8_t> encodings;
   };
 
   class H264Parameters : public Parameters
@@ -1236,21 +1339,72 @@ public:
     unsigned int max_fr;
   };
 
+  class OpusParameters : public Parameters
+  {
+  public:
+    enum { kDefaultMaxPlaybackRate = 48000,
+           kDefaultStereo = 0,
+           kDefaultUseInBandFec = 0 };
+    OpusParameters() :
+      Parameters(SdpRtpmapAttributeList::kOpus),
+      maxplaybackrate(kDefaultMaxPlaybackRate),
+      stereo(kDefaultStereo),
+      useInBandFec(kDefaultUseInBandFec)
+    {}
+
+    Parameters*
+    Clone() const override
+    {
+      return new OpusParameters(*this);
+    }
+
+    void
+    Serialize(std::ostream& os) const override
+    {
+      os << "maxplaybackrate=" << maxplaybackrate
+         << ";stereo=" << stereo
+         << ";useinbandfec=" << useInBandFec;
+    }
+
+    unsigned int maxplaybackrate;
+    unsigned int stereo;
+    unsigned int useInBandFec;
+  };
+
+  class TelephoneEventParameters : public Parameters
+  {
+  public:
+    TelephoneEventParameters() :
+      Parameters(SdpRtpmapAttributeList::kTelephoneEvent),
+      dtmfTones("0-15")
+    {}
+
+    virtual Parameters*
+    Clone() const override
+    {
+      return new TelephoneEventParameters(*this);
+    }
+
+    void
+    Serialize(std::ostream& os) const override
+    {
+      os << dtmfTones;
+    }
+
+    std::string dtmfTones;
+  };
+
   class Fmtp
   {
   public:
-    Fmtp(const std::string& aFormat, const std::string& aParametersString,
-         UniquePtr<Parameters> aParameters)
+    Fmtp(const std::string& aFormat, UniquePtr<Parameters> aParameters)
         : format(aFormat),
-          parameters_string(aParametersString),
           parameters(Move(aParameters))
     {
     }
 
-    Fmtp(const std::string& aFormat, const std::string& aParametersString,
-         const Parameters& aParameters)
+    Fmtp(const std::string& aFormat, const Parameters& aParameters)
         : format(aFormat),
-          parameters_string(aParametersString),
           parameters(aParameters.Clone())
     {
     }
@@ -1262,34 +1416,28 @@ public:
     {
       if (this != &rhs) {
         format = rhs.format;
-        parameters_string = rhs.parameters_string;
         parameters.reset(rhs.parameters ? rhs.parameters->Clone() : nullptr);
       }
       return *this;
     }
 
     // The contract around these is as follows:
-    // * |format| and |parameters_string| are always set
     // * |parameters| is only set if we recognized the media type and had
     //   a subclass of Parameters to represent that type of parameters
     // * |parameters| is a best-effort representation; it might be missing
     //   stuff
-    // * if |parameters| is set, it determines the serialized form,
-    //   otherwise |parameters_string| is used
     // * Parameters::codec_type tells you the concrete class, eg
     //   kH264 -> H264Parameters
     std::string format;
-    std::string parameters_string;
     UniquePtr<Parameters> parameters;
   };
 
   virtual void Serialize(std::ostream& os) const override;
 
   void
-  PushEntry(const std::string& format, const std::string& parameters_string,
-            UniquePtr<Parameters> parameters)
+  PushEntry(const std::string& format, UniquePtr<Parameters> parameters)
   {
-    mFmtps.push_back(Fmtp(format, parameters_string, Move(parameters)));
+    mFmtps.push_back(Fmtp(format, Move(parameters)));
   }
 
   std::vector<Fmtp> mFmtps;

@@ -44,7 +44,7 @@ GetLatencyLog()
   return sLog;
 }
 
-class LogEvent : public nsRunnable
+class LogEvent : public Runnable
 {
 public:
   LogEvent(AsyncLatencyLogger::LatencyLogIndex aIndex, uint64_t aID, int64_t aValue,
@@ -62,7 +62,7 @@ public:
   {}
   ~LogEvent() {}
 
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() override {
     AsyncLatencyLogger::Get(true)->WriteLog(mIndex, mID, mValue, mTimeStamp);
     return NS_OK;
   }

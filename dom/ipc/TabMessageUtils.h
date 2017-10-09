@@ -10,6 +10,7 @@
 #include "ipc/IPCMessageUtils.h"
 #include "mozilla/dom/AudioChannelBinding.h"
 #include "nsIDOMEvent.h"
+#include "nsPIDOMWindow.h"
 #include "nsCOMPtr.h"
 
 #ifdef MOZ_CRASHREPORTER
@@ -24,7 +25,7 @@ struct RemoteDOMEvent
   nsCOMPtr<nsIDOMEvent> mEvent;
 };
 
-bool ReadRemoteEvent(const IPC::Message* aMsg, void** aIter,
+bool ReadRemoteEvent(const IPC::Message* aMsg, PickleIterator* aIter,
                      mozilla::dom::RemoteDOMEvent* aResult);
 
 #ifdef MOZ_CRASHREPORTER
@@ -49,7 +50,7 @@ struct ParamTraits<mozilla::dom::RemoteDOMEvent>
     aParam.mEvent->Serialize(aMsg, true);
   }
 
-  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
+  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
   {
     return mozilla::dom::ReadRemoteEvent(aMsg, aIter, aResult);
   }
@@ -64,16 +65,19 @@ struct ParamTraits<mozilla::dom::AudioChannel>
 {
   typedef mozilla::dom::AudioChannel paramType;
 
-  static bool IsLegalValue(const paramType &aValue) {
+  static bool IsLegalValue(const paramType &aValue)
+  {
     return aValue <= mozilla::dom::AudioChannel::Publicnotification;
   }
 
-  static void Write(Message* aMsg, const paramType& aValue) {
+  static void Write(Message* aMsg, const paramType& aValue)
+  {
     MOZ_ASSERT(IsLegalValue(aValue));
     WriteParam(aMsg, (uint32_t)aValue);
   }
 
-  static bool Read(const Message* aMsg, void** aIter, paramType* aResult) {
+  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
+  {
     uint32_t value;
     if(!ReadParam(aMsg, aIter, &value) ||
        !IsLegalValue(paramType(value))) {
@@ -84,8 +88,7 @@ struct ParamTraits<mozilla::dom::AudioChannel>
   }
 
   static void Log(const paramType& aParam, std::wstring* aLog)
-  {
-  }
+  {}
 };
 
 template <>
@@ -93,15 +96,22 @@ struct ParamTraits<nsEventStatus>
   : public ContiguousEnumSerializer<nsEventStatus,
                                     nsEventStatus_eIgnore,
                                     nsEventStatus_eSentinel>
-{ };
+{};
 
 template<>
 struct ParamTraits<nsSizeMode>
   : public ContiguousEnumSerializer<nsSizeMode,
                                     nsSizeMode_Normal,
                                     nsSizeMode_Invalid>
+{};
+
+template<>
+struct ParamTraits<UIStateChangeType>
+  : public ContiguousEnumSerializer<UIStateChangeType,
+                                    UIStateChangeType_NoChange,
+                                    UIStateChangeType_Invalid>
 { };
 
 } // namespace IPC
 
-#endif
+#endif // TABMESSAGE_UTILS_H

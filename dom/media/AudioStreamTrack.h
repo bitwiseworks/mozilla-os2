@@ -14,15 +14,31 @@ namespace dom {
 
 class AudioStreamTrack : public MediaStreamTrack {
 public:
-  AudioStreamTrack(DOMMediaStream* aStream, TrackID aTrackID)
-    : MediaStreamTrack(aStream, aTrackID) {}
+  AudioStreamTrack(DOMMediaStream* aStream, TrackID aTrackID,
+                   TrackID aInputTrackID,
+                   MediaStreamTrackSource* aSource,
+                   const MediaTrackConstraints& aConstraints = MediaTrackConstraints())
+    : MediaStreamTrack(aStream, aTrackID, aInputTrackID, aSource, aConstraints) {}
 
-  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
-  virtual AudioStreamTrack* AsAudioStreamTrack() override { return this; }
+  AudioStreamTrack* AsAudioStreamTrack() override { return this; }
+
+  const AudioStreamTrack* AsAudioStreamTrack() const override { return this; }
 
   // WebIDL
-  virtual void GetKind(nsAString& aKind) override { aKind.AssignLiteral("audio"); }
+  void GetKind(nsAString& aKind) override { aKind.AssignLiteral("audio"); }
+
+protected:
+  already_AddRefed<MediaStreamTrack> CloneInternal(DOMMediaStream* aOwningStream,
+                                                   TrackID aTrackID) override
+  {
+    return do_AddRef(new AudioStreamTrack(aOwningStream,
+                                          aTrackID,
+                                          mInputTrackID,
+                                          mSource,
+                                          mConstraints));
+  }
 };
 
 } // namespace dom

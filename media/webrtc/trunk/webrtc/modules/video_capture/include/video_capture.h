@@ -21,6 +21,14 @@
 
 namespace webrtc {
 
+class VideoInputFeedBack
+{
+public:
+    virtual void OnDeviceChange() = 0;
+protected:
+    virtual ~VideoInputFeedBack(){}
+};
+
 #if defined(ANDROID) && !defined(WEBRTC_CHROMIUM_BUILD) && !defined(WEBRTC_GONK)
   int32_t SetCaptureAndroidVM(JavaVM* javaVM);
 #endif
@@ -32,6 +40,16 @@ class VideoCaptureModule: public RefCountedModule {
    public:
     virtual uint32_t NumberOfDevices() = 0;
     virtual int32_t Refresh() = 0;
+    virtual void DeviceChange() {
+     if (_inputCallBack)
+      _inputCallBack->OnDeviceChange();
+    }
+    virtual void RegisterVideoInputFeedBack(VideoInputFeedBack& callBack) {
+     _inputCallBack = &callBack;
+    }
+    virtual void DeRegisterVideoInputFeedBack() {
+     _inputCallBack = NULL;
+    }
 
     // Returns the available capture devices.
     // deviceNumber   - Index of capture device.
@@ -40,6 +58,7 @@ class VideoCaptureModule: public RefCountedModule {
     //                      Otherwise same as deviceNameUTF8.
     // productUniqueIdUTF8 - Unique product id if it exist.
     //                       Null terminated otherwise.
+    // pid                 - Owning process id (pid).
     virtual int32_t GetDeviceName(
         uint32_t deviceNumber,
         char* deviceNameUTF8,
@@ -47,7 +66,8 @@ class VideoCaptureModule: public RefCountedModule {
         char* deviceUniqueIdUTF8,
         uint32_t deviceUniqueIdUTF8Length,
         char* productUniqueIdUTF8 = 0,
-        uint32_t productUniqueIdUTF8Length = 0) = 0;
+        uint32_t productUniqueIdUTF8Length = 0,
+        pid_t* pid = 0) = 0;
 
 
     // Returns the number of capabilities this device.
@@ -82,6 +102,8 @@ class VideoCaptureModule: public RefCountedModule {
         uint32_t positionY) = 0;
 
     virtual ~DeviceInfo() {}
+   private:
+    VideoInputFeedBack* _inputCallBack = NULL;
   };
 
   class VideoCaptureEncodeInterface {

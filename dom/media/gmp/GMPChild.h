@@ -31,9 +31,6 @@ public:
             base::ProcessId aParentPid,
             MessageLoop* aIOLoop,
             IPC::Channel* aChannel);
-#ifdef XP_WIN
-  bool PreLoadLibraries(const nsAString& aPluginPath);
-#endif
   MessageLoop* GMPMessageLoop();
 
   // Main thread only.
@@ -44,7 +41,7 @@ public:
   void ShutdownComplete() override;
 
 #if defined(XP_MACOSX) && defined(MOZ_GMP_SANDBOX)
-  bool SetMacSandboxInfo();
+  bool SetMacSandboxInfo(MacSandboxPluginType aPluginType);
 #endif
 
 private:
@@ -55,30 +52,31 @@ private:
 
   bool GetUTF8LibPath(nsACString& aOutLibPath);
 
-  virtual bool RecvSetNodeId(const nsCString& aNodeId) override;
-  virtual bool AnswerStartPlugin() override;
+  bool RecvSetNodeId(const nsCString& aNodeId) override;
+  bool AnswerStartPlugin(const nsString& aAdapter) override;
+  bool RecvPreloadLibs(const nsCString& aLibs) override;
 
-  virtual PCrashReporterChild* AllocPCrashReporterChild(const NativeThreadId& aThread) override;
-  virtual bool DeallocPCrashReporterChild(PCrashReporterChild*) override;
+  PCrashReporterChild* AllocPCrashReporterChild(const NativeThreadId& aThread) override;
+  bool DeallocPCrashReporterChild(PCrashReporterChild*) override;
 
-  virtual PGMPTimerChild* AllocPGMPTimerChild() override;
-  virtual bool DeallocPGMPTimerChild(PGMPTimerChild* aActor) override;
+  PGMPTimerChild* AllocPGMPTimerChild() override;
+  bool DeallocPGMPTimerChild(PGMPTimerChild* aActor) override;
 
-  virtual PGMPStorageChild* AllocPGMPStorageChild() override;
-  virtual bool DeallocPGMPStorageChild(PGMPStorageChild* aActor) override;
+  PGMPStorageChild* AllocPGMPStorageChild() override;
+  bool DeallocPGMPStorageChild(PGMPStorageChild* aActor) override;
 
-  virtual PGMPContentChild* AllocPGMPContentChild(Transport* aTransport,
-                                                  ProcessId aOtherPid) override;
+  PGMPContentChild* AllocPGMPContentChild(Transport* aTransport,
+                                          ProcessId aOtherPid) override;
   void GMPContentChildActorDestroy(GMPContentChild* aGMPContentChild);
 
-  virtual bool RecvCrashPluginNow() override;
-  virtual bool RecvBeginAsyncShutdown() override;
-  virtual bool RecvCloseActive() override;
+  bool RecvCrashPluginNow() override;
+  bool RecvBeginAsyncShutdown() override;
+  bool RecvCloseActive() override;
 
-  virtual void ActorDestroy(ActorDestroyReason aWhy) override;
-  virtual void ProcessingError(Result aCode, const char* aReason) override;
+  void ActorDestroy(ActorDestroyReason aWhy) override;
+  void ProcessingError(Result aCode, const char* aReason) override;
 
-  GMPErr GetAPI(const char* aAPIName, void* aHostAPI, void** aPluginAPI);
+  GMPErr GetAPI(const char* aAPIName, void* aHostAPI, void** aPluginAPI, uint32_t aDecryptorId = 0);
 
   nsTArray<UniquePtr<GMPContentChild>> mGMPContentChildren;
 

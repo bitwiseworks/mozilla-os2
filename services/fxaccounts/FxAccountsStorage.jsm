@@ -4,17 +4,28 @@
 "use strict";
 
 this.EXPORTED_SYMBOLS = [
+  "FxAccountsStorageManagerCanStoreField",
   "FxAccountsStorageManager",
 ];
 
 const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
+Cu.import("resource://gre/modules/AppConstants.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/Task.jsm");
 Cu.import("resource://gre/modules/FxAccountsCommon.js");
 Cu.import("resource://gre/modules/osfile.jsm");
 Cu.import("resource://services-common/utils.js");
 
+// A helper function so code can check what fields are able to be stored by
+// the storage manager without having a reference to a manager instance.
+function FxAccountsStorageManagerCanStoreField(fieldName) {
+  return FXA_PWDMGR_MEMORY_FIELDS.has(fieldName) ||
+         FXA_PWDMGR_PLAINTEXT_FIELDS.has(fieldName) ||
+         FXA_PWDMGR_SECURE_FIELDS.has(fieldName);
+}
+
+// The storage manager object.
 this.FxAccountsStorageManager = function(options = {}) {
   this.options = {
     filename: options.filename || DEFAULT_STORAGE_FILENAME,
@@ -61,7 +72,7 @@ this.FxAccountsStorageManager.prototype = {
         // If accountData is passed we don't need to read any storage.
         this._needToReadSecure = false;
         // split it into the 2 parts, write it and we are done.
-        for (let [name, val] of Iterator(accountData)) {
+        for (let [name, val] of Object.entries(accountData)) {
           if (FXA_PWDMGR_PLAINTEXT_FIELDS.has(name)) {
             this.cachedPlain[name] = val;
           } else if (FXA_PWDMGR_SECURE_FIELDS.has(name)) {
@@ -145,7 +156,7 @@ this.FxAccountsStorageManager.prototype = {
     let result = {};
     if (fieldNames === null) {
       // The "old" deprecated way of fetching a logged in user.
-      for (let [name, value] of Iterator(this.cachedPlain)) {
+      for (let [name, value] of Object.entries(this.cachedPlain)) {
         result[name] = value;
       }
       // But the secure data may not have been read, so try that now.
@@ -153,7 +164,7 @@ this.FxAccountsStorageManager.prototype = {
       // .cachedSecure now has as much as it possibly can (which is possibly
       // nothing if (a) secure storage remains locked and (b) we've never updated
       // a field to be stored in secure storage.)
-      for (let [name, value] of Iterator(this.cachedSecure)) {
+      for (let [name, value] of Object.entries(this.cachedSecure)) {
         result[name] = value;
       }
       // Note we don't return cachedMemory fields here - they must be explicitly
@@ -207,7 +218,7 @@ this.FxAccountsStorageManager.prototype = {
     }
     log.debug("_updateAccountData with items", Object.keys(newFields));
     // work out what bucket.
-    for (let [name, value] of Iterator(newFields)) {
+    for (let [name, value] of Object.entries(newFields)) {
       if (FXA_PWDMGR_MEMORY_FIELDS.has(name)) {
         if (value == null) {
           delete this.cachedMemory[name];
@@ -284,7 +295,7 @@ this.FxAccountsStorageManager.prototype = {
     if (Object.keys(this.cachedPlain).length != 0) {
       throw new Error("should be impossible to have cached data already.")
     }
-    for (let [name, value] of Iterator(got.accountData)) {
+    for (let [name, value] of Object.entries(got.accountData)) {
       this.cachedPlain[name] = value;
     }
     return true;
@@ -326,7 +337,7 @@ this.FxAccountsStorageManager.prototype = {
       }
       if (readSecure && readSecure.accountData) {
         log.debug("secure read fetched items", Object.keys(readSecure.accountData));
-        for (let [name, value] of Iterator(readSecure.accountData)) {
+        for (let [name, value] of Object.entries(readSecure.accountData)) {
           if (!(name in this.cachedSecure)) {
             this.cachedSecure[name] = value;
           }
@@ -337,11 +348,13 @@ this.FxAccountsStorageManager.prototype = {
         }
       }
       this._needToReadSecure = false;
-    } catch (ex if ex instanceof this.secureStorage.STORAGE_LOCKED) {
-      log.debug("setAccountData: secure storage is locked trying to read");
     } catch (ex) {
-      log.error("failed to read secure storage", ex);
-      throw ex;
+      if (ex instanceof this.secureStorage.STORAGE_LOCKED) {
+        log.debug("setAccountData: secure storage is locked trying to read");
+      } else {
+        log.error("failed to read secure storage", ex);
+        throw ex;
+      }
     }
   }),
 
@@ -377,7 +390,7 @@ this.FxAccountsStorageManager.prototype = {
   */
   _doWriteSecure: Task.async(function* () {
     // We need to remove null items here.
-    for (let [name, value] of Iterator(this.cachedSecure)) {
+    for (let [name, value] of Object.entries(this.cachedSecure)) {
       if (value == null) {
         delete this.cachedSecure[name];
       }
@@ -388,8 +401,11 @@ this.FxAccountsStorageManager.prototype = {
       accountData: this.cachedSecure,
     }
     try {
-      yield this.secureStorage.set(this.cachedPlain.email, toWriteSecure);
-    } catch (ex if ex instanceof this.secureStorage.STORAGE_LOCKED) {
+      yield this.secureStorage.set(this.cachedPlain.uid, toWriteSecure);
+    } catch (ex) {
+      if (!ex instanceof this.secureStorage.STORAGE_LOCKED) {
+        throw ex;
+      }
       // This shouldn't be possible as once it is unlocked it can't be
       // re-locked, and we can only be here if we've previously managed to
       // read.
@@ -402,7 +418,7 @@ this.FxAccountsStorageManager.prototype = {
     return this._queueStorageOperation(() => this._deleteAccountData());
   },
 
-  _deleteAccountData: Task.async(function() {
+  _deleteAccountData: Task.async(function* () {
     log.debug("removing account data");
     yield this._promiseInitialized;
     yield this.plainStorage.set(null);
@@ -495,7 +511,7 @@ LoginManagerStorage.prototype = {
     }
   }),
 
-  set: Task.async(function* (email, contents) {
+  set: Task.async(function* (uid, contents) {
     if (!contents) {
       // Nuke it from the login manager.
       let cleared = yield this._clearLoginMgrData();
@@ -525,7 +541,7 @@ LoginManagerStorage.prototype = {
       let login = new loginInfo(FXA_PWDMGR_HOST,
                                 null, // aFormSubmitURL,
                                 FXA_PWDMGR_REALM, // aHttpRealm,
-                                email, // aUsername
+                                uid, // aUsername
                                 JSON.stringify(contents), // aPassword
                                 "", // aUsernameField
                                 "");// aPasswordField
@@ -538,9 +554,10 @@ LoginManagerStorage.prototype = {
         Services.logins.addLogin(login);
       }
       log.trace("finished write of user data to the login manager");
-    } catch (ex if ex instanceof this.STORAGE_LOCKED) {
-      throw ex;
     } catch (ex) {
+      if (ex instanceof this.STORAGE_LOCKED) {
+        throw ex;
+      }
       // just log and consume the error here - it may be a 3rd party login
       // manager replacement that's simply broken.
       log.error("Failed to save data to the login manager", ex);
@@ -566,17 +583,17 @@ LoginManagerStorage.prototype = {
         return null;
       }
       let login = logins[0];
-      // Support either the uid or the email as the username - we plan to move
-      // to storing the uid once Fx41 hits the release channel as the code below
-      // that handles either first landed in 41. Bug 1183951 is to store the uid.
+      // Support either the uid or the email as the username - as of bug 1183951
+      // we store the uid, but we support having either for b/w compat.
       if (login.username == uid || login.username == email) {
         return JSON.parse(login.password);
       }
       log.info("username in the login manager doesn't match - ignoring it");
       yield this._clearLoginMgrData();
-    } catch (ex if ex instanceof this.STORAGE_LOCKED) {
-      throw ex;
     } catch (ex) {
+      if (ex instanceof this.STORAGE_LOCKED) {
+        throw ex;
+      }
       // just log and consume the error here - it may be a 3rd party login
       // manager replacement that's simply broken.
       log.error("Failed to get data from the login manager", ex);
@@ -589,9 +606,4 @@ LoginManagerStorage.prototype = {
 // exist on b2g. Defined here as the use of preprocessor directives skews line
 // numbers in the runtime, meaning stack-traces etc end up off by a few lines.
 // Doing it at the end of the file makes that less of a pita.
-var haveLoginManager =
-#if defined(MOZ_B2G)
-                       false;
-#else
-                       true;
-#endif
+var haveLoginManager = !AppConstants.MOZ_B2G;

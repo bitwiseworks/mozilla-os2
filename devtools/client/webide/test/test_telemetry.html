@@ -19,7 +19,6 @@
       const { _DeprecatedUSBRuntime, _WiFiRuntime, _SimulatorRuntime,
               _gRemoteRuntime, _gLocalRuntime, RuntimeTypes }
             = require("devtools/client/webide/modules/runtimes");
-      const { DebuggerServer } = require("devtools/server/main");
 
       // Because we need to gather stats for the period of time that a tool has
       // been opened we make use of setTimeout() to create tool active times.
@@ -121,8 +120,11 @@
         return Task.spawn(function*() {
           let packagedAppLocation = getTestFilePath("../app");
           let winProject = getProjectWindow(win);
+          let onValidated = waitForUpdate(win, "project-validated");
+          let onDetails = waitForUpdate(win, "details");
           yield winProject.projectList.importPackagedApp(packagedAppLocation);
-          yield waitForUpdate(win, "project-validated");
+          yield onValidated;
+          yield onDetails;
         });
       }
 
@@ -165,17 +167,14 @@
       function checkResults() {
         let result = Telemetry.prototype.telemetryInfo;
         for (let [histId, value] of Iterator(result)) {
-          if (histId.endsWith("_PER_USER_FLAG")) {
-            ok(value.length === 1 && !!value[0],
-               "Per user value " + histId + " has a single value of true");
-          } else if (histId === "DEVTOOLS_WEBIDE_IMPORT_PROJECT_BOOLEAN") {
+          if (histId === "DEVTOOLS_WEBIDE_IMPORT_PROJECT_BOOLEAN") {
             ok(value.length === 1 && !!value[0],
                histId + " has 1 successful entry");
           } else if (histId ===
-                     "DEVTOOLS_WEBIDE_PROJECT_EDITOR_OPENED_BOOLEAN") {
+                     "DEVTOOLS_WEBIDE_PROJECT_EDITOR_OPENED_COUNT") {
             ok(value.length === 1 && !!value[0],
                histId + " has 1 successful entry");
-          } else if (histId === "DEVTOOLS_WEBIDE_OPENED_BOOLEAN") {
+          } else if (histId === "DEVTOOLS_WEBIDE_OPENED_COUNT") {
             ok(value.length > 1, histId + " has more than one entry");
 
             let okay = value.every(function(element) {

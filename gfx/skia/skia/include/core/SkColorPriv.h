@@ -71,6 +71,11 @@
      SK_B32_SHIFT == SK_BGRA_B32_SHIFT)
 
 
+#define SK_A_INDEX  (SK_A32_SHIFT/8)
+#define SK_R_INDEX  (SK_R32_SHIFT/8)
+#define SK_G_INDEX  (SK_G32_SHIFT/8)
+#define SK_B_INDEX  (SK_B32_SHIFT/8)
+
 #if defined(SK_PMCOLOR_IS_RGBA) && !LOCAL_PMCOLOR_SHIFTS_EQUIVALENT_TO_RGBA
     #error "SK_PMCOLOR_IS_RGBA does not match SK_*32_SHIFT values"
 #endif
@@ -193,7 +198,19 @@ static inline unsigned Sk255To256(U8CPU value) {
 /** Multiplify value by 0..256, and shift the result down 8
     (i.e. return (value * alpha256) >> 8)
  */
-#define SkAlphaMul(value, alpha256)     (SkMulS16(value, alpha256) >> 8)
+#define SkAlphaMul(value, alpha256)     (((value) * (alpha256)) >> 8)
+
+/** Calculates 256 - (value * alpha256) / 255 in range [0,256],
+ *  for [0,255] value and [0,256] alpha256.
+ */
+static inline U16CPU SkAlphaMulInv256(U16CPU value, U16CPU alpha256) {
+#ifdef SK_SUPPORT_LEGACY_BROKEN_LERP
+    return SkAlpha255To256(255 - SkAlphaMul(value, alpha256));
+#else
+    unsigned prod = 0xFFFF - value * alpha256;
+    return (prod + (prod >> 8)) >> 8;
+#endif
+}
 
 //  The caller may want negative values, so keep all params signed (int)
 //  so we don't accidentally slip into unsigned math and lose the sign
@@ -213,9 +230,13 @@ static inline int SkAlphaBlend255(S16CPU src, S16CPU dst, U8CPU alpha) {
     SkASSERT((int16_t)dst == dst);
     SkASSERT((uint8_t)alpha == alpha);
 
-    int prod = SkMulS16(src - dst, alpha) + 128;
+    int prod = (src - dst) * alpha + 128;
     prod = (prod + (prod >> 8)) >> 8;
     return dst + prod;
+}
+
+static inline U8CPU SkUnitScalarClampToByte(SkScalar x) {
+    return static_cast<U8CPU>(SkScalarPin(x, 0, 1) * 255 + 0.5);
 }
 
 #define SK_R16_BITS     5
@@ -281,6 +302,16 @@ static inline U16CPU SkAlphaMulRGB16(U16CPU c, unsigned scale) {
 // this helper explicitly returns a clean 16bit value (but slower)
 #define SkAlphaMulRGB16_ToU16(c, s)  (uint16_t)SkAlphaMulRGB16(c, s)
 
+/** Blend pre-expanded RGB32 with 16bit color value by the 0..32 scale parameter.
+    The computation yields only 16bits of valid data, but we claim to return
+    32bits, so that the compiler won't generate extra instructions to "clean"
+    the top 16bits.
+*/
+static inline U16CPU SkBlend32_RGB16(uint32_t src_expand, uint16_t dst, unsigned scale) {
+    uint32_t dst_expand = SkExpand_rgb_16(dst) * scale;
+    return SkCompact_rgb_16((src_expand + dst_expand) >> 5);
+}
+
 /** Blend src and dst 16bit colors by the 0..256 scale parameter.
     The computation yields only 16bits of valid data, but we claim
     to return 32bits, so that the compiler won't generate extra instructions to
@@ -306,7 +337,8 @@ static inline void SkBlendRGB16(const uint16_t src[], uint16_t dst[],
     do {
         uint32_t src32 = SkExpand_rgb_16(*src++);
         uint32_t dst32 = SkExpand_rgb_16(*dst);
-        *dst++ = SkCompact_rgb_16(dst32 + ((src32 - dst32) * srcScale >> 5));
+        *dst++ = static_cast<uint16_t>(
+            SkCompact_rgb_16(dst32 + ((src32 - dst32) * srcScale >> 5)));
     } while (--count > 0);
 }
 
@@ -345,20 +377,30 @@ static inline void SkBlendRGB16(const uint16_t src[], uint16_t dst[],
 #define SkB32Assert(b)  SkASSERT((unsigned)(b) <= SK_B32_MASK)
 
 #ifdef SK_DEBUG
-    static inline void SkPMColorAssert(SkPMColor c) {
-        unsigned a = SkGetPackedA32(c);
-        unsigned r = SkGetPackedR32(c);
-        unsigned g = SkGetPackedG32(c);
-        unsigned b = SkGetPackedB32(c);
-
-        SkA32Assert(a);
-        SkASSERT(r <= a);
-        SkASSERT(g <= a);
-        SkASSERT(b <= a);
-    }
+    #define SkPMColorAssert(color_value)                                    \
+        do {                                                                \
+            SkPMColor pm_color_value = (color_value);                       \
+            uint32_t alpha_color_value = SkGetPackedA32(pm_color_value);    \
+            SkA32Assert(alpha_color_value);                                 \
+            SkASSERT(SkGetPackedR32(pm_color_value) <= alpha_color_value);  \
+            SkASSERT(SkGetPackedG32(pm_color_value) <= alpha_color_value);  \
+            SkASSERT(SkGetPackedB32(pm_color_value) <= alpha_color_value);  \
+        } while (false)
 #else
     #define SkPMColorAssert(c)
 #endif
+
+static inline bool SkPMColorValid(SkPMColor c) {
+    auto a = SkGetPackedA32(c);
+    bool valid = a <= SK_A32_MASK
+              && SkGetPackedR32(c) <= a
+              && SkGetPackedG32(c) <= a
+              && SkGetPackedB32(c) <= a;
+    if (valid) {
+        SkPMColorAssert(c);  // Make sure we're consistent when it counts.
+    }
+    return valid;
+}
 
 /**
  *  Pack the components into a SkPMColor, checking (in the debug version) that
@@ -538,13 +580,38 @@ static inline SkPMColor SkPMSrcOver(SkPMColor src, SkPMColor dst) {
     return src + SkAlphaMulQ(dst, SkAlpha255To256(255 - SkGetPackedA32(src)));
 }
 
+/**
+ * Interpolates between colors src and dst using [0,256] scale.
+ */
+static inline SkPMColor SkPMLerp(SkPMColor src, SkPMColor dst, unsigned scale) {
+#ifdef SK_SUPPORT_LEGACY_BROKEN_LERP
+    return SkAlphaMulQ(src, scale) + SkAlphaMulQ(dst, 256 - scale);
+#else
+    return SkFastFourByteInterp256(src, dst, scale);
+#endif
+}
+
 static inline SkPMColor SkBlendARGB32(SkPMColor src, SkPMColor dst, U8CPU aa) {
     SkASSERT((unsigned)aa <= 255);
 
     unsigned src_scale = SkAlpha255To256(aa);
+#ifdef SK_SUPPORT_LEGACY_BROKEN_LERP
     unsigned dst_scale = SkAlpha255To256(255 - SkAlphaMul(SkGetPackedA32(src), src_scale));
 
     return SkAlphaMulQ(src, src_scale) + SkAlphaMulQ(dst, dst_scale);
+#else
+    unsigned dst_scale = SkAlphaMulInv256(SkGetPackedA32(src), src_scale);
+
+    const uint32_t mask = 0xFF00FF;
+
+    uint32_t src_rb = (src & mask) * src_scale;
+    uint32_t src_ag = ((src >> 8) & mask) * src_scale;
+
+    uint32_t dst_rb = (dst & mask) * dst_scale;
+    uint32_t dst_ag = ((dst >> 8) & mask) * dst_scale;
+
+    return (((src_rb + dst_rb) >> 8) & mask) | ((src_ag + dst_ag) & ~mask);
+#endif
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////
@@ -787,7 +854,7 @@ static inline SkPMColor16 SkPackARGB4444(unsigned a, unsigned r,
                          (g << SK_G4444_SHIFT) | (b << SK_B4444_SHIFT));
 }
 
-static inline U16CPU SkAlphaMulQ4(U16CPU c, unsigned scale) {
+static inline SkPMColor16 SkAlphaMulQ4(SkPMColor16 c, int scale) {
     SkASSERT(scale <= 16);
 
     const unsigned mask = 0xF0F;    //gMask_0F0F;
@@ -797,32 +864,20 @@ static inline U16CPU SkAlphaMulQ4(U16CPU c, unsigned scale) {
     unsigned ag = ((c >> 4) & mask) * scale;
     return (rb & mask) | (ag & ~mask);
 #else
-    c = (c & mask) | ((c & (mask << 4)) << 12);
-    c = c * scale >> 4;
-    return (c & mask) | ((c >> 12) & (mask << 4));
+    unsigned expanded_c = (c & mask) | ((c & (mask << 4)) << 12);
+    unsigned scaled_c = (expanded_c * scale) >> 4;
+    return (scaled_c & mask) | ((scaled_c >> 12) & (mask << 4));
 #endif
 }
 
 /** Expand the SkPMColor16 color into a 32bit value that can be scaled all at
-    once by a value up to 16. Used in conjunction with SkCompact_4444.
+    once by a value up to 16.
 */
 static inline uint32_t SkExpand_4444(U16CPU c) {
     SkASSERT(c == (uint16_t)c);
 
     const unsigned mask = 0xF0F;    //gMask_0F0F;
     return (c & mask) | ((c & ~mask) << 12);
-}
-
-/** Compress an expanded value (from SkExpand_4444) back down to a SkPMColor16.
-    NOTE: this explicitly does not clean the top 16 bits (which may be garbage).
-    It does this for speed, since if it is being written directly to 16bits of
-    memory, the top 16bits will be ignored. Casting the result to uint16_t here
-    would add 2 more instructions, slow us down. It is up to the caller to
-    perform the cast if needed.
-*/
-static inline U16CPU SkCompact_4444(uint32_t c) {
-    const unsigned mask = 0xF0F;    //gMask_0F0F;
-    return (c & mask) | ((c >> 12) & ~mask);
 }
 
 static inline uint16_t SkSrcOver4444To16(SkPMColor16 s, uint16_t d) {
@@ -854,22 +909,6 @@ static inline uint16_t SkBlend4444To16(SkPMColor16 src, uint16_t dst, int scale1
     SkASSERT((unsigned)scale16 <= 16);
 
     return SkSrcOver4444To16(SkAlphaMulQ4(src, scale16), dst);
-}
-
-static inline uint16_t SkBlend4444(SkPMColor16 src, SkPMColor16 dst, int scale16) {
-    SkASSERT((unsigned)scale16 <= 16);
-
-    uint32_t src32 = SkExpand_4444(src) * scale16;
-    // the scaled srcAlpha is the bottom byte
-#ifdef SK_DEBUG
-    {
-        unsigned srcA = SkGetPackedA4444(src) * scale16;
-        SkASSERT(srcA == (src32 & 0xFF));
-    }
-#endif
-    unsigned dstScale = SkAlpha255To256(255 - (src32 & 0xFF)) >> 4;
-    uint32_t dst32 = SkExpand_4444(dst) * dstScale;
-    return SkCompact_4444((src32 + dst32) >> 4);
 }
 
 static inline SkPMColor SkPixel4444ToPixel32(U16CPU c) {

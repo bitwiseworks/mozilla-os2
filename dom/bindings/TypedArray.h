@@ -44,12 +44,8 @@ protected:
 public:
   inline void TraceSelf(JSTracer* trc)
   {
-    if (mTypedObj) {
-      JS_CallUnbarrieredObjectTracer(trc, &mTypedObj, "TypedArray.mTypedObj");
-    }
-    if (mWrappedObj) {
-      JS_CallUnbarrieredObjectTracer(trc, &mTypedObj, "TypedArray.mWrappedObj");
-    }
+    JS::UnsafeTraceRoot(trc, &mTypedObj, "TypedArray.mTypedObj");
+    JS::UnsafeTraceRoot(trc, &mWrappedObj, "TypedArray.mWrappedObj");
   }
 
 private:
@@ -373,7 +369,8 @@ template<typename ArrayType>
 class MOZ_RAII TypedArrayRooter : private JS::CustomAutoRooter
 {
 public:
-  TypedArrayRooter(JSContext* cx,
+  template <typename CX>
+  TypedArrayRooter(const CX& cx,
                    ArrayType* aArray MOZ_GUARD_OBJECT_NOTIFIER_PARAM) :
     JS::CustomAutoRooter(cx MOZ_GUARD_OBJECT_NOTIFIER_PARAM_TO_PARENT),
     mArray(aArray)
@@ -396,7 +393,8 @@ class MOZ_RAII TypedArrayRooter<Nullable<ArrayType> > :
     private JS::CustomAutoRooter
 {
 public:
-  TypedArrayRooter(JSContext* cx,
+  template <typename CX>
+  TypedArrayRooter(const CX& cx,
                    Nullable<ArrayType>* aArray MOZ_GUARD_OBJECT_NOTIFIER_PARAM) :
     JS::CustomAutoRooter(cx MOZ_GUARD_OBJECT_NOTIFIER_PARAM_TO_PARENT),
     mArray(aArray)
@@ -416,18 +414,20 @@ private:
 
 // Class for easily setting up a rooted typed array object on the stack
 template<typename ArrayType>
-class MOZ_RAII RootedTypedArray : public ArrayType,
-                                  private TypedArrayRooter<ArrayType>
+class MOZ_RAII RootedTypedArray final : public ArrayType,
+                                        private TypedArrayRooter<ArrayType>
 {
 public:
-  explicit RootedTypedArray(JSContext* cx MOZ_GUARD_OBJECT_NOTIFIER_PARAM) :
+  template <typename CX>
+  explicit RootedTypedArray(const CX& cx MOZ_GUARD_OBJECT_NOTIFIER_PARAM) :
     ArrayType(),
     TypedArrayRooter<ArrayType>(cx, this
                                 MOZ_GUARD_OBJECT_NOTIFIER_PARAM_TO_PARENT)
   {
   }
 
-  RootedTypedArray(JSContext* cx, JSObject* obj MOZ_GUARD_OBJECT_NOTIFIER_PARAM) :
+  template <typename CX>
+  RootedTypedArray(const CX& cx, JSObject* obj MOZ_GUARD_OBJECT_NOTIFIER_PARAM) :
     ArrayType(obj),
     TypedArrayRooter<ArrayType>(cx, this
                                 MOZ_GUARD_OBJECT_NOTIFIER_PARAM_TO_PARENT)

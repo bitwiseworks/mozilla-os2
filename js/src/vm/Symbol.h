@@ -22,6 +22,10 @@
 #include "js/Utility.h"
 #include "vm/String.h"
 
+namespace js {
+class AutoLockForExclusiveAccess;
+} // namespace js
+
 namespace JS {
 
 class Symbol : public js::gc::TenuredCell
@@ -52,7 +56,7 @@ class Symbol : public js::gc::TenuredCell
 
     static Symbol*
     newInternal(js::ExclusiveContext* cx, SymbolCode code, js::HashNumber hash,
-                JSAtom* description);
+                JSAtom* description, js::AutoLockForExclusiveAccess& lock);
 
   public:
     static Symbol* new_(js::ExclusiveContext* cx, SymbolCode code, JSString* description);
@@ -64,7 +68,7 @@ class Symbol : public js::gc::TenuredCell
 
     bool isWellKnownSymbol() const { return uint32_t(code_) < WellKnownSymbolLimit; }
 
-    static inline js::ThingRootKind rootKind() { return js::THING_ROOT_SYMBOL; }
+    static const JS::TraceKind TraceKind = JS::TraceKind::Symbol;
     inline void traceChildren(JSTracer* trc) {
         if (description_)
             js::TraceManuallyBarrieredEdge(trc, &description_, "description");
@@ -135,10 +139,10 @@ bool
 SymbolDescriptiveString(JSContext* cx, JS::Symbol* sym, JS::MutableHandleValue result);
 
 bool
-IsSymbolOrSymbolWrapper(JS::Value v);
+IsSymbolOrSymbolWrapper(const JS::Value& v);
 
 JS::Symbol*
-ToSymbolPrimitive(JS::Value v);
+ToSymbolPrimitive(const JS::Value& v);
 
 } /* namespace js */
 

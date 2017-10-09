@@ -7,7 +7,7 @@
 #include "nsISupports.idl"
 
 interface nsIPK11Token;
-interface nsIEnumerator;
+interface nsISimpleEnumerator;
 
 /**
  * The PK11 Token Database provides access to the PK11 modules
@@ -33,12 +33,10 @@ interface nsIPK11TokenDB : nsISupports
   /*
    * Find a token by name
    */
-  nsIPK11Token findTokenByName(in wstring tokenName);
+  nsIPK11Token findTokenByName(in AUTF8String tokenName);
 
   /*
    * List all tokens
    */
-  nsIEnumerator listTokens();
-
+  nsISimpleEnumerator listTokens();
 };
-

@@ -12,6 +12,8 @@
 
 #include "ds/IdValuePair.h"
 #include "gc/Barrier.h"
+#include "js/CharacterEncoding.h"
+#include "js/GCHashTable.h"
 #include "vm/TaggedProto.h"
 #include "vm/TypeInference.h"
 
@@ -44,6 +46,12 @@ enum NewObjectKind {
      * singleton and is allocated in the tenured heap.
      */
     SingletonObject,
+
+    /*
+     * CrossCompartmentWrappers use the common Proxy class, but are allowed
+     * to have nursery lifetime.
+     */
+    NurseryAllocatedProxy,
 
     /*
      * Objects which will not benefit from being allocated in the nursery
@@ -83,7 +91,7 @@ class ObjectGroup : public gc::TenuredCell
     const Class* clasp_;
 
     /* Prototype shared by objects in this group. */
-    HeapPtr<TaggedProto> proto_;
+    GCPtr<TaggedProto> proto_;
 
     /* Compartment shared by objects in this group. */
     JSCompartment* compartment_;
@@ -95,14 +103,19 @@ class ObjectGroup : public gc::TenuredCell
     }
 
     void setClasp(const Class* clasp) {
+        MOZ_ASSERT(JS::StringIsASCII(clasp->name));
         clasp_ = clasp;
     }
 
-    const HeapPtr<TaggedProto>& proto() const {
+    bool hasDynamicPrototype() const {
+        return proto_.isDynamic();
+    }
+
+    const GCPtr<TaggedProto>& proto() const {
         return proto_;
     }
 
-    HeapPtr<TaggedProto>& proto() {
+    GCPtr<TaggedProto>& proto() {
         return proto_;
     }
 
@@ -275,7 +288,7 @@ class ObjectGroup : public gc::TenuredCell
         // Identifier for this property, JSID_VOID for the aggregate integer
         // index property, or JSID_EMPTY for properties holding constraints
         // listening to changes in the group's state.
-        HeapId id;
+        GCPtrId id;
 
         // Possible own types for this property.
         HeapTypeSet types;
@@ -419,9 +432,8 @@ class ObjectGroup : public gc::TenuredCell
     size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
 
     void finalize(FreeOp* fop);
-    void fixupAfterMovingGC() {}
 
-    static inline ThingRootKind rootKind() { return THING_ROOT_OBJECT_GROUP; }
+    static const JS::TraceKind TraceKind = JS::TraceKind::ObjectGroup;
 
     static inline uint32_t offsetOfClasp() {
         return offsetof(ObjectGroup, clasp_);
@@ -538,26 +550,28 @@ class ObjectGroupCompartment
 {
     friend class ObjectGroup;
 
-    struct NewEntry;
-    typedef HashSet<NewEntry, NewEntry, SystemAllocPolicy> NewTable;
-    class NewTableRef;
+    class NewTable;
 
     // Set of default 'new' or lazy groups in the compartment.
     NewTable* defaultNewTable;
     NewTable* lazyTable;
 
     struct ArrayObjectKey;
-    typedef HashMap<ArrayObjectKey,
-                    ReadBarrieredObjectGroup,
-                    ArrayObjectKey,
-                    SystemAllocPolicy> ArrayObjectTable;
+    using ArrayObjectTable = js::GCRekeyableHashMap<ArrayObjectKey,
+                                                    ReadBarrieredObjectGroup,
+                                                    ArrayObjectKey,
+                                                    SystemAllocPolicy>;
 
     struct PlainObjectKey;
     struct PlainObjectEntry;
-    typedef HashMap<PlainObjectKey,
-                    PlainObjectEntry,
-                    PlainObjectKey,
-                    SystemAllocPolicy> PlainObjectTable;
+    struct PlainObjectTableSweepPolicy {
+        static bool needsSweep(PlainObjectKey* key, PlainObjectEntry* entry);
+    };
+    using PlainObjectTable = JS::GCHashMap<PlainObjectKey,
+                                           PlainObjectEntry,
+                                           PlainObjectKey,
+                                           SystemAllocPolicy,
+                                           PlainObjectTableSweepPolicy>;
 
     // Tables for managing groups common to the contents of large script
     // singleton objects and JSON objects. These are vanilla ArrayObjects and
@@ -572,15 +586,14 @@ class ObjectGroupCompartment
     PlainObjectTable* plainObjectTable;
 
     struct AllocationSiteKey;
-    typedef HashMap<AllocationSiteKey,
-                    ReadBarrieredObjectGroup,
-                    AllocationSiteKey,
-                    SystemAllocPolicy> AllocationSiteTable;
+    class AllocationSiteTable;
 
     // Table for referencing types of objects keyed to an allocation site.
     AllocationSiteTable* allocationSiteTable;
 
   public:
+    struct NewEntry;
+
     ObjectGroupCompartment();
     ~ObjectGroupCompartment();
 
@@ -622,11 +635,7 @@ class ObjectGroupCompartment
     void checkNewTableAfterMovingGC(NewTable* table);
 #endif
 
-    void sweepNewTable(NewTable* table);
     void fixupNewTableAfterMovingGC(NewTable* table);
-
-    static void newTablePostBarrier(ExclusiveContext* cx, NewTable* table,
-                                    const Class* clasp, TaggedProto proto, JSObject* associated);
 };
 
 PlainObject*

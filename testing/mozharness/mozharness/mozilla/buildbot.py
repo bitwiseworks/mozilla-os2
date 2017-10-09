@@ -8,6 +8,7 @@
 Ideally this will go away if and when we retire buildbot.
 """
 
+import copy
 import os
 import re
 import sys
@@ -61,8 +62,13 @@ class BuildbotMixin(object):
         else:
             # TODO try/except?
             self.buildbot_config = parse_config_file(c['buildbot_json_path'])
+            buildbot_properties = copy.deepcopy(self.buildbot_config.get('properties', {}))
+            if 'commit_titles' in buildbot_properties:
+                # Remove the commit messages since they can cause false positives with
+                # Treeherder log parsers. Eg: "Bug X - Fix TEST-UNEPXECTED-FAIL ...".
+                del buildbot_properties['commit_titles']
             self.info("Using buildbot properties:")
-            self.info(json.dumps(self.buildbot_config, indent=4))
+            self.info(json.dumps(buildbot_properties, indent=4))
 
     def tryserver_email(self):
         pass
@@ -215,3 +221,26 @@ class BuildbotMixin(object):
         except:
             self.fatal('Could not parse buildid into YYYYMMDDHHMMSS: %s' % buildid)
         return buildidDict
+
+    def query_who(self):
+        """ looks for who triggered the build with a change.
+
+        This is used for things like try builds where the upload dir is
+        associated with who pushed to try. First it will look in self.config
+        and failing that, will poll buildbot_config
+        If nothing is found, it will default to returning "nobody@example.com"
+        """
+        if self.config.get('who'):
+            return self.config['who']
+        self.read_buildbot_config()
+        try:
+            return self.buildbot_config['sourcestamp']['changes'][0]['who']
+        except (KeyError, IndexError):
+            # KeyError: "sourcestamp" or "changes" or "who" not in buildbot_config
+            # IndexError: buildbot_config['sourcestamp']['changes'] is empty
+            pass
+        try:
+            return str(self.buildbot_config['properties']['who'])
+        except KeyError:
+            pass
+        return "nobody@example.com"

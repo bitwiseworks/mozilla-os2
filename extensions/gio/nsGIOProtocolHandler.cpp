@@ -37,7 +37,7 @@
 //-----------------------------------------------------------------------------
 
 // NSPR_LOG_MODULES=gio:5
-static PRLogModuleInfo *sGIOLog;
+static mozilla::LazyLogModule sGIOLog("gio");
 #define LOG(args) MOZ_LOG(sGIOLog, mozilla::LogLevel::Debug, args)
 
 
@@ -542,7 +542,7 @@ nsGIOInputStream::DoRead(char *aBuf, uint32_t aCount, uint32_t *aCountRead)
 /**
  * This class is used to implement SetContentTypeOfChannel.
  */
-class nsGIOSetContentTypeEvent : public nsRunnable
+class nsGIOSetContentTypeEvent : public mozilla::Runnable
 {
   public:
     nsGIOSetContentTypeEvent(nsIChannel *channel, const char *contentType)
@@ -552,7 +552,7 @@ class nsGIOSetContentTypeEvent : public nsRunnable
       // in SetContentTypeOfchannel.
     }
 
-    NS_IMETHOD Run()
+    NS_IMETHOD Run() override
     {
       mChannel->SetContentType(mContentType);
       return NS_OK;
@@ -615,17 +615,10 @@ nsGIOInputStream::Close()
     mDirListPtr = nullptr;
   }
 
-  if (mChannel)
-  {
-    nsresult rv = NS_OK;
+  if (mChannel) {
+    NS_ReleaseOnMainThread(dont_AddRef(mChannel));
 
-    nsCOMPtr<nsIThread> thread = do_GetMainThread();
-    if (thread)
-      rv = NS_ProxyRelease(thread, mChannel);
-
-    NS_ASSERTION(thread && NS_SUCCEEDED(rv), "leaking channel reference");
     mChannel = nullptr;
-    (void) rv;
   }
 
   mSpec.Truncate(); // free memory
@@ -833,17 +826,17 @@ mount_operation_ask_password (GMountOperation   *mount_op,
     if (flags & G_ASK_PASSWORD_NEED_USERNAME) {
       if (!realm.IsEmpty()) {
         const char16_t *strings[] = { realm.get(), dispHost.get() };
-        bundle->FormatStringFromName(MOZ_UTF16("EnterLoginForRealm"),
+        bundle->FormatStringFromName(u"EnterLoginForRealm3",
                                      strings, 2, getter_Copies(nsmessage));
       } else {
         const char16_t *strings[] = { dispHost.get() };
-        bundle->FormatStringFromName(MOZ_UTF16("EnterUserPasswordFor"),
+        bundle->FormatStringFromName(u"EnterUserPasswordFor2",
                                      strings, 1, getter_Copies(nsmessage));
       }
     } else {
       NS_ConvertUTF8toUTF16 userName(default_user);
       const char16_t *strings[] = { userName.get(), dispHost.get() };
-      bundle->FormatStringFromName(MOZ_UTF16("EnterPasswordFor"),
+      bundle->FormatStringFromName(u"EnterPasswordFor",
                                    strings, 2, getter_Copies(nsmessage));
     }
   } else {
@@ -875,6 +868,8 @@ mount_operation_ask_password (GMountOperation   *mount_op,
   }
   if (NS_FAILED(rv) || !retval) {  //  was || user == '\0' || pass == '\0'
     g_mount_operation_reply(mount_op, G_MOUNT_OPERATION_ABORTED);
+    free(user);
+    free(pass);
     return;
   }
   /* GIO should accept UTF8 */
@@ -911,8 +906,6 @@ NS_IMPL_ISUPPORTS(nsGIOProtocolHandler, nsIProtocolHandler, nsIObserver)
 nsresult
 nsGIOProtocolHandler::Init()
 {
-  sGIOLog = PR_NewLogModule("gio");
-
   nsCOMPtr<nsIPrefBranch> prefs = do_GetService(NS_PREFSERVICE_CONTRACTID);
   if (prefs)
   {

@@ -8,7 +8,6 @@
 #include "nsAutoPtr.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/Atomics.h"
-#include "mozilla/SharedThreadPool.h"
 
 #include "MediaConduitInterface.h"
 #include "MediaEngineWrapper.h"
@@ -139,6 +138,21 @@ public:
   virtual MediaConduitErrorCode SetReceiverTransport(RefPtr<TransportInterface> aTransport) override;
 
   /**
+   * Function to set the encoding bitrate limits based on incoming frame size and rate
+   * @param width, height: dimensions of the frame
+   * @param cap: user-enforced max bitrate, or 0
+   * @param aLastFramerateTenths: holds the current input framerate
+   * @param out_start, out_min, out_max: bitrate results
+   */
+  void SelectBitrates(unsigned short width,
+                      unsigned short height,
+                      unsigned int cap,
+                      mozilla::Atomic<int32_t, mozilla::Relaxed>& aLastFramerateTenths,
+                      unsigned int& out_min,
+                      unsigned int& out_start,
+                      unsigned int& out_max);
+
+  /**
    * Function to select and change the encoding resolution based on incoming frame size
    * and current available bandwidth.
    * @param width, height: dimensions of the frame
@@ -199,6 +213,10 @@ public:
   virtual MediaConduitErrorCode SetExternalRecvCodec(VideoCodecConfig* config,
                                                      VideoDecoder* decoder) override;
 
+  /**
+  * Enables use of Rtp Stream Id, and sets the extension ID.
+  */
+  virtual MediaConduitErrorCode EnableRTPStreamIdExtension(bool enabled, uint8_t id) override;
 
   /**
    * Webrtc transport implementation to send and receive RTP packet.
@@ -330,15 +348,6 @@ private:
   void CodecConfigToWebRTCCodec(const VideoCodecConfig* codecInfo,
                                 webrtc::VideoCodec& cinst);
 
-  // Function to copy a codec structure to Conduit's database
-  bool CopyCodecToDB(const VideoCodecConfig* codecInfo);
-
-  // Functions to verify if the codec passed is already in
-  // conduits database
-  bool CheckCodecForMatch(const VideoCodecConfig* codecInfo) const;
-  bool CheckCodecsForMatch(const VideoCodecConfig* curCodecConfig,
-                           const VideoCodecConfig* codecInfo) const;
-
   //Checks the codec to be applied
   MediaConduitErrorCode ValidateCodecConfig(const VideoCodecConfig* codecInfo, bool send);
 
@@ -347,6 +356,9 @@ private:
 
   // Video Latency Test averaging filter
   void VideoLatencyUpdate(uint64_t new_sample);
+
+  // Utility function to determine RED and ULPFEC payload types
+  bool DetermineREDAndULPFECPayloadTypes(uint8_t &payload_type_red, uint8_t &payload_type_ulpfec);
 
   webrtc::VideoEngine* mVideoEngine;
   mozilla::ReentrantMonitor mTransportMonitor;
@@ -370,7 +382,6 @@ private:
 
   int mChannel; // Video Channel for this conduit
   int mCapId;   // Capturer for this conduit
-  RecvCodecList    mRecvCodecList;
 
   Mutex mCodecMutex; // protects mCurrSendCodecConfig
   nsAutoPtr<VideoCodecConfig> mCurSendCodecConfig;
@@ -391,6 +402,10 @@ private:
   uint32_t mMinBitrate;
   uint32_t mStartBitrate;
   uint32_t mMaxBitrate;
+  uint32_t mMinBitrateEstimate;
+
+  bool mRtpStreamIdEnabled;
+  uint8_t mRtpStreamIdExtId;
 
   static const unsigned int sAlphaNum = 7;
   static const unsigned int sAlphaDen = 8;

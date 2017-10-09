@@ -29,9 +29,9 @@ keyUsage:[digitalSignature,nonRepudiation,keyEncipherment,
 extKeyUsage:[serverAuth,clientAuth,codeSigning,emailProtection
              nsSGC, # Netscape Server Gated Crypto
              OCSPSigning,timeStamping]
-subjectAlternativeName:[<dNSName>,...]
+subjectAlternativeName:[<dNSName|directoryName>,...]
 authorityInformationAccess:<OCSP URI>
-certificatePolicies:<policy OID>
+certificatePolicies:[<policy OID>,...]
 nameConstraints:{permitted,excluded}:[<dNSName|directoryName>,...]
 nsCertType:sslServer
 TLSFeature:[<TLSFeature>,...]
@@ -65,7 +65,8 @@ Issuer and subject distinguished name specifications are of the form
 (organizational unit name), CN (common name) and emailAddress (email
 address) are currently supported. The optional stringEncoding field may
 be 'utf8String' or 'printableString'. If the given string does not
-contain a '/', it is assumed to represent a common name.
+contain a '/', it is assumed to represent a common name. If an empty
+string is provided, then an empty distinguished name is returned.
 DirectoryNames also use this format. When specifying a directoryName in
 a nameConstraints extension, the implicit form may not be used.
 
@@ -248,7 +249,7 @@ def stringToDN(string, tag=None):
     for the issuer and subject fields for more details. Takes an
     optional implicit tag in cases where the Name needs to be tagged
     differently."""
-    if '/' not in string:
+    if string and '/' not in string:
         string = '/CN=%s' % string
     rdns = rfc2459.RDNSequence()
     pattern = '/(C|ST|L|O|OU|CN|emailAddress)='
@@ -531,14 +532,19 @@ class Certificate(object):
             extKeyUsageExtension.setComponentByPosition(count, self.keyPurposeToOID(keyPurpose))
         self.addExtension(rfc2459.id_ce_extKeyUsage, extKeyUsageExtension, critical)
 
-    def addSubjectAlternativeName(self, dNSNames, critical):
+    def addSubjectAlternativeName(self, names, critical):
         subjectAlternativeName = rfc2459.SubjectAltName()
-        for count, dNSName in enumerate(dNSNames.split(',')):
+        for count, name in enumerate(names.split(',')):
             generalName = rfc2459.GeneralName()
-            # The string may have things like '\0' (i.e. a slash
-            # followed by the number zero) that have to be decoded into
-            # the resulting '\x00' (i.e. a byte with value zero).
-            generalName.setComponentByName('dNSName', dNSName.decode(encoding='string_escape'))
+            if '/' in name:
+                directoryName = stringToDN(name,
+                                           tag.Tag(tag.tagClassContext, tag.tagFormatSimple, 4))
+                generalName.setComponentByName('directoryName', directoryName)
+            else:
+                # The string may have things like '\0' (i.e. a slash
+                # followed by the number zero) that have to be decoded into
+                # the resulting '\x00' (i.e. a byte with value zero).
+                generalName.setComponentByName('dNSName', name.decode(encoding='string_escape'))
             subjectAlternativeName.setComponentByPosition(count, generalName)
         self.addExtension(rfc2459.id_ce_subjectAltName, subjectAlternativeName, critical)
 
@@ -548,14 +554,15 @@ class Certificate(object):
         sequence.setComponentByPosition(0, accessDescription)
         self.addExtension(rfc2459.id_pe_authorityInfoAccess, sequence, critical)
 
-    def addCertificatePolicies(self, policyOID, critical):
+    def addCertificatePolicies(self, policyOIDs, critical):
         policies = rfc2459.CertificatePolicies()
-        policy = rfc2459.PolicyInformation()
-        if policyOID == 'any':
-            policyOID = '2.5.29.32.0'
-        policyIdentifier = rfc2459.CertPolicyId(policyOID)
-        policy.setComponentByName('policyIdentifier', policyIdentifier)
-        policies.setComponentByPosition(0, policy)
+        for pos, policyOID in enumerate(policyOIDs.split(',')):
+            if policyOID == 'any':
+                policyOID = '2.5.29.32.0'
+            policy = rfc2459.PolicyInformation()
+            policyIdentifier = rfc2459.CertPolicyId(policyOID)
+            policy.setComponentByName('policyIdentifier', policyIdentifier)
+            policies.setComponentByPosition(pos, policy)
         self.addExtension(rfc2459.id_ce_certificatePolicies, policies, critical)
 
     def addNameConstraints(self, constraints, critical):

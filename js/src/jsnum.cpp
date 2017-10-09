@@ -188,7 +188,7 @@ js::ParseDecimalNumber(const mozilla::Range<const CharT> chars)
 {
     MOZ_ASSERT(chars.length() > 0);
     uint64_t dec = 0;
-    RangedPtr<const CharT> s = chars.start(), end = chars.end();
+    RangedPtr<const CharT> s = chars.begin(), end = chars.end();
     do {
         CharT c = *s;
         MOZ_ASSERT('0' <= c && c <= '9');
@@ -702,7 +702,7 @@ num_toString_impl(JSContext* cx, const CallArgs& args)
             return false;
 
         if (d2 < 2 || d2 > 36) {
-            JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_BAD_RADIX);
+            JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_BAD_RADIX);
             return false;
         }
 
@@ -877,12 +877,9 @@ js::num_valueOf(JSContext* cx, unsigned argc, Value* vp)
 static const unsigned MAX_PRECISION = 100;
 
 static bool
-ComputePrecisionInRange(JSContext* cx, int minPrecision, int maxPrecision, HandleValue v,
+ComputePrecisionInRange(JSContext* cx, int minPrecision, int maxPrecision, double prec,
                         int* precision)
 {
-    double prec;
-    if (!ToInteger(cx, v, &prec))
-        return false;
     if (minPrecision <= prec && prec <= maxPrecision) {
         *precision = int(prec);
         return true;
@@ -890,7 +887,7 @@ ComputePrecisionInRange(JSContext* cx, int minPrecision, int maxPrecision, Handl
 
     ToCStringBuf cbuf;
     if (char* numStr = NumberToCString(cx, &cbuf, prec, 10))
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_PRECISION_RANGE, numStr);
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_PRECISION_RANGE, numStr);
     return false;
 }
 
@@ -914,19 +911,45 @@ DToStrResult(JSContext* cx, double d, JSDToStrMode mode, int precision, const Ca
  * In the following three implementations, we allow a larger range of precision
  * than ECMA requires; this is permitted by ECMA-262.
  */
+// ES 2017 draft rev f8a9be8ea4bd97237d176907a1e3080dce20c68f 20.1.3.3.
 MOZ_ALWAYS_INLINE bool
 num_toFixed_impl(JSContext* cx, const CallArgs& args)
 {
+    // Step 1.
     MOZ_ASSERT(IsNumber(args.thisv()));
+    double d = Extract(args.thisv());
 
+    // Steps 2-3.
     int precision;
     if (args.length() == 0) {
         precision = 0;
     } else {
-        if (!ComputePrecisionInRange(cx, -20, MAX_PRECISION, args[0], &precision))
+        double prec = 0;
+        if (!ToInteger(cx, args[0], &prec))
+            return false;
+
+        if (!ComputePrecisionInRange(cx, -20, MAX_PRECISION, prec, &precision))
             return false;
     }
 
+    // Step 4.
+    if (mozilla::IsNaN(d)) {
+        args.rval().setString(cx->names().NaN);
+        return true;
+    }
+
+    // Steps 5-7, 9 (optimized path for Infinity).
+    if (mozilla::IsInfinite(d)) {
+        if(d > 0) {
+            args.rval().setString(cx->names().Infinity);
+            return true;
+        }
+
+        args.rval().setString(cx->names().NegativeInfinity);
+        return true;
+    }
+
+    // Steps 5-9.
     return DToStrResult(cx, Extract(args.thisv()), DTOSTR_FIXED, precision, args);
 }
 
@@ -937,23 +960,51 @@ num_toFixed(JSContext* cx, unsigned argc, Value* vp)
     return CallNonGenericMethod<IsNumber, num_toFixed_impl>(cx, args);
 }
 
+// ES 2017 draft rev f8a9be8ea4bd97237d176907a1e3080dce20c68f 20.1.3.2.
 MOZ_ALWAYS_INLINE bool
 num_toExponential_impl(JSContext* cx, const CallArgs& args)
 {
+    // Step 1.
     MOZ_ASSERT(IsNumber(args.thisv()));
+    double d = Extract(args.thisv());
 
-    JSDToStrMode mode;
-    int precision;
-    if (!args.hasDefined(0)) {
-        mode = DTOSTR_STANDARD_EXPONENTIAL;
-        precision = 0;
-    } else {
+    // Step 2.
+    double prec = 0;
+    JSDToStrMode mode = DTOSTR_STANDARD_EXPONENTIAL;
+    if (args.hasDefined(0)) {
         mode = DTOSTR_EXPONENTIAL;
-        if (!ComputePrecisionInRange(cx, 0, MAX_PRECISION, args[0], &precision))
+        if (!ToInteger(cx, args[0], &prec))
             return false;
     }
 
-    return DToStrResult(cx, Extract(args.thisv()), mode, precision + 1, args);
+    // Step 3.
+    MOZ_ASSERT_IF(!args.hasDefined(0), prec == 0);
+
+    // Step 4.
+    if (mozilla::IsNaN(d)) {
+        args.rval().setString(cx->names().NaN);
+        return true;
+    }
+
+    // Steps 5-7.
+    if (mozilla::IsInfinite(d)) {
+        if (d > 0) {
+            args.rval().setString(cx->names().Infinity);
+            return true;
+        }
+
+        args.rval().setString(cx->names().NegativeInfinity);
+        return true;
+    }
+
+    // Steps 5-6, 8-15.
+    int precision = 0;
+    if (mode == DTOSTR_EXPONENTIAL) {
+        if (!ComputePrecisionInRange(cx, 0, MAX_PRECISION, prec, &precision))
+            return false;
+    }
+
+    return DToStrResult(cx, d, mode, precision + 1, args);
 }
 
 static bool
@@ -963,13 +1014,15 @@ num_toExponential(JSContext* cx, unsigned argc, Value* vp)
     return CallNonGenericMethod<IsNumber, num_toExponential_impl>(cx, args);
 }
 
+// ES 2017 draft rev f8a9be8ea4bd97237d176907a1e3080dce20c68f 20.1.3.5.
 MOZ_ALWAYS_INLINE bool
 num_toPrecision_impl(JSContext* cx, const CallArgs& args)
 {
+    // Step 1.
     MOZ_ASSERT(IsNumber(args.thisv()));
-
     double d = Extract(args.thisv());
 
+    // Step 2.
     if (!args.hasDefined(0)) {
         JSString* str = NumberToStringWithBase<CanGC>(cx, d, 10);
         if (!str) {
@@ -980,8 +1033,31 @@ num_toPrecision_impl(JSContext* cx, const CallArgs& args)
         return true;
     }
 
-    int precision;
-    if (!ComputePrecisionInRange(cx, 1, MAX_PRECISION, args[0], &precision))
+    // Step 3.
+    double prec = 0;
+    if (!ToInteger(cx, args[0], &prec))
+        return false;
+
+    // Step 4.
+    if (mozilla::IsNaN(d)) {
+        args.rval().setString(cx->names().NaN);
+        return true;
+    }
+
+    // Steps 5-7.
+    if (mozilla::IsInfinite(d)) {
+        if (d > 0) {
+            args.rval().setString(cx->names().Infinity);
+            return true;
+        }
+
+        args.rval().setString(cx->names().NegativeInfinity);
+        return true;
+    }
+
+    // Steps 5-6, 8-14.
+    int precision = 0;
+    if (!ComputePrecisionInRange(cx, 1, MAX_PRECISION, prec, &precision))
         return false;
 
     return DToStrResult(cx, d, DTOSTR_PRECISION, precision, args);
@@ -1498,58 +1574,48 @@ js::StringToNumber(ExclusiveContext* cx, JSString* str, double* result)
 }
 
 bool
-js::ToNumberSlow(ExclusiveContext* cx, Value v, double* out)
+js::ToNumberSlow(ExclusiveContext* cx, HandleValue v_, double* out)
 {
+    RootedValue v(cx, v_);
     MOZ_ASSERT(!v.isNumber());
-    goto skip_int_double;
-    for (;;) {
+
+    if (!v.isPrimitive()) {
+        if (!cx->isJSContext())
+            return false;
+
+        if (!ToPrimitive(cx->asJSContext(), JSTYPE_NUMBER, &v))
+            return false;
+
         if (v.isNumber()) {
             *out = v.toNumber();
             return true;
         }
-
-      skip_int_double:
-        if (!v.isObject()) {
-            if (v.isString())
-                return StringToNumber(cx, v.toString(), out);
-            if (v.isBoolean()) {
-                *out = v.toBoolean() ? 1.0 : 0.0;
-                return true;
-            }
-            if (v.isNull()) {
-                *out = 0.0;
-                return true;
-            }
-            if (v.isSymbol()) {
-                if (cx->isJSContext()) {
-                    JS_ReportErrorNumber(cx->asJSContext(), GetErrorMessage, nullptr,
-                                         JSMSG_SYMBOL_TO_NUMBER);
-                }
-                return false;
-            }
-
-            MOZ_ASSERT(v.isUndefined());
-            *out = GenericNaN();
-            return true;
+    }
+    if (v.isString())
+        return StringToNumber(cx, v.toString(), out);
+    if (v.isBoolean()) {
+        *out = v.toBoolean() ? 1.0 : 0.0;
+        return true;
+    }
+    if (v.isNull()) {
+        *out = 0.0;
+        return true;
+    }
+    if (v.isSymbol()) {
+        if (cx->isJSContext()) {
+            JS_ReportErrorNumberASCII(cx->asJSContext(), GetErrorMessage, nullptr,
+                                      JSMSG_SYMBOL_TO_NUMBER);
         }
-
-        if (!cx->isJSContext())
-            return false;
-
-        RootedValue v2(cx, v);
-        if (!ToPrimitive(cx->asJSContext(), JSTYPE_NUMBER, &v2))
-            return false;
-        v = v2;
-        if (v.isObject())
-            break;
+        return false;
     }
 
+    MOZ_ASSERT(v.isUndefined());
     *out = GenericNaN();
     return true;
 }
 
 JS_PUBLIC_API(bool)
-js::ToNumberSlow(JSContext* cx, Value v, double* out)
+js::ToNumberSlow(JSContext* cx, HandleValue v, double* out)
 {
     return ToNumberSlow(static_cast<ExclusiveContext*>(cx), v, out);
 }
@@ -1560,6 +1626,25 @@ js::ToNumberSlow(JSContext* cx, Value v, double* out)
  */
 JS_PUBLIC_API(bool)
 js::ToInt8Slow(JSContext *cx, const HandleValue v, int8_t *out)
+{
+    MOZ_ASSERT(!v.isInt32());
+    double d;
+    if (v.isDouble()) {
+        d = v.toDouble();
+    } else {
+        if (!ToNumberSlow(cx, v, &d))
+            return false;
+    }
+    *out = ToInt8(d);
+    return true;
+}
+
+/*
+ * Convert a value to an uint8_t, according to the ToUInt8() function in ES6
+ * ECMA-262, 7.1.10. Return converted value in *out on success, false on failure.
+ */
+JS_PUBLIC_API(bool)
+js::ToUint8Slow(JSContext *cx, const HandleValue v, uint8_t *out)
 {
     MOZ_ASSERT(!v.isInt32());
     double d;
@@ -1728,6 +1813,55 @@ template bool
 js::ToLengthClamped<JSContext>(JSContext*, HandleValue, uint32_t*, bool*);
 template bool
 js::ToLengthClamped<ExclusiveContext>(ExclusiveContext*, HandleValue, uint32_t*, bool*);
+
+bool
+js::ToIntegerIndex(JSContext* cx, JS::HandleValue v, uint64_t* index)
+{
+    // Fast common case.
+    if (v.isInt32()) {
+        int32_t i = v.toInt32();
+        if (i >= 0) {
+            *index = i;
+            return true;
+        }
+    }
+
+    // Slow case. Use ToNumber() to coerce. This may throw a TypeError.
+    double d;
+    if (!ToNumber(cx, v, &d))
+        return false;
+
+    // Check that |d| is an integer in the valid range.
+    //
+    // Not all floating point integers fit in the range of a uint64_t, so we
+    // need a rough range check before the real range check in our caller. We
+    // could limit indexes to UINT64_MAX, but this would mean that our callers
+    // have to be very careful about integer overflow. The contiguous integer
+    // floating point numbers end at 2^53, so make that our upper limit. If we
+    // ever support arrays with more than 2^53 elements, this will need to
+    // change.
+    //
+    // Reject infinities, NaNs, and numbers outside the contiguous integer range
+    // with a RangeError.
+
+    // Write relation so NaNs throw a RangeError.
+    if (!(0 <= d && d <= (uint64_t(1) << 53))) {
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_BAD_INDEX);
+        return false;
+    }
+
+    // Check that d is an integer, throw a RangeError if not.
+    // Note that this conversion could invoke undefined behaviour without the
+    // range check above.
+    uint64_t i(d);
+    if (d != double(i)) {
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_BAD_INDEX);
+        return false;
+    }
+
+    *index = i;
+    return true;
+}
 
 template <typename CharT>
 bool

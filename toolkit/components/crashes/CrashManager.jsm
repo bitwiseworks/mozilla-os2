@@ -14,7 +14,6 @@ Cu.import("resource://gre/modules/Services.jsm", this);
 Cu.import("resource://gre/modules/Task.jsm", this);
 Cu.import("resource://gre/modules/Timer.jsm", this);
 Cu.import("resource://gre/modules/XPCOMUtils.jsm", this);
-Cu.import("resource://services-common/utils.js", this);
 Cu.import("resource://gre/modules/TelemetryController.jsm");
 Cu.import("resource://gre/modules/KeyValueParser.jsm");
 
@@ -139,6 +138,9 @@ this.CrashManager.prototype = Object.freeze({
 
   // A crash in a Gecko media plugin process.
   PROCESS_TYPE_GMPLUGIN: "gmplugin",
+
+  // A crash in the GPU process.
+  PROCESS_TYPE_GPU: "gpu",
 
   // A real crash.
   CRASH_TYPE_CRASH: "crash",
@@ -272,8 +274,7 @@ this.CrashManager.prototype = Object.freeze({
             }
           } catch (ex) {
             if (ex instanceof OS.File.Error) {
-              this._log.warn("I/O error reading " + entry.path + ": " +
-                             CommonUtils.exceptionStr(ex));
+              this._log.warn("I/O error reading " + entry.path, ex);
             } else {
               // We should never encounter an exception. This likely represents
               // a coding error because all errors should be detected and
@@ -282,7 +283,7 @@ this.CrashManager.prototype = Object.freeze({
               // If we get here, report the error and delete the source file
               // so we don't see it again.
               Cu.reportError("Exception when processing crash event file: " +
-                             CommonUtils.exceptionStr(ex));
+                             Log.exceptionStr(ex));
               deletePaths.push(entry.path);
             }
           }
@@ -297,8 +298,7 @@ this.CrashManager.prototype = Object.freeze({
           try {
             yield OS.File.remove(path);
           } catch (ex) {
-            this._log.warn("Error removing event file (" + path + "): " +
-                           CommonUtils.exceptionStr(ex));
+            this._log.warn("Error removing event file (" + path + ")", ex);
           }
         }
 
@@ -534,19 +534,36 @@ this.CrashManager.prototype = Object.freeze({
           // If we have a saved environment, use it. Otherwise report
           // the current environment.
           let crashEnvironment = null;
+          let sessionId = null;
+          let stackTraces = null;
           let reportMeta = Cu.cloneInto(metadata, myScope);
           if ('TelemetryEnvironment' in reportMeta) {
             try {
               crashEnvironment = JSON.parse(reportMeta.TelemetryEnvironment);
-            } catch(e) {
+            } catch (e) {
               Cu.reportError(e);
             }
             delete reportMeta.TelemetryEnvironment;
+          }
+          if ('TelemetrySessionId' in reportMeta) {
+            sessionId = reportMeta.TelemetrySessionId;
+            delete reportMeta.TelemetrySessionId;
+          }
+          if ('StackTraces' in reportMeta) {
+            try {
+              stackTraces = JSON.parse(reportMeta.StackTraces);
+            } catch (e) {
+              Cu.reportError(e);
+            }
+            delete reportMeta.StackTraces;
           }
           TelemetryController.submitExternalPing("crash",
             {
               version: 1,
               crashDate: date.toISOString().slice(0, 10), // YYYY-MM-DD
+              sessionId: sessionId,
+              crashId: entry.id,
+              stackTraces: stackTraces,
               metadata: reportMeta,
               hasCrashEnvironment: (crashEnvironment !== null),
             },
@@ -609,12 +626,12 @@ this.CrashManager.prototype = Object.freeze({
       try {
         yield it.forEach((entry, index, it) => {
           if (entry.isDir) {
-            return;
+            return undefined;
           }
 
           let match = re.exec(entry.name);
           if (!match) {
-            return;
+            return undefined;
           }
 
           return OS.File.stat(entry.path).then((info) => {
@@ -829,7 +846,7 @@ CrashStore.prototype = Object.freeze({
 
           // If we have an OOM size, count the crash as an OOM in addition to
           // being a main process crash.
-          if (denormalized.metadata && 
+          if (denormalized.metadata &&
               denormalized.metadata.OOMAllocationSize) {
             let oomKey = key + "-oom";
             actualCounts.set(oomKey, (actualCounts.get(oomKey) || 0) + 1);
@@ -1026,7 +1043,7 @@ CrashStore.prototype = Object.freeze({
    */
   get crashes() {
     let crashes = [];
-    for (let [id, crash] of this._data.crashes) {
+    for (let [, crash] of this._data.crashes) {
       crashes.push(new CrashRecord(crash));
     }
 

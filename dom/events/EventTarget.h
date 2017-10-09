@@ -11,11 +11,12 @@
 #include "nsWrapperCache.h"
 #include "nsIAtom.h"
 
-class nsIDOMWindow;
+class nsPIDOMWindowOuter;
 class nsIGlobalObject;
 
 namespace mozilla {
 
+class AsyncEventDispatcher;
 class ErrorResult;
 class EventListenerManager;
 
@@ -53,12 +54,12 @@ public:
                                    EventListener* aCallback,
                                    const EventListenerOptionsOrBoolean& aOptions,
                                    ErrorResult& aRv);
-  bool DispatchEvent(Event& aEvent, ErrorResult& aRv);
+  bool DispatchEvent(JSContext* aCx, Event& aEvent, ErrorResult& aRv);
 
   // Note, this takes the type in onfoo form!
   EventHandlerNonNull* GetEventHandler(const nsAString& aType)
   {
-    nsCOMPtr<nsIAtom> type = do_GetAtom(aType);
+    nsCOMPtr<nsIAtom> type = NS_Atomize(aType);
     return GetEventHandler(type, EmptyString());
   }
 
@@ -73,7 +74,7 @@ public:
   // Returns an outer window that corresponds to the inner window this event
   // target is associated with.  Will return null if the inner window is not the
   // current inner or if there is no window around at all.
-  virtual nsIDOMWindow* GetOwnerGlobalForBindings() = 0;
+  virtual nsPIDOMWindowOuter* GetOwnerGlobalForBindings() = 0;
 
   // The global object this event target is associated with, if any.
   // This may be an inner window or some other global object.  This
@@ -91,7 +92,10 @@ public:
    */
   virtual EventListenerManager* GetExistingListenerManager() const = 0;
 
-  virtual bool HasApzAwareListeners() const;
+  // Called from AsyncEventDispatcher to notify it is running.
+  virtual void AsyncEventRunning(AsyncEventDispatcher* aEvent) {}
+
+  virtual bool IsApzAware() const;
 
 protected:
   EventHandlerNonNull* GetEventHandler(nsIAtom* aType,

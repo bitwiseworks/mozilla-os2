@@ -3,11 +3,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const { Task } = require("resource://gre/modules/Task.jsm");
-const { ViewHelpers } = require("resource://devtools/client/shared/widgets/ViewHelpers.jsm");
-const { setNamedTimeout, clearNamedTimeout } = require("resource://devtools/client/shared/widgets/ViewHelpers.jsm");
+const { Task } = require("devtools/shared/task");
+const { ViewHelpers, setNamedTimeout } = require("devtools/client/shared/widgets/view-helpers");
+const { ELLIPSIS } = require("devtools/shared/l10n");
 
-loader.lazyRequireGetter(this, "promise");
+loader.lazyRequireGetter(this, "defer", "devtools/shared/defer");
 loader.lazyRequireGetter(this, "EventEmitter",
   "devtools/shared/event-emitter");
 
@@ -15,9 +15,11 @@ loader.lazyRequireGetter(this, "getColor",
   "devtools/client/shared/theme", true);
 
 loader.lazyRequireGetter(this, "CATEGORY_MAPPINGS",
-  "devtools/client/performance/modules/global", true);
+  "devtools/client/performance/modules/categories", true);
 loader.lazyRequireGetter(this, "FrameUtils",
   "devtools/client/performance/modules/logic/frame-utils");
+loader.lazyRequireGetter(this, "demangle",
+  "devtools/client/shared/demangle");
 
 loader.lazyRequireGetter(this, "AbstractCanvasGraph",
   "devtools/client/shared/widgets/Graphs", true);
@@ -26,40 +28,54 @@ loader.lazyRequireGetter(this, "GraphArea",
 loader.lazyRequireGetter(this, "GraphAreaDragger",
   "devtools/client/shared/widgets/Graphs", true);
 
-const HTML_NS = "http://www.w3.org/1999/xhtml";
 const GRAPH_SRC = "chrome://devtools/content/shared/widgets/graphs-frame.xhtml";
 
-const L10N = new ViewHelpers.L10N();
-
-const GRAPH_RESIZE_EVENTS_DRAIN = 100; // ms
+// ms
+const GRAPH_RESIZE_EVENTS_DRAIN = 100;
 
 const GRAPH_WHEEL_ZOOM_SENSITIVITY = 0.00035;
 const GRAPH_WHEEL_SCROLL_SENSITIVITY = 0.5;
-const GRAPH_MIN_SELECTION_WIDTH = 0.001; // ms
+const GRAPH_KEYBOARD_ZOOM_SENSITIVITY = 20;
+const GRAPH_KEYBOARD_PAN_SENSITIVITY = 20;
+const GRAPH_KEYBOARD_ACCELERATION = 1.05;
+const GRAPH_KEYBOARD_TRANSLATION_MAX = 150;
 
-const GRAPH_HORIZONTAL_PAN_THRESHOLD = 10; // px
-const GRAPH_VERTICAL_PAN_THRESHOLD = 30; // px
+// ms
+const GRAPH_MIN_SELECTION_WIDTH = 0.001;
+
+// px
+const GRAPH_HORIZONTAL_PAN_THRESHOLD = 10;
+const GRAPH_VERTICAL_PAN_THRESHOLD = 30;
 
 const FIND_OPTIMAL_TICK_INTERVAL_MAX_ITERS = 100;
-const TIMELINE_TICKS_MULTIPLE = 5; // ms
-const TIMELINE_TICKS_SPACING_MIN = 75; // px
 
-const OVERVIEW_HEADER_HEIGHT = 16; // px
-const OVERVIEW_HEADER_TEXT_FONT_SIZE = 9; // px
+// ms
+const TIMELINE_TICKS_MULTIPLE = 5;
+// px
+const TIMELINE_TICKS_SPACING_MIN = 75;
+
+// px
+const OVERVIEW_HEADER_HEIGHT = 16;
+const OVERVIEW_HEADER_TEXT_FONT_SIZE = 9;
 const OVERVIEW_HEADER_TEXT_FONT_FAMILY = "sans-serif";
-const OVERVIEW_HEADER_TEXT_PADDING_LEFT = 6; // px
-const OVERVIEW_HEADER_TEXT_PADDING_TOP = 5; // px
+// px
+const OVERVIEW_HEADER_TEXT_PADDING_LEFT = 6;
+const OVERVIEW_HEADER_TEXT_PADDING_TOP = 5;
 const OVERVIEW_HEADER_TIMELINE_STROKE_COLOR = "rgba(128, 128, 128, 0.5)";
 
-const FLAME_GRAPH_BLOCK_HEIGHT = 15; // px
-const FLAME_GRAPH_BLOCK_BORDER = 1; // px
-const FLAME_GRAPH_BLOCK_TEXT_FONT_SIZE = 10; // px
-const FLAME_GRAPH_BLOCK_TEXT_FONT_FAMILY = "message-box, Helvetica Neue, Helvetica, sans-serif";
-const FLAME_GRAPH_BLOCK_TEXT_PADDING_TOP = 0; // px
-const FLAME_GRAPH_BLOCK_TEXT_PADDING_LEFT = 3; // px
-const FLAME_GRAPH_BLOCK_TEXT_PADDING_RIGHT = 3; // px
+// px
+const FLAME_GRAPH_BLOCK_HEIGHT = 15;
+const FLAME_GRAPH_BLOCK_BORDER = 1;
+const FLAME_GRAPH_BLOCK_TEXT_FONT_SIZE = 10;
+const FLAME_GRAPH_BLOCK_TEXT_FONT_FAMILY = "message-box, Helvetica Neue," +
+                                           "Helvetica, sans-serif";
+// px
+const FLAME_GRAPH_BLOCK_TEXT_PADDING_TOP = 0;
+const FLAME_GRAPH_BLOCK_TEXT_PADDING_LEFT = 3;
+const FLAME_GRAPH_BLOCK_TEXT_PADDING_RIGHT = 3;
 
-const PALLETTE_SIZE = 20; // Large enough number for a diverse pallette.
+// Large enough number for a diverse pallette.
+const PALLETTE_SIZE = 20;
 const PALLETTE_HUE_OFFSET = Math.random() * 90;
 const PALLETTE_HUE_RANGE = 270;
 const PALLETTE_SATURATION = 100;
@@ -67,7 +83,8 @@ const PALLETTE_BRIGHTNESS = 55;
 const PALLETTE_OPACITY = 0.35;
 
 const COLOR_PALLETTE = Array.from(Array(PALLETTE_SIZE)).map((_, i) => "hsla" +
-  "(" + ((PALLETTE_HUE_OFFSET + (i / PALLETTE_SIZE * PALLETTE_HUE_RANGE))|0 % 360) +
+  "(" +
+  ((PALLETTE_HUE_OFFSET + (i / PALLETTE_SIZE * PALLETTE_HUE_RANGE)) | 0 % 360) +
   "," + PALLETTE_SATURATION + "%" +
   "," + PALLETTE_BRIGHTNESS + "%" +
   "," + PALLETTE_OPACITY +
@@ -125,7 +142,7 @@ function FlameGraph(parent, sharpness) {
   EventEmitter.decorate(this);
 
   this._parent = parent;
-  this._ready = promise.defer();
+  this._ready = defer();
 
   this.setTheme();
 
@@ -135,7 +152,8 @@ function FlameGraph(parent, sharpness) {
     this._document = iframe.contentDocument;
     this._pixelRatio = sharpness || this._window.devicePixelRatio;
 
-    let container = this._container = this._document.getElementById("graph-container");
+    let container =
+      this._container = this._document.getElementById("graph-container");
     container.className = "flame-graph-widget-container graph-widget-container";
 
     let canvas = this._canvas = this._document.getElementById("graph-canvas");
@@ -156,6 +174,11 @@ function FlameGraph(parent, sharpness) {
     this._selectionDragger = new GraphAreaDragger();
     this._verticalOffset = 0;
     this._verticalOffsetDragger = new GraphAreaDragger(0);
+    this._keyboardZoomAccelerationFactor = 1;
+    this._keyboardPanAccelerationFactor = 1;
+
+    this._userInputStack = 0;
+    this._keysPressed = [];
 
     // Calculating text widths is necessary to trim the text inside the blocks
     // while the scaling changes (e.g. via scrolling). This is very expensive,
@@ -169,6 +192,9 @@ function FlameGraph(parent, sharpness) {
     this._overflowCharWidth = this._getTextWidth(this.overflowChar);
 
     this._onAnimationFrame = this._onAnimationFrame.bind(this);
+    this._onKeyDown = this._onKeyDown.bind(this);
+    this._onKeyUp = this._onKeyUp.bind(this);
+    this._onKeyPress = this._onKeyPress.bind(this);
     this._onMouseMove = this._onMouseMove.bind(this);
     this._onMouseDown = this._onMouseDown.bind(this);
     this._onMouseUp = this._onMouseUp.bind(this);
@@ -176,6 +202,9 @@ function FlameGraph(parent, sharpness) {
     this._onResize = this._onResize.bind(this);
     this.refresh = this.refresh.bind(this);
 
+    this._window.addEventListener("keydown", this._onKeyDown);
+    this._window.addEventListener("keyup", this._onKeyUp);
+    this._window.addEventListener("keypress", this._onKeyPress);
     this._window.addEventListener("mousemove", this._onMouseMove);
     this._window.addEventListener("mousedown", this._onMouseDown);
     this._window.addEventListener("mouseup", this._onMouseUp);
@@ -184,7 +213,8 @@ function FlameGraph(parent, sharpness) {
     let ownerWindow = this._parent.ownerDocument.defaultView;
     ownerWindow.addEventListener("resize", this._onResize);
 
-    this._animationId = this._window.requestAnimationFrame(this._onAnimationFrame);
+    this._animationId =
+      this._window.requestAnimationFrame(this._onAnimationFrame);
 
     this._ready.resolve(this);
     this.emit("ready", this);
@@ -206,16 +236,19 @@ FlameGraph.prototype = {
   /**
    * Returns a promise resolved once this graph is ready to receive data.
    */
-  ready: function() {
+  ready: function () {
     return this._ready.promise;
   },
 
   /**
    * Destroys this graph.
    */
-  destroy: Task.async(function*() {
+  destroy: Task.async(function* () {
     yield this.ready();
 
+    this._window.removeEventListener("keydown", this._onKeyDown);
+    this._window.removeEventListener("keyup", this._onKeyUp);
+    this._window.removeEventListener("keypress", this._onKeyPress);
     this._window.removeEventListener("mousemove", this._onMouseMove);
     this._window.removeEventListener("mousedown", this._onMouseDown);
     this._window.removeEventListener("mouseup", this._onMouseUp);
@@ -234,6 +267,8 @@ FlameGraph.prototype = {
     this._selectionDragger = null;
     this._verticalOffset = null;
     this._verticalOffsetDragger = null;
+    this._keyboardZoomAccelerationFactor = null;
+    this._keyboardPanAccelerationFactor = null;
     this._textWidthsCache = null;
 
     this._data = null;
@@ -264,7 +299,7 @@ FlameGraph.prototype = {
    * Character used when a block's text is overflowing.
    * Defaults to an ellipsis.
    */
-  overflowChar: L10N.ellipsis,
+  overflowChar: ELLIPSIS,
 
   /**
    * Sets the data source for this graph.
@@ -275,7 +310,7 @@ FlameGraph.prototype = {
    *          - bounds: the minimum/maximum { start, end }, in ms or px
    *          - visible: optional, the shown { start, end }, in ms or px
    */
-  setData: function({ data, bounds, visible }) {
+  setData: function ({ data, bounds, visible }) {
     this._data = data;
     this.setOuterBounds(bounds);
     this.setViewRange(visible || bounds);
@@ -289,7 +324,7 @@ FlameGraph.prototype = {
    * @return promise
    *         A promise resolved once the data is set.
    */
-  setDataWhenReady: Task.async(function*(data) {
+  setDataWhenReady: Task.async(function* (data) {
     yield this.ready();
     this.setData(data);
   }),
@@ -298,7 +333,7 @@ FlameGraph.prototype = {
    * Gets whether or not this graph has a data source.
    * @return boolean
    */
-  hasData: function() {
+  hasData: function () {
     return !!this._data;
   },
 
@@ -306,7 +341,7 @@ FlameGraph.prototype = {
    * Sets the maximum selection (i.e. the 'graph bounds').
    * @param object { start, end }
    */
-  setOuterBounds: function({ startTime, endTime }) {
+  setOuterBounds: function ({ startTime, endTime }) {
     this._bounds.start = startTime * this._pixelRatio;
     this._bounds.end = endTime * this._pixelRatio;
     this._shouldRedraw = true;
@@ -316,7 +351,7 @@ FlameGraph.prototype = {
    * Sets the selection and vertical offset (i.e. the 'view range').
    * @return number
    */
-  setViewRange: function({ startTime, endTime }, verticalOffset = 0) {
+  setViewRange: function ({ startTime, endTime }, verticalOffset = 0) {
     this._selection.start = startTime * this._pixelRatio;
     this._selection.end = endTime * this._pixelRatio;
     this._verticalOffset = verticalOffset * this._pixelRatio;
@@ -327,7 +362,7 @@ FlameGraph.prototype = {
    * Gets the maximum selection (i.e. the 'graph bounds').
    * @return number
    */
-  getOuterBounds: function() {
+  getOuterBounds: function () {
     return {
       startTime: this._bounds.start / this._pixelRatio,
       endTime: this._bounds.end / this._pixelRatio
@@ -338,7 +373,7 @@ FlameGraph.prototype = {
    * Gets the current selection and vertical offset (i.e. the 'view range').
    * @return number
    */
-  getViewRange: function() {
+  getViewRange: function () {
     return {
       startTime: this._selection.start / this._pixelRatio,
       endTime: this._selection.end / this._pixelRatio,
@@ -347,12 +382,19 @@ FlameGraph.prototype = {
   },
 
   /**
+   * Focuses this graph's iframe window.
+   */
+  focus: function () {
+    this._window.focus();
+  },
+
+  /**
    * Updates this graph to reflect the new dimensions of the parent node.
    *
    * @param boolean options.force
    *        Force redraw everything.
    */
-  refresh: function(options={}) {
+  refresh: function (options = {}) {
     let bounds = this._parent.getBoundingClientRect();
     let newWidth = this.fixedWidth || bounds.width;
     let newHeight = this.fixedHeight || bounds.height;
@@ -386,8 +428,10 @@ FlameGraph.prototype = {
     theme = theme || "light";
     this.overviewHeaderBackgroundColor = getColor("body-background", theme);
     this.overviewHeaderTextColor = getColor("body-color", theme);
-    // Hard to get a color that is readable across both themes for the text on the flames
-    this.blockTextColor = getColor(theme === "dark" ? "selection-color" : "body-color", theme);
+    // Hard to get a color that is readable across both themes for the text
+    // on the flames
+    this.blockTextColor = getColor(theme === "dark" ? "selection-color"
+                                                    : "body-color", theme);
   },
 
   /**
@@ -400,8 +444,9 @@ FlameGraph.prototype = {
   /**
    * Animation frame callback, invoked on each tick of the refresh driver.
    */
-  _onAnimationFrame: function() {
-    this._animationId = this._window.requestAnimationFrame(this._onAnimationFrame);
+  _onAnimationFrame: function () {
+    this._animationId =
+      this._window.requestAnimationFrame(this._onAnimationFrame);
     this._drawWidget();
   },
 
@@ -409,10 +454,18 @@ FlameGraph.prototype = {
    * Redraws the widget when necessary. The actual graph is not refreshed
    * every time this function is called, only the cliphead, selection etc.
    */
-  _drawWidget: function() {
+  _drawWidget: function () {
     if (!this._shouldRedraw) {
       return;
     }
+
+    // Unlike mouse events which are updated as needed in their own respective
+    // handlers, keyboard events are granular and non-continuous (not even
+    // "keydown", which is fired with a low frequency). Therefore, to maintain
+    // animation smoothness, update anything that's controllable via the
+    // keyboard here, in the animation loop, before any actual drawing.
+    this._keyboardUpdateLoop();
+
     let ctx = this._ctx;
     let canvasWidth = this._width;
     let canvasHeight = this._height;
@@ -422,10 +475,104 @@ FlameGraph.prototype = {
     let selectionWidth = selection.end - selection.start;
     let selectionScale = canvasWidth / selectionWidth;
     this._drawTicks(selection.start, selectionScale);
-    this._drawPyramid(this._data, this._verticalOffset, selection.start, selectionScale);
+    this._drawPyramid(this._data, this._verticalOffset,
+                      selection.start, selectionScale);
     this._drawHeader(selection.start, selectionScale);
 
-    this._shouldRedraw = false;
+    // If the user isn't doing anything anymore, it's safe to stop drawing.
+    // XXX: This doesn't handle cases where we should still be drawing even
+    // if any input stops (e.g. smooth panning transitions after the user
+    // finishes input). We don't care about that right now.
+    if (this._userInputStack == 0) {
+      this._shouldRedraw = false;
+      return;
+    }
+    if (this._userInputStack < 0) {
+      throw new Error("The user went back in time from a pyramid.");
+    }
+  },
+
+  /**
+   * Performs any necessary changes to the graph's state based on the
+   * user's input on a keyboard.
+   */
+  _keyboardUpdateLoop: function () {
+    const KEY_CODE_UP = 38;
+    const KEY_CODE_DOWN = 40;
+    const KEY_CODE_LEFT = 37;
+    const KEY_CODE_RIGHT = 39;
+    const KEY_CODE_W = 87;
+    const KEY_CODE_A = 65;
+    const KEY_CODE_S = 83;
+    const KEY_CODE_D = 68;
+
+    let canvasWidth = this._width;
+    let pressed = this._keysPressed;
+
+    let selection = this._selection;
+    let selectionWidth = selection.end - selection.start;
+    let selectionScale = canvasWidth / selectionWidth;
+
+    let translation = [0, 0];
+    let isZooming = false;
+    let isPanning = false;
+
+    if (pressed[KEY_CODE_UP] || pressed[KEY_CODE_W]) {
+      translation[0] += GRAPH_KEYBOARD_ZOOM_SENSITIVITY / selectionScale;
+      translation[1] -= GRAPH_KEYBOARD_ZOOM_SENSITIVITY / selectionScale;
+      isZooming = true;
+    }
+    if (pressed[KEY_CODE_DOWN] || pressed[KEY_CODE_S]) {
+      translation[0] -= GRAPH_KEYBOARD_ZOOM_SENSITIVITY / selectionScale;
+      translation[1] += GRAPH_KEYBOARD_ZOOM_SENSITIVITY / selectionScale;
+      isZooming = true;
+    }
+    if (pressed[KEY_CODE_LEFT] || pressed[KEY_CODE_A]) {
+      translation[0] -= GRAPH_KEYBOARD_PAN_SENSITIVITY / selectionScale;
+      translation[1] -= GRAPH_KEYBOARD_PAN_SENSITIVITY / selectionScale;
+      isPanning = true;
+    }
+    if (pressed[KEY_CODE_RIGHT] || pressed[KEY_CODE_D]) {
+      translation[0] += GRAPH_KEYBOARD_PAN_SENSITIVITY / selectionScale;
+      translation[1] += GRAPH_KEYBOARD_PAN_SENSITIVITY / selectionScale;
+      isPanning = true;
+    }
+
+    if (isPanning) {
+      // Accelerate the left/right selection panning continuously
+      // while the pan keys are pressed.
+      this._keyboardPanAccelerationFactor *= GRAPH_KEYBOARD_ACCELERATION;
+      translation[0] *= this._keyboardPanAccelerationFactor;
+      translation[1] *= this._keyboardPanAccelerationFactor;
+    } else {
+      this._keyboardPanAccelerationFactor = 1;
+    }
+
+    if (isZooming) {
+      // Accelerate the in/out selection zooming continuously
+      // while the zoom keys are pressed.
+      this._keyboardZoomAccelerationFactor *= GRAPH_KEYBOARD_ACCELERATION;
+      translation[0] *= this._keyboardZoomAccelerationFactor;
+      translation[1] *= this._keyboardZoomAccelerationFactor;
+    } else {
+      this._keyboardZoomAccelerationFactor = 1;
+    }
+
+    if (translation[0] != 0 || translation[1] != 0) {
+      // Make sure the panning translation speed doesn't end up
+      // being too high.
+      let maxTranslation = GRAPH_KEYBOARD_TRANSLATION_MAX / selectionScale;
+      if (Math.abs(translation[0]) > maxTranslation) {
+        translation[0] = Math.sign(translation[0]) * maxTranslation;
+      }
+      if (Math.abs(translation[1]) > maxTranslation) {
+        translation[1] = Math.sign(translation[1]) * maxTranslation;
+      }
+      this._selection.start += translation[0];
+      this._selection.end += translation[1];
+      this._normalizeSelectionBounds();
+      this.emit("selecting");
+    }
   },
 
   /**
@@ -435,7 +582,7 @@ FlameGraph.prototype = {
    *        Offsets and scales the data source by the specified amount.
    *        This is used for scrolling the visualization.
    */
-  _drawHeader: function(dataOffset, dataScale) {
+  _drawHeader: function (dataOffset, dataScale) {
     let ctx = this._ctx;
     let canvasWidth = this._width;
     let headerHeight = OVERVIEW_HEADER_HEIGHT * this._pixelRatio;
@@ -443,7 +590,11 @@ FlameGraph.prototype = {
     ctx.fillStyle = this.overviewHeaderBackgroundColor;
     ctx.fillRect(0, 0, canvasWidth, headerHeight);
 
-    this._drawTicks(dataOffset, dataScale, { from: 0, to: headerHeight, renderText: true });
+    this._drawTicks(dataOffset, dataScale, {
+      from: 0,
+      to: headerHeight,
+      renderText: true
+    });
   },
 
   /**
@@ -455,8 +606,8 @@ FlameGraph.prototype = {
    *        should be drawn.
    *        This is used when scrolling the visualization.
    */
-  _drawTicks: function(dataOffset, dataScale, options) {
-    let { from, to, renderText }  = options || {};
+  _drawTicks: function (dataOffset, dataScale, options) {
+    let { from, to, renderText } = options || {};
     let ctx = this._ctx;
     let canvasWidth = this._width;
     let canvasHeight = this._height;
@@ -474,7 +625,8 @@ FlameGraph.prototype = {
     ctx.strokeStyle = OVERVIEW_HEADER_TIMELINE_STROKE_COLOR;
     ctx.beginPath();
 
-    for (let x = -scaledOffset % tickInterval; x < canvasWidth; x += tickInterval) {
+    for (let x = -scaledOffset % tickInterval; x < canvasWidth;
+         x += tickInterval) {
       let lineLeft = x;
       let textLeft = lineLeft + textPaddingLeft;
       let time = Math.round((x / dataScale + dataOffset) / this._pixelRatio);
@@ -500,25 +652,28 @@ FlameGraph.prototype = {
    *        Offsets and scales the data source by the specified amount.
    *        This is used for scrolling the visualization.
    */
-  _drawPyramid: function(dataSource, verticalOffset, dataOffset, dataScale) {
+  _drawPyramid: function (dataSource, verticalOffset, dataOffset, dataScale) {
     let ctx = this._ctx;
 
     let fontSize = FLAME_GRAPH_BLOCK_TEXT_FONT_SIZE * this._pixelRatio;
     let fontFamily = FLAME_GRAPH_BLOCK_TEXT_FONT_FAMILY;
-    let visibleBlocksInfo = this._drawPyramidFill(dataSource, verticalOffset, dataOffset, dataScale);
+    let visibleBlocksInfo = this._drawPyramidFill(dataSource, verticalOffset,
+                                                  dataOffset, dataScale);
 
     ctx.textBaseline = "middle";
     ctx.font = fontSize + "px " + fontFamily;
     ctx.fillStyle = this.blockTextColor;
 
-    this._drawPyramidText(visibleBlocksInfo, verticalOffset, dataOffset, dataScale);
+    this._drawPyramidText(visibleBlocksInfo, verticalOffset,
+                          dataOffset, dataScale);
   },
 
   /**
    * Fills all block inside this graph's pyramid.
    * @see FlameGraph.prototype._drawPyramid
    */
-  _drawPyramidFill: function(dataSource, verticalOffset, dataOffset, dataScale) {
+  _drawPyramidFill: function (dataSource, verticalOffset, dataOffset,
+                              dataScale) {
     let visibleBlocksInfoStore = [];
     let minVisibleBlockWidth = this._overflowCharWidth;
 
@@ -535,7 +690,8 @@ FlameGraph.prototype = {
    * Adds the text for all block inside this graph's pyramid.
    * @see FlameGraph.prototype._drawPyramid
    */
-  _drawPyramidText: function(blocksInfo, verticalOffset, dataOffset, dataScale) {
+  _drawPyramidText: function (blocksInfo, verticalOffset, dataOffset,
+                              dataScale) {
     for (let { block, rect } of blocksInfo) {
       this._drawBlockText(block, rect, verticalOffset, dataOffset, dataScale);
     }
@@ -562,10 +718,9 @@ FlameGraph.prototype = {
    *        The minimum width of the blocks that will be added into
    *        the `visibleBlocksInfoStore`.
    */
-  _drawBlocksFill: function(
+  _drawBlocksFill: function (
     color, blocks, verticalOffset, dataOffset, dataScale,
-    visibleBlocksInfoStore, minVisibleBlockWidth)
-  {
+    visibleBlocksInfoStore, minVisibleBlockWidth) {
     let ctx = this._ctx;
     let canvasWidth = this._width;
     let canvasHeight = this._height;
@@ -577,14 +732,16 @@ FlameGraph.prototype = {
     for (let block of blocks) {
       let { x, y, width, height } = block;
       let rectLeft = x * this._pixelRatio * dataScale - scaledOffset;
-      let rectTop = (y - verticalOffset + OVERVIEW_HEADER_HEIGHT) * this._pixelRatio;
+      let rectTop = (y - verticalOffset + OVERVIEW_HEADER_HEIGHT)
+                    * this._pixelRatio;
       let rectWidth = width * this._pixelRatio * dataScale;
       let rectHeight = height * this._pixelRatio;
 
-      if (rectLeft > canvasWidth || // Too far right.
-          rectLeft < -rectWidth ||  // Too far left.
-          rectTop > canvasHeight || // Too far bottom.
-          rectTop < -rectHeight) {  // Too far top.
+      // Too far respectively right/left/bottom/top
+      if (rectLeft > canvasWidth ||
+          rectLeft < -rectWidth ||
+          rectTop > canvasHeight ||
+          rectTop < -rectHeight) {
         continue;
       }
 
@@ -636,11 +793,11 @@ FlameGraph.prototype = {
    *        Offsets and scales the data source by the specified amount.
    *        This is used for scrolling the visualization.
    */
-  _drawBlockText: function(block, rect, verticalOffset, dataOffset, dataScale) {
+  _drawBlockText: function (block, rect, verticalOffset, dataOffset,
+                            dataScale) {
     let ctx = this._ctx;
-    let scaledOffset = dataOffset * dataScale;
 
-    let { x, y, width, height, text } = block;
+    let { text } = block;
     let { rectLeft, rectTop, rectWidth, rectHeight } = rect;
 
     let paddingTop = FLAME_GRAPH_BLOCK_TEXT_PADDING_TOP * this._pixelRatio;
@@ -687,7 +844,7 @@ FlameGraph.prototype = {
    * @return number
    *         The text width.
    */
-  _getTextWidth: function(text) {
+  _getTextWidth: function (text) {
     let cachedWidth = this._textWidthsCache[text];
     if (cachedWidth) {
       return cachedWidth;
@@ -705,7 +862,7 @@ FlameGraph.prototype = {
    * @return number
    *         The approximate text width.
    */
-  _getTextWidthApprox: function(text) {
+  _getTextWidthApprox: function (text) {
     return text.length * this._averageCharWidth;
   },
 
@@ -717,10 +874,12 @@ FlameGraph.prototype = {
    * @return number
    *         The average letter width.
    */
-  _calcAverageCharWidth: function() {
+  _calcAverageCharWidth: function () {
     let letterWidthsSum = 0;
-    let start = 32; // space
-    let end = 123; // "z"
+    // space
+    let start = 32;
+    // "z"
+    let end = 123;
 
     for (let i = start; i < end; i++) {
       let char = String.fromCharCode(i);
@@ -741,7 +900,7 @@ FlameGraph.prototype = {
    * @return string
    *         The fitted text.
    */
-  _getFittedText: function(text, maxWidth) {
+  _getFittedText: function (text, maxWidth) {
     let textWidth = this._getTextWidth(text);
     if (textWidth < maxWidth) {
       return text;
@@ -751,7 +910,8 @@ FlameGraph.prototype = {
     }
     for (let i = 1, len = text.length; i <= len; i++) {
       let trimmedText = text.substring(0, len - i);
-      let trimmedWidth = this._getTextWidthApprox(trimmedText) + this._overflowCharWidth;
+      let trimmedWidth = this._getTextWidthApprox(trimmedText)
+                         + this._overflowCharWidth;
       if (trimmedWidth < maxWidth) {
         return trimmedText + this.overflowChar;
       }
@@ -760,13 +920,47 @@ FlameGraph.prototype = {
   },
 
   /**
+   * Listener for the "keydown" event on the graph's container.
+   */
+  _onKeyDown: function (e) {
+    ViewHelpers.preventScrolling(e);
+
+    const hasModifier = e.ctrlKey || e.shiftKey || e.altKey || e.metaKey;
+
+    if (!hasModifier && !this._keysPressed[e.keyCode]) {
+      this._keysPressed[e.keyCode] = true;
+      this._userInputStack++;
+      this._shouldRedraw = true;
+    }
+  },
+
+  /**
+   * Listener for the "keyup" event on the graph's container.
+   */
+  _onKeyUp: function (e) {
+    ViewHelpers.preventScrolling(e);
+
+    if (this._keysPressed[e.keyCode]) {
+      this._keysPressed[e.keyCode] = false;
+      this._userInputStack--;
+      this._shouldRedraw = true;
+    }
+  },
+
+  /**
+   * Listener for the "keypress" event on the graph's container.
+   */
+  _onKeyPress: function (e) {
+    ViewHelpers.preventScrolling(e);
+  },
+
+  /**
    * Listener for the "mousemove" event on the graph's container.
    */
-  _onMouseMove: function(e) {
+  _onMouseMove: function (e) {
     let {mouseX, mouseY} = this._getRelativeEventCoordinates(e);
 
     let canvasWidth = this._width;
-    let canvasHeight = this._height;
 
     let selection = this._selection;
     let selectionWidth = selection.end - selection.start;
@@ -792,17 +986,22 @@ FlameGraph.prototype = {
     }
 
     if (horizDrag.origin != null && this._horizontalDragEnabled) {
-      let relativeX = mouseX + this._horizontalDragDirection * this.horizontalPanThreshold;
-      selection.start = horizDrag.anchor.start + (horizDrag.origin - relativeX) / selectionScale;
-      selection.end = horizDrag.anchor.end + (horizDrag.origin - relativeX) / selectionScale;
+      let relativeX = mouseX + this._horizontalDragDirection *
+                               this.horizontalPanThreshold;
+      selection.start = horizDrag.anchor.start +
+                        (horizDrag.origin - relativeX) / selectionScale;
+      selection.end = horizDrag.anchor.end +
+                      (horizDrag.origin - relativeX) / selectionScale;
       this._normalizeSelectionBounds();
       this._shouldRedraw = true;
       this.emit("selecting");
     }
 
     if (vertDrag.origin != null && this._verticalDragEnabled) {
-      let relativeY = mouseY + this._verticalDragDirection * this.verticalPanThreshold;
-      this._verticalOffset = vertDrag.anchor + (vertDrag.origin - relativeY) / this._pixelRatio;
+      let relativeY = mouseY +
+                      this._verticalDragDirection * this.verticalPanThreshold;
+      this._verticalOffset = vertDrag.anchor +
+                             (vertDrag.origin - relativeY) / this._pixelRatio;
       this._normalizeVerticalOffset();
       this._shouldRedraw = true;
       this.emit("panning-vertically");
@@ -812,7 +1011,7 @@ FlameGraph.prototype = {
   /**
    * Listener for the "mousedown" event on the graph's container.
    */
-  _onMouseDown: function(e) {
+  _onMouseDown: function (e) {
     let {mouseX, mouseY} = this._getRelativeEventCoordinates(e);
 
     this._selectionDragger.origin = mouseX;
@@ -831,7 +1030,7 @@ FlameGraph.prototype = {
   /**
    * Listener for the "mouseup" event on the graph's container.
    */
-  _onMouseUp: function() {
+  _onMouseUp: function () {
     this._selectionDragger.origin = null;
     this._verticalOffsetDragger.origin = null;
     this._horizontalDragEnabled = false;
@@ -844,11 +1043,10 @@ FlameGraph.prototype = {
   /**
    * Listener for the "wheel" event on the graph's container.
    */
-  _onMouseWheel: function(e) {
+  _onMouseWheel: function (e) {
     let {mouseX} = this._getRelativeEventCoordinates(e);
 
     let canvasWidth = this._width;
-    let canvasHeight = this._height;
 
     let selection = this._selection;
     let selectionWidth = selection.end - selection.start;
@@ -881,7 +1079,7 @@ FlameGraph.prototype = {
    * are withing the graph's visible bounds, and that they form a selection
    * wider than the allowed minimum width.
    */
-  _normalizeSelectionBounds: function() {
+  _normalizeSelectionBounds: function () {
     let boundsStart = this._bounds.start;
     let boundsEnd = this._bounds.end;
     let selectionStart = this._selection.start;
@@ -915,7 +1113,7 @@ FlameGraph.prototype = {
    * Makes sure that the current vertical offset is within the allowed
    * panning range.
    */
-  _normalizeVerticalOffset: function() {
+  _normalizeVerticalOffset: function () {
     this._verticalOffset = Math.max(this._verticalOffset, 0);
   },
 
@@ -926,7 +1124,7 @@ FlameGraph.prototype = {
    * @param number dataScale
    * @return number
    */
-  _findOptimalTickInterval: function(dataScale) {
+  _findOptimalTickInterval: function (dataScale) {
     let timingStep = TIMELINE_TICKS_MULTIPLE;
     let spacingMin = TIMELINE_TICKS_SPACING_MIN * this._pixelRatio;
     let maxIters = FIND_OPTIMAL_TICK_INTERVAL_MAX_ITERS;
@@ -955,7 +1153,7 @@ FlameGraph.prototype = {
    * @return object
    *         The { left, top } offset.
    */
-  _getContainerOffset: function() {
+  _getContainerOffset: function () {
     let node = this._canvas;
     let x = 0;
     let y = 0;
@@ -972,7 +1170,7 @@ FlameGraph.prototype = {
    * Given a MouseEvent, make it relative to this._canvas.
    * @return object {mouseX,mouseY}
    */
-  _getRelativeEventCoordinates: function(e) {
+  _getRelativeEventCoordinates: function (e) {
     // For ease of testing, testX and testY can be passed in as the event
     // object.
     if ("testX" in e && "testY" in e) {
@@ -986,13 +1184,13 @@ FlameGraph.prototype = {
     let mouseX = (e.clientX - offset.left) * this._pixelRatio;
     let mouseY = (e.clientY - offset.top) * this._pixelRatio;
 
-    return {mouseX,mouseY};
+    return {mouseX, mouseY};
   },
 
   /**
    * Listener for the "resize" event on the graph's parent node.
    */
-  _onResize: function() {
+  _onResize: function () {
     if (this.hasData()) {
       setNamedTimeout(this._uid, GRAPH_RESIZE_EVENTS_DRAIN, this.refresh);
     }
@@ -1021,7 +1219,7 @@ var FlameGraphUtils = {
    * @return object
    *         Data source usable by FlameGraph.
    */
-  createFlameGraphDataFromThread: function(thread, options = {}, out = []) {
+  createFlameGraphDataFromThread: function (thread, options = {}, out = []) {
     let cached = this._cache.get(thread);
     if (cached) {
       return cached;
@@ -1063,7 +1261,8 @@ var FlameGraphUtils = {
     // Take the timestamp of the first sample as prevTime. 0 is incorrect due
     // to circular buffer wraparound. If wraparound happens, then the first
     // sample will have an incorrect, large duration.
-    let prevTime = samplesData.length > 0 ? samplesData[0][SAMPLE_TIME_SLOT] : 0;
+    let prevTime = samplesData.length > 0 ? samplesData[0][SAMPLE_TIME_SLOT]
+                                          : 0;
     let prevFrames = [];
     let sampleFrames = [];
     let sampleFrameKeys = [];
@@ -1100,8 +1299,9 @@ var FlameGraphUtils = {
         stackIndex = stackEntry[STACK_PREFIX_SLOT];
 
         // Inflate the frame.
-        let inflatedFrame = getOrAddInflatedFrame(inflatedFrameCache, frameIndex,
-                                                  frameTable, stringTable);
+        let inflatedFrame = getOrAddInflatedFrame(inflatedFrameCache,
+                                                  frameIndex, frameTable,
+                                                  stringTable);
 
         mutableFrameKeyOptions.isRoot = stackIndex === null;
         mutableFrameKeyOptions.isLeaf = stackDepth === 0;
@@ -1154,10 +1354,9 @@ var FlameGraphUtils = {
         // If there is a block already created, change its width.
         if (prevFrame && prevFrame.frameKey === key) {
           prevFrame.width = (time - prevFrame.startTime);
-        }
-        // Otherwise, create a new block for this frame at this depth,
-        // using a simple location based salt for picking a color.
-        else {
+        } else {
+          // Otherwise, create a new block for this frame at this depth,
+          // using a simple location based salt for picking a color.
           let hash = this._getStringHash(key);
           let bucket = buckets[hash % PALLETTE_SIZE];
 
@@ -1167,7 +1366,8 @@ var FlameGraphUtils = {
           } else {
             label = labelCache[key];
             if (!label) {
-              label = labelCache[key] = this._formatLabel(key, sampleFrames[frameIndex]);
+              label = labelCache[key] =
+                this._formatLabel(key, sampleFrames[frameIndex]);
             }
           }
 
@@ -1204,7 +1404,7 @@ var FlameGraphUtils = {
    * Clears the cached flame graph data created for the given source.
    * @param any source
    */
-  removeFromCache: function(source) {
+  removeFromCache: function (source) {
     this._cache.delete(source);
   },
 
@@ -1214,7 +1414,7 @@ var FlameGraphUtils = {
    * @param string input
    * @return number
    */
-  _getStringHash: function(input) {
+  _getStringHash: function (input) {
     const STRING_HASH_PRIME1 = 7;
     const STRING_HASH_PRIME2 = 31;
 
@@ -1241,8 +1441,10 @@ var FlameGraphUtils = {
    * @return string
    */
   _formatLabel: function (key, frame) {
-    let { functionName, fileName, line } = FrameUtils.parseLocation(key, frame.line);
-    let label = functionName;
+    let { functionName, fileName, line } =
+      FrameUtils.parseLocation(key, frame.line);
+    let label = FrameUtils.shouldDemangle(functionName) ? demangle(functionName)
+                                                        : functionName;
 
     if (fileName) {
       label += ` (${fileName}${line != null ? (":" + line) : ""})`;

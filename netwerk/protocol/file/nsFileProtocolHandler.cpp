@@ -4,6 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "nsIFile.h"
 #include "nsFileProtocolHandler.h"
 #include "nsFileChannel.h"
 #include "nsStandardURL.h"
@@ -103,6 +104,12 @@ nsFileProtocolHandler::ReadURLFile(nsIFile* aFile, nsIURI** aURI)
     if (NS_FAILED(rv) ||
 	!StringEndsWith(leafName, NS_LITERAL_CSTRING(".desktop")))
         return NS_ERROR_NOT_AVAILABLE;
+
+    bool isFile = false;
+    rv = aFile->IsFile(&isFile);
+    if (NS_FAILED(rv) || !isFile) {
+        return NS_ERROR_NOT_AVAILABLE;
+    }
 
     nsINIParser parser;
     rv = parser.Init(aFile);

@@ -14,6 +14,9 @@
 
 class nsIRequest;
 
+namespace mozilla {
+namespace net {
+
 class nsStreamLoader final : public nsIStreamLoader
                            , public nsIThreadRetargetableStreamListener
 {
@@ -32,8 +35,8 @@ public:
 protected:
   ~nsStreamLoader();
 
-  static NS_METHOD WriteSegmentFun(nsIInputStream *, void *, const char *,
-                                   uint32_t, uint32_t, uint32_t *);
+  static nsresult WriteSegmentFun(nsIInputStream *, void *, const char *,
+                                  uint32_t, uint32_t, uint32_t *);
 
   // Utility method to free mData, if present, and update other state to
   // reflect that no data has been allocated.
@@ -48,5 +51,8 @@ protected:
   // available.
   mozilla::Vector<uint8_t, 0> mData;
 };
+
+} // namespace net
+} // namespace mozilla
 
 #endif // nsStreamLoader_h__

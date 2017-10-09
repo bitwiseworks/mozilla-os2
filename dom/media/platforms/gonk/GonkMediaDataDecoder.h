@@ -23,11 +23,11 @@ class GonkDecoderManager : public android::AHandler {
 public:
   typedef TrackInfo::TrackType TrackType;
   typedef MediaDataDecoder::InitPromise InitPromise;
-  typedef MediaDataDecoder::DecoderFailureReason DecoderFailureReason;
 
   virtual ~GonkDecoderManager() {}
 
   virtual RefPtr<InitPromise> Init() = 0;
+  virtual const char* GetDescriptionName() const = 0;
 
   // Asynchronously send sample into mDecoder. If out of input buffer, aSample
   // will be queued for later re-send.
@@ -76,6 +76,7 @@ protected:
   void ProcessInput(bool aEndOfStream);
   virtual void ProcessFlush();
   void ProcessToDo(bool aEndOfStream);
+  virtual void ResetEOS();
 
   RefPtr<MediaByteBuffer> mCodecSpecificData;
 
@@ -184,20 +185,24 @@ private:
 class GonkMediaDataDecoder : public MediaDataDecoder {
 public:
   GonkMediaDataDecoder(GonkDecoderManager* aDecoderManager,
-                       FlushableTaskQueue* aTaskQueue,
                        MediaDataDecoderCallback* aCallback);
 
   ~GonkMediaDataDecoder();
 
   RefPtr<InitPromise> Init() override;
 
-  nsresult Input(MediaRawData* aSample) override;
+  void Input(MediaRawData* aSample) override;
 
-  nsresult Flush() override;
+  void Flush() override;
 
-  nsresult Drain() override;
+  void Drain() override;
 
-  nsresult Shutdown() override;
+  void Shutdown() override;
+
+  const char* GetDescriptionName() const override
+  {
+    return "gonk decoder";
+  }
 
 private:
 

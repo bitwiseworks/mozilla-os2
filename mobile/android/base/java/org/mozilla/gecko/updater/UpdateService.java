@@ -11,10 +11,13 @@ import org.mozilla.gecko.R;
 
 import org.mozilla.apache.commons.codec.binary.Hex;
 
+import org.mozilla.gecko.permissions.Permissions;
+import org.mozilla.gecko.util.ProxySelector;
 import org.w3c.dom.Document;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 
+import android.Manifest;
 import android.app.AlarmManager;
 import android.app.IntentService;
 import android.app.Notification;
@@ -30,7 +33,9 @@ import android.net.Uri;
 import android.net.wifi.WifiManager;
 import android.net.wifi.WifiManager.WifiLock;
 import android.os.Environment;
+import android.provider.Settings;
 import android.support.v4.app.NotificationManagerCompat;
+import android.support.v4.content.ContextCompat;
 import android.support.v4.net.ConnectivityManagerCompat;
 import android.support.v4.app.NotificationCompat;
 import android.support.v4.app.NotificationCompat.Builder;
@@ -43,8 +48,6 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.Proxy;
-import java.net.ProxySelector;
 import java.net.URI;
 import java.net.URL;
 import java.net.URLConnection;
@@ -180,7 +183,7 @@ public class UpdateService extends IntentService {
     }
 
     @Override
-    protected void onHandleIntent (Intent intent) {
+    protected void onHandleIntent (final Intent intent) {
         if (UpdateServiceHelper.ACTION_REGISTER_FOR_UPDATES.equals(intent.getAction())) {
             AutoDownloadPolicy policy = AutoDownloadPolicy.get(
                 intent.getIntExtra(UpdateServiceHelper.EXTRA_AUTODOWNLOAD_NAME,
@@ -223,7 +226,7 @@ public class UpdateService extends IntentService {
         int interval;
         if (isRetry) {
             interval = INTERVAL_RETRY;
-        } else if (!AppConstants.RELEASE_BUILD) {
+        } else if (!AppConstants.RELEASE_OR_BETA) {
             interval = INTERVAL_SHORT;
         } else {
             interval = INTERVAL_LONG;
@@ -259,7 +262,7 @@ public class UpdateService extends IntentService {
         manager.set(AlarmManager.RTC_WAKEUP, lastAttempt.getTimeInMillis(), pending);
     }
 
-    private void startUpdate(int flags) {
+    private void startUpdate(final int flags) {
         setLastAttemptDate();
 
         NetworkInfo netInfo = mConnectivityManager.getActiveNetworkInfo();
@@ -272,7 +275,7 @@ public class UpdateService extends IntentService {
 
         registerForUpdates(false);
 
-        UpdateInfo info = findUpdate(hasFlag(flags, UpdateServiceHelper.FLAG_REINSTALL));
+        final UpdateInfo info = findUpdate(hasFlag(flags, UpdateServiceHelper.FLAG_REINSTALL));
         boolean haveUpdate = (info != null);
 
         if (!haveUpdate) {
@@ -283,6 +286,23 @@ public class UpdateService extends IntentService {
 
         Log.i(LOGTAG, "update available, buildID = " + info.buildID);
 
+        Permissions.from(this)
+                .withPermissions(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                .doNotPrompt()
+                .andFallback(new Runnable() {
+                    @Override
+                    public void run() {
+                        showPermissionNotification();
+                        sendCheckUpdateResult(CheckUpdateResult.NOT_AVAILABLE);
+                    }})
+                .run(new Runnable() {
+                    @Override
+                    public void run() {
+                        startDownload(info, flags);
+                    }});
+    }
+
+    private void startDownload(UpdateInfo info, int flags) {
         AutoDownloadPolicy policy = getAutoDownloadPolicy();
 
         // We only start a download automatically if one of following criteria are met:
@@ -293,8 +313,8 @@ public class UpdateService extends IntentService {
         //   is OK with large data transfers occurring)
         //
         boolean shouldStartDownload = hasFlag(flags, UpdateServiceHelper.FLAG_FORCE_DOWNLOAD) ||
-            policy == AutoDownloadPolicy.ENABLED ||
-            (policy == AutoDownloadPolicy.WIFI && !ConnectivityManagerCompat.isActiveNetworkMetered(mConnectivityManager));
+                policy == AutoDownloadPolicy.ENABLED ||
+                (policy == AutoDownloadPolicy.WIFI && !ConnectivityManagerCompat.isActiveNetworkMetered(mConnectivityManager));
 
         if (!shouldStartDownload) {
             Log.i(LOGTAG, "not initiating automatic update download due to policy " + policy.toString());
@@ -352,21 +372,6 @@ public class UpdateService extends IntentService {
         }
     }
 
-    private URLConnection openConnectionWithProxy(URI uri) throws java.net.MalformedURLException, java.io.IOException {
-        Log.i(LOGTAG, "opening connection with URI: " + uri);
-
-        ProxySelector ps = ProxySelector.getDefault();
-        Proxy proxy = Proxy.NO_PROXY;
-        if (ps != null) {
-            List<Proxy> proxies = ps.select(uri);
-            if (proxies != null && !proxies.isEmpty()) {
-                proxy = proxies.get(0);
-            }
-        }
-
-        return uri.toURL().openConnection(proxy);
-    }
-
     private UpdateInfo findUpdate(boolean force) {
         try {
             URI uri = getUpdateURI(force);
@@ -377,7 +382,7 @@ public class UpdateService extends IntentService {
             }
 
             DocumentBuilder builder = DocumentBuilderFactory.newInstance().newDocumentBuilder();
-            Document dom = builder.parse(openConnectionWithProxy(uri).getInputStream());
+            Document dom = builder.parse(ProxySelector.openConnectionWithProxy(uri).getInputStream());
 
             NodeList nodes = dom.getElementsByTagName("update");
             if (nodes == null || nodes.getLength() == 0)
@@ -558,7 +563,7 @@ public class UpdateService extends IntentService {
                 mWifiLock.acquire();
             }
 
-            URLConnection conn = openConnectionWithProxy(info.uri);
+            URLConnection conn = ProxySelector.openConnectionWithProxy(info.uri);
             int length = conn.getContentLength();
 
             output = new BufferedOutputStream(new FileOutputStream(downloadFile));
@@ -604,12 +609,12 @@ public class UpdateService extends IntentService {
             try {
                 if (input != null)
                     input.close();
-            } catch (java.io.IOException e) {}
+            } catch (java.io.IOException e) { }
 
             try {
                 if (output != null)
                     output.close();
-            } catch (java.io.IOException e) {}
+            } catch (java.io.IOException e) { }
 
             mDownloading = false;
 
@@ -641,7 +646,7 @@ public class UpdateService extends IntentService {
             try {
                 if (input != null)
                     input.close();
-            } catch(java.io.IOException e) {}
+            } catch (java.io.IOException e) { }
         }
 
         String hex = Hex.encodeHexString(digest.digest());
@@ -657,7 +662,10 @@ public class UpdateService extends IntentService {
         if (updatePath == null) {
             updatePath = getLastFileName();
         }
-        applyUpdate(new File(updatePath));
+
+        if (updatePath != null) {
+            applyUpdate(new File(updatePath));
+        }
     }
 
     private void applyUpdate(File updateFile) {
@@ -677,6 +685,29 @@ public class UpdateService extends IntentService {
         intent.setDataAndType(Uri.fromFile(updateFile), "application/vnd.android.package-archive");
         intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         startActivity(intent);
+    }
+
+    private void showPermissionNotification() {
+        Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.fromParts("package", getPackageName(), null));
+
+        PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, intent, 0);
+
+        NotificationCompat.BigTextStyle bigTextStyle = new NotificationCompat.BigTextStyle()
+                .bigText(getString(R.string.updater_permission_text));
+
+        Notification notification = new NotificationCompat.Builder(this)
+                .setContentTitle(getString(R.string.updater_permission_title))
+                .setContentText(getString(R.string.updater_permission_text))
+                .setStyle(bigTextStyle)
+                .setAutoCancel(true)
+                .setSmallIcon(R.drawable.ic_status_logo)
+                .setColor(ContextCompat.getColor(this, R.color.rejection_red))
+                .setContentIntent(pendingIntent)
+                .build();
+
+        NotificationManagerCompat.from(this)
+                .notify(R.id.updateServicePermissionNotification, notification);
     }
 
     private String getLastBuildID() {

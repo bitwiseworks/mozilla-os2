@@ -28,9 +28,9 @@ public:
   void DeferredDestroy();
 
   virtual bool RecvAsyncMessage(const nsString& aMsg,
-                                const ClonedMessageData& aData,
                                 InfallibleTArray<jsipc::CpowEntry>&& aCpows,
-                                const IPC::Principal& aPrincipal) override;
+                                const IPC::Principal& aPrincipal,
+                                const ClonedMessageData& aData) override;
 
   virtual PBlobChild*
   SendPBlobConstructor(PBlobChild* actor,
@@ -45,6 +45,14 @@ public:
                                        const ContentParentId& aCpID,
                                        const bool& aIsForApp,
                                        const bool& aIsForBrowser) override;
+
+  virtual mozilla::ipc::PFileDescriptorSetChild*
+  SendPFileDescriptorSetConstructor(const mozilla::ipc::FileDescriptor&) override;
+
+  virtual mozilla::ipc::PSendStreamChild*
+  SendPSendStreamConstructor(mozilla::ipc::PSendStreamChild*) override;
+
+  FORWARD_SHMEM_ALLOCATOR_TO(PContentBridgeChild)
 
 protected:
   virtual ~ContentBridgeChild();
@@ -69,6 +77,17 @@ protected:
 
   virtual PBlobChild* AllocPBlobChild(const BlobConstructorParams& aParams) override;
   virtual bool DeallocPBlobChild(PBlobChild*) override;
+
+  virtual mozilla::ipc::PSendStreamChild* AllocPSendStreamChild() override;
+
+  virtual bool
+  DeallocPSendStreamChild(mozilla::ipc::PSendStreamChild* aActor) override;
+
+  virtual PFileDescriptorSetChild*
+  AllocPFileDescriptorSetChild(const mozilla::ipc::FileDescriptor& aFD) override;
+
+  virtual bool
+  DeallocPFileDescriptorSetChild(mozilla::ipc::PFileDescriptorSetChild* aActor) override;
 
   DISALLOW_EVIL_CONSTRUCTORS(ContentBridgeChild);
 

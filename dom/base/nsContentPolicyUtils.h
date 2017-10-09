@@ -131,6 +131,7 @@ NS_CP_ContentTypeName(uint32_t contentType)
     CASE_RETURN( TYPE_INTERNAL_SCRIPT_PRELOAD     );
     CASE_RETURN( TYPE_INTERNAL_IMAGE              );
     CASE_RETURN( TYPE_INTERNAL_IMAGE_PRELOAD      );
+    CASE_RETURN( TYPE_INTERNAL_IMAGE_FAVICON      );
     CASE_RETURN( TYPE_INTERNAL_STYLESHEET         );
     CASE_RETURN( TYPE_INTERNAL_STYLESHEET_PRELOAD );
    default:
@@ -180,11 +181,11 @@ NS_CP_ContentTypeName(uint32_t contentType)
           nsresult rv = secMan->IsSystemPrincipal(originPrincipal,            \
                                                   &isSystem);                 \
           NS_ENSURE_SUCCESS(rv, rv);                                          \
-          if (isSystem) {                                                     \
+          if (isSystem && contentType != nsIContentPolicy::TYPE_DOCUMENT) {   \
               *decision = nsIContentPolicy::ACCEPT;                           \
               nsCOMPtr<nsINode> n = do_QueryInterface(context);               \
               if (!n) {                                                       \
-                  nsCOMPtr<nsPIDOMWindow> win = do_QueryInterface(context);   \
+                  nsCOMPtr<nsPIDOMWindowOuter> win = do_QueryInterface(context);\
                   n = win ? win->GetExtantDoc() : nullptr;                    \
               }                                                               \
               if (n) {                                                        \
@@ -299,7 +300,7 @@ NS_CP_GetDocShellFromContext(nsISupports *aContext)
         return nullptr;
     }
 
-    nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aContext);
+    nsCOMPtr<nsPIDOMWindowOuter> window = do_QueryInterface(aContext);
 
     if (!window) {
         // our context might be a document (which also QIs to nsIDOMNode), so

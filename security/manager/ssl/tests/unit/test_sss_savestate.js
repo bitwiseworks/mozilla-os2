@@ -1,6 +1,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+"use strict";
 
 // The purpose of this test is to see that the site security service properly
 // writes its state file.
@@ -17,6 +18,10 @@ const NON_ISSUED_KEY_HASH = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 // separated by newlines ('\n')
 
 function checkStateWritten(aSubject, aTopic, aData) {
+  if (aData == PRELOAD_STATE_FILE_NAME) {
+    return;
+  }
+
   equal(aData, SSS_STATE_FILE_NAME);
 
   let stateFile = gProfileDir.clone();
@@ -49,10 +54,10 @@ function checkStateWritten(aSubject, aTopic, aData) {
   // sites[url][1] corresponds to SecurityPropertySet (if 1) and
   //                              SecurityPropertyUnset (if 0)
   // sites[url][2] corresponds to includeSubdomains
-  if (sites["bugzilla.mozilla.org:HSTS"][1] != 1) {
+  if (sites["includesubdomains.preloaded.test:HSTS"][1] != 1) {
     return;
   }
-  if (sites["bugzilla.mozilla.org:HSTS"][2] != 0) {
+  if (sites["includesubdomains.preloaded.test:HSTS"][2] != 0) {
     return;
   }
   if (sites["a.example.com:HSTS"][1] != 1) {
@@ -96,10 +101,11 @@ function run_test() {
   let SSService = Cc["@mozilla.org/ssservice;1"]
                     .getService(Ci.nsISiteSecurityService);
   // Put an HPKP entry
-  SSService.setKeyPins("dynamic-pin.example.com", true, 1000, 1,
+  SSService.setKeyPins("dynamic-pin.example.com", true,
+                       new Date().getTime() + 1000000, 1,
                        [NON_ISSUED_KEY_HASH]);
 
-  let uris = [ Services.io.newURI("http://bugzilla.mozilla.org", null, null),
+  let uris = [ Services.io.newURI("http://includesubdomains.preloaded.test", null, null),
                Services.io.newURI("http://a.example.com", null, null),
                Services.io.newURI("http://b.example.com", null, null),
                Services.io.newURI("http://c.c.example.com", null, null),

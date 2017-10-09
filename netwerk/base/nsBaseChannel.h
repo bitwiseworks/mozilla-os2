@@ -244,7 +244,7 @@ private:
   // start URI classifier if requested
   void ClassifyURI();
 
-  class RedirectRunnable : public nsRunnable
+  class RedirectRunnable : public mozilla::Runnable
   {
   public:
     RedirectRunnable(nsBaseChannel* chan, nsIChannel* newChannel)
@@ -252,8 +252,8 @@ private:
     {
       NS_PRECONDITION(newChannel, "Must have channel to redirect to");
     }
-    
-    NS_IMETHOD Run()
+
+    NS_IMETHOD Run() override
     {
       mChannel->HandleAsyncRedirect(mNewChannel);
       return NS_OK;

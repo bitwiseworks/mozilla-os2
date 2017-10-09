@@ -1,4 +1,4 @@
---enable-threadsafe
---enable-optimize
---enable-warnings-as-errors
-
+{
+    "configure-args": "--enable-warnings-as-errors",
+    "optimize": true
+}

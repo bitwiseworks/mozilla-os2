@@ -28,16 +28,20 @@ struct IsPixel : FalseType {};
 struct CSSPixel;
 struct LayoutDevicePixel;
 struct LayerPixel;
+struct CSSTransformedLayerPixel;
 struct RenderTargetPixel;
 struct ScreenPixel;
 struct ParentLayerPixel;
+struct DesktopPixel;
 
 template<> struct IsPixel<CSSPixel>          : TrueType {};
 template<> struct IsPixel<LayoutDevicePixel> : TrueType {};
 template<> struct IsPixel<LayerPixel>        : TrueType {};
+template<> struct IsPixel<CSSTransformedLayerPixel> : TrueType {};
 template<> struct IsPixel<RenderTargetPixel> : TrueType {};
 template<> struct IsPixel<ScreenPixel>       : TrueType {};
 template<> struct IsPixel<ParentLayerPixel>  : TrueType {};
+template<> struct IsPixel<DesktopPixel>      : TrueType {};
 
 typedef gfx::CoordTyped<CSSPixel> CSSCoord;
 typedef gfx::IntCoordTyped<CSSPixel> CSSIntCoord;
@@ -75,6 +79,18 @@ typedef gfx::MarginTyped<LayerPixel> LayerMargin;
 typedef gfx::IntMarginTyped<LayerPixel> LayerIntMargin;
 typedef gfx::IntRegionTyped<LayerPixel> LayerIntRegion;
 
+typedef gfx::CoordTyped<CSSTransformedLayerPixel> CSSTransformedLayerCoord;
+typedef gfx::IntCoordTyped<CSSTransformedLayerPixel> CSSTransformedLayerIntCoord;
+typedef gfx::PointTyped<CSSTransformedLayerPixel> CSSTransformedLayerPoint;
+typedef gfx::IntPointTyped<CSSTransformedLayerPixel> CSSTransformedLayerIntPoint;
+typedef gfx::SizeTyped<CSSTransformedLayerPixel> CSSTransformedLayerSize;
+typedef gfx::IntSizeTyped<CSSTransformedLayerPixel> CSSTransformedLayerIntSize;
+typedef gfx::RectTyped<CSSTransformedLayerPixel> CSSTransformedLayerRect;
+typedef gfx::IntRectTyped<CSSTransformedLayerPixel> CSSTransformedLayerIntRect;
+typedef gfx::MarginTyped<CSSTransformedLayerPixel> CSSTransformedLayerMargin;
+typedef gfx::IntMarginTyped<CSSTransformedLayerPixel> CSSTransformedLayerIntMargin;
+typedef gfx::IntRegionTyped<CSSTransformedLayerPixel> CSSTransformedLayerIntRegion;
+
 typedef gfx::PointTyped<RenderTargetPixel> RenderTargetPoint;
 typedef gfx::IntPointTyped<RenderTargetPixel> RenderTargetIntPoint;
 typedef gfx::SizeTyped<RenderTargetPixel> RenderTargetSize;
@@ -109,6 +125,15 @@ typedef gfx::MarginTyped<ParentLayerPixel> ParentLayerMargin;
 typedef gfx::IntMarginTyped<ParentLayerPixel> ParentLayerIntMargin;
 typedef gfx::IntRegionTyped<ParentLayerPixel> ParentLayerIntRegion;
 
+typedef gfx::CoordTyped<DesktopPixel> DesktopCoord;
+typedef gfx::IntCoordTyped<DesktopPixel> DesktopIntCoord;
+typedef gfx::PointTyped<DesktopPixel> DesktopPoint;
+typedef gfx::IntPointTyped<DesktopPixel> DesktopIntPoint;
+typedef gfx::SizeTyped<DesktopPixel> DesktopSize;
+typedef gfx::IntSizeTyped<DesktopPixel> DesktopIntSize;
+typedef gfx::RectTyped<DesktopPixel> DesktopRect;
+typedef gfx::IntRectTyped<DesktopPixel> DesktopIntRect;
+
 typedef gfx::ScaleFactor<CSSPixel, LayoutDevicePixel> CSSToLayoutDeviceScale;
 typedef gfx::ScaleFactor<CSSPixel, LayerPixel> CSSToLayerScale;
 typedef gfx::ScaleFactor<CSSPixel, ScreenPixel> CSSToScreenScale;
@@ -130,6 +155,7 @@ typedef gfx::ScaleFactor<ScreenPixel, ParentLayerPixel> ScreenToParentLayerScale
 typedef gfx::ScaleFactor<ParentLayerPixel, LayerPixel> ParentLayerToLayerScale;
 typedef gfx::ScaleFactor<ParentLayerPixel, ScreenPixel> ParentLayerToScreenScale;
 typedef gfx::ScaleFactor<ParentLayerPixel, ParentLayerPixel> ParentLayerToParentLayerScale;
+typedef gfx::ScaleFactor<DesktopPixel, LayoutDevicePixel> DesktopToLayoutDeviceScale;
 
 typedef gfx::ScaleFactors2D<CSSPixel, LayoutDevicePixel> CSSToLayoutDeviceScale2D;
 typedef gfx::ScaleFactors2D<CSSPixel, LayerPixel> CSSToLayerScale2D;
@@ -222,6 +248,11 @@ struct CSSPixel {
                    NSToCoordRoundWithClamp(float(aPoint.y) * float(AppUnitsPerCSSPixel())));
   }
 
+  static nsSize ToAppUnits(const CSSSize& aSize) {
+    return nsSize(NSToCoordRoundWithClamp(aSize.width * float(AppUnitsPerCSSPixel())),
+                  NSToCoordRoundWithClamp(aSize.height * float(AppUnitsPerCSSPixel())));
+  }
+
   static nsSize ToAppUnits(const CSSIntSize& aSize) {
     return nsSize(NSToCoordRoundWithClamp(float(aSize.width)  * float(AppUnitsPerCSSPixel())),
                   NSToCoordRoundWithClamp(float(aSize.height) * float(AppUnitsPerCSSPixel())));
@@ -232,6 +263,13 @@ struct CSSPixel {
                   NSToCoordRoundWithClamp(aRect.y * float(AppUnitsPerCSSPixel())),
                   NSToCoordRoundWithClamp(aRect.width * float(AppUnitsPerCSSPixel())),
                   NSToCoordRoundWithClamp(aRect.height * float(AppUnitsPerCSSPixel())));
+  }
+
+  static nsRect ToAppUnits(const CSSIntRect& aRect) {
+    return nsRect(NSToCoordRoundWithClamp(float(aRect.x) * float(AppUnitsPerCSSPixel())),
+                  NSToCoordRoundWithClamp(float(aRect.y) * float(AppUnitsPerCSSPixel())),
+                  NSToCoordRoundWithClamp(float(aRect.width) * float(AppUnitsPerCSSPixel())),
+                  NSToCoordRoundWithClamp(float(aRect.height) * float(AppUnitsPerCSSPixel())));
   }
 };
 
@@ -274,6 +312,10 @@ struct LayoutDevicePixel {
 
   static LayoutDeviceIntRect FromAppUnitsToNearest(const nsRect& aRect, nscoord aAppUnitsPerDevPixel) {
     return LayoutDeviceIntRect::FromUnknownRect(aRect.ToNearestPixels(aAppUnitsPerDevPixel));
+  }
+
+  static LayoutDeviceIntRect FromAppUnitsToInside(const nsRect& aRect, nscoord aAppUnitsPerDevPixel) {
+    return LayoutDeviceIntRect::FromUnknownRect(aRect.ToInsidePixels(aAppUnitsPerDevPixel));
   }
 
   static LayoutDeviceIntSize FromAppUnitsRounded(const nsSize& aSize, nscoord aAppUnitsPerDevPixel) {
@@ -325,6 +367,16 @@ struct LayerPixel {
 };
 
 /*
+ * This is Layer coordinates with the Layer's CSS transform applied.
+ * It can be thought of as intermediate between LayerPixel and
+ * ParentLayerPixel, as further applying async transforms to this
+ * yields ParentLayerPixels.
+ */
+struct CSSTransformedLayerPixel {
+
+};
+
+/*
  * Layers are always composited to a render target. This unit
  * represents one pixel in the render target. Note that for the
  * root render target RenderTargetPixel == ScreenPixel. Also
@@ -359,6 +411,23 @@ struct ScreenPixel {
  * to get a picture of how the various coordinate systems relate to each other.
  */
 struct ParentLayerPixel {
+};
+
+/*
+ * Pixels in the coordinate space used by the host OS to manage windows on the
+ * desktop. What these mean varies between OSs:
+ * - by default (unless implemented differently in platform-specific widget
+ *   code) they are the same as LayoutDevicePixels
+ * - on Mac OS X, they're "cocoa points", which correspond to device pixels
+ *   on a non-Retina display, and to 2x device pixels on Retina
+ * - on Windows *without* per-monitor DPI support, they are Windows "logical
+ *   pixels", i.e. device pixels scaled according to the Windows display DPI
+ *   scaling factor (typically one of 1.25, 1.5, 1.75, 2.0...)
+ * - on Windows *with* per-monitor DPI support, they are physical device pixels
+ *   on each screen; note that this means the scaling between CSS pixels and
+ *   desktop pixels may vary across multiple displays.
+ */
+struct DesktopPixel {
 };
 
 // Operators to apply ScaleFactors directly to Coords, Points, Rects, Sizes and Margins

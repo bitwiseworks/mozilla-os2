@@ -33,6 +33,7 @@ class nsIDocument;
 class nsIFrame;
 class nsPresContext;
 class nsStyleContext;
+class nsStyleSVGPaint;
 class nsSVGDisplayContainerFrame;
 class nsSVGElement;
 class nsSVGEnum;
@@ -40,13 +41,13 @@ class nsSVGLength2;
 class nsSVGOuterSVGFrame;
 class nsSVGPathGeometryFrame;
 class nsTextFrame;
-class gfxTextContextPaint;
 
 struct nsStyleSVG;
-struct nsStyleSVGPaint;
 struct nsRect;
 
 namespace mozilla {
+class SVGContextPaint;
+struct SVGContextPaintImpl;
 namespace dom {
 class Element;
 class UserSpaceMetrics;
@@ -59,7 +60,7 @@ class GeneralPattern;
 
 // maximum dimension of an offscreen surface - choose so that
 // the surface size doesn't overflow a 32-bit signed int using
-// 4 bytes per pixel; in line with gfxASurface::CheckSurfaceSize
+// 4 bytes per pixel; in line with Factory::CheckSurfaceSize
 // In fact Macs can't even manage that
 #define NS_SVG_OFFSCREEN_MAX_DIMENSION 4096
 
@@ -178,20 +179,18 @@ class nsSVGUtils
 {
 public:
   typedef mozilla::dom::Element Element;
-  typedef mozilla::FramePropertyDescriptor FramePropertyDescriptor;
   typedef mozilla::gfx::AntialiasMode AntialiasMode;
+  typedef mozilla::gfx::DrawTarget DrawTarget;
   typedef mozilla::gfx::FillRule FillRule;
   typedef mozilla::gfx::GeneralPattern GeneralPattern;
   typedef mozilla::gfx::Size Size;
+  typedef mozilla::SVGContextPaint SVGContextPaint;
+  typedef mozilla::SVGContextPaintImpl SVGContextPaintImpl;
+  typedef mozilla::image::DrawResult DrawResult;
 
   static void Init();
 
-  static void DestroyObjectBoundingBoxProperty(void* aPropertyValue) {
-    delete static_cast<gfxRect*>(aPropertyValue);
-  }
-
-  NS_DECLARE_FRAME_PROPERTY(ObjectBoundingBoxProperty,
-                            DestroyObjectBoundingBoxProperty);
+  NS_DECLARE_FRAME_PROPERTY_DELETABLE(ObjectBoundingBoxProperty, gfxRect)
 
   /**
    * Gets the nearest nsSVGInnerSVGFrame or nsSVGOuterSVGFrame frame. aFrame
@@ -285,7 +284,7 @@ public:
 
   /* Paint SVG frame with SVG effects - aDirtyRect is the area being
    * redrawn, in device pixel coordinates relative to the outer svg */
-  static void
+  static DrawResult
   PaintFrameWithEffects(nsIFrame *aFrame,
                         gfxContext& aContext,
                         const gfxMatrix& aTransform,
@@ -503,33 +502,33 @@ public:
   MakeFillPatternFor(nsIFrame *aFrame,
                      gfxContext* aContext,
                      GeneralPattern* aOutPattern,
-                     gfxTextContextPaint *aContextPaint = nullptr);
+                     SVGContextPaint* aContextPaint = nullptr);
 
   static void
   MakeStrokePatternFor(nsIFrame* aFrame,
                        gfxContext* aContext,
                        GeneralPattern* aOutPattern,
-                       gfxTextContextPaint *aContextPaint = nullptr);
+                       SVGContextPaint* aContextPaint = nullptr);
 
   static float GetOpacity(nsStyleSVGOpacitySource aOpacityType,
                           const float& aOpacity,
-                          gfxTextContextPaint *aContextPaint);
+                          SVGContextPaint* aContextPaint);
 
   /*
    * @return false if there is no stroke
    */
   static bool HasStroke(nsIFrame* aFrame,
-                        gfxTextContextPaint *aContextPaint = nullptr);
+                        SVGContextPaint* aContextPaint = nullptr);
 
   static float GetStrokeWidth(nsIFrame* aFrame,
-                              gfxTextContextPaint *aContextPaint = nullptr);
+                              SVGContextPaint* aContextPaint = nullptr);
 
   /*
    * Set up a cairo context for a stroked path (including any dashing that
    * applies).
    */
   static void SetupCairoStrokeGeometry(nsIFrame* aFrame, gfxContext *aContext,
-                                       gfxTextContextPaint *aContextPaint = nullptr);
+                                       SVGContextPaint* aContextPaint = nullptr);
 
   /**
    * This function returns a set of bit flags indicating which parts of the
@@ -539,8 +538,8 @@ public:
    */
   static uint16_t GetGeometryHitTestFlags(nsIFrame* aFrame);
 
-  static FillRule ToFillRule(uint8_t aFillRule) {
-    return aFillRule == NS_STYLE_FILL_RULE_EVENODD ?
+  static FillRule ToFillRule(mozilla::StyleFillRule aFillRule) {
+    return aFillRule == mozilla::StyleFillRule::Evenodd ?
              FillRule::FILL_EVEN_ODD : FillRule::FILL_WINDING;
   }
 
@@ -553,12 +552,9 @@ public:
    * Render a SVG glyph.
    * @param aElement the SVG glyph element to render
    * @param aContext the thebes aContext to draw to
-   * @param aDrawMode fill or stroke or both (see DrawMode)
    * @return true if rendering succeeded
    */
-  static bool PaintSVGGlyph(Element* aElement, gfxContext* aContext,
-                            DrawMode aDrawMode,
-                            gfxTextContextPaint* aContextPaint);
+  static bool PaintSVGGlyph(Element* aElement, gfxContext* aContext);
   /**
    * Get the extents of a SVG glyph.
    * @param aElement the SVG glyph element
@@ -580,6 +576,25 @@ public:
   ToCanvasBounds(const gfxRect &aUserspaceRect,
                  const gfxMatrix &aToCanvas,
                  const nsPresContext *presContext);
+
+  struct MaskUsage {
+    bool shouldGenerateMaskLayer;
+    bool shouldGenerateClipMaskLayer;
+    bool shouldApplyClipPath;
+    bool shouldApplyBasicShape;
+    float opacity;
+
+    MaskUsage()
+      : shouldGenerateMaskLayer(false), shouldGenerateClipMaskLayer(false),
+        shouldApplyClipPath(false), shouldApplyBasicShape(false), opacity(0.0)
+    { }
+  };
+
+  static void
+  DetermineMaskUsage(nsIFrame* aFrame, bool aHandleOpacity, MaskUsage& aUsage);
+
+  static float
+  ComputeOpacity(nsIFrame* aFrame, bool aHandleOpacity);
 };
 
 #endif

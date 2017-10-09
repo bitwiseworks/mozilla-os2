@@ -196,11 +196,16 @@ public:
 
   size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf);
 
+  static void ReportToConsole(const nsAString& aMessage);
+
 protected:
   virtual ~nsPrefBranch();
 
   nsPrefBranch()    /* disallow use of this constructer */
-    { }
+    : mPrefRootLength(0)
+    , mIsDefault(false)
+    , mFreeingObserverList(false)
+  {}
 
   nsresult   GetDefaultFromPropertiesFile(const char *aPrefName, char16_t **return_buf);
   // As SetCharPref, but without any check on the length of |aValue|
@@ -212,11 +217,6 @@ protected:
   void RemoveExpiredCallback(PrefCallback *aCallback);
   const char *getPrefName(const char *aPrefName);
   void       freeObserverList(void);
-
-  friend PLDHashOperator
-    FreeObserverFunc(PrefCallback *aKey,
-                     nsAutoPtr<PrefCallback> &aCallback,
-                     void *aArgs);
 
 private:
   int32_t               mPrefRootLength;

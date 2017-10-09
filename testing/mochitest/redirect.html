@@ -5,8 +5,8 @@
   <script type="text/javascript">
     function redirect(aURL)
     {
-      // We create a listener for this event in browser-test.js 
-      // which will get picked up when specifying --chrome or --a11y
+      // We create a listener for this event in browser-test.js which will
+      // get picked up when specifying --flavor=chrome or --flavor=a11y
       var event = new CustomEvent("contentEvent", {
         bubbles: true,
         detail: {
@@ -28,6 +28,8 @@
       window.addEventListener("MozAfterPaint", function testOnMozAfterPaint() {
         window.removeEventListener("MozAfterPaint", testOnMozAfterPaint);
         setTimeout(redirectToHarness, 0);
+        // In case the listener was not ready, try again after a few seconds.
+        setTimeout(redirectToHarness, 5000);
       });
 
     }

@@ -7,13 +7,14 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/FileHandleCommon.h"
 #include "mozilla/dom/PBackgroundFileHandleParent.h"
 #include "mozilla/dom/PBackgroundFileRequestParent.h"
 #include "mozilla/dom/indexedDB/ActorsParent.h"
 #include "mozilla/dom/ipc/BlobParent.h"
+#include "nsAutoPtr.h"
 #include "nsComponentManagerUtils.h"
 #include "nsDebug.h"
 #include "nsError.h"
@@ -61,7 +62,7 @@ const uint32_t kStreamCopyBlockSize = 32768;
 } // namespace
 
 class FileHandleThreadPool::FileHandleQueue final
-  : public nsRunnable
+  : public Runnable
 {
   friend class FileHandleThreadPool;
 
@@ -570,7 +571,7 @@ protected:
 };
 
 class CopyFileHandleOp::ProgressRunnable final
-  : public nsRunnable
+  : public Runnable
 {
   RefPtr<CopyFileHandleOp> mCopyFileHandleOp;
   uint64_t mProgress;
@@ -821,7 +822,7 @@ FileHandleThreadPool::AssertIsOnOwningThread() const
   MOZ_ASSERT(mOwningThread);
 
   bool current;
-  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(mOwningThread->IsOnCurrentThread(&current)));
+  MOZ_ALWAYS_SUCCEEDS(mOwningThread->IsOnCurrentThread(&current));
   MOZ_ASSERT(current);
 }
 
@@ -897,7 +898,7 @@ FileHandleThreadPool::Enqueue(FileHandle* aFileHandle,
     if (aFileHandleOp) {
       fileHandleQueue->Enqueue(aFileHandleOp);
       if (aFinish) {
-        existingFileHandleQueue->Finish();
+        fileHandleQueue->Finish();
       }
     }
   }
@@ -991,7 +992,7 @@ FileHandleThreadPool::Cleanup()
   MOZ_ASSERT(!mShutdownComplete);
   MOZ_ASSERT(!mDirectoryInfos.Count());
 
-  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(mThreadPool->Shutdown()));
+  MOZ_ALWAYS_SUCCEEDS(mThreadPool->Shutdown());
 
   if (!mCompleteCallbacks.IsEmpty()) {
     // Run all callbacks manually now.
@@ -1012,7 +1013,7 @@ FileHandleThreadPool::Cleanup()
     nsIThread* currentThread = NS_GetCurrentThread();
     MOZ_ASSERT(currentThread);
 
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_ProcessPendingEvents(currentThread)));
+    MOZ_ALWAYS_SUCCEEDS(NS_ProcessPendingEvents(currentThread));
   }
 
   mShutdownComplete = true;
@@ -1135,7 +1136,7 @@ FileHandleQueue::ProcessQueue()
   nsCOMPtr<nsIThreadPool> threadPool = mOwningFileHandleThreadPool->mThreadPool;
   MOZ_ASSERT(threadPool);
 
-  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(threadPool->Dispatch(this, NS_DISPATCH_NORMAL)));
+  MOZ_ALWAYS_SUCCEEDS(threadPool->Dispatch(this, NS_DISPATCH_NORMAL));
 }
 
 NS_IMETHODIMP
@@ -1156,8 +1157,8 @@ FileHandleQueue::Run()
 
     nsCOMPtr<nsIEventTarget> backgroundThread = mCurrentOp->OwningThread();
 
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
-      backgroundThread->Dispatch(this, NS_DISPATCH_NORMAL)));
+    MOZ_ALWAYS_SUCCEEDS(
+      backgroundThread->Dispatch(this, NS_DISPATCH_NORMAL));
   }
 
   return NS_OK;
@@ -2004,7 +2005,7 @@ FinishOp::RunOnThreadPool()
   nsCOMPtr<nsIInputStream> inputStream = do_QueryInterface(stream);
   MOZ_ASSERT(inputStream);
 
-  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(inputStream->Close()));
+  MOZ_ALWAYS_SUCCEEDS(inputStream->Close());
 
   stream = nullptr;
 }
@@ -2256,9 +2257,9 @@ CopyFileHandleOp::DoFileWork(FileHandle* aFileHandle)
   MOZ_ASSERT(mOffset == mSize);
 
   if (mRead) {
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(outputStream->Close()));
+    MOZ_ALWAYS_SUCCEEDS(outputStream->Close());
   } else {
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(inputStream->Close()));
+    MOZ_ALWAYS_SUCCEEDS(inputStream->Close());
   }
 
   return NS_OK;
@@ -2535,6 +2536,7 @@ WriteOp::Init(FileHandle* aFileHandle)
       ErrorResult rv;
       blobImpl->GetInternalStream(getter_AddRefs(inputStream), rv);
       if (NS_WARN_IF(rv.Failed())) {
+        rv.SuppressException();
         return false;
       }
 

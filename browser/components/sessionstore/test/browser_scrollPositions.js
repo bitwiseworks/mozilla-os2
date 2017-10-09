@@ -16,6 +16,8 @@ const SCROLL2_X = Math.round(300 * (1 + Math.random()));
 const SCROLL2_Y = Math.round(400 * (1 + Math.random()));
 const SCROLL2_STR = SCROLL2_X + "," + SCROLL2_Y;
 
+requestLongerTimeout(2);
+
 /**
  * This test ensures that we properly serialize and restore scroll positions
  * for an average page without any frames.
@@ -149,11 +151,3 @@ add_task(function test_scroll_background_tabs() {
 
   yield BrowserTestUtils.closeWindow(newWin);
 });
-
-function* checkScroll(tab, expected, msg) {
-  let browser = tab.linkedBrowser;
-  yield TabStateFlusher.flush(browser);
-
-  let scroll = JSON.parse(ss.getTabState(tab)).scroll || null;
-  is(JSON.stringify(scroll), JSON.stringify(expected), msg);
-}

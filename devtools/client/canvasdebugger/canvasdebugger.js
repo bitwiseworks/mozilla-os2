@@ -5,29 +5,24 @@
 
 var { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://devtools/client/shared/widgets/SideMenuWidget.jsm");
-Cu.import("resource://devtools/client/shared/widgets/ViewHelpers.jsm");
-Cu.import("resource://gre/modules/Console.jsm");
-
 const { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
+const { XPCOMUtils } = require("resource://gre/modules/XPCOMUtils.jsm");
+const { SideMenuWidget } = require("resource://devtools/client/shared/widgets/SideMenuWidget.jsm");
 const promise = require("promise");
+const Services = require("Services");
 const EventEmitter = require("devtools/shared/event-emitter");
-const { CallWatcherFront } = require("devtools/server/actors/call-watcher");
-const { CanvasFront } = require("devtools/server/actors/canvas");
+const { CallWatcherFront } = require("devtools/shared/fronts/call-watcher");
+const { CanvasFront } = require("devtools/shared/fronts/canvas");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
+const flags = require("devtools/shared/flags");
+const { LocalizationHelper } = require("devtools/shared/l10n");
+const { PluralForm } = require("devtools/shared/plural-form");
+const { Heritage, WidgetMethods, setNamedTimeout, clearNamedTimeout,
+        setConditionalTimeout } = require("devtools/client/shared/widgets/view-helpers");
 
-const Telemetry = require("devtools/client/shared/telemetry");
-const telemetry = new Telemetry();
+const CANVAS_ACTOR_RECORDING_ATTEMPT = flags.testing ? 500 : 5000;
 
-const CANVAS_ACTOR_RECORDING_ATTEMPT = DevToolsUtils.testing ? 500 : 5000;
-
-XPCOMUtils.defineLazyModuleGetter(this, "Task",
-  "resource://gre/modules/Task.jsm");
-
-XPCOMUtils.defineLazyModuleGetter(this, "PluralForm",
-  "resource://gre/modules/PluralForm.jsm");
+const { Task } = require("devtools/shared/task");
 
 XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
   "resource://gre/modules/FileUtils.jsm");
@@ -35,7 +30,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
 XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
   "resource://gre/modules/NetUtil.jsm");
 
-XPCOMUtils.defineLazyGetter(this, "NetworkHelper", function() {
+XPCOMUtils.defineLazyGetter(this, "NetworkHelper", function () {
   return require("devtools/shared/webconsole/network-helper");
 });
 
@@ -80,8 +75,8 @@ const EVENTS = {
 XPCOMUtils.defineConstant(this, "EVENTS", EVENTS);
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
-const STRINGS_URI = "chrome://devtools/locale/canvasdebugger.properties";
-const SHARED_STRINGS_URI = "chrome://devtools/locale/shared.properties";
+const STRINGS_URI = "devtools/client/locales/canvasdebugger.properties";
+const SHARED_STRINGS_URI = "devtools/client/locales/shared.properties";
 
 const SNAPSHOT_START_RECORDING_DELAY = 10; // ms
 const SNAPSHOT_DATA_EXPORT_MAX_BLOCK = 1000; // ms
@@ -131,8 +126,13 @@ var EventsHandler = {
   /**
    * Listen for events emitted by the current tab target.
    */
-  initialize: function() {
-    telemetry.toolOpened("canvasdebugger");
+  initialize: function () {
+    // Make sure the backend is prepared to handle <canvas> contexts.
+    // Since actors are created lazily on the first request to them, we need to send an
+    // early request to ensure the CallWatcherActor is running and watching for new window
+    // globals.
+    gFront.setup({ reload: false });
+
     this._onTabNavigated = this._onTabNavigated.bind(this);
     gTarget.on("will-navigate", this._onTabNavigated);
     gTarget.on("navigate", this._onTabNavigated);
@@ -141,8 +141,7 @@ var EventsHandler = {
   /**
    * Remove events emitted by the current tab target.
    */
-  destroy: function() {
-    telemetry.toolClosed("canvasdebugger");
+  destroy: function () {
     gTarget.off("will-navigate", this._onTabNavigated);
     gTarget.off("navigate", this._onTabNavigated);
   },
@@ -150,12 +149,10 @@ var EventsHandler = {
   /**
    * Called for each location change in the debugged tab.
    */
-  _onTabNavigated: function(event) {
+  _onTabNavigated: function (event) {
     if (event != "will-navigate") {
       return;
     }
-    // Make sure the backend is prepared to handle <canvas> contexts.
-    gFront.setup({ reload: false });
 
     // Reset UI.
     SnapshotsListView.empty();
@@ -180,8 +177,8 @@ var EventsHandler = {
 /**
  * Localization convenience methods.
  */
-var L10N = new ViewHelpers.L10N(STRINGS_URI);
-var SHARED_L10N = new ViewHelpers.L10N(SHARED_STRINGS_URI);
+var L10N = new LocalizationHelper(STRINGS_URI);
+var SHARED_L10N = new LocalizationHelper(SHARED_STRINGS_URI);
 
 /**
  * Convenient way of emitting events from the panel window.

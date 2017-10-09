@@ -9,20 +9,29 @@ import org.mozilla.gecko.GeckoSharedPrefs;
 import org.mozilla.gecko.Locales;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.Telemetry;
-import org.mozilla.gecko.animation.TransitionsTracker;
+import org.mozilla.gecko.TelemetryContract;
 
+import android.annotation.TargetApi;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.provider.Settings;
+import android.util.Log;
 import android.view.MotionEvent;
 import android.view.View;
-import com.nineoldandroids.animation.Animator;
-import com.nineoldandroids.animation.AnimatorListenerAdapter;
-import com.nineoldandroids.animation.AnimatorSet;
-import com.nineoldandroids.animation.ObjectAnimator;
-import com.nineoldandroids.view.ViewHelper;
+import android.widget.Toast;
+
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.AnimatorSet;
+import android.animation.ObjectAnimator;
 
 public class TabQueuePrompt extends Locales.LocaleAwareActivity {
     public static final String LOGTAG = "Gecko" + TabQueuePrompt.class.getSimpleName();
+
+    private static final int SETTINGS_REQUEST_CODE = 1;
 
     // Flag set during animation to prevent animation multiple-start.
     private boolean isAnimating;
@@ -41,30 +50,51 @@ public class TabQueuePrompt extends Locales.LocaleAwareActivity {
     private void showTabQueueEnablePrompt() {
         setContentView(R.layout.tab_queue_prompt);
 
-        final int numberOfTimesTabQueuePromptSeen = GeckoSharedPrefs.forApp(this).getInt(TabQueueHelper.PREF_TAB_QUEUE_TIMES_PROMPT_SHOWN, 0);
-
-        findViewById(R.id.ok_button).setOnClickListener(new View.OnClickListener() {
+        final View okButton = findViewById(R.id.ok_button);
+        okButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 onConfirmButtonPressed();
-                Telemetry.addToHistogram("FENNEC_TABQUEUE_PROMPT_ENABLE_YES", numberOfTimesTabQueuePromptSeen);
+                Telemetry.sendUIEvent(TelemetryContract.Event.ACTION, TelemetryContract.Method.BUTTON, "tabqueue_prompt_yes");
             }
         });
         findViewById(R.id.cancel_button).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                Telemetry.addToHistogram("FENNEC_TABQUEUE_PROMPT_ENABLE_NO", numberOfTimesTabQueuePromptSeen);
+                Telemetry.sendUIEvent(TelemetryContract.Event.ACTION, TelemetryContract.Method.BUTTON, "tabqueue_prompt_no");
                 setResult(TabQueueHelper.TAB_QUEUE_NO);
                 finish();
             }
         });
+        final View settingsButton = findViewById(R.id.settings_button);
+        settingsButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                onSettingsButtonPressed();
+            }
+        });
+
+        final View tipView = findViewById(R.id.tip_text);
+        final View settingsPermitView = findViewById(R.id.settings_permit_text);
+
+        if (TabQueueHelper.canDrawOverlays(this)) {
+            okButton.setVisibility(View.VISIBLE);
+            settingsButton.setVisibility(View.GONE);
+            tipView.setVisibility(View.VISIBLE);
+            settingsPermitView.setVisibility(View.GONE);
+        } else {
+            okButton.setVisibility(View.GONE);
+            settingsButton.setVisibility(View.VISIBLE);
+            tipView.setVisibility(View.GONE);
+            settingsPermitView.setVisibility(View.VISIBLE);
+        }
 
         containerView = findViewById(R.id.tab_queue_container);
         buttonContainer = findViewById(R.id.button_container);
         enabledConfirmation = findViewById(R.id.enabled_confirmation);
 
-        ViewHelper.setTranslationY(containerView, 500);
-        ViewHelper.setAlpha(containerView, 0);
+        containerView.setTranslationY(500);
+        containerView.setAlpha(0);
 
         final Animator translateAnimator = ObjectAnimator.ofFloat(containerView, "translationY", 0);
         translateAnimator.setDuration(400);
@@ -76,7 +106,6 @@ public class TabQueuePrompt extends Locales.LocaleAwareActivity {
         final AnimatorSet set = new AnimatorSet();
         set.playTogether(alphaAnimator, translateAnimator);
         set.setStartDelay(400);
-        TransitionsTracker.track(set);
 
         set.start();
     }
@@ -91,7 +120,7 @@ public class TabQueuePrompt extends Locales.LocaleAwareActivity {
 
     private void onConfirmButtonPressed() {
         enabledConfirmation.setVisibility(View.VISIBLE);
-        ViewHelper.setAlpha(enabledConfirmation, 0);
+        enabledConfirmation.setAlpha(0);
 
         final Animator buttonsAlphaAnimator = ObjectAnimator.ofFloat(buttonContainer, "alpha", 0);
         buttonsAlphaAnimator.setDuration(300);
@@ -102,7 +131,6 @@ public class TabQueuePrompt extends Locales.LocaleAwareActivity {
 
         final AnimatorSet set = new AnimatorSet();
         set.playTogether(buttonsAlphaAnimator, messagesAlphaAnimator);
-        TransitionsTracker.track(set);
 
         set.addListener(new AnimatorListenerAdapter() {
 
@@ -120,6 +148,30 @@ public class TabQueuePrompt extends Locales.LocaleAwareActivity {
         });
 
         set.start();
+    }
+
+    @TargetApi(Build.VERSION_CODES.M)
+    private void onSettingsButtonPressed() {
+        Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION);
+        intent.setData(Uri.parse("package:" + getPackageName()));
+        startActivityForResult(intent, SETTINGS_REQUEST_CODE);
+
+        Toast.makeText(this, R.string.tab_queue_prompt_permit_drawing_over_apps, Toast.LENGTH_LONG).show();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode != SETTINGS_REQUEST_CODE) {
+            return;
+        }
+
+        if (TabQueueHelper.canDrawOverlays(this)) {
+            // User granted the permission in Android's settings.
+            Telemetry.sendUIEvent(TelemetryContract.Event.ACTION, TelemetryContract.Method.BUTTON, "tabqueue_prompt_yes");
+
+            setResult(TabQueueHelper.TAB_QUEUE_YES);
+            finish();
+        }
     }
 
     /**

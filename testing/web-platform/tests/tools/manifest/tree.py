@@ -1,10 +1,10 @@
 import os
-from cStringIO import StringIO
+from six.moves import cStringIO as StringIO
 from fnmatch import fnmatch
 
-import vcs
-from log import get_logger
-from utils import is_blacklisted, rel_path_to_url
+from . import vcs
+from .log import get_logger
+from .utils import is_blacklisted, rel_path_to_url
 
 def chunks(data, n):
     for i in range(0, len(data) - 1, n):
@@ -130,6 +130,8 @@ class GitTree(TestTree):
             elif staged == "?" and worktree == "?":
                 # A new file. If it's a directory, recurse into it
                 if os.path.isdir(os.path.join(self.tests_root, filename)):
+                    if filename[-1] != '/':
+                        filename += '/'
                     rv.update(self.local_changes(filename))
                 else:
                     rv[filename] = "modified"

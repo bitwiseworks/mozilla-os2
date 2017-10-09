@@ -28,10 +28,13 @@ PointerEvent::PointerEvent(EventTarget* aOwner,
     mEventIsInternal = false;
   } else {
     mEventIsInternal = true;
-    mEvent->time = PR_Now();
-    mEvent->refPoint.x = mEvent->refPoint.y = 0;
+    mEvent->mTime = PR_Now();
+    mEvent->mRefPoint = LayoutDeviceIntPoint(0, 0);
     mouseEvent->inputSource = nsIDOMMouseEvent::MOZ_SOURCE_UNKNOWN;
   }
+  // 5.2 Pointer Event types, for all pointer events, |detail| attribute SHOULD
+  // be 0.
+  mDetail = 0;
 }
 
 static uint16_t
@@ -87,16 +90,17 @@ PointerEvent::Constructor(EventTarget* aOwner,
 
   WidgetPointerEvent* widgetEvent = e->mEvent->AsPointerEvent();
   widgetEvent->pointerId = aParam.mPointerId;
-  widgetEvent->width = aParam.mWidth;
-  widgetEvent->height = aParam.mHeight;
+  widgetEvent->mWidth = aParam.mWidth;
+  widgetEvent->mHeight = aParam.mHeight;
   widgetEvent->pressure = aParam.mPressure;
   widgetEvent->tiltX = aParam.mTiltX;
   widgetEvent->tiltY = aParam.mTiltY;
   widgetEvent->inputSource = ConvertStringToPointerType(aParam.mPointerType);
-  widgetEvent->isPrimary = aParam.mIsPrimary;
+  widgetEvent->mIsPrimary = aParam.mIsPrimary;
   widgetEvent->buttons = aParam.mButtons;
 
   e->SetTrusted(trusted);
+  e->SetComposed(aParam.mComposed);
   return e.forget();
 }
 
@@ -126,13 +130,13 @@ PointerEvent::PointerId()
 int32_t
 PointerEvent::Width()
 {
-  return mEvent->AsPointerEvent()->width;
+  return mEvent->AsPointerEvent()->mWidth;
 }
 
 int32_t
 PointerEvent::Height()
 {
-  return mEvent->AsPointerEvent()->height;
+  return mEvent->AsPointerEvent()->mHeight;
 }
 
 float
@@ -156,7 +160,7 @@ PointerEvent::TiltY()
 bool
 PointerEvent::IsPrimary()
 {
-  return mEvent->AsPointerEvent()->isPrimary;
+  return mEvent->AsPointerEvent()->mIsPrimary;
 }
 
 } // namespace dom

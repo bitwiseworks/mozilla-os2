@@ -58,7 +58,6 @@
 
 #define DEFAULTS_DIR_NAME           NS_LITERAL_CSTRING("defaults")
 #define DEFAULTS_PREF_DIR_NAME      NS_LITERAL_CSTRING("pref")
-#define DEFAULTS_PROFILE_DIR_NAME   NS_LITERAL_CSTRING("profile")
 #define RES_DIR_NAME                NS_LITERAL_CSTRING("res")
 #define CHROME_DIR_NAME             NS_LITERAL_CSTRING("chrome")
 #define PLUGINS_DIR_NAME            NS_LITERAL_CSTRING("plugins")
@@ -121,15 +120,6 @@ nsAppFileLocationProvider::GetFile(const char* aProp, bool* aPersistent,
       rv = localFile->AppendRelativeNativePath(DEFAULTS_DIR_NAME);
       if (NS_SUCCEEDED(rv)) {
         rv = localFile->AppendRelativeNativePath(DEFAULTS_PREF_DIR_NAME);
-      }
-    }
-  } else if (nsCRT::strcmp(aProp, NS_APP_PROFILE_DEFAULTS_50_DIR) == 0 ||
-             nsCRT::strcmp(aProp, NS_APP_PROFILE_DEFAULTS_NLOC_50_DIR) == 0) {
-    rv = CloneMozBinDirectory(getter_AddRefs(localFile));
-    if (NS_SUCCEEDED(rv)) {
-      rv = localFile->AppendRelativeNativePath(DEFAULTS_DIR_NAME);
-      if (NS_SUCCEEDED(rv)) {
-        rv = localFile->AppendRelativeNativePath(DEFAULTS_PROFILE_DIR_NAME);
       }
     }
   } else if (nsCRT::strcmp(aProp, NS_APP_USER_PROFILES_ROOT_DIR) == 0) {
@@ -237,7 +227,7 @@ nsAppFileLocationProvider::GetFile(const char* aProp, bool* aPersistent,
 }
 
 
-NS_METHOD
+nsresult
 nsAppFileLocationProvider::CloneMozBinDirectory(nsIFile** aLocalFile)
 {
   if (NS_WARN_IF(!aLocalFile)) {
@@ -285,7 +275,7 @@ nsAppFileLocationProvider::CloneMozBinDirectory(nsIFile** aLocalFile)
 // WIN    : <Application Data folder on user's machine>\Mozilla
 // Mac    : :Documents:Mozilla:
 //----------------------------------------------------------------------------------------
-NS_METHOD
+nsresult
 nsAppFileLocationProvider::GetProductDirectory(nsIFile** aLocalFile,
                                                bool aLocal)
 {
@@ -362,7 +352,7 @@ nsAppFileLocationProvider::GetProductDirectory(nsIFile** aLocalFile,
 // WIN    : <Application Data folder on user's machine>\Mozilla\Profiles
 // Mac    : :Documents:Mozilla:Profiles:
 //----------------------------------------------------------------------------------------
-NS_METHOD
+nsresult
 nsAppFileLocationProvider::GetDefaultUserProfileRoot(nsIFile** aLocalFile,
                                                      bool aLocal)
 {

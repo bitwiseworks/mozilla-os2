@@ -5,10 +5,6 @@
 
 package org.mozilla.gecko.home;
 
-import org.mozilla.gecko.db.BrowserContract.TopSites;
-import org.mozilla.gecko.favicons.Favicons;
-import org.mozilla.gecko.R;
-
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.text.TextUtils;
@@ -18,13 +14,21 @@ import android.widget.ImageView.ScaleType;
 import android.widget.RelativeLayout;
 import android.widget.TextView;
 
+import org.mozilla.gecko.R;
+import org.mozilla.gecko.db.BrowserContract.TopSites;
+import org.mozilla.gecko.icons.IconCallback;
+import org.mozilla.gecko.icons.IconResponse;
+import org.mozilla.gecko.icons.Icons;
+
+import java.util.concurrent.Future;
+
 /**
  * A view that displays the thumbnail and the title/url for a top/pinned site.
  * If the title/url is longer than the width of the view, they are faded out.
  * If there is no valid url, a default string is shown at 50% opacity.
  * This is denoted by the empty state.
  */
-public class TopSitesGridItemView extends RelativeLayout {
+public class TopSitesGridItemView extends RelativeLayout implements IconCallback {
     private static final String LOGTAG = "GeckoTopSitesGridItemView";
 
     // Empty state, to denote there is no valid url.
@@ -35,8 +39,6 @@ public class TopSitesGridItemView extends RelativeLayout {
     private static final ScaleType SCALE_TYPE_THUMBNAIL = ScaleType.CENTER_CROP;
     private static final ScaleType SCALE_TYPE_URL       = ScaleType.CENTER_INSIDE;
 
-    private static final int THUMBNAIL_DEFAULT_FAVICON_ID = R.drawable.favicon_globe;
-
     // Child views.
     private final TextView mTitleView;
     private final TopSitesThumbnailView mThumbnailView;
@@ -44,7 +46,6 @@ public class TopSitesGridItemView extends RelativeLayout {
     // Data backing this view.
     private String mTitle;
     private String mUrl;
-    private String mFaviconURL;
 
     private boolean mThumbnailSet;
 
@@ -54,8 +55,7 @@ public class TopSitesGridItemView extends RelativeLayout {
     // Dirty state.
     private boolean mIsDirty;
 
-    // Empty state.
-    private int mLoadId = Favicons.NOT_LOADING;
+    private Future<IconResponse> mOngoingIconRequest;
 
     public TopSitesGridItemView(Context context) {
         this(context, null);
@@ -138,7 +138,7 @@ public class TopSitesGridItemView extends RelativeLayout {
         mTitle = "";
         updateType(TopSites.TYPE_BLANK);
         updateTitleView();
-        setLoadId(Favicons.NOT_LOADING);
+        cancelIconLoading();
         ImageLoader.with(getContext()).cancelRequest(mThumbnailView);
         displayThumbnail(R.drawable.top_site_add);
 
@@ -181,7 +181,7 @@ public class TopSitesGridItemView extends RelativeLayout {
 
         if (changed) {
             updateTitleView();
-            setLoadId(Favicons.NOT_LOADING);
+            cancelIconLoading();
             ImageLoader.with(getContext()).cancelRequest(mThumbnailView);
         }
 
@@ -196,6 +196,23 @@ public class TopSitesGridItemView extends RelativeLayout {
         mIsDirty = false;
 
         return changed;
+    }
+
+    /**
+     * Try to load an icon for the given page URL.
+     */
+    public void loadFavicon(String pageUrl) {
+        mOngoingIconRequest = Icons.with(getContext())
+                .pageUrl(pageUrl)
+                .skipNetwork()
+                .build()
+                .execute(this);
+    }
+
+    private void cancelIconLoading() {
+        if (mOngoingIconRequest != null) {
+            mOngoingIconRequest.cancel(true);
+        }
     }
 
     /**
@@ -217,12 +234,12 @@ public class TopSitesGridItemView extends RelativeLayout {
      */
     public void displayThumbnail(Bitmap thumbnail) {
         if (thumbnail == null) {
-            // Show a favicon based view instead.
-            displayThumbnail(THUMBNAIL_DEFAULT_FAVICON_ID);
             return;
         }
+
         mThumbnailSet = true;
-        Favicons.cancelFaviconLoad(mLoadId);
+
+        cancelIconLoading();
         ImageLoader.with(getContext()).cancelRequest(mThumbnailView);
 
         mThumbnailView.setScaleType(SCALE_TYPE_THUMBNAIL);
@@ -244,49 +261,7 @@ public class TopSitesGridItemView extends RelativeLayout {
         ImageLoader.with(getContext())
                    .load(imageUrl)
                    .noFade()
-                   .error(THUMBNAIL_DEFAULT_FAVICON_ID)
                    .into(mThumbnailView);
-    }
-
-    public void displayFavicon(Bitmap favicon, String faviconURL, int expectedLoadId) {
-        if (mLoadId != Favicons.NOT_LOADING &&
-            mLoadId != expectedLoadId) {
-            // View recycled.
-            return;
-        }
-
-        // Yes, there's a chance of a race here.
-        displayFavicon(favicon, faviconURL);
-    }
-
-    /**
-     * Display the thumbnail from a favicon.
-     *
-     * @param favicon The favicon to show as thumbnail.
-     */
-    public void displayFavicon(Bitmap favicon, String faviconURL) {
-        if (mThumbnailSet) {
-            // Already showing a thumbnail; do nothing.
-            return;
-        }
-
-        if (favicon == null) {
-            // Should show default favicon.
-            displayThumbnail(THUMBNAIL_DEFAULT_FAVICON_ID);
-            return;
-        }
-
-        if (faviconURL != null) {
-            mFaviconURL = faviconURL;
-        }
-
-        mThumbnailView.setScaleType(SCALE_TYPE_FAVICON);
-        mThumbnailView.setImageBitmap(favicon, false);
-
-        if (mFaviconURL != null) {
-            final int bgColor = Favicons.getFaviconColor(mFaviconURL);
-            mThumbnailView.setBackgroundColorWithOpacityFilter(bgColor);
-        }
     }
 
     /**
@@ -320,8 +295,18 @@ public class TopSitesGridItemView extends RelativeLayout {
         }
     }
 
-    public void setLoadId(int aLoadId) {
-        Favicons.cancelFaviconLoad(mLoadId);
-        mLoadId = aLoadId;
+    /**
+     * Display the loaded icon (if no thumbnail is set).
+     */
+    @Override
+    public void onIconResponse(IconResponse response) {
+        if (mThumbnailSet) {
+            // Already showing a thumbnail; do nothing.
+            return;
+        }
+
+        mThumbnailView.setScaleType(SCALE_TYPE_FAVICON);
+        mThumbnailView.setImageBitmap(response.getBitmap(), false);
+        mThumbnailView.setBackgroundColorWithOpacityFilter(response.getColor());
     }
 }
